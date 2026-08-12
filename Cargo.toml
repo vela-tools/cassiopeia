@@ -1,0 +1,8 @@
+[package]
+name = "cassiopeia"
+version = "0.1.0"
+authors = ["Matej Škvarč <matej.skvarc@senlab.io>"]
+edition = "2024"
+license = "EUPL-1.2"
+
+[dependencies]
