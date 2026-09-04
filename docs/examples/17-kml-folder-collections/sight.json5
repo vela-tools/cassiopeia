@@ -1,0 +1,20 @@
+{
+    version: "v4",
+    dataModel: "Sightseeing",
+    // The "Places to Stop" folder becomes the `places_to_stop` namespace.
+    identity: {
+        entityName: "{{ places_to_stop.properties.name | trim | clean }}",
+    },
+    attributes: {
+        name: {
+            source: "{{ places_to_stop.properties.name | trim }}",
+            type: "Property",
+            transformation: "string",
+        },
+        location: {
+            source: "{{ places_to_stop.geometry }}",
+            type: "GeoProperty",
+            transformation: "geometry",
+        },
+    },
+}

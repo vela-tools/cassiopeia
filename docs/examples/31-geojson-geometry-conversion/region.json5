@@ -1,0 +1,33 @@
+{
+    version: "v4",
+    dataModel: "Region",
+    identity: {
+        entityName: "{{ properties.NUTS_ID }}",
+    },
+    attributes: {
+        name: {
+            source: "{{ properties.NUTS_NAME }}",
+            transformation: "string",
+        },
+        countryCode: {
+            source: "{{ properties.CNTR_CODE }}",
+            transformation: "string",
+        },
+        level: {
+            source: "{{ properties.LEVL_CODE }}",
+            transformation: "integer",
+        },
+        location: {
+            source: "{{ geometry }}",
+            type: "GeoProperty",
+            transformation: "polygon",
+            geometry: { convert: "largest" },
+        },
+        centroid: {
+            source: "{{ geometry }}",
+            type: "GeoProperty",
+            transformation: "point",
+            geometry: { convert: "point-on-surface" },
+        },
+    },
+}

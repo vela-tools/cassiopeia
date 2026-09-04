@@ -1,0 +1,28 @@
+{
+    version: "v4",
+    // No published Smart Data Model covers this country list. The mapping is used to create the
+    // relationship targets referenced by the airport and airline entities.
+    dataModel: "Country",
+    identity: {
+        // The country name is the identity. An airport or airline that uses the same name therefore
+        // resolves to the same URN.
+        entityName: "{{ this[0] }}",
+    },
+    attributes: {
+        name: {
+            source: "{{ this[0] }}",
+            type: "Property",
+            transformation: "string",
+        },
+        isoCode: {
+            source: "{% if this[1] %}{{ this[1] }}{% endif %}",
+            type: "Property",
+            transformation: "string",
+        },
+        dafifCode: {
+            source: "{% if this[2] %}{{ this[2] }}{% endif %}",
+            type: "Property",
+            transformation: "string",
+        },
+    },
+}

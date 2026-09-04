@@ -1,0 +1,30 @@
+[package]
+name = "cassiopeia-manifest"
+description = "The manifest document: the declarative description of which sources a Cassiopeia run reads, how they are mapped, when it runs, and where its entities go"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+cassiopeia-common.workspace = true
+chrono = "0.4.45"
+cron = { version = "0.17.0", features = ["serde"] }
+derive_more = { version = "2.1.1", features = ["as_ref", "deref", "display", "from", "from_str"] }
+getset = "0.1.7"
+humantime-serde = "1.1.1"
+json5format = "0.2.6"
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = { version = "1.0.151", features = ["preserve_order"] }
+serde_json5 = "0.2.1"
+strum = { version = "0.28.0", features = ["derive"] }
+thiserror = "2.0.20"
+typed-builder = "0.23.2"
+url = { version = "2.5.8", features = ["serde"] }
+
+[package.metadata.cargo-machete]
+ignored = ["humantime-serde"]
+
+[lints]
+workspace = true

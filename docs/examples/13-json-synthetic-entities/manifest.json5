@@ -1,0 +1,20 @@
+{
+    version: "v1",
+    inputs: [
+        {
+            source: "mountains.json",
+            mapping: "mountain.json5",
+            format: "json",
+        },
+    ],
+    output: {
+        target: "file",
+        directory: "out",
+        context: "none",
+        // Mountain and the synthesised Country are custom data models with no published schema, so
+        // fail-when-schema validates each entity where a schema exists and lets these pass.
+        validation: {
+            mode: "fail-when-schema",
+        },
+    },
+}

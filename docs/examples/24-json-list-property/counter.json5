@@ -1,0 +1,39 @@
+{
+    version: "v4",
+    dataModel: "BicycleCounter",
+    // One entity per counter per day: the counter name and the day together are the identity, so
+    // each day-object becomes its own BicycleCounter rather than merging into one.
+    identity: {
+        entityName: "{{ counter }}-{{ date }}",
+    },
+    attributes: {
+        counterName: {
+            source: "{{ counter }}",
+            type: "Property",
+            transformation: "string",
+        },
+        dateObserved: {
+            source: "{{ date }}",
+            type: "Property",
+            transformation: "date",
+        },
+        location: {
+            source: [
+                "{{ longitude }}",
+                "{{ latitude }}",
+            ],
+            type: "GeoProperty",
+            transformation: "point",
+        },
+        // The record's hourlyCounts is already a JSON array of 24 integers, one per hour of the day.
+        // A ListProperty keeps it as an ordered list (ETSI GS CIM 009 v1.9.1 clause 4.5.21): index 0
+        // is the count for hour 00, index 23 the count for hour 23. transformation: "array" reads the
+        // source as a JSON array; because {{ hourlyCounts }} is a bare field reference it resolves to
+        // the raw array, so the order the preprocessing step built is preserved end to end.
+        hourlyCounts: {
+            source: "{{ hourlyCounts }}",
+            type: "ListProperty",
+            transformation: "array",
+        },
+    },
+}

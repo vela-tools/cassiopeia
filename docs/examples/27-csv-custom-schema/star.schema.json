@@ -1,0 +1,58 @@
+{
+    "$schema": "http://json-schema.org/draft-07/schema#",
+    "$id": "http://localhost/Star.json",
+    "title": "Star",
+    "description": "A planet-hosting star from the NASA Exoplanet Archive, in the simplified (key-values) NGSI-LD representation this schema validates.",
+    "type": "object",
+    "required": [
+        "id",
+        "type",
+        "numberOfPlanets"
+    ],
+    "properties": {
+        "id": {
+            "type": "string",
+            "pattern": "^urn:ngsi-ld:Star:"
+        },
+        "type": {
+            "type": "string",
+            "enum": [
+                "Star"
+            ]
+        },
+        "stellarTemperature": {
+            "type": "number",
+            "exclusiveMinimum": 0
+        },
+        "stellarRadius": {
+            "type": "number",
+            "exclusiveMinimum": 0
+        },
+        "stellarMass": {
+            "type": "number",
+            "exclusiveMinimum": 0
+        },
+        "spectralType": {
+            "type": "string",
+            "minLength": 1
+        },
+        "numberOfPlanets": {
+            "type": "integer",
+            "minimum": 1
+        },
+        "distance": {
+            "type": "number",
+            "exclusiveMinimum": 0
+        },
+        "rightAscension": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 360
+        },
+        "declination": {
+            "type": "number",
+            "minimum": -90,
+            "maximum": 90
+        }
+    }
+}

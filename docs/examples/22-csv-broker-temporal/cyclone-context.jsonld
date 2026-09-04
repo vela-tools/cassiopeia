@@ -1,0 +1,10 @@
+{
+    "@context": {
+        "tc": "https://vocab.example/tropical-cyclone#",
+        "TropicalCyclone": "tc:TropicalCyclone",
+        "name": "tc:name",
+        "category": "tc:category",
+        "maxSustainedWind": "tc:maxSustainedWind",
+        "minPressure": "tc:minPressure"
+    }
+}

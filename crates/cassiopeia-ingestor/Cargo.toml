@@ -1,0 +1,52 @@
+[package]
+name = "cassiopeia-ingestor"
+description = "Parses source formats into records for the Cassiopeia pipeline"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+cassiopeia-common.workspace = true
+cassiopeia-crs.workspace = true
+cassiopeia-data-profiler.workspace = true
+cassiopeia-ir.workspace = true
+convert_case = "0.12.0"
+csv = "1.4.0"
+dbase = { version = "0.8.0", features = ["encoding_rs", "yore"] }
+eccodes = { version = "0.15.1", default-features = false, optional = true }
+encoding_rs = "0.8.35"
+encoding_rs_io = "0.1.8"
+geo-types = "0.7.20"
+geojson = "1.0.0"
+grib = { version = "0.18.3", default-features = false, features = ["ccsds-unpack-with-rust-aec", "jpeg2000-unpack-with-hayro", "png-unpack-with-png-crate", "time-calculation"] }
+indexmap = "2.14.2"
+kml = { version = "0.14.0", features = ["geo-types"] }
+quick-xml = { version = "0.42.0", features = ["encoding"] }
+rustc-hash = "2.1.3"
+serde = "1.0.229"
+serde_json = { version = "1.0.151", features = ["preserve_order"] }
+shapefile = { version = "0.9.0", features = ["encoding_rs", "geo-types", "yore"] }
+simd-json = { version = "0.18.1", features = ["beef"] }
+strum = { version = "0.28.0", features = ["derive"] }
+temp-dir = "0.2.0"
+thiserror = "2.0.20"
+tracing = "0.1.44"
+zip = { version = "8.6.0", default-features = false, features = ["deflate"] }
+
+[features]
+default = ["grib1", "grib2-full"]
+grib1 = ["dep:eccodes"]
+grib2-full = ["dep:eccodes"]
+
+[dev-dependencies]
+cassiopeia-data-profiler.workspace = true
+grib-core = "0.6.0"
+grib-writer = "0.6.0"
+mediatype = "0.23.0"
+temp-dir = "0.2.0"
+zip = { version = "8.6.0", default-features = false, features = ["deflate"] }
+
+[lints]
+workspace = true

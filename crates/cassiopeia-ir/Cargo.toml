@@ -1,0 +1,27 @@
+[package]
+name = "cassiopeia-ir"
+description = "Intermediate representation carried between Cassiopeia's pipeline stages"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+cassiopeia-common.workspace = true
+cassiopeia-data-profiler.workspace = true
+cassiopeia-mapping.workspace = true
+cassiopeia-ngsi-ld.workspace = true
+derive_more = { version = "2.1.1", features = ["display"] }
+foldhash = "0.2.0"
+getset = "0.1.7"
+indexmap = { version = "2.14.2", features = ["serde"] }
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = { version = "1.0.151", features = ["preserve_order"] }
+smallvec = "1.16.0"
+smart-default = "0.7.1"
+thiserror = "2.0.20"
+urn-rs = { version = "0.9.2", features = ["serde"] }
+
+[lints]
+workspace = true

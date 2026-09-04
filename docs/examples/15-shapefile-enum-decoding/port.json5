@@ -1,0 +1,73 @@
+{
+    version: "v4",
+    dataModel: "Port",
+    // The World Port Index gives every port a stable numeric index; it is a whole number stored as a
+    // float in the .dbf, so the int filter drops the trailing zeros before it becomes the URN.
+    identity: {
+        entityName: "{{ properties.INDEX_NO | int }}",
+    },
+    attributes: {
+        name: {
+            source: "{{ properties.PORT_NAME }}",
+            type: "Property",
+            transformation: "string",
+        },
+        // The shapefile feature already carries a point geometry, reprojected to WGS84 on ingest, so it
+        // passes straight through as the GeoProperty rather than being rebuilt from the lat/long fields.
+        location: {
+            source: "{{ geometry }}",
+            type: "GeoProperty",
+            transformation: "geometry",
+        },
+        // The country is a two-letter code.
+        alpha2CountryCode: {
+            source: "{{ properties.COUNTRY }}",
+            type: "Property",
+            transformation: "string",
+        },
+        regionNumber: {
+            source: "{{ properties.REGION_NO | int }}",
+            type: "Property",
+            transformation: "integer",
+        },
+        // The index codes each harbour's configuration with a two-letter token; the mapping turns it
+        // into a readable value. An unknown or absent code matches no branch, leaving the attribute off.
+        harbourType: {
+            source: "{% if properties.HARBORTYPE == 'CN' %}coastalNatural{% elif properties.HARBORTYPE == 'CB' %}coastalBreakwater{% elif properties.HARBORTYPE == 'CT' %}coastalTideGate{% elif properties.HARBORTYPE == 'LC' %}lakeOrCanal{% elif properties.HARBORTYPE == 'OR' %}openRoadstead{% elif properties.HARBORTYPE == 'RB' %}riverBasin{% elif properties.HARBORTYPE == 'RN' %}riverNatural{% elif properties.HARBORTYPE == 'RT' %}riverTideGate{% elif properties.HARBORTYPE == 'TH' %}typhoonHarbour{% endif %}",
+            type: "Property",
+            transformation: "string",
+        },
+        // Harbour size: V, S, M, L for very small through large.
+        harbourSize: {
+            source: "{% if properties.HARBORSIZE == 'V' %}verySmall{% elif properties.HARBORSIZE == 'S' %}small{% elif properties.HARBORSIZE == 'M' %}medium{% elif properties.HARBORSIZE == 'L' %}large{% endif %}",
+            type: "Property",
+            transformation: "string",
+        },
+        // Shelter afforded from wind and sea, graded by its initial: N, P, F, G, E for none, poor,
+        // fair, good, and excellent.
+        shelter: {
+            source: "{% if properties.SHELTER == 'N' %}none{% elif properties.SHELTER == 'P' %}poor{% elif properties.SHELTER == 'F' %}fair{% elif properties.SHELTER == 'G' %}good{% elif properties.SHELTER == 'E' %}excellent{% endif %}",
+            type: "Property",
+            transformation: "string",
+        },
+        // The mean tidal range in metres; MTR is the UN/CEFACT Common Code for metre (ETSI GS CIM 009
+        // v1.9.1 clause 4.5.2.2).
+        tidalRange: {
+            source: "{{ properties.TIDE_RANGE }}",
+            type: "Property",
+            transformation: "float",
+            properties: {
+                unitCode: {
+                    source: "MTR",
+                },
+            },
+        },
+        // A facility flag: the index marks a medical facility with "Y" and leaves it null otherwise, so
+        // the attribute is present and true only where one is recorded.
+        medicalFacilities: {
+            source: "{% if properties.MED_FACIL == 'Y' %}true{% endif %}",
+            type: "Property",
+            transformation: "boolean",
+        },
+    },
+}

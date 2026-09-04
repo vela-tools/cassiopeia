@@ -1,0 +1,21 @@
+[package]
+name = "cassiopeia-scheduler"
+description = "Decides when and how often a Cassiopeia run is triggered"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+cassiopeia-common.workspace = true
+cassiopeia-manifest.workspace = true
+cassiopeia-reporter.workspace = true
+chrono = "0.4.45"
+cron = "0.17.0"
+derive_more = { version = "2.1.1", features = ["deref"] }
+humantime = "2.4.0"
+rand = "0.10.2"
+
+[lints]
+workspace = true

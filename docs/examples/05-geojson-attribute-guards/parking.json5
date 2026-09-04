@@ -1,0 +1,86 @@
+{
+    version: "v4",
+    dataModel: "dataModel.Parking/OffStreetParking",
+    identity: {
+        entityName: "{{ id }}",
+    },
+    attributes: {
+        name: {
+            source: "{{ properties.STRNAM }}",
+            type: "Property",
+            transformation: "string",
+        },
+        description: {
+            source: "{{ properties.BESCHREIBUNG }}",
+            type: "Property",
+            transformation: "string",
+        },
+        category: {
+            // Keep both values: derive the access category, then add the constant forDisabled.
+            source: [
+                "{% if properties.KATEGORIE == 1 %}public{% elif properties.KATEGORIE == 2 %}private{% else %}onlyWithPermit{% endif %}",
+                "forDisabled",
+            ],
+            type: "Property",
+            transformation: "array",
+        },
+        requiredPermit: {
+            source: "{% if properties.KATEGORIE == 3 %}specificIdentifiedVehiclePermit{% else %}noPermitNeeded{% endif %}",
+            type: "Property",
+            transformation: "array",
+        },
+        allowedVehicleType: {
+            source: "car",
+            type: "Property",
+            transformation: "array",
+        },
+        totalSpotNumber: {
+            // The source uses -1 or an empty value when the count is unknown. The guard leaves those
+            // cases empty, so the integer transformation returns null and the attribute is omitted.
+            source: "{% if properties.STELLPL_ANZ and properties.STELLPL_ANZ > 0 %}{{ properties.STELLPL_ANZ }}{% endif %}",
+            type: "Property",
+            transformation: "integer",
+        },
+        openingHours: {
+            source: "{{ properties.ZEITRAUM }}",
+            type: "Property",
+            transformation: "string",
+        },
+        dataProvider: {
+            source: "Stadt Wien",
+            type: "Property",
+            transformation: "string",
+        },
+        source: {
+            source: "https://www.data.gv.at/katalog/en/dataset/4315e096-f51e-4b56-8235-57be9789a62c",
+            type: "Property",
+            transformation: "string",
+        },
+        location: {
+            source: "{{ geometry }}",
+            type: "GeoProperty",
+            transformation: "geometry",
+        },
+        address: {
+            type: "Property",
+            transformation: "object",
+            mappings: {
+                streetAddress: {
+                    source: "{{ properties.STRNAM }} {{ properties.ONR_VON }}",
+                    type: "Property",
+                    transformation: "string",
+                },
+                addressLocality: {
+                    source: "Wien",
+                    type: "Property",
+                    transformation: "string",
+                },
+                addressCountry: {
+                    source: "Austria",
+                    type: "Property",
+                    transformation: "string",
+                },
+            },
+        },
+    },
+}

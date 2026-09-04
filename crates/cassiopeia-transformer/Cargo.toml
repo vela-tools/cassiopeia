@@ -1,0 +1,28 @@
+[package]
+name = "cassiopeia-transformer"
+description = "Turns extracted entities into NGSI-LD entities for the Cassiopeia pipeline"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+cassiopeia-common.workspace = true
+cassiopeia-geometry.workspace = true
+cassiopeia-ir.workspace = true
+cassiopeia-mapping.workspace = true
+cassiopeia-ngsi-ld.workspace = true
+cassiopeia-unreadable-timestamps.workspace = true
+cefact-units = "0.1.2"
+chrono = "0.4.45"
+indexmap = { version = "2.14.2", features = ["serde"] }
+iri-rs = "3.4.1"
+langtag = "1.1.0"
+rayon = "1.12.0"
+serde_json = { version = "1.0.151", features = ["preserve_order"] }
+thiserror = "2.0.20"
+urn-rs = "0.9.2"
+
+[lints]
+workspace = true

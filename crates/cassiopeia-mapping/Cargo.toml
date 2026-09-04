@@ -1,0 +1,33 @@
+[package]
+name = "cassiopeia-mapping"
+description = "The Cassiopeia mapping DSL: the declarative document describing how source records become NGSI-LD entities, and the template engine that evaluates it"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+cassiopeia-common.workspace = true
+cassiopeia-geometry.workspace = true
+cassiopeia-ngsi-ld.workspace = true
+chrono = { version = "0.4.45", features = ["serde"] }
+derive_more = { version = "2.1.1", features = ["deref", "display", "into"] }
+geohash = "0.13.2"
+geojson = "1.0.0"
+getset = "0.1.7"
+indexmap = { version = "2.14.2", features = ["serde"] }
+langtag = { version = "1.1.0", features = ["serde"] }
+lazy-regex = "3.6.1"
+md5 = "0.8.1"
+serde = { version = "1.0.229", features = ["derive", "rc"] }
+serde_json = { version = "1.0.151", features = ["preserve_order"] }
+serde_json5 = "0.2.1"
+strum = { version = "0.28.0", features = ["derive"] }
+tera = { version = "2.3.0", features = ["fast"] }
+tera-contrib = { version = "0.3.0", features = ["base64", "date", "filesize_format", "format", "json", "rand", "regex", "slug", "urlencode"] }
+thiserror = "2.0.20"
+typed-builder = "0.23.2"
+
+[lints]
+workspace = true

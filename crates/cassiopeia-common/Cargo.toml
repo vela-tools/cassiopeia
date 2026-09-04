@@ -1,0 +1,26 @@
+[package]
+name = "cassiopeia-common"
+description = "Foundation types, error enums, and pipeline signal envelope shared across the Cassiopeia workspace"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+clap = { version = "4.6.6", features = ["derive"] }
+cpu-time = "1.0.0"
+derive-where = "1.6.1"
+derive_more = { version = "2.1.1", features = ["debug", "deref", "display", "from", "into", "into_iterator", "is_variant"] }
+http = "1.5.0"
+num-traits = "0.2.19"
+parking_lot = "0.12.5"
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.151"
+smart-default = "0.7.1"
+strum = { version = "0.28.0", features = ["derive"] }
+thiserror = "2.0.20"
+url = "2.5.8"
+
+[lints]
+workspace = true

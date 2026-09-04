@@ -1,0 +1,76 @@
+{
+    version: "v4",
+    dataModel: "Star",
+    identity: {
+        // The star's name is its identity. The URN cleaner drops the space in "HD 330075", giving
+        // Star:HD330075, the exact URN each planet's hostStar relationship points at.
+        entityName: "{{ hostname }}",
+    },
+    attributes: {
+        stellarTemperature: {
+            source: "{{ st_teff }}",
+            type: "Property",
+            transformation: "float",
+            // UN/CEFACT Common Code for kelvin.
+            properties: {
+                unitCode: {
+                    source: "KEL",
+                },
+            },
+        },
+        stellarRadius: {
+            // Solar radii: no UN/CEFACT code exists, so the custom term carries the unit.
+            source: "{{ st_rad }}",
+            type: "Property",
+            transformation: "float",
+        },
+        stellarMass: {
+            // Solar masses: likewise outside UN/CEFACT.
+            source: "{{ st_mass }}",
+            type: "Property",
+            transformation: "float",
+        },
+        spectralType: {
+            source: "{{ st_spectype }}",
+            type: "Property",
+            transformation: "string",
+        },
+        numberOfPlanets: {
+            source: "{{ sy_pnum }}",
+            type: "Property",
+            transformation: "integer",
+        },
+        distance: {
+            // Parsec is in UN/CEFACT: C63.
+            source: "{{ sy_dist }}",
+            type: "Property",
+            transformation: "float",
+            properties: {
+                unitCode: {
+                    source: "C63",
+                },
+            },
+        },
+        rightAscension: {
+            source: "{{ ra }}",
+            type: "Property",
+            transformation: "float",
+            // UN/CEFACT Common Code for degree (unit of angle).
+            properties: {
+                unitCode: {
+                    source: "DD",
+                },
+            },
+        },
+        declination: {
+            source: "{{ dec }}",
+            type: "Property",
+            transformation: "float",
+            properties: {
+                unitCode: {
+                    source: "DD",
+                },
+            },
+        },
+    },
+}

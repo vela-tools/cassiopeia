@@ -1,0 +1,32 @@
+[package]
+name = "cassiopeia-ngsi-ld"
+description = "The NGSI-LD output model: value representation and entity/attribute construction"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+cassiopeia-common.workspace = true
+cassiopeia-geometry.workspace = true
+cefact-units = { version = "0.1.2", features = ["serde"] }
+chrono = { version = "0.4.45", features = ["serde"] }
+compact_str = { version = "0.10.0", features = ["serde"] }
+derive_more = { version = "2.1.1", features = ["as_ref", "display", "from"] }
+foldhash = "0.2.0"
+geojson = "1.0.0"
+indexmap = { version = "2.14.2", features = ["serde"] }
+iri-rs = { version = "3.4.1", features = ["serde"] }
+langtag = { version = "1.1.0", features = ["serde"] }
+lazy-regex = "3.6.1"
+num-traits = "0.2.19"
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = { version = "1.0.151", features = ["preserve_order"] }
+strum = { version = "0.28.0", features = ["derive"] }
+thiserror = "2.0.20"
+url = { version = "2.5.8", features = ["serde"] }
+urn-rs = { version = "0.9.2", features = ["serde"] }
+
+[lints]
+workspace = true

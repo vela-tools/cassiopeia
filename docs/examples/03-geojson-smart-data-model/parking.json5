@@ -1,0 +1,71 @@
+{
+    version: "v4",
+    dataModel: "dataModel.Parking/OffStreetParking",
+    identity: {
+        entityName: "{{ id }}",
+    },
+    attributes: {
+        name: {
+            source: "{{ properties.STRNAM }}",
+            type: "Property",
+            transformation: "string",
+        },
+        description: {
+            source: "{{ properties.BESCHREIBUNG }}",
+            type: "Property",
+            transformation: "string",
+        },
+        category: {
+            source: "forDisabled",
+            type: "Property",
+            transformation: "array",
+        },
+        allowedVehicleType: {
+            source: "car",
+            type: "Property",
+            transformation: "array",
+        },
+        openingHours: {
+            source: "{{ properties.ZEITRAUM }}",
+            type: "Property",
+            transformation: "string",
+        },
+        dataProvider: {
+            source: "Stadt Wien",
+            type: "Property",
+            transformation: "string",
+        },
+        source: {
+            source: "https://www.data.gv.at/katalog/en/dataset/4315e096-f51e-4b56-8235-57be9789a62c",
+            type: "Property",
+            transformation: "string",
+        },
+        location: {
+            // The feature already contains the geometry, so no coordinate mapping is needed.
+            source: "{{ geometry }}",
+            type: "GeoProperty",
+            transformation: "geometry",
+        },
+        address: {
+            type: "Property",
+            transformation: "object",
+            mappings: {
+                streetAddress: {
+                    source: "{{ properties.STRNAM }} {{ properties.ONR_VON }}",
+                    type: "Property",
+                    transformation: "string",
+                },
+                addressLocality: {
+                    source: "Wien",
+                    type: "Property",
+                    transformation: "string",
+                },
+                addressCountry: {
+                    source: "Austria",
+                    type: "Property",
+                    transformation: "string",
+                },
+            },
+        },
+    },
+}

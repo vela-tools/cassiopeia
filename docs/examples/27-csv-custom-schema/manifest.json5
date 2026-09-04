@@ -1,0 +1,26 @@
+{
+    version: "v1",
+    inputs: [
+        {
+            source: "planets.csv",
+            mapping: "planet.json5",
+            format: "csv",
+            schema: "exoplanet.schema.json",
+        },
+        {
+            source: "stars.csv",
+            mapping: "star.json5",
+            format: "csv",
+            schema: "star.schema.json",
+        },
+    ],
+    output: {
+        target: "file",
+        directory: "out",
+        context: "none",
+        validation: {
+            mode: "fail",
+            representation: "simplified",
+        },
+    },
+}

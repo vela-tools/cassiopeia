@@ -1,0 +1,29 @@
+[package]
+name = "cassiopeia-data-profiler"
+description = "Detects the source format of a file or byte buffer by parsing and validating its content"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+bytecount = "0.6.9"
+cassiopeia-common.workspace = true
+chardetng = "1.0.0"
+csv = "1.4.0"
+# `Encoding::decode` lives behind encoding_rs's `alloc` feature, which chardetng pulls in with
+# `default-features = false`; declare it here so the decode path is available.
+encoding_rs = { version = "0.8.35", features = ["alloc"] }
+getset = "0.1.7"
+lazy-regex = "3.6.1"
+mediatype = { version = "0.23.0", features = ["serde"] }
+memmap2 = "0.9.11"
+quick-xml = "0.42.0"
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.151"
+thiserror = "2.0.20"
+zip = { version = "8.6.0", default-features = false, features = ["bzip2", "deflate", "time", "zstd"] }
+
+[lints]
+workspace = true

@@ -1,0 +1,36 @@
+{
+    version: "v4",
+    dataModel: "UrbanMobilityPoint",
+    // Overpass emits the element type and id in columns headed "@type" and "@id". An OSM id is unique
+    // only within a type (a node and a way can carry the same id), so identity pairs the two to stay
+    // unique across the nwr query. "@" is not a valid template identifier, so both are read through the
+    // this['...'] bracket form.
+    identity: {
+        entityName: "{{ this['@type'] }}-{{ this['@id'] }}",
+    },
+    attributes: {
+        name: {
+            source: "{{ name }}",
+            type: "Property",
+            transformation: "string",
+        },
+        // The OSM amenity value is a controlled-vocabulary term, not free text. A VocabProperty maps
+        // the term to the canonical IRI that defines it (ETSI GS CIM 009 v1.9.1 clause 4.5.20): each
+        // amenity value expands to its OSM-wiki tag page. The source builds that IRI by interpolating
+        // the term, and the VocabProperty stores it under vocab.
+        category: {
+            source: "https://wiki.openstreetmap.org/wiki/Tag:amenity={{ amenity }}",
+            type: "VocabProperty",
+        },
+        // Overpass "out center;" gives way- and relation-mapped features a centroid, carried in the
+        // @lat/@lon columns alongside the node coordinates.
+        location: {
+            source: [
+                "{{ this['@lon'] }}",
+                "{{ this['@lat'] }}",
+            ],
+            type: "GeoProperty",
+            transformation: "point",
+        },
+    },
+}

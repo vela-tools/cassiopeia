@@ -1,0 +1,40 @@
+name: Help and questions
+description: Ask how to accomplish something with Cassiopeia.
+title: "[Help]: "
+labels: ["question"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Have a look at the [documentation and examples](https://github.com/vela-tools/cassiopeia/tree/main/docs) first.
+        Use this form for usage questions; if something is actually broken, use the Bug report form instead.
+  - type: textarea
+    id: goal
+    attributes:
+      label: What are you trying to do?
+      description: Describe the goal in terms of your source data and the NGSI-LD entities you want out of it.
+    validations:
+      required: true
+  - type: textarea
+    id: tried
+    attributes:
+      label: What have you tried?
+      description: The command, mapping, manifest, or configuration you are working with, and what happened.
+      render: shell
+    validations:
+      required: false
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: The output of `cassiopeia --version`.
+      placeholder: 0.1.0
+    validations:
+      required: false
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Before submitting
+      options:
+        - label: I checked the documentation and the existing issues.
+          required: true

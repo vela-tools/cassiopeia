@@ -1,0 +1,84 @@
+{
+    version: "v4",
+    dataModel: "Mountain",
+    // The source packs a peak's aliases into one comma-separated field, primary name first. Splitting
+    // on the comma and taking the first token gives a stable identity: "Mount Everest, Sagarmatha,
+    // Chomolungma" keys as urn:ngsi-ld:Mountain:MountEverest.
+    identity: {
+        entityName: "{{ mountain_names | split(pat=', ') | first }}",
+    },
+    attributes: {
+        name: {
+            source: "{{ mountain_names | split(pat=', ') | first }}",
+            type: "Property",
+            transformation: "string",
+        },
+        mountainRange: {
+            source: "{{ range }}",
+            type: "Property",
+            transformation: "string",
+        },
+        // The height reads "8,849 metres (29,032 ft)": drop everything from the first space, then the
+        // thousands comma, leaving the whole-metre figure for the integer transformation.
+        heightMetres: {
+            source: "{{ height_rounded | regex_replace(pattern=' .*', rep='') | regex_replace(pattern=',', rep='') }}",
+            type: "Property",
+            transformation: "integer",
+        },
+        prominenceMetres: {
+            source: "{{ prominence_rounded | regex_replace(pattern=' .*', rep='') | regex_replace(pattern=',', rep='') }}",
+            type: "Property",
+            transformation: "integer",
+        },
+        // Unclimbed peaks carry "none" rather than a year; the guard keeps a four-digit year and lets
+        // everything else resolve to nothing, so the attribute is simply absent for them.
+        firstAscentYear: {
+            source: "{% if first_ascent is matching(pat='^[0-9]{4}$') %}{{ first_ascent }}{% endif %}",
+            type: "Property",
+            transformation: "integer",
+        },
+        // The coordinate is a sexagesimal pair, "27°59′17″N 86°55′30″E"; dms_point parses it into a
+        // GeoJSON Point in longitude-latitude order for the GeoProperty.
+        location: {
+            source: "{{ dms_point(value=coordinates) }}",
+            type: "GeoProperty",
+            transformation: "point",
+        },
+        // A peak points at the massif it rises from, another Mountain in this very dataset, keyed on
+        // that parent's primary name. The highest summits carry an em dash for "no parent"; the guard
+        // yields an empty identifier there, so the relationship is omitted rather than pointing at a
+        // placeholder.
+        parentMountain: {
+            source: "{% if parent_mountain is matching(pat='[A-Za-z]') %}{{ parent_mountain }}{% endif %}",
+            type: "Relationship",
+            target: {
+                entity: "Mountain",
+            },
+        },
+        // The country field is a comma-separated list. Each token both links the mountain to a country
+        // and is materialised as that Country entity in the same run: the list relationship fans out
+        // into one target per name, and the synthetic entity gives each of those targets a body. The
+        // synthetic mapping reads its one token as this[0], the same positional accessor a headerless
+        // source uses. No separate country dataset is needed; the countries are synthesised here.
+        hasCountry: {
+            source: "{{ country_or_region }}",
+            type: "ListRelationship",
+            target: {
+                entity: "Country",
+            },
+            syntheticEntity: {
+                dataModel: "Country",
+                identity: {
+                    entityName: "{{ this[0] }}",
+                },
+                attributes: {
+                    name: {
+                        source: "{{ this[0] }}",
+                        type: "Property",
+                        transformation: "string",
+                    },
+                },
+            },
+        },
+    },
+}

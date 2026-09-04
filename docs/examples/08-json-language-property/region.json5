@@ -1,0 +1,54 @@
+{
+    version: "v4",
+    dataModel: "Region",
+    identity: {
+        // The region id is unique across the file, so it is the whole identity.
+        entityName: "{{ id }}",
+    },
+    attributes: {
+        name: {
+            type: "LanguageProperty",
+            // A languageMap is keyed by BCP-47 language tag, and every value is one localized
+            // string (NGSI-LD 4.5.18). The tag on the left is chosen here; the source on the
+            // right names where that language's text comes from in the record.
+            languageMap: {
+                // English has no entry under 'translations'; it is the record's own 'name'.
+                en: {
+                    source: "{{ name }}",
+                },
+                de: {
+                    source: "{{ translations.de }}",
+                },
+                fr: {
+                    source: "{{ translations.fr }}",
+                },
+                es: {
+                    source: "{{ translations.es }}",
+                },
+                it: {
+                    source: "{{ translations.it }}",
+                },
+                ja: {
+                    source: "{{ translations.ja }}",
+                },
+                ko: {
+                    source: "{{ translations.ko }}",
+                },
+                ru: {
+                    source: "{{ translations.ru }}",
+                },
+                // A source key with a hyphen cannot be read as 'translations.pt-BR'; the 'get'
+                // filter looks it up by its exact name instead.
+                "pt-BR": {
+                    source: "{{ translations | get(key='pt-BR') }}",
+                },
+                "zh-CN": {
+                    source: "{{ translations | get(key='zh-CN') }}",
+                },
+            },
+        },
+        wikidataId: {
+            source: "{{ wikiDataId }}",
+        },
+    },
+}

@@ -1,0 +1,37 @@
+name: deny
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  # Advisories land without any change to this repository, so re-run the gate on a
+  # schedule as well as on code changes.
+  schedule:
+    - cron: "17 6 * * 1"
+  workflow_dispatch:
+
+concurrency:
+  group: deny-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  deny:
+    name: cargo deny
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # Split so a new advisory does not mask a licence regression, and so the
+        # failing check names which policy was broken.
+        checks:
+          - licenses sources
+          - advisories
+          - bans
+    steps:
+      - uses: actions/checkout@v7
+      - uses: EmbarkStudios/cargo-deny-action@v2
+        with:
+          command: check ${{ matrix.checks }}

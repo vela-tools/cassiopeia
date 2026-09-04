@@ -1,0 +1,24 @@
+{
+    version: "v1",
+    inputs: [
+        {
+            source: "tmdb_5000_credits.csv",
+            mapping: "movie.json5",
+            format: "csv",
+            // Validate the Movie entities with the schema stored next to this mapping.
+            schema: "movie.schema.json",
+        },
+    ],
+    output: {
+        target: "file",
+        directory: "out",
+        // Movie is an invented model rather than a Smart Data Model. No @context is attached, and a
+        // broker adds the core context implicitly.
+        context: "none",
+        // Validate the normalized shape, including nested relationships, and abort on any violation.
+        validation: {
+            mode: "fail-when-schema",
+            representation: "normalized",
+        },
+    },
+}

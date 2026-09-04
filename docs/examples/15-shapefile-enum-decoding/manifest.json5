@@ -1,0 +1,20 @@
+{
+    version: "v1",
+    inputs: [
+        {
+            source: "world_port_index.zip",
+            mapping: "port.json5",
+            format: "shapefile",
+        },
+    ],
+    output: {
+        target: "file",
+        directory: "out",
+        context: "none",
+        // Port is a custom data model with no published schema, so fail-when-schema writes it without
+        // a schema check.
+        validation: {
+            mode: "fail-when-schema",
+        },
+    },
+}

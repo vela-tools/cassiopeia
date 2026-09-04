@@ -1,0 +1,129 @@
+name: release
+
+on:
+  push:
+    tags:
+      - v[0-9]+.[0-9]+.[0-9]+
+      - v[0-9]+.[0-9]+.[0-9]+-alpha[0-9]+
+      - v[0-9]+.[0-9]+.[0-9]+-beta[0-9]+
+      - v[0-9]+.[0-9]+.[0-9]+-rc[0-9]+
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            platform: linux-x86_64
+            ext: ""
+          - os: ubuntu-24.04-arm
+            target: aarch64-unknown-linux-gnu
+            platform: linux-aarch64
+            ext: ""
+          - os: macos-15
+            target: aarch64-apple-darwin
+            platform: macos-aarch64
+            ext: ""
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            platform: windows-x86_64
+            ext: ".exe"
+
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.target }}
+
+      - name: Build
+        run: cargo build --release --locked --no-default-features --bin cassiopeia --target ${{ matrix.target }}
+
+      - name: Package (unix)
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          set -euo pipefail
+          bin="cassiopeia${{ matrix.ext }}"
+          stage="cassiopeia-${{ matrix.platform }}"
+          mkdir "$stage"
+          cp "target/${{ matrix.target }}/release/${bin}" "$stage/"
+          (
+            cd "$stage"
+            if command -v sha256sum >/dev/null 2>&1; then
+              sha256sum "$bin" > "${bin}.sha256"
+            else
+              shasum -a 256 "$bin" > "${bin}.sha256"
+            fi
+            zip "../${stage}.zip" "$bin" "${bin}.sha256"
+          )
+
+      - name: Package (windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $bin = "cassiopeia.exe"
+          $stage = "cassiopeia-${{ matrix.platform }}"
+          New-Item -ItemType Directory -Path $stage | Out-Null
+          Copy-Item "target/${{ matrix.target }}/release/$bin" "$stage/"
+          $hash = (Get-FileHash "$stage/$bin" -Algorithm SHA256).Hash.ToLower()
+          "$hash  $bin" | Out-File -Encoding ascii "$stage/$bin.sha256"
+          Compress-Archive -Path "$stage/*" -DestinationPath "$stage.zip"
+
+      - name: Upload
+        uses: actions/upload-artifact@v7
+        with:
+          name: ${{ matrix.platform }}
+          path: cassiopeia-${{ matrix.platform }}.zip
+          if-no-files-found: error
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - uses: actions/download-artifact@v8
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Generate release notes
+        id: changelog
+        uses: orhun/git-cliff-action@v4
+        with:
+          config: cliff.toml
+          args: --current --strip all
+
+      - name: Determine release type
+        id: release_type
+        run: |
+          if [[ "${GITHUB_REF_NAME}" == *-* ]]; then
+            echo "makeLatest=false" >> "$GITHUB_OUTPUT"
+            echo "prerelease=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "makeLatest=true" >> "$GITHUB_OUTPUT"
+            echo "prerelease=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Create release
+        uses: ncipollo/release-action@v1
+        with:
+          artifacts: "dist/*.zip"
+          allowUpdates: true
+          artifactErrorsFailBuild: true
+          draft: false
+          makeLatest: ${{ steps.release_type.outputs.makeLatest }}
+          prerelease: ${{ steps.release_type.outputs.prerelease }}
+          name: ${{ github.ref_name }}
+          body: ${{ steps.changelog.outputs.content }}
+          token: ${{ secrets.GITHUB_TOKEN }}

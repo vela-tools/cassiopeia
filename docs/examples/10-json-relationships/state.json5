@@ -1,0 +1,84 @@
+{
+    version: "v4",
+    dataModel: "State",
+    identity: {
+        entityName: "{{ id }}",
+    },
+    attributes: {
+        name: {
+            type: "LanguageProperty",
+            languageMap: {
+                en: {
+                    source: "{{ name }}",
+                },
+                de: {
+                    source: "{{ translations.de }}",
+                },
+                fr: {
+                    source: "{{ translations.fr }}",
+                },
+                es: {
+                    source: "{{ translations.es }}",
+                },
+                ru: {
+                    source: "{{ translations.ru }}",
+                },
+                "pt-BR": {
+                    source: "{{ translations | get(key='pt-BR') }}",
+                },
+                "zh-CN": {
+                    source: "{{ translations | get(key='zh-CN') }}",
+                },
+            },
+        },
+        nativeName: {
+            source: "{{ native }}",
+            type: "Property",
+            transformation: "string",
+        },
+        // Every state belongs to a country.
+        country: {
+            source: "{{ country_id }}",
+            type: "Relationship",
+            target: {
+                entity: "Country",
+            },
+        },
+        // The ISO 3166-2 subdivision code, e.g. "US-CA".
+        code: {
+            source: "{{ iso3166_2 }}",
+            type: "Property",
+            transformation: "string",
+        },
+        // What kind of subdivision this is: state, province, district, region, and so on.
+        stateType: {
+            source: "{{ type }}",
+            type: "Property",
+            transformation: "string",
+        },
+        timezone: {
+            source: "{{ timezone }}",
+            type: "Property",
+            transformation: "string",
+        },
+        population: {
+            source: "{{ population }}",
+            type: "Property",
+            transformation: "integer",
+        },
+        // A handful of states carry no coordinates; the location is left off those rather than failing.
+        location: {
+            source: [
+                "{{ longitude }}",
+                "{{ latitude }}",
+            ],
+            type: "GeoProperty",
+            transformation: "point",
+        },
+        wikidataId: {
+            source: "{{ wikiDataId }}",
+            type: "Property",
+            transformation: "string",
+        },
+    },
+}

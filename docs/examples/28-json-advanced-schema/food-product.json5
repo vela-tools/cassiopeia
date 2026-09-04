@@ -1,0 +1,135 @@
+{
+    version: "v4",
+    dataModel: "FoodProduct",
+    // One entity per barcode. Open Food Facts calls the barcode `code`; it is unique per product.
+    identity: {
+        entityName: "{{ code }}",
+    },
+    attributes: {
+        // The product name in whatever languages the record carries, as one LanguageProperty whose
+        // languageMap holds one localized string per BCP-47 tag (ETSI GS CIM 009 v1.9.1 clause 4.5.18).
+        // A language whose source is empty is dropped, so the map holds only the names that exist.
+        name: {
+            type: "LanguageProperty",
+            languageMap: {
+                en: {
+                    source: "{{ product_name_en }}",
+                },
+                fr: {
+                    source: "{{ product_name_fr }}",
+                },
+                de: {
+                    source: "{{ product_name_de }}",
+                },
+                es: {
+                    source: "{{ product_name_es }}",
+                },
+                it: {
+                    source: "{{ product_name_it }}",
+                },
+            },
+        },
+
+        // A Relationship links the product to its brand by URN (clause 4.5.3). No Brand entity is
+        // materialised, the relationship carries only the object URN, cleaned of URN-unsafe characters.
+        brand: {
+            source: "{{ brands }}",
+            type: "Relationship",
+            target: {
+                entity: "Brand",
+            },
+        },
+
+        // Energy is reported both per 100 g and per serving. One attribute name with one instance per
+        // basis, each tagged with its own datasetId (clause 4.5.5), keeps the two side by side rather
+        // than overwriting. Per-serving is often absent, so a product frequently yields one instance.
+        // The nutriment keys carry hyphens, so they are read from the nested object with the `get`
+        // filter rather than dotted-path access.
+        energy: {
+            type: "Property",
+            transformation: "float",
+            // UN/CEFACT Common Code for kilocalorie (international table).
+            properties: {
+                unitCode: {
+                    source: "E14",
+                },
+            },
+            instances: [
+                {
+                    source: "{{ nutriments | get(key='energy-kcal_100g') }}",
+                    properties: {
+                        datasetId: {
+                            source: "urn:ngsi-ld:Dataset:per-100g",
+                        },
+                    },
+                },
+                {
+                    source: "{{ nutriments | get(key='energy-kcal_serving') }}",
+                    properties: {
+                        datasetId: {
+                            source: "urn:ngsi-ld:Dataset:per-serving",
+                        },
+                    },
+                },
+            ],
+        },
+
+        // Sugars per 100 g, a Property carrying its unit and a nested sub-attribute. A sub-attribute is
+        // the serialization of a Property or any of its subclasses (ETSI GS CIM 009 v1.9.1 clause
+        // 4.5.2.2), so `level` keeps its declared type: a VocabProperty whose vocab is the IRI for
+        // Open Food Facts' own low/moderate/high sugars classification (clause 4.5.20).
+        sugars: {
+            source: "{{ nutriments | get(key='sugars_100g') }}",
+            type: "Property",
+            transformation: "float",
+            properties: {
+                // UN/CEFACT Common Code for gram.
+                unitCode: {
+                    source: "GRM",
+                },
+                level: {
+                    source: "https://example.org/nutrient-level/{{ nutrient_levels | get(key='sugars') }}",
+                    type: "VocabProperty",
+                },
+            },
+        },
+
+        // Salt per 100 g, timestamped with the record's last-modified epoch turned into an ISO
+        // date-time by Tera's `date` filter, carried as the Property's `observedAt` qualifier (4.8).
+        salt: {
+            source: "{{ nutriments | get(key='salt_100g') }}",
+            type: "Property",
+            transformation: "float",
+            properties: {
+                unitCode: {
+                    source: "GRM",
+                },
+                observedAt: {
+                    source: "{{ last_modified_t | date(format='%Y-%m-%dT%H:%M:%SZ') }}",
+                },
+            },
+        },
+
+        // The Nutri-Score grade is a controlled-vocabulary term, not free text. A VocabProperty stores
+        // the IRI that identifies the grade under vocab (clause 4.5.20) rather than a loose letter.
+        nutriScore: {
+            source: "https://example.org/nutriscore/{{ nutriscore_grade }}",
+            type: "VocabProperty",
+        },
+
+        // The NOVA processing group, an integer 1-4, as a plain Property.
+        novaGroup: {
+            source: "{{ nova_group }}",
+            type: "Property",
+            transformation: "integer",
+        },
+
+        // The product's label tags are an ordered list of terms. A ListProperty keeps them as the
+        // valueList array (clause 4.5.21); the source is a bare field reference to the JSON array.
+        labels: {
+            source: "{{ labels_tags }}",
+            type: "ListProperty",
+            transformation: "array",
+        },
+    },
+}

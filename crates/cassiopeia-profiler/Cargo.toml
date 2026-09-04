@@ -1,0 +1,18 @@
+[package]
+name = "cassiopeia-profiler"
+description = "Detects a payload's source format and routes it to the matching Cassiopeia ingestor"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+cassiopeia-common.workspace = true
+cassiopeia-data-profiler.workspace = true
+cassiopeia-ir.workspace = true
+mediatype = "0.23.0"
+thiserror = "2.0.20"
+
+[lints]
+workspace = true

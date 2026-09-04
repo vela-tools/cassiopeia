@@ -1,0 +1,8 @@
+# `core` is allowed because shadow-rs's generated build-info code has a `Display` impl that emits
+# `core::fmt::*` paths the crate cannot rewrite. `typed_builder` is allowed for its generated
+# builder code, which uses the same fully-qualified form.
+absolute-paths-allowed-crates = ["core", "typed_builder"]
+
+allow-expect-in-tests = true
+allow-panic-in-tests = true
+allow-unwrap-in-tests = true

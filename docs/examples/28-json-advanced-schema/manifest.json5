@@ -1,0 +1,24 @@
+{
+    version: "v1",
+    inputs: [
+        // The per-input `schema` names the custom schema for the types this input produces, beside its
+        // `mapping`, the same place the per-input `context` would go. The schema is never on the mapping.
+        {
+            source: "products.json",
+            mapping: "food-product.json5",
+            format: "json",
+            schema: "food-product.schema.json",
+        },
+    ],
+    output: {
+        target: "file",
+        directory: "out",
+        // A local .jsonld attaches its @context to every entity's body (AtContextMode::Local).
+        context: "food-product-context.jsonld",
+        // Validate the full normalized shape, and abort the run on any violation.
+        validation: {
+            mode: "fail",
+            representation: "normalized",
+        },
+    },
+}

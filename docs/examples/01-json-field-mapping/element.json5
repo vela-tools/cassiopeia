@@ -1,0 +1,24 @@
+{
+    version: "v4",
+    dataModel: "ChemicalElement",
+    identity: {
+        // The symbol is unique in this dataset, so it is enough to identify the entity.
+        entityName: "{{ symbol }}",
+    },
+    attributes: {
+        name: {
+            source: "{{ name }}",
+        },
+        atomicNumber: {
+            source: "{{ atomicNumber }}",
+            // The source looks numeric, but direct copies stay text. This transformation makes it a number.
+            transformation: "integer",
+        },
+        group: {
+            source: "{{ groupBlock }}",
+        },
+        standardState: {
+            source: "{{ standardState }}",
+        },
+    },
+}

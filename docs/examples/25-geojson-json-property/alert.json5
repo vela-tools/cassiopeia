@@ -1,0 +1,68 @@
+{
+    version: "v4",
+    dataModel: "WeatherAlert",
+    // The alert's own CAP identifier is stable across fetches, so it is the identity. The URN cleaner
+    // collapses the "urn:oid:..." separators into a URN-safe tail.
+    identity: {
+        entityName: "{{ properties.id }}",
+    },
+    attributes: {
+        event: {
+            source: "{{ properties.event }}",
+            type: "Property",
+            transformation: "string",
+        },
+        severity: {
+            source: "{{ properties.severity }}",
+            type: "Property",
+            transformation: "string",
+        },
+        certainty: {
+            source: "{{ properties.certainty }}",
+            type: "Property",
+            transformation: "string",
+        },
+        urgency: {
+            source: "{{ properties.urgency }}",
+            type: "Property",
+            transformation: "string",
+        },
+        headline: {
+            source: "{{ properties.headline }}",
+            type: "Property",
+            transformation: "string",
+        },
+        areaDescription: {
+            source: "{{ properties.areaDesc }}",
+            type: "Property",
+            transformation: "string",
+        },
+        effective: {
+            source: "{{ properties.effective }}",
+            type: "Property",
+            transformation: "datetime",
+        },
+        expires: {
+            source: "{{ properties.expires }}",
+            type: "Property",
+            transformation: "datetime",
+        },
+        // The feature's polygon, passed straight through as the location. An alert that references
+        // forecast zones instead of a polygon has a null geometry, so this attribute is simply dropped
+        // for those records.
+        location: {
+            source: "{{ geometry }}",
+            type: "GeoProperty",
+            transformation: "geometry",
+        },
+        // The CAP "parameters" object is open-ended: its keys depend on the event type (a thunderstorm
+        // alert carries maxWindGust and maxHailSize, a flood alert carries different keys entirely).
+        // A JsonProperty keeps the whole object verbatim (ETSI GS CIM 009 v1.9.1 clause 4.5.24) rather
+        // than forcing a fixed set of attributes onto a shape that varies row to row.
+        rawParameters: {
+            source: "{{ properties.parameters }}",
+            type: "JsonProperty",
+            transformation: "object",
+        },
+    },
+}

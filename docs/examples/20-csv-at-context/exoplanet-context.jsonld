@@ -1,0 +1,25 @@
+{
+    "@context": {
+        "exo": "https://vocab.example/exoplanet#",
+        "ExoPlanet": "exo:ExoPlanet",
+        "Star": "exo:Star",
+        "hostStar": "exo:hostStar",
+        "discoveryMethod": "exo:discoveryMethod",
+        "discoveryYear": "exo:discoveryYear",
+        "orbitalPeriod": "exo:orbitalPeriod",
+        "radius": "exo:radius",
+        "radiusMeters": "exo:radiusMeters",
+        "mass": "exo:mass",
+        "massKilograms": "exo:massKilograms",
+        "equilibriumTemperature": "exo:equilibriumTemperature",
+        "eccentricity": "exo:eccentricity",
+        "stellarTemperature": "exo:stellarTemperature",
+        "stellarRadius": "exo:stellarRadius",
+        "stellarMass": "exo:stellarMass",
+        "spectralType": "exo:spectralType",
+        "numberOfPlanets": "exo:numberOfPlanets",
+        "distance": "exo:distance",
+        "rightAscension": "exo:rightAscension",
+        "declination": "exo:declination"
+    }
+}

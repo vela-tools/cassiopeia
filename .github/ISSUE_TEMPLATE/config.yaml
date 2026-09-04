@@ -1,0 +1,11 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Report a security vulnerability
+    url: https://github.com/vela-tools/cassiopeia/security/policy
+    about: Never open a public issue for a vulnerability. Follow the responsible disclosure process in the Cassiopeia security policy.
+  - name: Documentation and examples
+    url: https://github.com/vela-tools/cassiopeia/tree/main/docs
+    about: Browse the getting-started guide, the CLI reference, and the worked examples before opening an issue.
+  - name: Contact Vela Tools
+    url: https://velacontext.com/contactus
+    about: Commercial enquiries, or anything else that should not be discussed in a public issue.

@@ -1,0 +1,131 @@
+{
+    version: "v4",
+    dataModel: "dataModel.Weather/WeatherObserved",
+    // One identity per station: every observation of Ljubljana Bezigrad is the same entity, observed
+    // again. The observedAt on the readings below keeps successive snapshots as distinct observations
+    // rather than overwrites.
+    identity: {
+        entityName: "{{ metData.domain_id }}",
+    },
+    attributes: {
+        stationName: {
+            source: "{{ metData.domain_title }}",
+            type: "Property",
+            transformation: "string",
+        },
+        stationCode: {
+            source: "{{ metData.domain_meteosiId }}",
+            type: "Property",
+            transformation: "string",
+        },
+        // dateObserved is required by the WeatherObserved model. The feed prints the valid time as
+        // "21.08.2026 10:00 UTC"; swapping the dots for slashes and dropping the " UTC" suffix leaves
+        // "21/08/2026 10:00", one of the date-time shapes the datetime transformation reads (as UTC).
+        dateObserved: {
+            source: "{{ metData.valid_UTC | replace(from='.', to='/') | replace(from=' UTC', to='') }}",
+            type: "Property",
+            transformation: "datetime",
+        },
+        // location is required by the model; the feed carries the station's longitude and latitude.
+        location: {
+            source: [
+                "{{ metData.domain_lon }}",
+                "{{ metData.domain_lat }}",
+            ],
+            type: "GeoProperty",
+            transformation: "point",
+        },
+        // The reading pairs a value with a unit and the instant it was taken. unitCode is a UN/CEFACT
+        // Common Code (ETSI GS CIM 009 v1.9.1 clause 4.5.2.2), not the "°C" symbol the feed prints:
+        // CEL is degrees Celsius. observedAt turns the reading into a timestamped observation and, being
+        // present anywhere in the entity, makes the whole entity a temporal one.
+        temperature: {
+            source: "{{ metData.t }}",
+            type: "Property",
+            transformation: "float",
+            properties: {
+                unitCode: {
+                    source: "CEL",
+                },
+                observedAt: {
+                    source: "{{ metData.valid_UTC | replace(from='.', to='/') | replace(from=' UTC', to='') }}",
+                    type: "Property",
+                    transformation: "datetime",
+                },
+            },
+        },
+        dewPoint: {
+            source: "{{ metData.td }}",
+            type: "Property",
+            transformation: "float",
+            properties: {
+                unitCode: {
+                    source: "CEL",
+                },
+            },
+        },
+        // The WeatherObserved model defines relativeHumidity as a dimensionless ratio in [0, 1], so
+        // the feed's percentage is scaled by 100. A ratio still has a unit: C62 is the UN/CEFACT code
+        // for "one", so the value carries a code stating it is a pure number, not one that lost its unit.
+        relativeHumidity: {
+            source: "{{ metData.rh | int / 100 }}",
+            type: "Property",
+            transformation: "float",
+            properties: {
+                unitCode: {
+                    source: "C62",
+                },
+            },
+        },
+        // A97 is hectopascal; the feed gives mean-sea-level pressure in hPa.
+        atmosphericPressure: {
+            source: "{{ metData.msl }}",
+            type: "Property",
+            transformation: "integer",
+            properties: {
+                unitCode: {
+                    source: "A97",
+                },
+            },
+        },
+        // MTS is metre per second.
+        windSpeed: {
+            source: "{{ metData.ff_val }}",
+            type: "Property",
+            transformation: "float",
+            properties: {
+                unitCode: {
+                    source: "MTS",
+                },
+            },
+        },
+        // DD is degree (unit of angle); wind direction is the compass bearing the wind blows from.
+        windDirection: {
+            source: "{{ metData.dd_val }}",
+            type: "Property",
+            transformation: "integer",
+            properties: {
+                unitCode: {
+                    source: "DD",
+                },
+            },
+        },
+        // KMT is kilometre.
+        visibility: {
+            source: "{{ metData.vis_value }}",
+            type: "Property",
+            transformation: "integer",
+            properties: {
+                unitCode: {
+                    source: "KMT",
+                },
+            },
+        },
+        // The sky-condition text, as the station reports it in Slovenian.
+        weatherType: {
+            source: "{{ metData.nn_shortText }}",
+            type: "Property",
+            transformation: "string",
+        },
+    },
+}

@@ -1,0 +1,41 @@
+{
+    version: "v4",
+    dataModel: "dataModel.Aeronautics/Flight",
+    identity: {
+        entityName: "{{ this[0] }}-{{ this[2] }}-{{ this[4] }}",
+    },
+    attributes: {
+        belongsToAirline: {
+            source: "{{ this[1] }}",
+            type: "Relationship",
+            target: {
+                entity: "Airline",
+            },
+        },
+        departsFromAirport: {
+            source: "{{ this[3] }}",
+            type: "Relationship",
+            target: {
+                entity: "Airport",
+            },
+        },
+        arrivesToAirport: {
+            source: "{{ this[5] }}",
+            type: "Relationship",
+            target: {
+                entity: "Airport",
+            },
+        },
+        // Every aircraft the route flies, not just the first. A ListRelationship reads the equipment
+        // field as a list of ids, its space-separated codes fan out into one object each, and emits
+        // them under a single `objectList`. This is a newer NGSI-LD attribute type; the Flight model's
+        // `hasAircraftModel` predates it, so this entity does not validate against that schema.
+        hasAircraftModel: {
+            source: "{{ this[8] }}",
+            type: "ListRelationship",
+            target: {
+                entity: "AircraftModel",
+            },
+        },
+    },
+}

@@ -1,0 +1,43 @@
+{
+    version: "v4",
+    dataModel: "Region",
+    identity: {
+        entityName: "{{ id }}",
+    },
+    attributes: {
+        // The name is multilingual, exactly as in the multilingual example: English from the
+        // record's own `name`, the rest from `translations`, with the hyphenated tags read through
+        // the `get` filter.
+        name: {
+            type: "LanguageProperty",
+            languageMap: {
+                en: {
+                    source: "{{ name }}",
+                },
+                de: {
+                    source: "{{ translations.de }}",
+                },
+                fr: {
+                    source: "{{ translations.fr }}",
+                },
+                es: {
+                    source: "{{ translations.es }}",
+                },
+                ru: {
+                    source: "{{ translations.ru }}",
+                },
+                "pt-BR": {
+                    source: "{{ translations | get(key='pt-BR') }}",
+                },
+                "zh-CN": {
+                    source: "{{ translations | get(key='zh-CN') }}",
+                },
+            },
+        },
+        wikidataId: {
+            source: "{{ wikiDataId }}",
+            type: "Property",
+            transformation: "string",
+        },
+    },
+}

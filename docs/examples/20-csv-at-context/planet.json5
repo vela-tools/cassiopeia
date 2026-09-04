@@ -1,0 +1,183 @@
+{
+    version: "v4",
+    dataModel: "ExoPlanet",
+    identity: {
+        // Planet names are unique across the archive. The URN cleaner keeps only
+        // URN-safe characters, so a name like "Kepler-1513 b" loses its space.
+        entityName: "{{ pl_name }}",
+    },
+    attributes: {
+        // The host star is linked and materialised in the same run. The relationship keeps the planet
+        // pointing at Star:<hostname>, and the syntheticEntity gives that star a body from the stellar
+        // columns this same archive row carries. The URN cleaner keeps both sides in step: "HD 330075"
+        // becomes Star:HD330075 for the link and for the star's own identity, so the two always meet.
+        // Every planet of a star emits an identical Star fragment; same-URN fragments merge into one.
+        hostStar: {
+            source: "{{ hostname }}",
+            type: "Relationship",
+            target: {
+                entity: "Star",
+            },
+            syntheticEntity: {
+                dataModel: "Star",
+                identity: {
+                    entityName: "{{ hostname }}",
+                },
+                attributes: {
+                    stellarTemperature: {
+                        source: "{{ st_teff }}",
+                        type: "Property",
+                        transformation: "float",
+                        // UN/CEFACT Common Code for kelvin.
+                        properties: {
+                            unitCode: {
+                                source: "KEL",
+                            },
+                        },
+                    },
+                    stellarRadius: {
+                        // Solar radii: no UN/CEFACT code exists, so the custom term carries the unit.
+                        source: "{{ st_rad }}",
+                        type: "Property",
+                        transformation: "float",
+                    },
+                    stellarMass: {
+                        // Solar masses: likewise outside UN/CEFACT.
+                        source: "{{ st_mass }}",
+                        type: "Property",
+                        transformation: "float",
+                    },
+                    spectralType: {
+                        source: "{{ st_spectype }}",
+                        type: "Property",
+                        transformation: "string",
+                    },
+                    numberOfPlanets: {
+                        source: "{{ sy_pnum }}",
+                        type: "Property",
+                        transformation: "integer",
+                    },
+                    distance: {
+                        // Parsec is in UN/CEFACT: C63. This is a system-level quantity, so it lives on
+                        // the star rather than the planet.
+                        source: "{{ sy_dist }}",
+                        type: "Property",
+                        transformation: "float",
+                        properties: {
+                            unitCode: {
+                                source: "C63",
+                            },
+                        },
+                    },
+                    rightAscension: {
+                        source: "{{ ra }}",
+                        type: "Property",
+                        transformation: "float",
+                        // UN/CEFACT Common Code for degree (unit of angle).
+                        properties: {
+                            unitCode: {
+                                source: "DD",
+                            },
+                        },
+                    },
+                    declination: {
+                        source: "{{ dec }}",
+                        type: "Property",
+                        transformation: "float",
+                        properties: {
+                            unitCode: {
+                                source: "DD",
+                            },
+                        },
+                    },
+                },
+            },
+        },
+        discoveryMethod: {
+            source: "{{ discoverymethod }}",
+            type: "Property",
+            transformation: "string",
+        },
+        discoveryYear: {
+            source: "{{ disc_year }}",
+            type: "Property",
+            transformation: "integer",
+        },
+        orbitalPeriod: {
+            source: "{{ pl_orbper }}",
+            type: "Property",
+            transformation: "float",
+            // UN/CEFACT Common Code for day.
+            properties: {
+                unitCode: {
+                    source: "DAY",
+                },
+            },
+        },
+        radius: {
+            // Earth radii: no UN/CEFACT code exists, so the custom vocabulary term
+            // carries the unit meaning rather than a faked unitCode.
+            source: "{{ pl_rade }}",
+            type: "Property",
+            transformation: "float",
+        },
+        radiusMeters: {
+            // The same radius in metres: multiplying the Earth-radii figure by the Earth's mean radius
+            // (6371000 m) turns an uncoded astronomy unit into SI metres, which UN/CEFACT does code
+            // (MTR). A planet radius is never zero, so the presence guard drops only blank cells before
+            // the in-template arithmetic, which the float filter would otherwise reject on an empty cell.
+            source: "{% if pl_rade %}{{ pl_rade | float * 6371000 }}{% endif %}",
+            type: "Property",
+            transformation: "float",
+            // UN/CEFACT Common Code for metre.
+            properties: {
+                unitCode: {
+                    source: "MTR",
+                },
+            },
+        },
+        mass: {
+            // Earth masses: likewise outside UN/CEFACT.
+            source: "{{ pl_bmasse }}",
+            type: "Property",
+            transformation: "float",
+        },
+        massKilograms: {
+            // The same mass in kilograms: 5.972 * 10 ** 24 is the Earth's mass in kg. The number lexer
+            // takes no exponent form, so the power operator ** builds the 10^24 factor. A planet mass is
+            // never zero, so the guard drops only blanks before the arithmetic.
+            source: "{% if pl_bmasse %}{{ pl_bmasse | float * 5.972 * 10 ** 24 }}{% endif %}",
+            type: "Property",
+            transformation: "float",
+            // UN/CEFACT Common Code for kilogram.
+            properties: {
+                unitCode: {
+                    source: "KGM",
+                },
+            },
+        },
+        equilibriumTemperature: {
+            source: "{{ pl_eqt }}",
+            type: "Property",
+            transformation: "float",
+            // UN/CEFACT Common Code for kelvin.
+            properties: {
+                unitCode: {
+                    source: "KEL",
+                },
+            },
+        },
+        eccentricity: {
+            // A dimensionless ratio; an exactly circular orbit is a real 0, so no truthiness guard here
+            // (it would drop the zero). C62 is the UN/CEFACT code for "one", the unit of a ratio.
+            source: "{{ pl_orbeccen }}",
+            type: "Property",
+            transformation: "float",
+            properties: {
+                unitCode: {
+                    source: "C62",
+                },
+            },
+        },
+    },
+}

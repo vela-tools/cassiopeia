@@ -1,0 +1,29 @@
+# A local NGSI-LD Context Broker for the worked example: Scorpio's all-in-one runner (the
+# Kafka-less Java variant) backed by a PostGIS database. Scorpio serves the NGSI-LD API, including
+# the temporal endpoints, on port 9090, which matches the manifest's base URL.
+#
+#   docker compose up -d      # start the broker and wait for it to become healthy
+#   docker compose down -v    # stop it and discard the database volume
+
+services:
+  postgis:
+    image: postgis/postgis:15-3.4
+    environment:
+      POSTGRES_USER: ngb
+      POSTGRES_PASSWORD: ngb
+      POSTGRES_DB: ngb
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ngb"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  scorpio:
+    image: scorpiobroker/all-in-one-runner:java-latest
+    environment:
+      DBHOST: postgis
+    ports:
+      - "9090:9090"
+    depends_on:
+      postgis:
+        condition: service_healthy

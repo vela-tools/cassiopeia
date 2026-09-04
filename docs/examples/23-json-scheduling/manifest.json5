@@ -1,0 +1,43 @@
+{
+    version: "v1",
+    inputs: [
+        {
+            // The area filter trims the global feed to sensors within 12 km of central Ljubljana; the
+            // query string is sent verbatim, so any lat,lon,radius works. The endpoint returns only
+            // the last five minutes of readings, which is what makes a five-minute poll meaningful.
+            source: "https://data.sensor.community/airrohr/v1/filter/area=46.05,14.51,12",
+            mapping: "air-quality.json5",
+            format: "json",
+        },
+    ],
+    // A live poller should ride out a bad poll rather than die on it: "ignore" keeps the schedule
+    // running past a failed cycle (once retries are exhausted) and still exits zero. "continue" would
+    // keep running too but exit non-zero when the schedule finishes; "abort", the default, would stop
+    // the schedule on the first failure. This is a top-level field governing the whole run, not a
+    // schedule field.
+    onFailure: "ignore",
+    output: {
+        target: "context-broker",
+        url: "http://localhost:9090/",
+        // Each poll upserts the current reading onto its sensor's entity, so the broker always holds
+        // the latest value per sensor; the observedAt on each reading records the instant it was taken.
+        operation: "upsert",
+        // AirQualityObserved is a published model, so default resolves its @context from the catalog.
+        context: "default",
+        validation: {
+            mode: "fail-when-schema",
+        },
+    },
+    // Run every five minutes, matching the feed's five-minute window. jitter spreads the request off a
+    // round boundary so many deployments do not hit the endpoint at once; retry rides out a transient
+    // network failure. The first run fires immediately, then each subsequent run waits for the interval.
+    schedule: {
+        mode: "every",
+        value: "5m",
+        jitter: "20s",
+        retry: {
+            maxAttempts: 3,
+            backoff: "15s",
+        },
+    },
+}

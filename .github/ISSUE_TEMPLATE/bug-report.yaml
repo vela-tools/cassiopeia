@@ -1,0 +1,67 @@
+name: Bug report
+description: Report incorrect behaviour, a crash, or NGSI-LD output that does not match the specification.
+title: "[Bug]: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to file a bug. Please search the existing issues first, in case it is already reported.
+
+        Do not use this form to report a security vulnerability. Follow the [Cassiopeia security policy](https://github.com/vela-tools/cassiopeia/security/policy) instead.
+  - type: textarea
+    id: summary
+    attributes:
+      label: What happened?
+      description: A clear description of the incorrect behaviour, including the exact error message if there was one.
+      placeholder: Cassiopeia exited with ..., or produced an entity where ...
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What did you expect to happen?
+      description: >-
+        Describe the correct behaviour. If this is a spec-compliance issue, cite the ETSI GS CIM 009
+        v1.9.1 clause, or the source-format specification (GTFS, GBFS, GeoJSON, and so on) it violates.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Steps to reproduce
+      description: The exact command you ran, plus the smallest input sample and mapping or manifest that triggers it.
+      placeholder: |
+        1. cassiopeia map -i sample.csv -m mapping.json5 ...
+        2. ...
+    validations:
+      required: true
+  - type: textarea
+    id: diagnostics
+    attributes:
+      label: Diagnostic report
+      description: >-
+        Run `cassiopeia bugreport` and paste the full output here. It records the exact version, the
+        commit and build features, the host, and where Cassiopeia looked for its inputs. Review it
+        before pasting; it never includes file contents, but it does show your command line.
+    validations:
+      required: true
+  - type: textarea
+    id: inputs
+    attributes:
+      label: Sample input, mapping, or manifest
+      description: A minimal sample that reproduces the problem. Remove any broker credentials, tokens, or private data first.
+      render: shell
+    validations:
+      required: false
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Before submitting
+      options:
+        - label: "This is not a security vulnerability. Vulnerabilities are reported privately, following the [Cassiopeia security policy](https://github.com/vela-tools/cassiopeia/security/policy)."
+          required: true
+        - label: I searched the existing issues and this is not a duplicate.
+          required: true
+        - label: I removed any credentials or private data from the report and samples above.
+          required: true

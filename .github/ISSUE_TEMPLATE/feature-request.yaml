@@ -1,0 +1,53 @@
+name: Feature request
+description: Suggest a new capability, a new source format, or an improvement.
+title: "[Feature]: "
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for the suggestion. Please search the existing issues first, in case it is already proposed.
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem or motivation
+      description: What are you trying to do, and what is missing or awkward today? Describe the need, not just the fix.
+    validations:
+      required: true
+  - type: textarea
+    id: solution
+    attributes:
+      label: Proposed solution
+      description: What should Cassiopeia do? If it affects a pipeline stage, the mapping or manifest format, or the CLI, say where.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: Other approaches you weighed, and why they fall short.
+    validations:
+      required: false
+  - type: textarea
+    id: references
+    attributes:
+      label: Specification or format references
+      description: >-
+        Anything that pins down the expected shape: an ETSI GS CIM 009 v1.9.1 clause, a source-format
+        specification (GTFS, GBFS, GeoJSON, and so on), or a specific Smart Data Model.
+    validations:
+      required: false
+  - type: textarea
+    id: context
+    attributes:
+      label: Additional context
+      description: Sample data, links, or anything else that helps.
+    validations:
+      required: false
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Before submitting
+      options:
+        - label: I searched the existing issues and this is not a duplicate.
+          required: true

@@ -1,0 +1,40 @@
+{
+    version: "v1",
+    inputs: [
+        {
+            source: "countries.dat",
+            mapping: "country.json5",
+            format: "csv",
+        },
+        {
+            source: "planes.dat",
+            mapping: "plane.json5",
+            format: "csv",
+        },
+        {
+            source: "airports.dat",
+            mapping: "airport.json5",
+            format: "csv",
+        },
+        {
+            source: "airlines.dat",
+            mapping: "airline.json5",
+            format: "csv",
+        },
+        {
+            source: "routes.dat",
+            mapping: "route.json5",
+            format: "csv",
+        },
+    ],
+    output: {
+        target: "file",
+        directory: "out",
+        context: "none",
+        // Validate Aeronautics entities against their published schemas. Country has no schema, so
+        // fail-when-schema writes those entities without validation.
+        validation: {
+            mode: "fail-when-schema",
+        },
+    },
+}

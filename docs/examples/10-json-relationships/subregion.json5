@@ -1,0 +1,50 @@
+{
+    version: "v4",
+    dataModel: "Subregion",
+    identity: {
+        entityName: "{{ id }}",
+    },
+    attributes: {
+        name: {
+            type: "LanguageProperty",
+            languageMap: {
+                en: {
+                    source: "{{ name }}",
+                },
+                de: {
+                    source: "{{ translations.de }}",
+                },
+                fr: {
+                    source: "{{ translations.fr }}",
+                },
+                es: {
+                    source: "{{ translations.es }}",
+                },
+                ru: {
+                    source: "{{ translations.ru }}",
+                },
+                "pt-BR": {
+                    source: "{{ translations | get(key='pt-BR') }}",
+                },
+                "zh-CN": {
+                    source: "{{ translations | get(key='zh-CN') }}",
+                },
+            },
+        },
+        // A subregion belongs to one region. The source is the foreign key `region_id`, and `target`
+        // names the model it points at; together they mint `urn:ngsi-ld:Region:<region_id>`, which is
+        // exactly the id the region mapping gives that entity.
+        region: {
+            source: "{{ region_id }}",
+            type: "Relationship",
+            target: {
+                entity: "Region",
+            },
+        },
+        wikidataId: {
+            source: "{{ wikiDataId }}",
+            type: "Property",
+            transformation: "string",
+        },
+    },
+}

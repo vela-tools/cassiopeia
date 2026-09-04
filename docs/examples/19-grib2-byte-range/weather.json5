@@ -1,0 +1,102 @@
+{
+    version: "v4",
+    dataModel: "dataModel.Weather/WeatherObserved",
+    identity: {
+        entityName: "{{ geohash(lat=latitude, lon=longitude) }}",
+    },
+    attributes: {
+        location: {
+            source: [
+                "{{ longitude }}",
+                "{{ latitude }}",
+            ],
+            type: "GeoProperty",
+            transformation: "point",
+        },
+        dateObserved: {
+            source: "{{ referenceTime }}",
+            type: "Property",
+            transformation: "datetime",
+        },
+        temperature: {
+            source: "{% if temperature is defined %}{{ temperature | float - 273.15 }}{% endif %}",
+            type: "Property",
+            transformation: "float",
+            properties: {
+                unitCode: {
+                    source: "CEL",
+                },
+            },
+        },
+        dewPoint: {
+            source: "{% if dewpoint is defined %}{{ dewpoint | float - 273.15 }}{% endif %}",
+            type: "Property",
+            transformation: "float",
+            properties: {
+                unitCode: {
+                    source: "CEL",
+                },
+            },
+        },
+        relativeHumidity: {
+            source: "{% if humidity is defined %}{{ map_range(value=humidity, in_min=0, in_max=100, out_min=0, out_max=1) }}{% endif %}",
+            type: "Property",
+            transformation: "float",
+            properties: {
+                unitCode: {
+                    source: "C62",
+                },
+            },
+        },
+        windSpeed: {
+            source: "{% if wind_u is defined %}{{ wind_speed(u=wind_u, v=wind_v) }}{% endif %}",
+            type: "Property",
+            transformation: "float",
+            properties: {
+                unitCode: {
+                    source: "MTS",
+                },
+            },
+        },
+        windDirection: {
+            source: "{% if wind_u is defined %}{{ wind_direction(u=wind_u, v=wind_v) }}{% endif %}",
+            type: "Property",
+            transformation: "integer",
+            properties: {
+                unitCode: {
+                    source: "DD",
+                },
+            },
+        },
+        gustSpeed: {
+            source: "{% if gust is defined %}{{ gust }}{% endif %}",
+            type: "Property",
+            transformation: "float",
+            properties: {
+                unitCode: {
+                    source: "MTS",
+                },
+            },
+        },
+        atmosphericPressure: {
+            source: "{% if pressure_msl is defined %}{{ pressure_msl | float / 100 }}{% endif %}",
+            type: "Property",
+            transformation: "float",
+            properties: {
+                unitCode: {
+                    source: "A97",
+                },
+            },
+        },
+        visibility: {
+            source: "{% if visibility is defined %}{{ visibility | float / 1000 }}{% endif %}",
+            type: "Property",
+            transformation: "float",
+            properties: {
+                unitCode: {
+                    source: "KMT",
+                },
+            },
+        },
+    },
+}

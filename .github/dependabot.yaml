@@ -1,0 +1,49 @@
+version: 2
+updates:
+  - package-ecosystem: "docker"
+    directories:
+      - "."
+    schedule:
+      interval: "daily"
+    rebase-strategy: "auto"
+    open-pull-requests-limit: 50
+    groups:
+      docker-minor:
+        applies-to: version-updates
+        patterns:
+          - "*"
+        update-types:
+          - "minor"
+          - "patch"
+  - package-ecosystem: "cargo"
+    directories:
+      - "."
+    schedule:
+      interval: "daily"
+    rebase-strategy: "auto"
+    allow:
+      - dependency-type: "all"
+    open-pull-requests-limit: 50
+    groups:
+      cargo-minor:
+        applies-to: version-updates
+        patterns:
+          - "*"
+        update-types:
+          - "minor"
+          - "patch"
+  - package-ecosystem: "github-actions"
+    directories:
+      - "."
+    schedule:
+      interval: "daily"
+    rebase-strategy: "auto"
+    open-pull-requests-limit: 50
+    groups:
+      github-actions-minor:
+        applies-to: version-updates
+        patterns:
+          - "*"
+        update-types:
+          - "minor"
+          - "patch"

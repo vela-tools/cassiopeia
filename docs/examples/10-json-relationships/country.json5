@@ -1,0 +1,145 @@
+{
+    version: "v4",
+    dataModel: "Country",
+    identity: {
+        entityName: "{{ id }}",
+    },
+    attributes: {
+        name: {
+            type: "LanguageProperty",
+            languageMap: {
+                en: {
+                    source: "{{ name }}",
+                },
+                de: {
+                    source: "{{ translations.de }}",
+                },
+                fr: {
+                    source: "{{ translations.fr }}",
+                },
+                es: {
+                    source: "{{ translations.es }}",
+                },
+                ru: {
+                    source: "{{ translations.ru }}",
+                },
+                "pt-BR": {
+                    source: "{{ translations | get(key='pt-BR') }}",
+                },
+                "zh-CN": {
+                    source: "{{ translations | get(key='zh-CN') }}",
+                },
+            },
+        },
+        // The endonym: the country's name in its own language.
+        nativeName: {
+            source: "{{ native }}",
+            type: "Property",
+            transformation: "string",
+        },
+        // A country points up the hierarchy at both its region and its subregion. A record whose
+        // foreign key is absent, Antarctica has no subregion, simply omits that relationship.
+        region: {
+            source: "{{ region_id }}",
+            type: "Relationship",
+            target: {
+                entity: "Region",
+            },
+        },
+        subregion: {
+            source: "{{ subregion_id }}",
+            type: "Relationship",
+            target: {
+                entity: "Subregion",
+            },
+        },
+        alpha2Code: {
+            source: "{{ iso2 }}",
+            type: "Property",
+            transformation: "string",
+        },
+        alpha3Code: {
+            source: "{{ iso3 }}",
+            type: "Property",
+            transformation: "string",
+        },
+        // A numeric code with a meaningful leading zero, so it stays text rather than a number.
+        numericCode: {
+            source: "{{ numeric_code }}",
+            type: "Property",
+            transformation: "string",
+        },
+        callingCode: {
+            source: "{{ phonecode }}",
+            type: "Property",
+            transformation: "string",
+        },
+        capitalCity: {
+            source: "{{ capital }}",
+            type: "Property",
+            transformation: "string",
+        },
+        topLevelDomain: {
+            source: "{{ tld }}",
+            type: "Property",
+            transformation: "string",
+        },
+        // A nested object Property built from three flat source fields.
+        currency: {
+            type: "Property",
+            transformation: "object",
+            mappings: {
+                code: {
+                    source: "{{ currency }}",
+                    type: "Property",
+                    transformation: "string",
+                },
+                name: {
+                    source: "{{ currency_name }}",
+                    type: "Property",
+                    transformation: "string",
+                },
+                symbol: {
+                    source: "{{ currency_symbol }}",
+                    type: "Property",
+                    transformation: "string",
+                },
+            },
+        },
+        population: {
+            source: "{{ population }}",
+            type: "Property",
+            transformation: "integer",
+        },
+        grossDomesticProduct: {
+            source: "{{ gdp }}",
+            type: "Property",
+            transformation: "integer",
+        },
+        areaSquareKilometers: {
+            source: "{{ area_sq_km }}",
+            type: "Property",
+            transformation: "integer",
+        },
+        // The source value is already an array of timezone objects; `array` carries it across whole.
+        timezones: {
+            source: "{{ timezones }}",
+            type: "Property",
+            transformation: "array",
+        },
+        // GeoJSON orders a point longitude first; the source stores the two as decimal-degree strings.
+        location: {
+            source: [
+                "{{ longitude }}",
+                "{{ latitude }}",
+            ],
+            type: "GeoProperty",
+            transformation: "point",
+        },
+        wikidataId: {
+            source: "{{ wikiDataId }}",
+            type: "Property",
+            transformation: "string",
+        },
+    },
+}

@@ -1,0 +1,52 @@
+{
+    version: "v4",
+    dataModel: "dataModel.Weather/WeatherObserved",
+    identity: {
+        entityName: "{{ geohash(lat=latitude, lon=longitude) }}",
+    },
+    attributes: {
+        location: {
+            source: [
+                "{{ longitude }}",
+                "{{ latitude }}",
+            ],
+            type: "GeoProperty",
+            transformation: "point",
+        },
+        dateObserved: {
+            source: "{{ referenceTime }}",
+            type: "Property",
+            transformation: "datetime",
+        },
+        temperature: {
+            source: "{% if temperature is defined %}{{ temperature | float - 273.15 }}{% endif %}",
+            type: "Property",
+            transformation: "float",
+            properties: {
+                unitCode: {
+                    source: "CEL",
+                },
+            },
+        },
+        windSpeed: {
+            source: "{% if wind_u is defined %}{{ wind_speed(u=wind_u, v=wind_v) }}{% endif %}",
+            type: "Property",
+            transformation: "float",
+            properties: {
+                unitCode: {
+                    source: "MTS",
+                },
+            },
+        },
+        windDirection: {
+            source: "{% if wind_u is defined %}{{ wind_direction(u=wind_u, v=wind_v) }}{% endif %}",
+            type: "Property",
+            transformation: "integer",
+            properties: {
+                unitCode: {
+                    source: "DD",
+                },
+            },
+        },
+    },
+}

@@ -1,0 +1,209 @@
+{
+    "$schema": "http://json-schema.org/draft-07/schema#",
+    "title": "FoodProduct",
+    "type": "object",
+    "required": [
+        "id",
+        "type"
+    ],
+    "properties": {
+        "id": {
+            "type": "string",
+            "pattern": "^urn:ngsi-ld:FoodProduct:"
+        },
+        "type": {
+            "const": "FoodProduct"
+        },
+
+        "name": {
+            "type": "object",
+            "required": [
+                "type",
+                "languageMap"
+            ],
+            "properties": {
+                "type": {
+                    "const": "LanguageProperty"
+                },
+                "languageMap": {
+                    "type": "object",
+                    "minProperties": 1,
+                    "additionalProperties": {
+                        "type": "string"
+                    }
+                }
+            }
+        },
+
+        "brand": {
+            "type": "object",
+            "required": [
+                "type",
+                "object"
+            ],
+            "properties": {
+                "type": {
+                    "const": "Relationship"
+                },
+                "object": {
+                    "type": "string",
+                    "pattern": "^urn:ngsi-ld:Brand:"
+                }
+            }
+        },
+
+        "energy": {
+            "oneOf": [
+                {
+                    "$ref": "#/definitions/energyInstance"
+                },
+                {
+                    "type": "array",
+                    "minItems": 1,
+                    "items": {
+                        "$ref": "#/definitions/energyInstance"
+                    }
+                }
+            ]
+        },
+
+        "sugars": {
+            "type": "object",
+            "required": [
+                "type",
+                "value"
+            ],
+            "properties": {
+                "type": {
+                    "const": "Property"
+                },
+                "value": {
+                    "type": "number"
+                },
+                "unitCode": {
+                    "enum": [
+                        "GRM"
+                    ]
+                },
+                "level": {
+                    "type": "object",
+                    "required": [
+                        "type",
+                        "vocab"
+                    ],
+                    "properties": {
+                        "type": {
+                            "const": "VocabProperty"
+                        },
+                        "vocab": {
+                            "type": "string",
+                            "pattern": "^https://example\\.org/nutrient-level/(low|moderate|high)$"
+                        }
+                    }
+                }
+            }
+        },
+
+        "salt": {
+            "type": "object",
+            "required": [
+                "type",
+                "value"
+            ],
+            "properties": {
+                "type": {
+                    "const": "Property"
+                },
+                "value": {
+                    "type": "number"
+                },
+                "unitCode": {
+                    "enum": [
+                        "GRM"
+                    ]
+                },
+                "observedAt": {
+                    "type": "string",
+                    "format": "date-time"
+                }
+            }
+        },
+
+        "nutriScore": {
+            "type": "object",
+            "required": [
+                "type",
+                "vocab"
+            ],
+            "properties": {
+                "type": {
+                    "const": "VocabProperty"
+                },
+                "vocab": {
+                    "type": "string",
+                    "format": "iri"
+                }
+            }
+        },
+
+        "novaGroup": {
+            "type": "object",
+            "required": [
+                "type",
+                "value"
+            ],
+            "properties": {
+                "type": {
+                    "const": "Property"
+                },
+                "value": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 4
+                }
+            }
+        },
+
+        "labels": {
+            "type": "object",
+            "required": [
+                "type",
+                "valueList"
+            ],
+            "properties": {
+                "type": {
+                    "const": "ListProperty"
+                },
+                "valueList": {
+                    "type": "array"
+                }
+            }
+        }
+    },
+    "definitions": {
+        "energyInstance": {
+            "type": "object",
+            "required": [
+                "type",
+                "value"
+            ],
+            "properties": {
+                "type": {
+                    "const": "Property"
+                },
+                "value": {
+                    "type": "number"
+                },
+                "unitCode": {
+                    "enum": [
+                        "E14"
+                    ]
+                },
+                "datasetId": {
+                    "type": "string",
+                    "pattern": "^urn:ngsi-ld:Dataset:"
+                }
+            }
+        }
+    }
+}

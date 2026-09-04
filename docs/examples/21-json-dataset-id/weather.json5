@@ -1,0 +1,544 @@
+{
+    // One WeatherForecast entity per day. Each weather variable is forecast by three numerical
+    // weather models (ECMWF IFS, NOAA GFS, DWD ICON-EU) for the same day and place, so the models'
+    // predictions must sit side by side rather than overwrite one another. NGSI-LD models exactly
+    // this with a multi-attribute: one attribute name, several instances, each tagged with its own
+    // datasetId (ETSI GS CIM 009 v1.9.1 clause 4.5.5). The `instances` block below produces one
+    // instance per model; a model that has no value for a given day contributes no instance.
+    version: "v4",
+    dataModel: "WeatherForecast",
+    identity: {
+        entityName: "{{ place }}-{{ time }}",
+    },
+    attributes: {
+        // A plain single-instance GeoProperty, for contrast: the location is the same regardless of
+        // model, so it needs no datasetId.
+        location: {
+            source: [
+                "{{ longitude }}",
+                "{{ latitude }}",
+            ],
+            type: "GeoProperty",
+            transformation: "point",
+        },
+
+        temperatureMax: {
+            type: "Property",
+            transformation: "float",
+            properties: {
+                unitCode: {
+                    source: "CEL",
+                },
+                observedAt: {
+                    source: "{{ time }}",
+                    transformation: "datetime",
+                },
+            },
+            instances: [
+                {
+                    source: "{{ temperature_2m_max_ecmwf_ifs025 }}",
+                    properties: {
+                        datasetId: {
+                            source: "urn:ngsi-ld:dataset:model:ecmwf-ifs025",
+                        },
+                    },
+                },
+                {
+                    source: "{{ temperature_2m_max_gfs_global }}",
+                    properties: {
+                        datasetId: {
+                            source: "urn:ngsi-ld:dataset:model:gfs-global",
+                        },
+                    },
+                },
+                {
+                    source: "{{ temperature_2m_max_icon_eu }}",
+                    properties: {
+                        datasetId: {
+                            source: "urn:ngsi-ld:dataset:model:icon-eu",
+                        },
+                    },
+                },
+            ],
+        },
+
+        temperatureMin: {
+            type: "Property",
+            transformation: "float",
+            properties: {
+                unitCode: {
+                    source: "CEL",
+                },
+                observedAt: {
+                    source: "{{ time }}",
+                    transformation: "datetime",
+                },
+            },
+            instances: [
+                {
+                    source: "{{ temperature_2m_min_ecmwf_ifs025 }}",
+                    properties: {
+                        datasetId: {
+                            source: "urn:ngsi-ld:dataset:model:ecmwf-ifs025",
+                        },
+                    },
+                },
+                {
+                    source: "{{ temperature_2m_min_gfs_global }}",
+                    properties: {
+                        datasetId: {
+                            source: "urn:ngsi-ld:dataset:model:gfs-global",
+                        },
+                    },
+                },
+                {
+                    source: "{{ temperature_2m_min_icon_eu }}",
+                    properties: {
+                        datasetId: {
+                            source: "urn:ngsi-ld:dataset:model:icon-eu",
+                        },
+                    },
+                },
+            ],
+        },
+
+        feelsLikeTemperatureMax: {
+            type: "Property",
+            transformation: "float",
+            properties: {
+                unitCode: {
+                    source: "CEL",
+                },
+                observedAt: {
+                    source: "{{ time }}",
+                    transformation: "datetime",
+                },
+            },
+            instances: [
+                {
+                    source: "{{ apparent_temperature_max_ecmwf_ifs025 }}",
+                    properties: {
+                        datasetId: {
+                            source: "urn:ngsi-ld:dataset:model:ecmwf-ifs025",
+                        },
+                    },
+                },
+                {
+                    source: "{{ apparent_temperature_max_gfs_global }}",
+                    properties: {
+                        datasetId: {
+                            source: "urn:ngsi-ld:dataset:model:gfs-global",
+                        },
+                    },
+                },
+                {
+                    source: "{{ apparent_temperature_max_icon_eu }}",
+                    properties: {
+                        datasetId: {
+                            source: "urn:ngsi-ld:dataset:model:icon-eu",
+                        },
+                    },
+                },
+            ],
+        },
+
+        feelsLikeTemperatureMin: {
+            type: "Property",
+            transformation: "float",
+            properties: {
+                unitCode: {
+                    source: "CEL",
+                },
+                observedAt: {
+                    source: "{{ time }}",
+                    transformation: "datetime",
+                },
+            },
+            instances: [
+                {
+                    source: "{{ apparent_temperature_min_ecmwf_ifs025 }}",
+                    properties: {
+                        datasetId: {
+                            source: "urn:ngsi-ld:dataset:model:ecmwf-ifs025",
+                        },
+                    },
+                },
+                {
+                    source: "{{ apparent_temperature_min_gfs_global }}",
+                    properties: {
+                        datasetId: {
+                            source: "urn:ngsi-ld:dataset:model:gfs-global",
+                        },
+                    },
+                },
+                {
+                    source: "{{ apparent_temperature_min_icon_eu }}",
+                    properties: {
+                        datasetId: {
+                            source: "urn:ngsi-ld:dataset:model:icon-eu",
+                        },
+                    },
+                },
+            ],
+        },
+
+        precipitation: {
+            type: "Property",
+            transformation: "float",
+            properties: {
+                unitCode: {
+                    source: "MMT",
+                },
+                observedAt: {
+                    source: "{{ time }}",
+                    transformation: "datetime",
+                },
+            },
+            instances: [
+                {
+                    source: "{{ precipitation_sum_ecmwf_ifs025 }}",
+                    properties: {
+                        datasetId: {
+                            source: "urn:ngsi-ld:dataset:model:ecmwf-ifs025",
+                        },
+                    },
+                },
+                {
+                    source: "{{ precipitation_sum_gfs_global }}",
+                    properties: {
+                        datasetId: {
+                            source: "urn:ngsi-ld:dataset:model:gfs-global",
+                        },
+                    },
+                },
+                {
+                    source: "{{ precipitation_sum_icon_eu }}",
+                    properties: {
+                        datasetId: {
+                            source: "urn:ngsi-ld:dataset:model:icon-eu",
+                        },
+                    },
+                },
+            ],
+        },
+
+        precipitationProbability: {
+            type: "Property",
+            transformation: "integer",
+            properties: {
+                unitCode: {
+                    source: "P1",
+                },
+                observedAt: {
+                    source: "{{ time }}",
+                    transformation: "datetime",
+                },
+            },
+            instances: [
+                {
+                    source: "{{ precipitation_probability_max_ecmwf_ifs025 }}",
+                    properties: {
+                        datasetId: {
+                            source: "urn:ngsi-ld:dataset:model:ecmwf-ifs025",
+                        },
+                    },
+                },
+                {
+                    source: "{{ precipitation_probability_max_gfs_global }}",
+                    properties: {
+                        datasetId: {
+                            source: "urn:ngsi-ld:dataset:model:gfs-global",
+                        },
+                    },
+                },
+                {
+                    source: "{{ precipitation_probability_max_icon_eu }}",
+                    properties: {
+                        datasetId: {
+                            source: "urn:ngsi-ld:dataset:model:icon-eu",
+                        },
+                    },
+                },
+            ],
+        },
+
+        windSpeed: {
+            type: "Property",
+            transformation: "float",
+            properties: {
+                unitCode: {
+                    source: "KMH",
+                },
+                observedAt: {
+                    source: "{{ time }}",
+                    transformation: "datetime",
+                },
+            },
+            instances: [
+                {
+                    source: "{{ wind_speed_10m_max_ecmwf_ifs025 }}",
+                    properties: {
+                        datasetId: {
+                            source: "urn:ngsi-ld:dataset:model:ecmwf-ifs025",
+                        },
+                    },
+                },
+                {
+                    source: "{{ wind_speed_10m_max_gfs_global }}",
+                    properties: {
+                        datasetId: {
+                            source: "urn:ngsi-ld:dataset:model:gfs-global",
+                        },
+                    },
+                },
+                {
+                    source: "{{ wind_speed_10m_max_icon_eu }}",
+                    properties: {
+                        datasetId: {
+                            source: "urn:ngsi-ld:dataset:model:icon-eu",
+                        },
+                    },
+                },
+            ],
+        },
+
+        windGust: {
+            type: "Property",
+            transformation: "float",
+            properties: {
+                unitCode: {
+                    source: "KMH",
+                },
+                observedAt: {
+                    source: "{{ time }}",
+                    transformation: "datetime",
+                },
+            },
+            instances: [
+                {
+                    source: "{{ wind_gusts_10m_max_ecmwf_ifs025 }}",
+                    properties: {
+                        datasetId: {
+                            source: "urn:ngsi-ld:dataset:model:ecmwf-ifs025",
+                        },
+                    },
+                },
+                {
+                    source: "{{ wind_gusts_10m_max_gfs_global }}",
+                    properties: {
+                        datasetId: {
+                            source: "urn:ngsi-ld:dataset:model:gfs-global",
+                        },
+                    },
+                },
+                {
+                    source: "{{ wind_gusts_10m_max_icon_eu }}",
+                    properties: {
+                        datasetId: {
+                            source: "urn:ngsi-ld:dataset:model:icon-eu",
+                        },
+                    },
+                },
+            ],
+        },
+
+        windDirection: {
+            type: "Property",
+            transformation: "integer",
+            properties: {
+                unitCode: {
+                    source: "DD",
+                },
+                observedAt: {
+                    source: "{{ time }}",
+                    transformation: "datetime",
+                },
+            },
+            instances: [
+                {
+                    source: "{{ wind_direction_10m_dominant_ecmwf_ifs025 }}",
+                    properties: {
+                        datasetId: {
+                            source: "urn:ngsi-ld:dataset:model:ecmwf-ifs025",
+                        },
+                    },
+                },
+                {
+                    source: "{{ wind_direction_10m_dominant_gfs_global }}",
+                    properties: {
+                        datasetId: {
+                            source: "urn:ngsi-ld:dataset:model:gfs-global",
+                        },
+                    },
+                },
+                {
+                    source: "{{ wind_direction_10m_dominant_icon_eu }}",
+                    properties: {
+                        datasetId: {
+                            source: "urn:ngsi-ld:dataset:model:icon-eu",
+                        },
+                    },
+                },
+            ],
+        },
+
+        // Shortwave radiation sum is reported in MJ/m2, which has no UN/CEFACT Common Code, so no
+        // unitCode is emitted (a code is set only where a real one exists).
+        solarRadiation: {
+            type: "Property",
+            transformation: "float",
+            properties: {
+                observedAt: {
+                    source: "{{ time }}",
+                    transformation: "datetime",
+                },
+            },
+            instances: [
+                {
+                    source: "{{ shortwave_radiation_sum_ecmwf_ifs025 }}",
+                    properties: {
+                        datasetId: {
+                            source: "urn:ngsi-ld:dataset:model:ecmwf-ifs025",
+                        },
+                    },
+                },
+                {
+                    source: "{{ shortwave_radiation_sum_gfs_global }}",
+                    properties: {
+                        datasetId: {
+                            source: "urn:ngsi-ld:dataset:model:gfs-global",
+                        },
+                    },
+                },
+                {
+                    source: "{{ shortwave_radiation_sum_icon_eu }}",
+                    properties: {
+                        datasetId: {
+                            source: "urn:ngsi-ld:dataset:model:icon-eu",
+                        },
+                    },
+                },
+            ],
+        },
+
+        relativeHumidity: {
+            type: "Property",
+            transformation: "integer",
+            properties: {
+                unitCode: {
+                    source: "P1",
+                },
+                observedAt: {
+                    source: "{{ time }}",
+                    transformation: "datetime",
+                },
+            },
+            instances: [
+                {
+                    source: "{{ relative_humidity_2m_mean_ecmwf_ifs025 }}",
+                    properties: {
+                        datasetId: {
+                            source: "urn:ngsi-ld:dataset:model:ecmwf-ifs025",
+                        },
+                    },
+                },
+                {
+                    source: "{{ relative_humidity_2m_mean_gfs_global }}",
+                    properties: {
+                        datasetId: {
+                            source: "urn:ngsi-ld:dataset:model:gfs-global",
+                        },
+                    },
+                },
+                {
+                    source: "{{ relative_humidity_2m_mean_icon_eu }}",
+                    properties: {
+                        datasetId: {
+                            source: "urn:ngsi-ld:dataset:model:icon-eu",
+                        },
+                    },
+                },
+            ],
+        },
+
+        atmosphericPressure: {
+            type: "Property",
+            transformation: "float",
+            properties: {
+                unitCode: {
+                    source: "A97",
+                },
+                observedAt: {
+                    source: "{{ time }}",
+                    transformation: "datetime",
+                },
+            },
+            instances: [
+                {
+                    source: "{{ pressure_msl_mean_ecmwf_ifs025 }}",
+                    properties: {
+                        datasetId: {
+                            source: "urn:ngsi-ld:dataset:model:ecmwf-ifs025",
+                        },
+                    },
+                },
+                {
+                    source: "{{ pressure_msl_mean_gfs_global }}",
+                    properties: {
+                        datasetId: {
+                            source: "urn:ngsi-ld:dataset:model:gfs-global",
+                        },
+                    },
+                },
+                {
+                    source: "{{ pressure_msl_mean_icon_eu }}",
+                    properties: {
+                        datasetId: {
+                            source: "urn:ngsi-ld:dataset:model:icon-eu",
+                        },
+                    },
+                },
+            ],
+        },
+
+        cloudCover: {
+            type: "Property",
+            transformation: "integer",
+            properties: {
+                unitCode: {
+                    source: "P1",
+                },
+                observedAt: {
+                    source: "{{ time }}",
+                    transformation: "datetime",
+                },
+            },
+            instances: [
+                {
+                    source: "{{ cloud_cover_mean_ecmwf_ifs025 }}",
+                    properties: {
+                        datasetId: {
+                            source: "urn:ngsi-ld:dataset:model:ecmwf-ifs025",
+                        },
+                    },
+                },
+                {
+                    source: "{{ cloud_cover_mean_gfs_global }}",
+                    properties: {
+                        datasetId: {
+                            source: "urn:ngsi-ld:dataset:model:gfs-global",
+                        },
+                    },
+                },
+                {
+                    source: "{{ cloud_cover_mean_icon_eu }}",
+                    properties: {
+                        datasetId: {
+                            source: "urn:ngsi-ld:dataset:model:icon-eu",
+                        },
+                    },
+                },
+            ],
+        },
+    },
+}

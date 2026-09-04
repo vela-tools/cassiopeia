@@ -1,0 +1,18 @@
+[package]
+name = "cassiopeia-crs"
+description = "Coordinate reference system reprojection to EPSG:4326 (WGS84) for Cassiopeia geometries"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+geo = "0.33.1"
+geo-types = "0.7.20"
+proj4rs = "0.1.10"
+proj4wkt = "0.1.1"
+thiserror = "2.0.20"
+
+[lints]
+workspace = true

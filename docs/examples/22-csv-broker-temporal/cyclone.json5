@@ -1,0 +1,87 @@
+{
+    version: "v4",
+    dataModel: "TropicalCyclone",
+    identity: {
+        // One identity per storm: every track row of AL122005 is the same cyclone, observed again.
+        // The URN becomes urn:ngsi-ld:TropicalCyclone:AL122005, shared by all of that storm's rows.
+        entityName: "{{ storm_id }}",
+    },
+    attributes: {
+        // The storm's name carries no observedAt, so it stays a single value after the fold rather
+        // than repeating once per track row.
+        name: {
+            source: "{{ name }}",
+            type: "Property",
+            transformation: "string",
+        },
+        maxSustainedWind: {
+            source: "{{ max_wind }}",
+            type: "Property",
+            transformation: "float",
+            properties: {
+                // UN/CEFACT Common Code for knot, the unit HURDAT2 reports intensity in.
+                unitCode: {
+                    source: "KNT",
+                },
+                // The reading's timestamp, composed from the separator-bearing date and time columns
+                // so the datetime parser sees "2005-08-25T12:00:00Z" rather than a bare "20050825T1200".
+                observedAt: {
+                    source: "{{ date }}T{{ time }}:00Z",
+                    type: "Property",
+                    transformation: "datetime",
+                },
+            },
+        },
+        minPressure: {
+            // HURDAT2 uses -999 for a missing central pressure; the guard drops the attribute for
+            // those rows instead of emitting the sentinel as a value.
+            source: "{% if min_pressure and min_pressure != -999 %}{{ min_pressure }}{% endif %}",
+            type: "Property",
+            transformation: "integer",
+            properties: {
+                // UN/CEFACT Common Code for hectopascal.
+                unitCode: {
+                    source: "A97",
+                },
+                observedAt: {
+                    source: "{{ date }}T{{ time }}:00Z",
+                    type: "Property",
+                    transformation: "datetime",
+                },
+            },
+        },
+        category: {
+            // Saffir-Simpson category from the one-minute sustained wind in knots. A row below
+            // hurricane force is labelled by its lower storm class instead.
+            source: "{% if max_wind >= 137 %}Category 5{% elif max_wind >= 113 %}Category 4{% elif max_wind >= 96 %}Category 3{% elif max_wind >= 83 %}Category 2{% elif max_wind >= 64 %}Category 1{% elif max_wind >= 34 %}Tropical Storm{% else %}Tropical Depression{% endif %}",
+            type: "Property",
+            transformation: "string",
+            properties: {
+                observedAt: {
+                    source: "{{ date }}T{{ time }}:00Z",
+                    type: "Property",
+                    transformation: "datetime",
+                },
+            },
+        },
+        location: {
+            // HURDAT2 stores each coordinate as a hemisphere-labelled string, e.g. "28.0N", "94.8W".
+            // GeoJSON wants signed decimal degrees, longitude first: strip the letter and prefix a
+            // minus for the western and southern hemispheres. dms_point is unusable here because it
+            // expects a degrees-minutes-seconds string with a degree sign.
+            source: [
+                "{% if 'W' in lon %}-{% endif %}{{ lon | replace(from='W', to='') | replace(from='E', to='') }}",
+                "{% if 'S' in lat %}-{% endif %}{{ lat | replace(from='N', to='') | replace(from='S', to='') }}",
+            ],
+            type: "GeoProperty",
+            transformation: "point",
+            properties: {
+                observedAt: {
+                    source: "{{ date }}T{{ time }}:00Z",
+                    type: "Property",
+                    transformation: "datetime",
+                },
+            },
+        },
+    },
+}

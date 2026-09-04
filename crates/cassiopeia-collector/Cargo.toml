@@ -1,0 +1,25 @@
+[package]
+name = "cassiopeia-collector"
+description = "Data transport for the Cassiopeia pipeline"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+cassiopeia-common.workspace = true
+cassiopeia-ir.workspace = true
+derive_more = { version = "2.1.1", features = ["display"] }
+http = "1.5.0"
+reqwest = { version = "0.13.4", features = ["blocking"] }
+temp-dir = "0.2.0"
+thiserror = "2.0.20"
+tracing = "0.1.44"
+url = "2.5.8"
+
+[dev-dependencies]
+tempfile = "3.27.0"
+
+[lints]
+workspace = true

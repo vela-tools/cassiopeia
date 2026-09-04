@@ -1,0 +1,22 @@
+{
+    version: "v4",
+    dataModel: "PublicRestroom",
+    // The "Restrooms" folder becomes the `restrooms` namespace. Labels read "Restrooms -<nbsp>Pier 84
+    // at W. 44th St."; the anchored strip removes the "Restrooms" prefix and its trailing punctuation,
+    // keeping the interior of the name (its own periods and spaces) intact.
+    identity: {
+        entityName: "{{ restrooms.properties.name | regex_replace(pattern='^Restrooms[^0-9A-Za-z]+', rep='') | trim | clean }}",
+    },
+    attributes: {
+        name: {
+            source: "{{ restrooms.properties.name | regex_replace(pattern='^Restrooms[^0-9A-Za-z]+', rep='') | trim }}",
+            type: "Property",
+            transformation: "string",
+        },
+        location: {
+            source: "{{ restrooms.geometry }}",
+            type: "GeoProperty",
+            transformation: "geometry",
+        },
+    },
+}

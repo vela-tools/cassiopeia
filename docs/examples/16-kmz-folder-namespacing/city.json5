@@ -1,0 +1,46 @@
+{
+    version: "v4",
+    dataModel: "City",
+    // The whole file sits in one <Folder> named "World_Cities", so the ingestor nests every record
+    // under that folder's snake_cased key; a placemark's data is reached through `world_cities`.
+    identity: {
+        entityName: "{{ world_cities.properties.FID }}",
+    },
+    attributes: {
+        name: {
+            source: "{{ world_cities.properties.CITY_NAME }}",
+            type: "Property",
+            transformation: "string",
+        },
+        // The placemark already carries a WGS84 <Point>, so the geometry passes straight through as the
+        // GeoProperty rather than being rebuilt from separate latitude and longitude fields.
+        location: {
+            source: "{{ world_cities.geometry }}",
+            type: "GeoProperty",
+            transformation: "geometry",
+        },
+        country: {
+            source: "{{ world_cities.properties.CNTRY_NAME }}",
+            type: "Property",
+            transformation: "string",
+        },
+        adminRegion: {
+            source: "{{ world_cities.properties.ADMIN_NAME }}",
+            type: "Property",
+            transformation: "string",
+        },
+        // SchemaData values arrive as strings, so the population is parsed to a number before it is typed.
+        population: {
+            source: "{{ world_cities.properties.POP | int }}",
+            type: "Property",
+            transformation: "integer",
+        },
+        // The administrative role is a short phrase; the mapping folds the file's six values into stable
+        // tokens. A value outside the six matches no branch and leaves the attribute off that city.
+        administrativeRole: {
+            source: "{% if world_cities.properties.STATUS == 'National capital' %}nationalCapital{% elif world_cities.properties.STATUS == 'Provincial capital' %}provincialCapital{% elif world_cities.properties.STATUS == 'National and provincial capital' %}nationalAndProvincialCapital{% elif world_cities.properties.STATUS == 'National capital and provincial capital enclave' %}nationalCapitalProvincialEnclave{% elif world_cities.properties.STATUS == 'Provincial capital enclave' %}provincialCapitalEnclave{% elif world_cities.properties.STATUS == 'Other' %}other{% endif %}",
+            type: "Property",
+            transformation: "string",
+        },
+    },
+}

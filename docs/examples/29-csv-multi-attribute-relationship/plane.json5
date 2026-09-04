@@ -1,0 +1,29 @@
+{
+    version: "v4",
+    dataModel: "dataModel.Aeronautics/AircraftModel",
+    identity: {
+        // The IATA code normally identifies the model and is what a route's equipment list refers
+        // to. A few models have no IATA code, so the ICAO code is the fallback identity.
+        entityName: "{% if this[1] %}{{ this[1] }}{% else %}{{ this[2] }}{% endif %}",
+    },
+    attributes: {
+        name: {
+            source: "{{ this[0] }}",
+            type: "Property",
+            transformation: "string",
+        },
+        // The IATA codes in this file match the model's `^[A-Z0-9]{3}$` pattern. Keep them as text,
+        // including numeric-looking codes such as "747".
+        codeIATA: {
+            source: "{% if this[1] %}{{ this[1] }}{% endif %}",
+            type: "Property",
+            transformation: "string",
+        },
+        // Keep the ICAO code only when it matches the model's pattern. Several source entries do not.
+        codeICAO: {
+            source: "{% if this[2] is string and this[2] is matching(pat='^[A-Z][A-Z0-9]{3}$') %}{{ this[2] }}{% endif %}",
+            type: "Property",
+            transformation: "string",
+        },
+    },
+}

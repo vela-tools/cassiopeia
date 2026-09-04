@@ -1,0 +1,25 @@
+[package]
+name = "cassiopeia-geometry"
+description = "The NGSI-LD geometry domain: the six admissible GeoJSON geometry types and the conversion lattice between them"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+derive_more = { version = "2.1.1", features = ["display"] }
+geo = "0.33.1"
+geo-types = "0.7.20"
+geojson = "1.0.0"
+getset = "0.1.7"
+serde = { version = "1.0.229", features = ["derive"] }
+strum = { version = "0.28.0", features = ["derive"] }
+thiserror = "2.0.20"
+typed-builder = "0.23.2"
+
+[dev-dependencies]
+serde_json = "1.0.151"
+
+[lints]
+workspace = true

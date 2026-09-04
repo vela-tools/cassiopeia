@@ -1,0 +1,50 @@
+{
+    version: "v4",
+    dataModel: "MonthlyPrecipitationObserved",
+    identity: {
+        entityName: "{{ Anno }}-{{ Mese }}",
+    },
+    attributes: {
+        year: {
+            source: "{{ Anno }}",
+            type: "Property",
+            transformation: "integer",
+        },
+        month: {
+            source: "{{ Mese }}",
+            type: "Property",
+            transformation: "integer",
+        },
+        totalRainfall: {
+            // The Italian source writes decimals with a comma, for example "241,6".
+            source: "{{ Totale }}",
+            type: "Property",
+            transformation: "float",
+        },
+        maxDaily: {
+            source: "{{ this['Massima giornaliera'] }}",
+            type: "Property",
+            transformation: "float",
+        },
+        rainyDays: {
+            source: "{{ this['N° giorni con precipitazione'] }}",
+            type: "Property",
+            transformation: "integer",
+        },
+        rainyHours: {
+            source: "{{ this['N° ore con precipitazione'] }}",
+            type: "Property",
+            transformation: "integer",
+        },
+        intenseDays: {
+            source: "{{ this['N° giorni con precipitazione intensa (>= 20 mm/g)'] }}",
+            type: "Property",
+            transformation: "integer",
+        },
+        intenseHours: {
+            source: "{{ this['N° ore con precipitazione intensa (>= 5 mm/h)'] }}",
+            type: "Property",
+            transformation: "integer",
+        },
+    },
+}

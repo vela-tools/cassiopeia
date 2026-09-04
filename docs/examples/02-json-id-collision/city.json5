@@ -1,0 +1,26 @@
+{
+    version: "v4",
+    dataModel: "City",
+    identity: {
+        // Country and name alone collide for same-named cities within a country; the
+        // coordinate-derived geohash suffix keeps each city's id distinct.
+        entityName: "{{ country }}-{{ name | clean }}-{{ geohash(lat=lat, lon=lng) }}",
+    },
+    attributes: {
+        name: {
+            source: "{{ name }}",
+        },
+        country: {
+            source: "{{ country }}",
+        },
+        location: {
+            type: "GeoProperty",
+            // GeoJSON coordinates are ordered longitude, then latitude.
+            source: [
+                "{{ lng }}",
+                "{{ lat }}",
+            ],
+            transformation: "point",
+        },
+    },
+}

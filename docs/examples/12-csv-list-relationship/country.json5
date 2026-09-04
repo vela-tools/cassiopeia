@@ -1,0 +1,28 @@
+{
+    version: "v4",
+    // A plain data model with no published schema: the country list is the one type here that has
+    // no Smart Data Model, so it is validated against nothing and used only as a relationship target.
+    dataModel: "Country",
+    identity: {
+        // The country name is the identity, so an airport or airline that names its country as text
+        // resolves to the same URN this mapping mints.
+        entityName: "{{ this[0] }}",
+    },
+    attributes: {
+        name: {
+            source: "{{ this[0] }}",
+            type: "Property",
+            transformation: "string",
+        },
+        isoCode: {
+            source: "{% if this[1] %}{{ this[1] }}{% endif %}",
+            type: "Property",
+            transformation: "string",
+        },
+        dafifCode: {
+            source: "{% if this[2] %}{{ this[2] }}{% endif %}",
+            type: "Property",
+            transformation: "string",
+        },
+    },
+}

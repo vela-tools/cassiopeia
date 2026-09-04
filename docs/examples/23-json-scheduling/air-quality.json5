@@ -1,0 +1,100 @@
+{
+    version: "v4",
+    dataModel: "dataModel.Environment/AirQualityObserved",
+    // One identity per sensor. The record-level `id` is a per-reading measurement id that changes on
+    // every fetch; `sensor.id` is stable, so every poll updates the same entity rather than minting a
+    // new one. The observedAt on the readings below keeps each poll's values as a fresh observation.
+    identity: {
+        entityName: "{{ sensor.id }}",
+    },
+    attributes: {
+        // dateObserved and location are the only two attributes AirQualityObserved requires. The feed
+        // stamps each reading in UTC as "2026-08-25 11:56:33"; replacing the space with the ISO 'T'
+        // and appending Z yields an RFC 3339 instant the datetime transformation parses.
+        dateObserved: {
+            source: "{{ timestamp | replace(from=' ', to='T') }}Z",
+            type: "Property",
+            transformation: "datetime",
+        },
+        // The station's coordinates arrive as strings under a nested object; point reads them in
+        // longitude-latitude order for the GeoProperty.
+        location: {
+            source: [
+                "{{ location.longitude }}",
+                "{{ location.latitude }}",
+            ],
+            type: "GeoProperty",
+            transformation: "point",
+        },
+        // A sensor reports a handful of readings under sensordatavalues, each tagged by value_type.
+        // The template loops that array and emits the one code this attribute wants; when the sensor
+        // does not report it (a particulate sensor has no temperature, a climate sensor no PM), the
+        // loop yields nothing, the float transformation sees an empty string, and the attribute is
+        // dropped. GQ is the UN/CEFACT Common Code for microgram per cubic metre; P1 is PM10.
+        pm10: {
+            source: "{% for v in sensordatavalues %}{% if v.value_type == 'P1' %}{{ v.value }}{% endif %}{% endfor %}",
+            type: "Property",
+            transformation: "float",
+            properties: {
+                unitCode: {
+                    source: "GQ",
+                },
+                observedAt: {
+                    source: "{{ timestamp | replace(from=' ', to='T') }}Z",
+                    type: "Property",
+                    transformation: "datetime",
+                },
+            },
+        },
+        // P2 is PM2.5.
+        pm25: {
+            source: "{% for v in sensordatavalues %}{% if v.value_type == 'P2' %}{{ v.value }}{% endif %}{% endfor %}",
+            type: "Property",
+            transformation: "float",
+            properties: {
+                unitCode: {
+                    source: "GQ",
+                },
+                observedAt: {
+                    source: "{{ timestamp | replace(from=' ', to='T') }}Z",
+                    type: "Property",
+                    transformation: "datetime",
+                },
+            },
+        },
+        // CEL is degrees Celsius.
+        temperature: {
+            source: "{% for v in sensordatavalues %}{% if v.value_type == 'temperature' %}{{ v.value }}{% endif %}{% endfor %}",
+            type: "Property",
+            transformation: "float",
+            properties: {
+                unitCode: {
+                    source: "CEL",
+                },
+                observedAt: {
+                    source: "{{ timestamp | replace(from=' ', to='T') }}Z",
+                    type: "Property",
+                    transformation: "datetime",
+                },
+            },
+        },
+        // AirQualityObserved defines relativeHumidity as a dimensionless ratio in [0, 1]; the feed
+        // reports a percentage, so it is scaled by 100. C62 is the UN/CEFACT Common Code for "one",
+        // the unit of a dimensionless ratio.
+        relativeHumidity: {
+            source: "{% for v in sensordatavalues %}{% if v.value_type == 'humidity' %}{{ v.value | float / 100 }}{% endif %}{% endfor %}",
+            type: "Property",
+            transformation: "float",
+            properties: {
+                unitCode: {
+                    source: "C62",
+                },
+                observedAt: {
+                    source: "{{ timestamp | replace(from=' ', to='T') }}Z",
+                    type: "Property",
+                    transformation: "datetime",
+                },
+            },
+        },
+    },
+}

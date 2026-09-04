@@ -1,0 +1,79 @@
+# Licence policy gate. The allow list is permissive only: the intersection of
+# licences that are both EUPL-redistributable and safe to relicense into proprietary
+# work. Strong copyleft (GPL, AGPL, SSPL) and weak or file-level copyleft (MPL-2.0,
+# LGPL) are both left off on purpose, so a dependency carrying one fails the build
+# and gets a legal review instead of shipping unnoticed. No copyleft dependency is
+# in the tree today.
+#
+# A crate whose licence is not on the allow list but is still permissive gets an
+# explicit [[licenses.exceptions]] entry below, with the reason stated, so the
+# exception stays scoped to that one crate instead of widening the allow list.
+
+[graph]
+all-features = true
+
+[licenses]
+confidence-threshold = 0.93
+allow = [
+    # General permissive licences
+    "MIT",
+    "Apache-2.0",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "ISC",
+    "Zlib",
+    "Unicode-3.0",
+    # Cassiopeia's own licence
+    "EUPL-1.2",
+]
+
+# MIT No Attribution: MIT without the attribution requirement, so strictly more
+# permissive than an allowed licence. No proprietary-distribution constraint.
+[[licenses.exceptions]]
+name = "borrow-or-share"
+allow = ["MIT-0"]
+
+# The bzip2 licence is BSD-style permissive: redistribution in source and binary
+# form with a notice, no copyleft and no source-disclosure obligation.
+[[licenses.exceptions]]
+name = "libbz2-rs-sys"
+allow = ["bzip2-1.0.6"]
+
+# CDLA-Permissive-2.0 covers data, not code - this crate is the Mozilla root
+# certificate bundle. Permissive, no copyleft, no obligation on our own source.
+[[licenses.exceptions]]
+name = "webpki-root-certs"
+allow = ["CDLA-Permissive-2.0"]
+
+[advisories]
+db-urls = ["https://github.com/rustsec/advisory-db"]
+yanked = "deny"
+ignore = [
+    # proc-macro-error is unmaintained with no safe upgrade available. Build-time
+    # only, pulled in twice by langtag: via str-newtype -> str-newtype-derive, and
+    # via static-automata -> static-automata-macros. Not a vulnerability.
+    { id = "RUSTSEC-2024-0370", reason = "unmaintained, build-time only, no upgrade path upstream" },
+]
+
+[bans]
+# Duplicate versions are hygiene, not a licensing or security concern, and in a tree
+# this size they appear and disappear with upstream releases. Warn so they stay
+# visible without turning an upstream bump into a red build.
+multiple-versions = "warn"
+# Every wildcard in this workspace is an internal crate depending on a sibling by
+# path, which Cargo records as a wildcard version. That is not the unpinned
+# registry dependency this check exists to catch, and there is no supply-chain
+# exposure in it. allow-wildcard-paths does not help: it exempts only crates marked
+# `publish = false`, and these are publishable. Warn so a genuine unpinned registry
+# dependency is still visible without all 29 crates permanently failing the gate.
+#
+# The stricter alternative, if these crates are ever published to crates.io: give
+# each workspace dependency an explicit `version` beside its `path`, then set this
+# back to "deny". crates.io rejects path-only dependencies anyway, so that work is
+# a prerequisite for publishing rather than something this gate should force now.
+wildcards = "warn"
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]

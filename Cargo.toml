@@ -1,8 +1,122 @@
+[workspace]
+members = [".", "crates/*"]
+resolver = "3"
+
+[workspace.package]
+version = "1.0.0"
+edition = "2024"
+rust-version = "1.96.0"
+license = "EUPL-1.2"
+repository = "https://github.com/vela-tools/cassiopeia"
+
 [package]
 name = "cassiopeia"
-version = "0.1.0"
-authors = ["Matej Škvarč <matej.skvarc@senlab.io>"]
-edition = "2024"
-license = "EUPL-1.2"
+description = "A tool for mapping and transforming data into NGSI-LD format"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
 
 [dependencies]
+cassiopeia-cli.workspace = true
+cassiopeia-common.workspace = true
+cassiopeia-configuration.workspace = true
+cassiopeia-diagnostic.workspace = true
+cassiopeia-directories.workspace = true
+cassiopeia-manifest.workspace = true
+cassiopeia-pipeline.workspace = true
+cassiopeia-reporter.workspace = true
+cassiopeia-terminal-style.workspace = true
+bugreport = { version = "0.6.0", default-features = false, features = ["collector_operating_system", "format_markdown"] }
+clap = { version = "4.6.6", features = ["derive", "wrap_help"] }
+cron = "0.17.0"
+ctrlc = "3.5.2"
+gdt-cpus = { version = "0.2606.1", default-features = false }
+human-panic = "2.0.8"
+humantime = "2.4.0"
+mimalloc = "0.1.52"
+rayon = "1.12.0"
+shadow-rs = "2.0.0"
+thiserror = "2.0.20"
+url = "2.5.8"
+
+[dev-dependencies]
+cassiopeia-ngsi-ld.workspace = true
+urn-rs = "0.9.2"
+
+[build-dependencies]
+shadow-rs = "2.0.0"
+
+[features]
+default = ["grib1", "grib2-full"]
+grib1 = ["cassiopeia-pipeline/grib1"]
+grib2-full = ["cassiopeia-pipeline/grib2-full"]
+
+[profile.release]
+lto = "fat"
+codegen-units = 1
+opt-level = 3
+
+[workspace.lints.clippy]
+pedantic = { level = "warn", priority = -1 }
+absolute_paths = "deny"
+allow_attributes_without_reason = "deny"
+arc_with_non_send_sync = "deny"
+await_holding_lock = "deny"
+branches_sharing_code = "warn"
+cast_possible_truncation = "deny"
+cast_possible_wrap = "deny"
+cast_sign_loss = "deny"
+cloned_instead_of_copied = "warn"
+expect_used = "deny"
+future_not_send = "deny"
+get_unwrap = "deny"
+map_unwrap_or = "deny"
+missing_const_for_fn = "warn"
+needless_collect = "warn"
+panic = "deny"
+redundant_clone = "warn"
+todo = "deny"
+unimplemented = "deny"
+unnecessary_self_imports = "warn"
+unreachable = "deny"
+unwrap_used = "deny"
+used_underscore_binding = "warn"
+wildcard_dependencies = "deny"
+wildcard_enum_match_arm = "deny"
+wildcard_imports = "deny"
+
+[workspace.dependencies]
+cassiopeia-aggregator = { path = "crates/cassiopeia-aggregator" }
+cassiopeia-cli = { path = "crates/cassiopeia-cli" }
+cassiopeia-collector = { path = "crates/cassiopeia-collector" }
+cassiopeia-common = { path = "crates/cassiopeia-common" }
+cassiopeia-configuration = { path = "crates/cassiopeia-configuration" }
+cassiopeia-crs = { path = "crates/cassiopeia-crs" }
+cassiopeia-data-profiler = { path = "crates/cassiopeia-data-profiler" }
+cassiopeia-diagnostic = { path = "crates/cassiopeia-diagnostic" }
+cassiopeia-directories = { path = "crates/cassiopeia-directories" }
+cassiopeia-expander = { path = "crates/cassiopeia-expander" }
+cassiopeia-extractor = { path = "crates/cassiopeia-extractor" }
+cassiopeia-geometry = { path = "crates/cassiopeia-geometry" }
+cassiopeia-ingestor = { path = "crates/cassiopeia-ingestor", default-features = false }
+cassiopeia-ir = { path = "crates/cassiopeia-ir" }
+cassiopeia-mapping = { path = "crates/cassiopeia-mapping" }
+cassiopeia-manifest = { path = "crates/cassiopeia-manifest" }
+cassiopeia-ngsi-ld = { path = "crates/cassiopeia-ngsi-ld" }
+cassiopeia-pipeline = { path = "crates/cassiopeia-pipeline", default-features = false }
+cassiopeia-profiler = { path = "crates/cassiopeia-profiler" }
+cassiopeia-reporter = { path = "crates/cassiopeia-reporter" }
+cassiopeia-resolver = { path = "crates/cassiopeia-resolver" }
+cassiopeia-scheduler = { path = "crates/cassiopeia-scheduler" }
+cassiopeia-smart-data-models = { path = "crates/cassiopeia-smart-data-models" }
+cassiopeia-terminal-style = { path = "crates/cassiopeia-terminal-style" }
+cassiopeia-transformer = { path = "crates/cassiopeia-transformer" }
+cassiopeia-tui = { path = "crates/cassiopeia-tui" }
+cassiopeia-unreadable-timestamps = { path = "crates/cassiopeia-unreadable-timestamps" }
+cassiopeia-validator = { path = "crates/cassiopeia-validator" }
+cassiopeia-writer = { path = "crates/cassiopeia-writer" }
+
+[lints]
+workspace = true

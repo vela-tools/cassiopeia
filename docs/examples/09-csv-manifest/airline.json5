@@ -1,0 +1,33 @@
+{
+    version: "v4",
+    dataModel: "dataModel.Aeronautics/Airline",
+    identity: {
+        // The OpenFlights airline id in column 0 is unique across the file.
+        entityName: "{{ this[0] }}",
+    },
+    attributes: {
+        name: {
+            source: "{{ this[1] }}",
+            type: "Property",
+            transformation: "string",
+        },
+        codeIATA: {
+            // The source often uses "-", "N/A", or "\N" instead of a two-character IATA code.
+            // The guard skips those values, while the pattern keeps only well-formed codes.
+            source: "{% if this[3] is string and this[3] is matching(pat='^[A-Z0-9]{2}$') %}{{ this[3] }}{% endif %}",
+            type: "Property",
+            transformation: "string",
+        },
+        codeICAO: {
+            source: "{% if this[4] is string and this[4] is matching(pat='^[A-Z]{3}$') %}{{ this[4] }}{% endif %}",
+            type: "Property",
+            transformation: "string",
+        },
+        callSign: {
+            // Column 5 is a free-text radio callsign. The guard drops the "\N" and blank values.
+            source: "{% if this[5] %}{{ this[5] }}{% endif %}",
+            type: "Property",
+            transformation: "string",
+        },
+    },
+}

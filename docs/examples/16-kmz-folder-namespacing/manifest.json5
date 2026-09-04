@@ -1,0 +1,21 @@
+{
+    version: "v1",
+    inputs: [
+        // A KMZ is a zip whose only real payload is a KML; the ingestor unzips it and reads the KML inside,
+        // so the format is "kmz" and the source is the archive itself.
+        {
+            source: "world-cities.kmz",
+            mapping: "city.json5",
+            format: "kmz",
+        },
+    ],
+    output: {
+        target: "file",
+        directory: "out",
+        context: "none",
+        // City is a plain data model with no published schema, so fail-when-schema writes it unchecked.
+        validation: {
+            mode: "fail-when-schema",
+        },
+    },
+}

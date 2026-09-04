@@ -1,0 +1,16 @@
+{
+    "@context": {
+        "fp": "https://example.org/food-product/",
+        "FoodProduct": "fp:FoodProduct",
+        "Brand": "fp:Brand",
+        "name": "fp:name",
+        "brand": "fp:brand",
+        "energy": "fp:energy",
+        "sugars": "fp:sugars",
+        "salt": "fp:salt",
+        "level": "fp:level",
+        "nutriScore": "fp:nutriScore",
+        "novaGroup": "fp:novaGroup",
+        "labels": "fp:labels"
+    }
+}

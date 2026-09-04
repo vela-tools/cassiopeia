@@ -1,0 +1,18 @@
+{
+    version: "v1",
+    inputs: [
+        {
+            source: "forecast.json",
+            mapping: "weather.json5",
+            format: "json",
+        },
+    ],
+    output: {
+        target: "file",
+        directory: "out",
+        context: "none",
+        validation: {
+            mode: "fail-when-schema",
+        },
+    },
+}

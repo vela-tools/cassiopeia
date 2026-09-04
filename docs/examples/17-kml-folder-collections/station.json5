@@ -1,0 +1,23 @@
+{
+    version: "v4",
+    dataModel: "CitiBikeStation",
+    // Every placemark in this file's "Citi Bike Stations" folder is reached through the folder's
+    // snake_cased name, `citi_bike_stations`. The label reads "Citi Bike -<nbsp>W 15 St & 10 Ave";
+    // the anchored strip removes the "Citi Bike" prefix and the punctuation and non-breaking space that
+    // follow it, leaving the intersection the station sits on.
+    identity: {
+        entityName: "{{ citi_bike_stations.properties.name | regex_replace(pattern='^Citi Bike[^0-9A-Za-z]+', rep='') | trim | clean }}",
+    },
+    attributes: {
+        name: {
+            source: "{{ citi_bike_stations.properties.name | regex_replace(pattern='^Citi Bike[^0-9A-Za-z]+', rep='') | trim }}",
+            type: "Property",
+            transformation: "string",
+        },
+        location: {
+            source: "{{ citi_bike_stations.geometry }}",
+            type: "GeoProperty",
+            transformation: "geometry",
+        },
+    },
+}

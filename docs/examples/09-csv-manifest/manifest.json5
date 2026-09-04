@@ -1,0 +1,26 @@
+{
+    version: "v1",
+    // Each input pairs one source with the mapping that shapes it. Two inputs, two entity types,
+    // one run.
+    inputs: [
+        {
+            source: "airports.dat",
+            mapping: "airport.json5",
+            format: "csv",
+        },
+        {
+            source: "airlines.dat",
+            mapping: "airline.json5",
+            format: "csv",
+        },
+    ],
+    output: {
+        target: "file",
+        directory: "out",
+        context: "none",
+        // Every entity is checked against its model's schema; the run fails if any does not conform.
+        validation: {
+            mode: "fail",
+        },
+    },
+}

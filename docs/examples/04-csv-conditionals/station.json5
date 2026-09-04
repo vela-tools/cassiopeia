@@ -1,0 +1,72 @@
+{
+    version: "v4",
+    dataModel: "dataModel.Transportation/BikeHireDockingStation",
+    identity: {
+        entityName: "{{ id_amat }}",
+    },
+    attributes: {
+        name: {
+            source: "{{ nome }}",
+            type: "Property",
+            transformation: "string",
+        },
+        stationCode: {
+            source: "{{ numero }}",
+            type: "Property",
+            transformation: "string",
+        },
+        status: {
+            // 'stato' is Italian free text ("attiva"); the model's status is a fixed enum.
+            source: "{% if stato == 'attiva' %}working{% else %}outOfService{% endif %}",
+            type: "Property",
+            transformation: "string",
+        },
+        description: {
+            // Turn the physical rack type into a readable sentence.
+            source: "{% if tipo == 'Monofacciale' %}Single-sided docking rack{% elif tipo == 'Bifacciale' %}Double-sided docking rack{% else %}Virtual station{% endif %}",
+            type: "Property",
+            transformation: "string",
+        },
+        totalSlotNumber: {
+            source: "{{ stalli }}",
+            type: "Property",
+            transformation: "integer",
+        },
+        dataProvider: {
+            source: "Comune di Milano",
+            type: "Property",
+            transformation: "string",
+        },
+        location: {
+            // GeoJSON coordinates are ordered longitude, then latitude.
+            source: [
+                "{{ LONG_X_4326 }}",
+                "{{ LAT_Y_4326 }}",
+            ],
+            type: "GeoProperty",
+            transformation: "point",
+        },
+        address: {
+            type: "Property",
+            transformation: "object",
+            mappings: {
+                streetAddress: {
+                    // The house number is present on only some rows; append it when it is.
+                    source: "{% if civico %}{{ indirizzo }} {{ civico }}{% else %}{{ indirizzo }}{% endif %}",
+                    type: "Property",
+                    transformation: "string",
+                },
+                addressLocality: {
+                    source: "Milano",
+                    type: "Property",
+                    transformation: "string",
+                },
+                addressCountry: {
+                    source: "IT",
+                    type: "Property",
+                    transformation: "string",
+                },
+            },
+        },
+    },
+}

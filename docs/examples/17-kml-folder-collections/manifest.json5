@@ -1,0 +1,41 @@
+{
+    version: "v1",
+    inputs: [
+        {
+            source: "nyc-cycling.kml",
+            format: "kml",
+            // One source, several folders. Each folder is a collection bound to its own mapping and its
+            // own entity type. A `mappings` list (rather than a single `mapping`) routes each folder's
+            // placemarks to the right transformation by the folder's exact name. Folders not listed here
+            // -- the map's "Directions" route -- are simply left unmapped.
+            mappings: [
+                {
+                    collection: "Citi Bike Stations",
+                    mapping: "station.json5",
+                },
+                {
+                    collection: "Where to Get Bikes",
+                    mapping: "rental.json5",
+                },
+                {
+                    collection: "Places to Stop",
+                    mapping: "sight.json5",
+                },
+                {
+                    collection: "Restrooms",
+                    mapping: "restroom.json5",
+                },
+            ],
+        },
+    ],
+    output: {
+        target: "file",
+        directory: "out",
+        context: "none",
+        // Every type here is a plain data model with no published schema, so fail-when-schema writes
+        // them all without a schema check.
+        validation: {
+            mode: "fail-when-schema",
+        },
+    },
+}

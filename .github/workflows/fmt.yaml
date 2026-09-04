@@ -1,0 +1,21 @@
+name: fmt
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: fmt-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  fmt:
+    name: cargo +nightly fmt --check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@nightly
+        with:
+          components: rustfmt
+      - run: cargo +nightly fmt --all --check

@@ -1,0 +1,25 @@
+{
+    version: "v1",
+    inputs: [
+        {
+            source: "cyclones.csv",
+            mapping: "cyclone.json5",
+            format: "csv",
+        },
+    ],
+    output: {
+        target: "context-broker",
+        url: "http://localhost:9090/",
+        // operation selects the /temporal/entities endpoint; temporal.representation "series" folds
+        // each storm's observations into one EntityTemporal (ETSI GS CIM 009 v1.9.1 clause 5.2.20)
+        // before delivery. A folded EntityTemporal only belongs at the temporal endpoint, so a series
+        // representation against a broker requires operation "temporal".
+        operation: "temporal",
+        temporal: { representation: "series" },
+        // A custom model with no published context: the hand-authored terms travel in each entity's
+        // body (application/ld+json) so the broker resolves them. A Link header would need the
+        // context hosted at a URL the broker can fetch.
+        context: "cyclone-context.jsonld",
+        contextDelivery: "body",
+    },
+}

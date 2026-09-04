@@ -1,0 +1,21 @@
+{
+    version: "v4",
+    dataModel: "BikeRentalShop",
+    // The "Where to Get Bikes" folder becomes the `where_to_get_bikes` namespace. Two placemarks share
+    // a shop name, so keying the entity on the name merges them into one rental shop.
+    identity: {
+        entityName: "{{ where_to_get_bikes.properties.name | trim | clean }}",
+    },
+    attributes: {
+        name: {
+            source: "{{ where_to_get_bikes.properties.name | trim }}",
+            type: "Property",
+            transformation: "string",
+        },
+        location: {
+            source: "{{ where_to_get_bikes.geometry }}",
+            type: "GeoProperty",
+            transformation: "geometry",
+        },
+    },
+}

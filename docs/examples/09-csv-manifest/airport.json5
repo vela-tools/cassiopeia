@@ -1,0 +1,55 @@
+{
+    version: "v4",
+    // The publishing repository qualifies the model, which lets validation find its schema.
+    dataModel: "dataModel.Aeronautics/Airport",
+    identity: {
+        // Column 0 is the OpenFlights airport id, unique across the file.
+        entityName: "{{ this[0] }}",
+    },
+    attributes: {
+        name: {
+            source: "{{ this[1] }}",
+            type: "Property",
+            transformation: "string",
+        },
+        codeIATA: {
+            // The IATA code is column 4, but only a real 3-letter code belongs here; the source is
+            // blank, "\N", or a code. `is string` skips a value the CSV reader typed as a number,
+            // which `is matching` (a string test) would otherwise error on, and the pattern enforces
+            // the shape the model's schema requires.
+            source: "{% if this[4] is string and this[4] is matching(pat='^[A-Z]{3}$') %}{{ this[4] }}{% endif %}",
+            type: "Property",
+            transformation: "string",
+        },
+        codeICAO: {
+            source: "{% if this[5] is string and this[5] is matching(pat='^[A-Z]{4}$') %}{{ this[5] }}{% endif %}",
+            type: "Property",
+            transformation: "string",
+        },
+        location: {
+            // Columns 6 and 7 are latitude and longitude; GeoJSON orders a point longitude first.
+            source: [
+                "{{ this[7] }}",
+                "{{ this[6] }}",
+            ],
+            type: "GeoProperty",
+            transformation: "point",
+        },
+        address: {
+            type: "Property",
+            transformation: "object",
+            mappings: {
+                addressLocality: {
+                    source: "{{ this[2] }}",
+                    type: "Property",
+                    transformation: "string",
+                },
+                addressCountry: {
+                    source: "{{ this[3] }}",
+                    type: "Property",
+                    transformation: "string",
+                },
+            },
+        },
+    },
+}

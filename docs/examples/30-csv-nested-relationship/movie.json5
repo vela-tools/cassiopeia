@@ -1,0 +1,58 @@
+{
+    version: "v4",
+    dataModel: "Movie",
+    identity: {
+        // The credits file keys every row by the film's TMDB id, so it is the entity identifier.
+        entityName: "{{ movie_id }}",
+    },
+    attributes: {
+        title: {
+            source: "{{ title }}",
+        },
+        // The first cast member is the lead actor because TMDB orders `cast` by billing. `hasLeadActor`
+        // links the film to that Person and carries two sub-attributes: `playsCharacter`, a nested
+        // Relationship to the Character the actor plays, and `billingOrder`, a plain Property. ETSI
+        // allows a Relationship as a sub-attribute (GS CIM 009 v1.9.1 clauses 4.5.2.2 and 4.5.3).
+        //
+        // TMDB stores `cast` as a JSON array packed into one string field. `json_decode` parses it
+        // before the template reads the first member or loops through the list.
+        hasLeadActor: {
+            type: "Relationship",
+            target: {
+                entity: "Person",
+            },
+            source: "{{ cast | json_decode | first | get(key='id') }}",
+            properties: {
+                playsCharacter: {
+                    type: "Relationship",
+                    target: {
+                        entity: "Character",
+                    },
+                    source: "{{ cast | json_decode | first | get(key='character') }}",
+                },
+                billingOrder: {
+                    source: "{{ cast | json_decode | first | get(key='order') }}",
+                    transformation: "integer",
+                },
+            },
+        },
+        // `hasCast` links the film to every cast member through one `objectList`. Its `castSize`
+        // Property describes the list as a whole. A `ListRelationship` can carry sub-attributes just
+        // as a single Relationship can (GS CIM 009 v1.9.1 clause 4.5.2.2).
+        hasCast: {
+            type: "ListRelationship",
+            target: {
+                entity: "Person",
+            },
+            // Print one id per cast member. ListRelationship splits the space-separated result into
+            // the `objectList`.
+            source: "{% for member in cast | json_decode %}{{ member.id }} {% endfor %}",
+            properties: {
+                castSize: {
+                    source: "{{ cast | json_decode | length }}",
+                    transformation: "integer",
+                },
+            },
+        },
+    },
+}

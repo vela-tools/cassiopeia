@@ -1,0 +1,23 @@
+{
+    version: "v4",
+    dataModel: "GoldPriceObserved",
+    identity: {
+        // All rows describe the same entity. The timestamp on the price keeps observations separate.
+        entityName: "gold",
+    },
+    attributes: {
+        price: {
+            source: "{{ Price }}",
+            type: "Property",
+            transformation: "float",
+            // This timestamp prevents a new monthly price from overwriting the previous one.
+            properties: {
+                observedAt: {
+                    source: "{{ Date }}",
+                    type: "Property",
+                    transformation: "datetime",
+                },
+            },
+        },
+    },
+}

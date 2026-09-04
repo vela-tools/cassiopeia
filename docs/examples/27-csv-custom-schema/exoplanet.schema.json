@@ -1,0 +1,59 @@
+{
+    "$schema": "http://json-schema.org/draft-07/schema#",
+    "$id": "http://localhost/ExoPlanet.json",
+    "title": "ExoPlanet",
+    "description": "A confirmed exoplanet from the NASA Exoplanet Archive, in the simplified (key-values) NGSI-LD representation this schema validates.",
+    "type": "object",
+    "required": [
+        "id",
+        "type",
+        "hostStar",
+        "discoveryMethod",
+        "discoveryYear"
+    ],
+    "properties": {
+        "id": {
+            "type": "string",
+            "pattern": "^urn:ngsi-ld:ExoPlanet:"
+        },
+        "type": {
+            "type": "string",
+            "enum": [
+                "ExoPlanet"
+            ]
+        },
+        "hostStar": {
+            "type": "string",
+            "pattern": "^urn:ngsi-ld:Star:"
+        },
+        "discoveryMethod": {
+            "type": "string",
+            "minLength": 1
+        },
+        "discoveryYear": {
+            "type": "integer",
+            "minimum": 1990
+        },
+        "orbitalPeriod": {
+            "type": "number",
+            "exclusiveMinimum": 0
+        },
+        "radius": {
+            "type": "number",
+            "exclusiveMinimum": 0
+        },
+        "mass": {
+            "type": "number",
+            "exclusiveMinimum": 0
+        },
+        "equilibriumTemperature": {
+            "type": "number",
+            "exclusiveMinimum": 0
+        },
+        "eccentricity": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1
+        }
+    }
+}

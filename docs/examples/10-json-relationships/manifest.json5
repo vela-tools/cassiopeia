@@ -1,0 +1,33 @@
+{
+    version: "v1",
+    // Four sources, one per entity type. The order does not matter: a relationship's object URN is
+    // computed from the source record, not looked up, so a country can point at a subregion whether
+    // or not that subregion has been read yet.
+    inputs: [
+        {
+            source: "regions.json",
+            mapping: "region.json5",
+            format: "json",
+        },
+        {
+            source: "subregions.json",
+            mapping: "subregion.json5",
+            format: "json",
+        },
+        {
+            source: "countries.json",
+            mapping: "country.json5",
+            format: "json",
+        },
+        {
+            source: "states.json",
+            mapping: "state.json5",
+            format: "json",
+        },
+    ],
+    output: {
+        target: "file",
+        directory: "out",
+        context: "none",
+    },
+}

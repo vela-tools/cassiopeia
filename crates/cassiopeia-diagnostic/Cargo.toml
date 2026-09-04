@@ -1,0 +1,23 @@
+[package]
+name = "cassiopeia-diagnostic"
+description = "The diagnostic vocabulary: what failed, why, and the identity repeated failures group under"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+cassiopeia-common.workspace = true
+cassiopeia-ngsi-ld.workspace = true
+dashmap = "6.2.1"
+derive_more = { version = "2.1.1", features = ["as_ref", "display", "from"] }
+getset = "0.1.7"
+http = "1.5.0"
+iri-rs = "3.4.1"
+strum = { version = "0.28.0", features = ["derive"] }
+url = "2.5.8"
+urn-rs = "0.9.2"
+
+[lints]
+workspace = true

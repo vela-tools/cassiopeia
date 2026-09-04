@@ -1,0 +1,56 @@
+{
+    version: "v4",
+    dataModel: "dataModel.Aeronautics/Flight",
+    identity: {
+        // A route has no id of its own, so its identity combines the airline and its two endpoints.
+        // Each combination in this file is distinct. If one were repeated, both rows would map to
+        // the same Flight entity.
+        entityName: "{{ this[0] }}-{{ this[2] }}-{{ this[4] }}",
+    },
+    attributes: {
+        belongsToAirline: {
+            source: "{{ this[1] }}",
+            type: "Relationship",
+            target: {
+                entity: "Airline",
+            },
+        },
+        // Keep both airport links under one name as two instances that differ by datasetId (ETSI GS
+        // CIM 009 v1.9.1 clause 4.5.5). Both links target an Airport; the datasetId records whether
+        // the link is for the departure or arrival airport.
+        servesAirport: {
+            type: "Relationship",
+            target: {
+                entity: "Airport",
+            },
+            instances: [
+                {
+                    source: "{{ this[3] }}",
+                    properties: {
+                        datasetId: {
+                            source: "urn:ngsi-ld:dataset:role:departure",
+                        },
+                    },
+                },
+                {
+                    source: "{{ this[5] }}",
+                    properties: {
+                        datasetId: {
+                            source: "urn:ngsi-ld:dataset:role:arrival",
+                        },
+                    },
+                },
+            ],
+        },
+        // Keep the first aircraft code as the primary model. Most rows contain text and are split to
+        // get the first code. A numeric code is already a single value, so use it directly. The list
+        // relationship example shows how to keep every aircraft instead.
+        hasAircraftModel: {
+            source: "{% if this[8] is string %}{{ this[8] | split(pat=' ') | first }}{% else %}{{ this[8] }}{% endif %}",
+            type: "Relationship",
+            target: {
+                entity: "AircraftModel",
+            },
+        },
+    },
+}

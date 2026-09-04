@@ -1,0 +1,46 @@
+{
+    version: "v4",
+    dataModel: "dataModel.Aeronautics/Flight",
+    identity: {
+        // A route has no id of its own, so its identity is the airline and the two endpoints. Every
+        // such triple in this file is distinct, so each route becomes its own Flight; were a triple
+        // to repeat, those rows would collapse onto one entity.
+        entityName: "{{ this[0] }}-{{ this[2] }}-{{ this[4] }}",
+    },
+    attributes: {
+        // Four relationships, each keyed on the id the source row carries. The Flight model defines
+        // all four, so they validate against its schema.
+        belongsToAirline: {
+            source: "{{ this[1] }}",
+            type: "Relationship",
+            target: {
+                entity: "Airline",
+            },
+        },
+        departsFromAirport: {
+            source: "{{ this[3] }}",
+            type: "Relationship",
+            target: {
+                entity: "Airport",
+            },
+        },
+        arrivesToAirport: {
+            source: "{{ this[5] }}",
+            type: "Relationship",
+            target: {
+                entity: "Airport",
+            },
+        },
+        // The primary aircraft: the first of the equipment codes. Most rows hold the codes as text; a
+        // lone numeric code, a plane whose IATA code is all digits, is read as a number, so it is
+        // used directly rather than split. Linking every aircraft, not just the first, is the subject
+        // of the next example.
+        hasAircraftModel: {
+            source: "{% if this[8] is string %}{{ this[8] | split(pat=' ') | first }}{% else %}{{ this[8] }}{% endif %}",
+            type: "Relationship",
+            target: {
+                entity: "AircraftModel",
+            },
+        },
+    },
+}

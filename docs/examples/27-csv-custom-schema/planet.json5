@@ -1,0 +1,79 @@
+{
+    version: "v4",
+    dataModel: "ExoPlanet",
+    identity: {
+        // Planet names are unique across the archive. The URN cleaner keeps only
+        // URN-safe characters, so a name like "Kepler-1513 b" loses its space.
+        entityName: "{{ pl_name }}",
+    },
+    attributes: {
+        hostStar: {
+            // A plain relationship to the star's URN. The Star entities come from the separate stellar
+            // dataset in this run, not from a synthetic entity, so the mapping only names the target.
+            // The same cleaning rule keeps the URN in step: "HD 330075" becomes Star:HD330075, matching
+            // the id the star mapping mints from the same hostname.
+            source: "{{ hostname }}",
+            type: "Relationship",
+            target: {
+                entity: "Star",
+            },
+        },
+        discoveryMethod: {
+            source: "{{ discoverymethod }}",
+            type: "Property",
+            transformation: "string",
+        },
+        discoveryYear: {
+            source: "{{ disc_year }}",
+            type: "Property",
+            transformation: "integer",
+        },
+        orbitalPeriod: {
+            source: "{{ pl_orbper }}",
+            type: "Property",
+            transformation: "float",
+            // UN/CEFACT Common Code for day.
+            properties: {
+                unitCode: {
+                    source: "DAY",
+                },
+            },
+        },
+        radius: {
+            // Earth radii: no UN/CEFACT code exists, so the custom vocabulary term
+            // carries the unit meaning rather than a faked unitCode.
+            source: "{{ pl_rade }}",
+            type: "Property",
+            transformation: "float",
+        },
+        mass: {
+            // Earth masses: likewise outside UN/CEFACT.
+            source: "{{ pl_bmasse }}",
+            type: "Property",
+            transformation: "float",
+        },
+        equilibriumTemperature: {
+            source: "{{ pl_eqt }}",
+            type: "Property",
+            transformation: "float",
+            // UN/CEFACT Common Code for kelvin.
+            properties: {
+                unitCode: {
+                    source: "KEL",
+                },
+            },
+        },
+        eccentricity: {
+            // A dimensionless ratio; an exactly circular orbit is a real 0, so no truthiness guard here
+            // (it would drop the zero). C62 is the UN/CEFACT code for "one", the unit of a ratio.
+            source: "{{ pl_orbeccen }}",
+            type: "Property",
+            transformation: "float",
+            properties: {
+                unitCode: {
+                    source: "C62",
+                },
+            },
+        },
+    },
+}

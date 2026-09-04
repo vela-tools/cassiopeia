@@ -1,0 +1,21 @@
+[package]
+name = "cassiopeia-aggregator"
+description = "Folds an id's observations into one NGSI-LD temporal entity for the Cassiopeia pipeline"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+cassiopeia-ngsi-ld.workspace = true
+
+[dev-dependencies]
+cassiopeia-geometry.workspace = true
+cassiopeia-common.workspace = true
+chrono = "0.4.45"
+serde_json = { version = "1.0.151", features = ["preserve_order"] }
+urn-rs = "0.9.2"
+
+[lints]
+workspace = true

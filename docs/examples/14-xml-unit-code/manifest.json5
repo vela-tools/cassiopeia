@@ -1,0 +1,20 @@
+{
+    version: "v1",
+    inputs: [
+        {
+            source: "observation.xml",
+            mapping: "weather.json5",
+            format: "xml",
+        },
+    ],
+    output: {
+        target: "file",
+        directory: "out",
+        context: "none",
+        // WeatherObserved is a published Smart Data Model, so each entity is validated against its
+        // schema; the run fails if a required field (dateObserved, location) is missing.
+        validation: {
+            mode: "fail-when-schema",
+        },
+    },
+}

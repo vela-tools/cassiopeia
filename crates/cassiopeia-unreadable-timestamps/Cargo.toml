@@ -1,0 +1,16 @@
+[package]
+name = "cassiopeia-unreadable-timestamps"
+description = "The record of source text a pipeline stage could not read as a timestamp, gathered per batch"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+cassiopeia-ngsi-ld.workspace = true
+indexmap = { version = "2.14.2", features = ["serde"] }
+parking_lot = "0.12.5"
+
+[lints]
+workspace = true
