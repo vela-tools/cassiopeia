@@ -18,18 +18,22 @@ jobs:
             target: x86_64-unknown-linux-gnu
             platform: linux-x86_64
             ext: ""
+            archive: tar.xz
           - os: ubuntu-24.04-arm
             target: aarch64-unknown-linux-gnu
             platform: linux-aarch64
             ext: ""
+            archive: tar.xz
           - os: macos-15
             target: aarch64-apple-darwin
             platform: macos-aarch64
             ext: ""
+            archive: tar.xz
           - os: windows-latest
             target: x86_64-pc-windows-msvc
             platform: windows-x86_64
             ext: ".exe"
+            archive: zip
 
     runs-on: ${{ matrix.os }}
     steps:
@@ -51,35 +55,36 @@ jobs:
           set -euo pipefail
           bin="cassiopeia${{ matrix.ext }}"
           stage="cassiopeia-${{ matrix.platform }}"
+          asset="${stage}.${{ matrix.archive }}"
           mkdir "$stage"
           cp "target/${{ matrix.target }}/release/${bin}" "$stage/"
-          (
-            cd "$stage"
-            if command -v sha256sum >/dev/null 2>&1; then
-              sha256sum "$bin" > "${bin}.sha256"
-            else
-              shasum -a 256 "$bin" > "${bin}.sha256"
-            fi
-            zip "../${stage}.zip" "$bin" "${bin}.sha256"
-          )
+          tar -cJf "$asset" -C "$stage" "$bin"
+          if command -v sha256sum >/dev/null 2>&1; then
+            sha256sum "$asset" > "${asset}.sha256"
+          else
+            shasum -a 256 "$asset" > "${asset}.sha256"
+          fi
 
       - name: Package (windows)
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
-          $bin = "cassiopeia.exe"
+          $bin = "cassiopeia${{ matrix.ext }}"
           $stage = "cassiopeia-${{ matrix.platform }}"
+          $asset = "$stage.${{ matrix.archive }}"
           New-Item -ItemType Directory -Path $stage | Out-Null
           Copy-Item "target/${{ matrix.target }}/release/$bin" "$stage/"
-          $hash = (Get-FileHash "$stage/$bin" -Algorithm SHA256).Hash.ToLower()
-          "$hash  $bin" | Out-File -Encoding ascii "$stage/$bin.sha256"
-          Compress-Archive -Path "$stage/*" -DestinationPath "$stage.zip"
+          Compress-Archive -Path "$stage/*" -DestinationPath $asset
+          $hash = (Get-FileHash $asset -Algorithm SHA256).Hash.ToLower()
+          "$hash  $asset" | Out-File -Encoding ascii "$asset.sha256"
 
       - name: Upload
         uses: actions/upload-artifact@v7
         with:
           name: ${{ matrix.platform }}
-          path: cassiopeia-${{ matrix.platform }}.zip
+          path: |
+            cassiopeia-${{ matrix.platform }}.${{ matrix.archive }}
+            cassiopeia-${{ matrix.platform }}.${{ matrix.archive }}.sha256
           if-no-files-found: error
 
   release:
@@ -118,7 +123,7 @@ jobs:
       - name: Create release
         uses: ncipollo/release-action@v1
         with:
-          artifacts: "dist/*.zip"
+          artifacts: "dist/cassiopeia-*"
           allowUpdates: true
           artifactErrorsFailBuild: true
           draft: false
