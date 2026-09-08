@@ -25,7 +25,7 @@
 </p>
 
 <p align="center">
-  <sub>Part of <a href="https://github.com/vela-tools">Vela Tools</a> · EU open standards 🇪🇺 · Built in Ljubljana, Slovenia 🇸🇮 by SenLab d.o.o.</sub>
+  <sub>Part of <a href="https://github.com/vela-tools">Vela Tools</a> · Based on EU open standards 🇪🇺 · Built in Ljubljana, Slovenia 🇸🇮 by SenLab d.o.o.</sub>
 </p>
 
 ---
