@@ -81,6 +81,8 @@ jobs:
     needs: build
     runs-on: ubuntu-latest
     permissions:
+      artifact-metadata: write
+      attestations: write
       contents: read
       id-token: write
       packages: write
@@ -137,3 +139,10 @@ jobs:
 
       - name: Sign manifest list and per-platform manifests
         run: cosign sign --yes --recursive "${{ env.IMAGE }}@${{ steps.digest.outputs.digest }}"
+
+      - name: Attest build provenance
+        uses: actions/attest@v4
+        with:
+          subject-name: ${{ env.IMAGE }}
+          subject-digest: ${{ steps.digest.outputs.digest }}
+          push-to-registry: true

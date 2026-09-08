@@ -44,6 +44,14 @@ cosign verify ghcr.io/vela-tools/cassiopeia@sha256:... \
     --certificate-oidc-issuer https://token.actions.githubusercontent.com
 ```
 
+Each image also carries a SLSA build provenance attestation, stored by GitHub and pushed to the registry beside the image. Where the cosign signature says the image was signed by this repository, the attestation records how it was built: the commit, the workflow, and the run. Verify it with the GitHub CLI:
+
+```bash
+gh attestation verify oci://ghcr.io/vela-tools/cassiopeia:v1.0.0 --repo vela-tools/cassiopeia
+```
+
+Add `--signer-workflow vela-tools/cassiopeia/.github/workflows/docker.yaml` to pin the check to the image workflow rather than accepting any workflow in the repository.
+
 ## Running the container
 
 The image's entrypoint is the `cassiopeia` binary. Docker passes everything after the image name to that command. Check that it runs:
