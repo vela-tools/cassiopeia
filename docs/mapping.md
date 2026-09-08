@@ -358,7 +358,7 @@ Conversions preserve a position's altitude wherever they can: the ones that sele
 
 A conversion that could never produce the declared type is rejected when the mapping loads, naming the attribute, rather than failing on every record.
 
-When a geometry has to be converted inside a template, for a value that a `transformation` cannot reach, use the [`geo_convert` function](templates.md#functions).
+When a geometry has to be converted inside a template, for a value that a `transformation` cannot reach, use the [`geo_convert` function](templates.md#geometry-functions).
 
 ### LanguageProperty
 
