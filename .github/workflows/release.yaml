@@ -19,12 +19,22 @@ jobs:
         include:
           - os: ubuntu-latest
             target: x86_64-unknown-linux-gnu
-            platform: linux-x86_64
+            platform: linux-x86_64-gnu
             ext: ""
             archive: tar.xz
           - os: ubuntu-24.04-arm
             target: aarch64-unknown-linux-gnu
-            platform: linux-aarch64
+            platform: linux-aarch64-gnu
+            ext: ""
+            archive: tar.xz
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-musl
+            platform: linux-x86_64-musl
+            ext: ""
+            archive: tar.xz
+          - os: ubuntu-24.04-arm
+            target: aarch64-unknown-linux-musl
+            platform: linux-aarch64-musl
             ext: ""
             archive: tar.xz
           - os: macos-15
@@ -47,6 +57,12 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           key: ${{ matrix.target }}
+
+      - name: Install musl toolchain
+        if: endsWith(matrix.target, '-musl')
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends musl-tools
 
       - name: Build
         run: cargo build --release --locked --no-default-features --bin cassiopeia --target ${{ matrix.target }}
@@ -156,20 +172,27 @@ jobs:
             name="$(basename "$archive")"
             slug="${name#cassiopeia-}"
             slug="${slug%%.*}"
-            case "${slug%%-*}" in
+            IFS=- read -r os arch libc <<< "$slug"
+            case "$os" in
               linux) os_label="Linux" ;;
               macos) os_label="macOS" ;;
               windows) os_label="Windows" ;;
               *) echo "no operating system label for ${name}" >&2; exit 1 ;;
             esac
-            case "${slug#*-}" in
+            case "$arch" in
               x86_64) arch_label="x64" ;;
               aarch64) arch_label="ARM64" ;;
               *) echo "no architecture label for ${name}" >&2; exit 1 ;;
             esac
+            case "$libc" in
+              "") libc_label="" ;;
+              gnu) libc_label="glibc " ;;
+              musl) libc_label="musl " ;;
+              *) echo "no C library label for ${name}" >&2; exit 1 ;;
+            esac
             read -r digest _ < "${archive}.sha256"
-            printf '| `%s` | %s %s | `%s` |\n' \
-              "$name" "$arch_label" "$os_label" "$digest" >> release-body.md
+            printf '| `%s` | %s %s%s | `%s` |\n' \
+              "$name" "$arch_label" "$libc_label" "$os_label" "$digest" >> release-body.md
           done
 
       - name: Create release
