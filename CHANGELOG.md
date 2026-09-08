@@ -10,6 +10,7 @@ All notable changes to this project will be documented in this file.
 - use locked build with cargo chef
 
 ### 👷 CI
+- use correct cosign installer version
 - add static musl builds for linux
 - add missing workflow permissions
 - add taplo ci gate
@@ -28,6 +29,7 @@ All notable changes to this project will be documented in this file.
 - better readme header
 
 ### 🧹 Chores
+- update changelog
 - add .gitattributes
 - update dependencies
 - bump version
