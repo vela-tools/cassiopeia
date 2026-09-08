@@ -60,6 +60,14 @@ install -m 0755 cassiopeia ~/.local/bin/   # or any directory on your PATH
 
 Every release also publishes a `.sha256` checksum beside each archive. The checksum covers the archive itself, so download both and verify before unpacking: `sha256sum -c cassiopeia-<platform>.tar.xz.sha256` on Linux, or `shasum -a 256 -c cassiopeia-<platform>.tar.xz.sha256` on macOS.
 
+Each archive also carries a SLSA build provenance attestation, signed with the release workflow's own identity and stored by GitHub. It records the commit, workflow, and run that produced the archive, which a checksum published on the same page cannot. Verify it with the GitHub CLI:
+
+```bash
+gh attestation verify cassiopeia-linux-x86_64.tar.xz --repo vela-tools/cassiopeia
+```
+
+Add `--signer-workflow vela-tools/cassiopeia/.github/workflows/release.yaml` to pin the check to the release workflow rather than accepting any workflow in the repository.
+
 The release binaries are built with `--no-default-features`, so they do **not** link ecCodes. They can decode GRIB2 with the pure-Rust reader, but report GRIB1 input as unsupported. If you need GRIB1, install ecCodes and build from source with the default features using one of the options below.
 
 ### 2. Clone and install onto your PATH (recommended for the examples)

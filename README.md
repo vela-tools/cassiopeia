@@ -46,7 +46,7 @@ tar -xf cassiopeia-linux-x86_64.tar.xz
 ./cassiopeia --version
 ```
 
-Every release also publishes a `.sha256` checksum beside each archive. Download it too and run `sha256sum -c cassiopeia-linux-x86_64.tar.xz.sha256` before unpacking.
+Every release also publishes a `.sha256` checksum beside each archive. Download it too and run `sha256sum -c cassiopeia-linux-x86_64.tar.xz.sha256` before unpacking. Each archive also carries a build provenance attestation, checked with `gh attestation verify cassiopeia-linux-x86_64.tar.xz --repo vela-tools/cassiopeia`.
 
 Try a complete mapping with a real dataset. The example needs no context broker, schema catalog, or configuration beyond the mapping itself:
 
