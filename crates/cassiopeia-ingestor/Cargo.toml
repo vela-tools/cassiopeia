@@ -16,7 +16,7 @@ convert_case = "0.12.0"
 csv = "1.4.0"
 dbase = { version = "0.8.0", features = ["encoding_rs", "yore"] }
 eccodes = { version = "0.15.1", default-features = false, optional = true }
-encoding_rs = "0.8.35"
+encoding_rs = "0.8.40"
 encoding_rs_io = "0.1.8"
 geo-types = "0.7.20"
 geojson = "1.0.0"
