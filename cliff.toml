@@ -31,16 +31,16 @@ skip_tags = ""
 ignore_tags = ""
 sort_commits = "newest"
 commit_parsers = [
-  { message = "^feat", group = "🚀 Features" },
-  { message = "^fix", group = "🐛 Bug Fixes" },
-  { message = "^perf", group = "⚡ Performance" },
-  { message = "^refactor", group = "🔧 Refactor" },
-  { message = "^style", group = "🎨 Style" },
-  { message = "^test", group = "🧪 Tests" },
-  { message = "^docs?", group = "📚 Documentation" },
-  { message = "^build", group = "🏗️ Build" },
-  { message = "^ci", group = "👷 CI" },
-  { message = "^chore\\(release\\)", skip = true },
-  { message = "^chore", group = "🧹 Chores" },
-  { message = ".*", group = "💡 Other" },
+    { message = "^feat", group = "🚀 Features" },
+    { message = "^fix", group = "🐛 Bug Fixes" },
+    { message = "^perf", group = "⚡ Performance" },
+    { message = "^refactor", group = "🔧 Refactor" },
+    { message = "^style", group = "🎨 Style" },
+    { message = "^test", group = "🧪 Tests" },
+    { message = "^docs?", group = "📚 Documentation" },
+    { message = "^build", group = "🏗️ Build" },
+    { message = "^ci", group = "👷 CI" },
+    { message = "^chore\\(release\\)", skip = true },
+    { message = "^chore", group = "🧹 Chores" },
+    { message = ".*", group = "💡 Other" },
 ]
