@@ -38,15 +38,15 @@ NGSI-LD is the linked-data model used by many smart-city, IoT, and dataspace pla
 
 ## Quick start
 
-Download the archive for your platform from the [latest release](https://github.com/vela-tools/cassiopeia/releases/latest). Archives use the name `cassiopeia-<platform>.zip`; supported platforms are `linux-x86_64`, `linux-aarch64`, `macos-aarch64`, and `windows-x86_64`. Unzip the archive, then run:
+Download the archive for your platform from the [latest release](https://github.com/vela-tools/cassiopeia/releases/latest). Linux and macOS builds ship as `cassiopeia-<platform>.tar.xz` for `linux-x86_64`, `linux-aarch64`, and `macos-aarch64`; the Windows build ships as `cassiopeia-windows-x86_64.zip`. Unpack the archive, then run:
 
 ```bash
-wget https://github.com/vela-tools/cassiopeia/releases/latest/download/cassiopeia-linux-x86_64.zip
-unzip cassiopeia-linux-x86_64.zip
+wget https://github.com/vela-tools/cassiopeia/releases/latest/download/cassiopeia-linux-x86_64.tar.xz
+tar -xf cassiopeia-linux-x86_64.tar.xz
 ./cassiopeia --version
 ```
 
-Each archive also includes a `cassiopeia.sha256` checksum next to the binary.
+Every release also publishes a `.sha256` checksum beside each archive. Download it too and run `sha256sum -c cassiopeia-linux-x86_64.tar.xz.sha256` before unpacking.
 
 Try a complete mapping with a real dataset. The example needs no context broker, schema catalog, or configuration beyond the mapping itself:
 

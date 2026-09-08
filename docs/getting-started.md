@@ -50,15 +50,15 @@ There are four ways to get a `cassiopeia` binary. The first is the quickest.
 
 ### 1. Download a prebuilt release binary (fastest)
 
-Every tagged release includes a binary for each platform on the [releases page](https://github.com/vela-tools/cassiopeia/releases/latest), packaged as `cassiopeia-<platform>.zip` for `linux-x86_64`, `linux-aarch64`, `macos-aarch64`, and `windows-x86_64`. Download the archive for your platform, unzip it, and move the binary to a directory on your PATH:
+Every tagged release includes a binary for each platform on the [releases page](https://github.com/vela-tools/cassiopeia/releases/latest). Linux and macOS builds ship as `cassiopeia-<platform>.tar.xz` for `linux-x86_64`, `linux-aarch64`, and `macos-aarch64`; the Windows build ships as `cassiopeia-windows-x86_64.zip`. Download the archive for your platform, unpack it, and move the binary to a directory on your PATH:
 
 ```bash
-wget https://github.com/vela-tools/cassiopeia/releases/latest/download/cassiopeia-linux-x86_64.zip
-unzip cassiopeia-linux-x86_64.zip
+wget https://github.com/vela-tools/cassiopeia/releases/latest/download/cassiopeia-linux-x86_64.tar.xz
+tar -xf cassiopeia-linux-x86_64.tar.xz
 install -m 0755 cassiopeia ~/.local/bin/   # or any directory on your PATH
 ```
 
-Each archive also includes a `cassiopeia.sha256` checksum next to the binary. Before installing, verify the download with `sha256sum -c cassiopeia.sha256` on Linux or `shasum -a 256 -c cassiopeia.sha256` on macOS.
+Every release also publishes a `.sha256` checksum beside each archive. The checksum covers the archive itself, so download both and verify before unpacking: `sha256sum -c cassiopeia-<platform>.tar.xz.sha256` on Linux, or `shasum -a 256 -c cassiopeia-<platform>.tar.xz.sha256` on macOS.
 
 The release binaries are built with `--no-default-features`, so they do **not** link ecCodes. They can decode GRIB2 with the pure-Rust reader, but report GRIB1 input as unsupported. If you need GRIB1, install ecCodes and build from source with the default features using one of the options below.
 
