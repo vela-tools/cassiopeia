@@ -2,6 +2,37 @@
 
 All notable changes to this project will be documented in this file.
 
+## [v1.0.1] - 2026-09-08
+
+### 🏗️ Build
+- no need to depend on eccodes dev package in docker image
+- add missing package to docker image
+- use locked build with cargo chef
+
+### 👷 CI
+- add static musl builds for linux
+- add missing workflow permissions
+- add taplo ci gate
+- add container image attestation
+- add release matrix table
+- add build provenance attestation
+- ship hashes as artifacts
+- integrate cosign into image building process
+- use composite action for native dependencies
+
+### 📚 Documentation
+- switch to static musl builds as default
+- update prebuilt binary instructions
+- document container image verification
+- fix incorrect link in docs
+- better readme header
+
+### 🧹 Chores
+- add .gitattributes
+- update dependencies
+- bump version
+- reconfigure taplo
+
 ## [v1.0.0] - 2026-09-07
 
 ### 🚀 Features
