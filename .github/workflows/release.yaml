@@ -105,6 +105,12 @@ jobs:
           path: dist
           merge-multiple: true
 
+      - name: Verify checksums
+        working-directory: dist
+        run: |
+          set -euo pipefail
+          sha256sum -c cassiopeia-*.sha256
+
       - name: Attest build provenance
         uses: actions/attest@v4
         with:
@@ -130,6 +136,39 @@ jobs:
             echo "prerelease=false" >> "$GITHUB_OUTPUT"
           fi
 
+      - name: Compose release body
+        env:
+          NOTES: ${{ steps.changelog.outputs.content }}
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          printf '%s\n\n' "$NOTES" > release-body.md
+          {
+            echo "## Artifacts"
+            echo
+            echo "| File | Platform | SHA256 |"
+            echo "| --- | --- | --- |"
+          } >> release-body.md
+          for archive in dist/cassiopeia-*.tar.xz dist/cassiopeia-*.zip; do
+            name="$(basename "$archive")"
+            slug="${name#cassiopeia-}"
+            slug="${slug%%.*}"
+            case "${slug%%-*}" in
+              linux) os_label="Linux" ;;
+              macos) os_label="macOS" ;;
+              windows) os_label="Windows" ;;
+              *) echo "no operating system label for ${name}" >&2; exit 1 ;;
+            esac
+            case "${slug#*-}" in
+              x86_64) arch_label="x64" ;;
+              aarch64) arch_label="ARM64" ;;
+              *) echo "no architecture label for ${name}" >&2; exit 1 ;;
+            esac
+            read -r digest _ < "${archive}.sha256"
+            printf '| `%s` | %s %s | `%s` |\n' \
+              "$name" "$arch_label" "$os_label" "$digest" >> release-body.md
+          done
+
       - name: Create release
         uses: ncipollo/release-action@v1
         with:
@@ -140,5 +179,5 @@ jobs:
           makeLatest: ${{ steps.release_type.outputs.makeLatest }}
           prerelease: ${{ steps.release_type.outputs.prerelease }}
           name: ${{ github.ref_name }}
-          body: ${{ steps.changelog.outputs.content }}
+          bodyFile: release-body.md
           token: ${{ secrets.GITHUB_TOKEN }}
