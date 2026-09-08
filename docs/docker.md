@@ -24,6 +24,26 @@ docker pull ghcr.io/vela-tools/cassiopeia:latest
 
 Unlike the prebuilt release binaries, the image is a **default build**. Its runtime layer links ecCodes, so it decodes both GRIB2 and GRIB1. The host does not need any additional system dependency for GRIB1. See [GRIB1 and ecCodes](getting-started.md#grib1-and-eccodes) for background.
 
+## Verifying the image
+
+Every published image is signed with [cosign](https://docs.sigstore.dev/) using keyless signing, so there is no public key to distribute. The signature carries a short-lived certificate that names the repository, the workflow, and the git ref the image was built from, and cosign records it in the public Sigstore transparency log. Install cosign, then verify a release:
+
+```bash
+cosign verify ghcr.io/vela-tools/cassiopeia:v1.0.0 \
+    --certificate-identity-regexp '^https://github\.com/vela-tools/cassiopeia/\.github/workflows/docker\.yaml@refs/tags/v' \
+    --certificate-oidc-issuer https://token.actions.githubusercontent.com
+```
+
+Both flags are necessary. Without them cosign confirms only that somebody signed the image; with them it confirms the signature came from this repository's `docker.yaml` workflow running on a release tag. Builds from other refs are signed too, but their certificate names a branch, so the expression above rejects them.
+
+The signature sits on the multi-platform manifest list, which is what a tag resolves to, so one check covers `linux/amd64` and `linux/arm64`. Cosign signs each per-platform manifest inside the list as well, so a single architecture copied into another registry still verifies once the list is gone. To check the exact image you are about to run, pass a digest instead of a tag:
+
+```bash
+cosign verify ghcr.io/vela-tools/cassiopeia@sha256:... \
+    --certificate-identity-regexp '^https://github\.com/vela-tools/cassiopeia/\.github/workflows/docker\.yaml@refs/tags/v' \
+    --certificate-oidc-issuer https://token.actions.githubusercontent.com
+```
+
 ## Running the container
 
 The image's entrypoint is the `cassiopeia` binary. Docker passes everything after the image name to that command. Check that it runs:
