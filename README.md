@@ -38,15 +38,15 @@ NGSI-LD is the linked-data model used by many smart-city, IoT, and dataspace pla
 
 ## Quick start
 
-Download the archive for your platform from the [latest release](https://github.com/vela-tools/cassiopeia/releases/latest). Linux and macOS builds ship as `cassiopeia-<platform>.tar.xz` for `linux-x86_64`, `linux-aarch64`, and `macos-aarch64`; the Windows build ships as `cassiopeia-windows-x86_64.zip`. Unpack the archive, then run:
+Download the archive for your platform from the [latest release](https://github.com/vela-tools/cassiopeia/releases/latest). Linux and macOS builds ship as `cassiopeia-<platform>.tar.xz`; the Windows build ships as `cassiopeia-windows-x86_64.zip`. On Linux, take a `-musl` archive: those are statically linked and run on any distribution of that architecture, where the `-gnu` archives need a recent enough glibc. Unpack the archive, then run:
 
 ```bash
-wget https://github.com/vela-tools/cassiopeia/releases/latest/download/cassiopeia-linux-x86_64.tar.xz
-tar -xf cassiopeia-linux-x86_64.tar.xz
+wget https://github.com/vela-tools/cassiopeia/releases/latest/download/cassiopeia-linux-x86_64-musl.tar.xz
+tar -xf cassiopeia-linux-x86_64-musl.tar.xz
 ./cassiopeia --version
 ```
 
-Every release also publishes a `.sha256` checksum beside each archive. Download it too and run `sha256sum -c cassiopeia-linux-x86_64.tar.xz.sha256` before unpacking. Each archive also carries a build provenance attestation, checked with `gh attestation verify cassiopeia-linux-x86_64.tar.xz --repo vela-tools/cassiopeia`.
+Every release also publishes a `.sha256` checksum beside each archive. Download it too and run `sha256sum -c cassiopeia-linux-x86_64-musl.tar.xz.sha256` before unpacking. Each archive also carries a build provenance attestation, checked with `gh attestation verify cassiopeia-linux-x86_64-musl.tar.xz --repo vela-tools/cassiopeia`.
 
 Try a complete mapping with a real dataset. The example needs no context broker, schema catalog, or configuration beyond the mapping itself:
 

@@ -50,20 +50,26 @@ There are four ways to get a `cassiopeia` binary. The first is the quickest.
 
 ### 1. Download a prebuilt release binary (fastest)
 
-Every tagged release includes a binary for each platform on the [releases page](https://github.com/vela-tools/cassiopeia/releases/latest). Linux and macOS builds ship as `cassiopeia-<platform>.tar.xz` for `linux-x86_64`, `linux-aarch64`, and `macos-aarch64`; the Windows build ships as `cassiopeia-windows-x86_64.zip`. Download the archive for your platform, unpack it, and move the binary to a directory on your PATH:
+Every tagged release includes a binary for each platform on the [releases page](https://github.com/vela-tools/cassiopeia/releases/latest). Linux and macOS builds ship as `cassiopeia-<platform>.tar.xz`; the Windows build ships as `cassiopeia-windows-x86_64.zip`.
+
+On Linux, take the `-musl` archive. `linux-x86_64-musl` and `linux-aarch64-musl` are linked statically against musl, so they need no system libraries and run on any distribution of that architecture, Alpine and long-lived LTS releases included. The `linux-x86_64-gnu` and `linux-aarch64-gnu` archives link glibc dynamically and need a glibc no older than the one they were built against. macOS is `macos-aarch64`.
+
+Download the archive for your platform, unpack it, and move the binary to a directory on your PATH:
 
 ```bash
-wget https://github.com/vela-tools/cassiopeia/releases/latest/download/cassiopeia-linux-x86_64.tar.xz
-tar -xf cassiopeia-linux-x86_64.tar.xz
+wget https://github.com/vela-tools/cassiopeia/releases/latest/download/cassiopeia-linux-x86_64-musl.tar.xz
+tar -xf cassiopeia-linux-x86_64-musl.tar.xz
 install -m 0755 cassiopeia ~/.local/bin/   # or any directory on your PATH
 ```
+
+A static build resolves hostnames through musl's own DNS resolver rather than the system NSS plugins, which only matters where hosts resolve through something other than DNS.
 
 Every release also publishes a `.sha256` checksum beside each archive. The checksum covers the archive itself, so download both and verify before unpacking: `sha256sum -c cassiopeia-<platform>.tar.xz.sha256` on Linux, or `shasum -a 256 -c cassiopeia-<platform>.tar.xz.sha256` on macOS.
 
 Each archive also carries a SLSA build provenance attestation, signed with the release workflow's own identity and stored by GitHub. It records the commit, workflow, and run that produced the archive, which a checksum published on the same page cannot. Verify it with the GitHub CLI:
 
 ```bash
-gh attestation verify cassiopeia-linux-x86_64.tar.xz --repo vela-tools/cassiopeia
+gh attestation verify cassiopeia-linux-x86_64-musl.tar.xz --repo vela-tools/cassiopeia
 ```
 
 Add `--signer-workflow vela-tools/cassiopeia/.github/workflows/release.yaml` to pin the check to the release workflow rather than accepting any workflow in the repository.
