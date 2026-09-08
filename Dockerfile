@@ -21,7 +21,7 @@ RUN cargo build --release --locked --bin cassiopeia
 FROM debian:trixie-20260824-slim AS runtime
 
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends libeccodes-dev \
+    && apt-get install -y --no-install-recommends ca-certificates libeccodes-dev \
     && rm -rf /var/lib/apt/lists/*
 
 RUN mkdir -p /etc/cassiopeia/mappings /var/lib/cassiopeia/schemas /var/log/cassiopeia/logs
