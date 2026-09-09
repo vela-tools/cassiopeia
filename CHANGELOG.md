@@ -2,6 +2,14 @@
 
 All notable changes to this project will be documented in this file.
 
+## [v1.0.2] - 2026-09-09
+
+### 🔧 Refactor
+- unify user agent handling on both collector and writer
+
+### 🧹 Chores
+- bump version
+
 ## [v1.0.1] - 2026-09-08
 
 ### 🏗️ Build
@@ -29,6 +37,7 @@ All notable changes to this project will be documented in this file.
 - better readme header
 
 ### 🧹 Chores
+- update changelog
 - update changelog
 - add .gitattributes
 - update dependencies
