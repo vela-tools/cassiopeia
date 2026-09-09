@@ -9,6 +9,14 @@ pub const ERROR_BODY_CAP: usize = 2 * 1024;
 /// Errors that can occur during data collection.
 #[derive(Debug, thiserror::Error)]
 pub enum CollectorError {
+    /// The HTTP client could not be built.
+    #[error("HTTP client could not be created")]
+    ClientInit {
+        /// The failure reported by the HTTP layer.
+        #[source]
+        source: reqwest::Error,
+    },
+
     /// An HTTP request never completed.
     #[error("HTTP request to '{url}' failed")]
     Http {

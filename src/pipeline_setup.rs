@@ -21,9 +21,8 @@ pub fn run_mapping(args: &MapArgs, config: &Config, reporter: &'static dyn Repor
     args.validate()?;
 
     let manifest = load_or_build_manifest(args)?;
-    let mut pipeline_config = pipeline_config(config);
+    let mut pipeline_config = pipeline_config(config, default_user_agent());
     pipeline_config.mode = args.mode;
-    pipeline_config.default_user_agent = default_user_agent();
 
     // All inline-only, so they are `None` under `--manifest`, where the manifest's own `output`
     // supplies the equivalents instead.

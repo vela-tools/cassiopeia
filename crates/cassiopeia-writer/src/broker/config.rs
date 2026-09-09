@@ -16,6 +16,7 @@ use cassiopeia_common::{
     representation::NgsiLdRepresentation,
     skip_null::NgsiLdSkipNull,
     tenant::Tenant,
+    user_agent::UserAgent,
 };
 use cassiopeia_ngsi_ld::entity::context::ContextSource;
 use cassiopeia_reporter::{reporter::Reporter, stage_id::StageId};
@@ -49,7 +50,7 @@ impl BrokerWriterConfig {
     /// back apart to re-parse here would lose that guarantee and turn a settled value into another
     /// failure path.
     #[must_use]
-    pub fn new(base_url: Url, user_agent: String, shutdown: &'static AtomicBool, reporter: &'static dyn Reporter) -> BrokerWriterConfig {
+    pub fn new(base_url: Url, user_agent: UserAgent, shutdown: &'static AtomicBool, reporter: &'static dyn Reporter) -> BrokerWriterConfig {
         BrokerWriterConfig {
             transport: BrokerTransport::new(base_url, user_agent),
             serialization: BrokerSerialization::default(),
@@ -138,13 +139,14 @@ mod tests {
         config::BrokerWriterConfig,
         test_reporter::{static_shutdown, static_test_reporter},
     };
+    use cassiopeia_common::user_agent::UserAgent;
     use url::Url;
 
     #[test]
     fn the_config_keeps_the_base_url_it_was_given() {
         let config = BrokerWriterConfig::new(
             Url::parse("https://broker.example.com/").unwrap(),
-            "ua".into(),
+            UserAgent::from("ua".to_owned()),
             static_shutdown(),
             static_test_reporter(),
         );

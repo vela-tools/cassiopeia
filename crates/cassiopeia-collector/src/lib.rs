@@ -7,6 +7,7 @@
 //! read.
 
 pub mod collector;
+pub mod downloader;
 pub mod error;
 pub mod file_extension;
 pub mod generic;

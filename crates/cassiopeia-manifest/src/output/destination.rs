@@ -1,4 +1,4 @@
-use crate::output::{context_delivery::ContextDelivery, user_agent::UserAgent};
+use crate::output::context_delivery::ContextDelivery;
 use cassiopeia_common::{
     attribute_overwrite::AttributeOverwrite,
     broker_atomicity::BrokerAtomicity,
@@ -7,6 +7,7 @@ use cassiopeia_common::{
     file_framing::FileFraming,
     tenant::Tenant,
     upsert_mode::UpsertMode,
+    user_agent::UserAgent,
 };
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;

@@ -1,4 +1,5 @@
 use crate::broker::{http2_prior_knowledge::Http2PriorKnowledge, tuning::BrokerTuning};
+use cassiopeia_common::user_agent::UserAgent;
 use std::time::Duration;
 use url::Url;
 
@@ -30,7 +31,7 @@ pub struct BrokerTransport {
     /// The broker base URL the operation endpoint is joined onto.
     pub base_url: Url,
     /// The `User-Agent` header sent with every request.
-    pub user_agent: String,
+    pub user_agent: UserAgent,
     /// The per-request HTTP timeout.
     pub timeout: Duration,
     /// The reqwest idle-connection pool size per host.
@@ -53,7 +54,7 @@ impl BrokerTransport {
     /// Builds the transport settings from the broker base URL and user-agent, filling every other
     /// knob from its default.
     #[must_use]
-    pub fn new(base_url: Url, user_agent: String) -> BrokerTransport {
+    pub fn new(base_url: Url, user_agent: UserAgent) -> BrokerTransport {
         let sender_threads = DEFAULT_SENDER_THREADS;
         BrokerTransport {
             base_url,

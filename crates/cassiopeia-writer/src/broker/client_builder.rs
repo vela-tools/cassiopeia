@@ -1,4 +1,5 @@
 use crate::{broker::http2_prior_knowledge::Http2PriorKnowledge, error::Result};
+use cassiopeia_common::user_agent::UserAgent;
 use reqwest::blocking::Client;
 use std::time::Duration;
 
@@ -11,7 +12,7 @@ pub struct ClientSettings {
     /// The TCP keep-alive interval.
     pub tcp_keepalive: Duration,
     /// The `User-Agent` every request carries.
-    pub user_agent: String,
+    pub user_agent: UserAgent,
     /// Whether HTTP/2 is used without an upgrade negotiation.
     pub http2_prior_knowledge: Http2PriorKnowledge,
 }
@@ -25,12 +26,12 @@ pub struct ClientSettings {
 /// # Errors
 /// Returns [`WriterError::ClientInit`](crate::error::WriterError::ClientInit) when the client cannot
 /// be constructed.
-pub fn build_client(settings: ClientSettings) -> Result<Client> {
+pub fn build_client(settings: &ClientSettings) -> Result<Client> {
     let mut builder = Client::builder()
         .timeout(settings.timeout)
         .pool_max_idle_per_host(settings.pool_max_idle_per_host)
         .tcp_keepalive(settings.tcp_keepalive)
-        .user_agent(settings.user_agent)
+        .user_agent(settings.user_agent.as_str())
         .gzip(true)
         .http2_adaptive_window(true);
     if settings.http2_prior_knowledge.is_on() {
@@ -45,6 +46,7 @@ mod tests {
         client_builder::{ClientSettings, build_client},
         http2_prior_knowledge::Http2PriorKnowledge,
     };
+    use cassiopeia_common::user_agent::UserAgent;
     use std::time::Duration;
 
     fn settings(http2_prior_knowledge: Http2PriorKnowledge) -> ClientSettings {
@@ -52,14 +54,14 @@ mod tests {
             timeout: Duration::from_secs(30),
             pool_max_idle_per_host: 8,
             tcp_keepalive: Duration::from_secs(60),
-            user_agent: "cassiopeia".to_owned(),
+            user_agent: UserAgent::from("cassiopeia".to_owned()),
             http2_prior_knowledge,
         }
     }
 
     #[test]
     fn a_client_builds_with_and_without_prior_knowledge() {
-        assert!(build_client(settings(Http2PriorKnowledge::Off)).is_ok());
-        assert!(build_client(settings(Http2PriorKnowledge::On)).is_ok());
+        assert!(build_client(&settings(Http2PriorKnowledge::Off)).is_ok());
+        assert!(build_client(&settings(Http2PriorKnowledge::On)).is_ok());
     }
 }

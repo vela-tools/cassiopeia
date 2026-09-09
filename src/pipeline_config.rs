@@ -1,4 +1,4 @@
-use cassiopeia_common::{channel::ChannelPolicy, context::mode::AtContextMode};
+use cassiopeia_common::{channel::ChannelPolicy, context::mode::AtContextMode, user_agent::UserAgent};
 use cassiopeia_configuration::{config::Config, pipeline::ExtractionMode};
 use cassiopeia_pipeline::pipeline_config::{ExtractionParallelism, PipelineConfig};
 
@@ -11,7 +11,10 @@ use cassiopeia_pipeline::pipeline_config::{ExtractionParallelism, PipelineConfig
 /// The writer's representation, skip-null, target, tenant, and `@context` mode are read from the
 /// manifest, so `context_mode` is only the fallback used when the manifest output does not set one;
 /// [`AtContextMode::None`] keeps a manifest that declares no `@context` from acquiring the default.
-pub fn pipeline_config(config: &Config) -> PipelineConfig {
+///
+/// `default_user_agent` has no configuration source at all: it is the build-time identifier the
+/// binary derives, so it is passed in rather than read from `config`.
+pub fn pipeline_config(config: &Config, default_user_agent: UserAgent) -> PipelineConfig {
     PipelineConfig {
         batch_size: config.pipeline.batch_size.get(),
         extraction: extraction_parallelism(config.pipeline.extraction_mode),
@@ -20,9 +23,7 @@ pub fn pipeline_config(config: &Config) -> PipelineConfig {
         relationship_store: config.resolver.relationship_store,
         schemas_folder: config.schemas.folder.clone(),
         context_mode: AtContextMode::None,
-        // The default user-agent has no configuration source; the composition root stamps the
-        // build-time value onto this field, mirroring how it stamps the run `mode`.
-        default_user_agent: String::new(),
+        default_user_agent,
         channel_policy: match config.pipeline.channel_capacity {
             Some(capacity) => ChannelPolicy::Bounded(capacity),
             None => ChannelPolicy::Unbounded,
@@ -42,7 +43,7 @@ const fn extraction_parallelism(mode: ExtractionMode) -> ExtractionParallelism {
 #[cfg(test)]
 mod tests {
     use crate::pipeline_config::{extraction_parallelism, pipeline_config};
-    use cassiopeia_common::{channel::ChannelPolicy, context::mode::AtContextMode};
+    use cassiopeia_common::{channel::ChannelPolicy, context::mode::AtContextMode, user_agent::UserAgent};
     use cassiopeia_configuration::{config::Config, pipeline::ExtractionMode};
     use cassiopeia_pipeline::pipeline_config::ExtractionParallelism;
     use std::num::NonZeroUsize;
@@ -57,24 +58,29 @@ mod tests {
         assert_eq!(extraction_parallelism(ExtractionMode::Sequential), ExtractionParallelism::Sequential);
     }
 
+    /// The build-time identifier the composition root supplies to every translation.
+    fn user_agent() -> UserAgent {
+        UserAgent::from("cassiopeia/1.0.0".to_owned())
+    }
+
     #[test]
     fn the_context_mode_starts_unset_so_the_manifest_governs_it() {
         let config = Config::default();
 
-        assert_eq!(pipeline_config(&config).context_mode, AtContextMode::None);
+        assert_eq!(pipeline_config(&config, user_agent()).context_mode, AtContextMode::None);
     }
 
     #[test]
-    fn the_default_user_agent_is_left_empty_for_the_composition_root_to_stamp() {
+    fn the_default_user_agent_is_the_one_the_composition_root_supplies() {
         let config = Config::default();
 
-        assert!(pipeline_config(&config).default_user_agent.is_empty());
+        assert_eq!(pipeline_config(&config, user_agent()).default_user_agent, user_agent());
     }
 
     #[test]
     fn the_batch_size_and_channel_policy_carry_the_configured_values() {
         let config = Config::default();
-        let translated = pipeline_config(&config);
+        let translated = pipeline_config(&config, user_agent());
 
         assert_eq!(translated.batch_size, config.pipeline.batch_size.get());
         assert_eq!(translated.channel_policy, ChannelPolicy::Unbounded);
@@ -86,6 +92,6 @@ mod tests {
         let capacity = NonZeroUsize::new(12).unwrap();
         config.pipeline.channel_capacity = Some(capacity);
 
-        assert_eq!(pipeline_config(&config).channel_policy, ChannelPolicy::Bounded(capacity));
+        assert_eq!(pipeline_config(&config, user_agent()).channel_policy, ChannelPolicy::Bounded(capacity));
     }
 }

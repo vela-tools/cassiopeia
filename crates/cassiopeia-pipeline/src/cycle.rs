@@ -68,7 +68,12 @@ impl Pipeline {
         // Custom schemas are resolved once here: a remote source is downloaded to a temp file whose
         // directory `resolved_schemas` owns. That binding is held until after `run_phase2` returns so
         // the temp files outlive the validator's lazy, first-use schema compilation.
-        let resolved_schemas = resolve_custom_schemas(&loaded, self.output.global_validation_schema.as_ref(), self.context.reporter)?;
+        let resolved_schemas = resolve_custom_schemas(
+            &loaded,
+            self.output.global_validation_schema.as_ref(),
+            self.context.reporter,
+            &self.config.default_user_agent,
+        )?;
         let validator = self.create_validator(repositories, resolved_schemas.by_type);
 
         // One cancellation source per cycle is shared by all pipeline stages; it reads the

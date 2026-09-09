@@ -103,7 +103,7 @@ impl BrokerWriter {
         let routing = route(operation);
         let endpoint = resolve_endpoint(&base_url, routing.path, routing.query)?;
 
-        let client = build_client(ClientSettings {
+        let client = build_client(&ClientSettings {
             timeout,
             pool_max_idle_per_host,
             tcp_keepalive,

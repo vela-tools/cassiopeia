@@ -253,6 +253,7 @@ mod tests {
         representation::NgsiLdRepresentation,
         schema_source::SchemaSource,
         store_kind::StoreKind,
+        user_agent::UserAgent,
     };
     use cassiopeia_manifest::{
         failure_policy::FailurePolicy,
@@ -285,7 +286,7 @@ mod tests {
             relationship_store: StoreKind::DashMap,
             schemas_folder: PathBuf::from("schemas"),
             context_mode: AtContextMode::Default,
-            default_user_agent: "test".to_string(),
+            default_user_agent: UserAgent::from("test".to_owned()),
             channel_policy: ChannelPolicy::Bounded(NonZeroUsize::new(64).unwrap()),
             memory_profile: MemoryProfile::Default,
         }

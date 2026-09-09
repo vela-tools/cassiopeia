@@ -44,9 +44,11 @@ impl From<&PipelineError> for DiagnosticCode {
 const fn collector_code(error: &CollectorError) -> IngestCode {
     match error {
         CollectorError::ChannelClosed => IngestCode::StreamClosed,
-        CollectorError::Http { .. } | CollectorError::HttpStatus { .. } | CollectorError::Io { .. } | CollectorError::InvalidFileExtension { .. } => {
-            IngestCode::SourceUnavailable
-        }
+        CollectorError::ClientInit { .. }
+        | CollectorError::Http { .. }
+        | CollectorError::HttpStatus { .. }
+        | CollectorError::Io { .. }
+        | CollectorError::InvalidFileExtension { .. } => IngestCode::SourceUnavailable,
     }
 }
 

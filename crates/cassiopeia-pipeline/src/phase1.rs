@@ -59,7 +59,11 @@ impl Pipeline {
         for (input, router) in loaded {
             let ingestor_bank = spawn_ingestor_bank(batch_size, channel_policy, self.context.reporter, &env.telemetry);
 
-            let collector = Box::new(GenericCollector::new(input.collector_source.clone(), input.format_override));
+            let collector = Box::new(GenericCollector::new(
+                input.collector_source.clone(),
+                input.format_override,
+                self.config.default_user_agent.clone(),
+            ));
             let collector_rx = spawn_collector_thread(collector, channel_policy, Arc::clone(&env.telemetry));
 
             let profiler = create_profiler(

@@ -841,7 +841,6 @@ dependencies = [
  "indexmap 2.14.2",
  "jsonschema",
  "memory-stats",
- "reqwest",
  "serde_json",
  "temp-dir",
  "tempfile",

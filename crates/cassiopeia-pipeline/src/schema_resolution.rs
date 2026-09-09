@@ -2,13 +2,12 @@ use crate::{
     error::{PipelineError, Result},
     input_config::InputConfig,
 };
-use cassiopeia_collector::{error::CollectorError, generic::download_to_file};
-use cassiopeia_common::schema_source::SchemaSource;
+use cassiopeia_collector::{downloader::Downloader, error::CollectorError};
+use cassiopeia_common::{schema_source::SchemaSource, user_agent::UserAgent};
 use cassiopeia_expander::router::MappingRouter;
 use cassiopeia_manifest::mapping_binding::MappingBinding;
 use cassiopeia_ngsi_ld::entity::name::NameBuf;
 use cassiopeia_reporter::reporter::MessageLog;
-use reqwest::blocking::Client;
 use std::{
     collections::HashMap,
     env,
@@ -37,7 +36,8 @@ pub(crate) struct ResolvedSchemas {
 /// A local source is absolutized against the file that declared it (the input's mapping directory,
 /// or the process working directory for the global one) without checking that it exists, so a typo
 /// aborts later through the validator's normal missing-schema error rather than here. A remote source
-/// is downloaded into a run-scoped temporary directory and thereafter treated as that local file.
+/// is downloaded into a run-scoped temporary directory, under the run's default `User-Agent`, and
+/// thereafter treated as that local file.
 ///
 /// # Errors
 ///
@@ -47,8 +47,9 @@ pub(crate) fn resolve_custom_schemas(
     loaded: &[(&InputConfig, MappingRouter)],
     global: Option<&SchemaSource>,
     reporter: &dyn MessageLog,
+    user_agent: &UserAgent,
 ) -> Result<ResolvedSchemas> {
-    let mut downloader = SchemaDownloader::new(reporter);
+    let mut downloader = SchemaDownloader::new(reporter, user_agent.clone());
     let mut by_type = HashMap::new();
 
     // A per-input schema binds every type its lane produces and takes precedence over the global one.
@@ -103,19 +104,19 @@ struct SchemaDownloader<'a> {
     reporter: &'a dyn MessageLog,
     /// The temporary directory holding downloaded schemas, created on the first remote source.
     cache: Option<TempDir>,
-    /// The blocking HTTP client, created on the first remote source and reused after.
-    client: Option<Client>,
+    /// The HTTP downloader every remote schema is fetched through.
+    downloader: Downloader,
     /// Every already-downloaded URL and the file it landed in, so a repeated URL is fetched once.
     fetched: HashMap<Url, PathBuf>,
 }
 
 impl<'a> SchemaDownloader<'a> {
-    /// Builds a downloader that has not yet touched the network.
-    fn new(reporter: &'a dyn MessageLog) -> SchemaDownloader<'a> {
+    /// Builds a downloader that has not yet touched the network, fetching under `user_agent`.
+    fn new(reporter: &'a dyn MessageLog, user_agent: UserAgent) -> SchemaDownloader<'a> {
         SchemaDownloader {
             reporter,
             cache: None,
-            client: None,
+            downloader: Downloader::new(user_agent),
             fetched: HashMap::new(),
         }
     }
@@ -139,7 +140,7 @@ impl<'a> SchemaDownloader<'a> {
         self.reporter
             .debug(&format!("Fetching custom validation schema for '{entity_type}' from {url}"));
 
-        // Take the reusable resources out so the download borrows locals, then restore them after.
+        // Take the cache out so the download borrows a local directory, then restore it after.
         let directory = match self.cache.take() {
             Some(directory) => directory,
             None => TempDir::new().map_err(|source| PipelineError::SchemaFetch {
@@ -147,15 +148,15 @@ impl<'a> SchemaDownloader<'a> {
                 source: Box::new(CollectorError::Io { source, path: env::temp_dir() }),
             })?,
         };
-        let client = self.client.take().unwrap_or_default();
-
         let destination = directory.path().join(format!("{entity_type}.json"));
-        let outcome = download_to_file(&client, url, &destination).map_err(|source| PipelineError::SchemaFetch {
-            url: url.clone(),
-            source: Box::new(source),
-        });
+        let outcome = self
+            .downloader
+            .download_to_file(url, &destination)
+            .map_err(|source| PipelineError::SchemaFetch {
+                url: url.clone(),
+                source: Box::new(source),
+            });
 
-        self.client = Some(client);
         self.cache = Some(directory);
 
         let path = outcome?;
@@ -183,7 +184,7 @@ mod tests {
         input_config::{InputConfig, build_input_config},
         schema_resolution::resolve_custom_schemas,
     };
-    use cassiopeia_common::{input::Input, schema_source::SchemaSource};
+    use cassiopeia_common::{input::Input, schema_source::SchemaSource, user_agent::UserAgent};
     use cassiopeia_expander::router::MappingRouter;
     use cassiopeia_manifest::{input::ManifestInput, mapping_binding::MappingBinding};
     use cassiopeia_mapping::{mapping::Mapping, template::runner::TemplateRunner};
@@ -220,6 +221,11 @@ mod tests {
         (config, MappingRouter::Single(Arc::new(mapping)))
     }
 
+    /// The run's build-time identifier, which every schema fetch announces itself with.
+    fn user_agent() -> UserAgent {
+        UserAgent::from("cassiopeia/1.0.0".to_owned())
+    }
+
     fn exoplanet() -> NameBuf {
         NameBuf::new("ExoPlanet").unwrap()
     }
@@ -246,7 +252,7 @@ mod tests {
         let loaded = vec![(&config, router)];
         let reporter = NoopReporter::new();
 
-        let resolved = resolve_custom_schemas(&loaded, None, &reporter).unwrap();
+        let resolved = resolve_custom_schemas(&loaded, None, &reporter, &user_agent()).unwrap();
 
         assert_eq!(resolved.by_type.get(&exoplanet()), Some(&PathBuf::from("/maps/e.json")));
     }
@@ -258,7 +264,7 @@ mod tests {
         let reporter = NoopReporter::new();
         let global = SchemaSource::Local(PathBuf::from("/schemas/g.json"));
 
-        let resolved = resolve_custom_schemas(&loaded, Some(&global), &reporter).unwrap();
+        let resolved = resolve_custom_schemas(&loaded, Some(&global), &reporter, &user_agent()).unwrap();
 
         assert_eq!(resolved.by_type.get(&exoplanet()), Some(&PathBuf::from("/schemas/g.json")));
     }
@@ -270,7 +276,7 @@ mod tests {
         let reporter = NoopReporter::new();
         let global = SchemaSource::Local(PathBuf::from("/schemas/g.json"));
 
-        let resolved = resolve_custom_schemas(&loaded, Some(&global), &reporter).unwrap();
+        let resolved = resolve_custom_schemas(&loaded, Some(&global), &reporter, &user_agent()).unwrap();
 
         // The per-input schema wins; the global one never reaches this type.
         assert_eq!(resolved.by_type.get(&exoplanet()), Some(&PathBuf::from("/schemas/m.json")));
@@ -283,7 +289,7 @@ mod tests {
         let loaded = vec![(&config, router)];
         let reporter = NoopReporter::new();
 
-        let resolved = resolve_custom_schemas(&loaded, None, &reporter).unwrap();
+        let resolved = resolve_custom_schemas(&loaded, None, &reporter, &user_agent()).unwrap();
 
         let schema_path = &resolved.by_type[&exoplanet()];
         assert_eq!(fs::read_to_string(schema_path).unwrap(), r#"{"type":"object","required":["mass"]}"#);
@@ -296,7 +302,7 @@ mod tests {
         let loaded = vec![(&config, router)];
         let reporter = NoopReporter::new();
 
-        let result = resolve_custom_schemas(&loaded, None, &reporter);
+        let result = resolve_custom_schemas(&loaded, None, &reporter, &user_agent());
 
         assert!(matches!(result, Err(PipelineError::SchemaFetch { .. })));
     }

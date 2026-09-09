@@ -1,7 +1,6 @@
 pub mod context_delivery;
 pub mod destination;
 pub mod temporal;
-pub mod user_agent;
 pub mod validation;
 pub mod validation_mode;
 

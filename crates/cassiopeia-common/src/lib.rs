@@ -37,3 +37,4 @@ pub mod store_kind;
 pub mod telemetry;
 pub mod tenant;
 pub mod upsert_mode;
+pub mod user_agent;

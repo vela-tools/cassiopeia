@@ -100,7 +100,7 @@ impl Pipeline {
             } => {
                 // The manifest destination's user-agent wins; the build-time default fills in when
                 // it names none.
-                let user_agent = user_agent.as_ref().map_or_else(|| self.config.default_user_agent.clone(), ToString::to_string);
+                let user_agent = user_agent.as_ref().unwrap_or(&self.config.default_user_agent).clone();
                 // The manifest carries the operation as a flat kind plus its two option enums; the
                 // composition root reassembles the tight domain value.
                 let operation = BrokerOperation::from_parts(*operation, *upsert_mode, *attribute_overwrite);

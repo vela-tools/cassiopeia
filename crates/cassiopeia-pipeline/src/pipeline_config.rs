@@ -4,6 +4,7 @@ use cassiopeia_common::{
     memory_profile::MemoryProfile,
     pipeline_mode::PipelineMode,
     store_kind::StoreKind,
+    user_agent::UserAgent,
 };
 use std::{num::NonZeroUsize, path::PathBuf};
 
@@ -41,9 +42,10 @@ pub struct PipelineConfig {
     pub schemas_folder: PathBuf,
     /// How the `@context` is resolved, when the manifest output does not state its own mode.
     pub context_mode: AtContextMode,
-    /// The `User-Agent` the broker writer sends when the manifest destination names none. Supplied
-    /// by the composition root as the build-time default, not read from configuration.
-    pub default_user_agent: String,
+    /// The `User-Agent` a remote source is fetched with, and the one the broker writer sends when
+    /// the manifest destination names none. Supplied by the composition root as the build-time
+    /// default, not read from configuration.
+    pub default_user_agent: UserAgent,
     /// Whether stage handoffs favour unrestricted overlap or bounded in-flight memory.
     pub channel_policy: ChannelPolicy,
     /// The pre-tuned parameter set to apply.
@@ -90,6 +92,7 @@ mod tests {
         memory_profile::MemoryProfile,
         pipeline_mode::PipelineMode,
         store_kind::StoreKind,
+        user_agent::UserAgent,
     };
     use std::{num::NonZeroUsize, path::PathBuf};
 
@@ -102,7 +105,7 @@ mod tests {
             relationship_store: StoreKind::DashMap,
             schemas_folder: PathBuf::from("schemas"),
             context_mode: AtContextMode::Default,
-            default_user_agent: "test".to_string(),
+            default_user_agent: UserAgent::from("test".to_owned()),
             channel_policy: ChannelPolicy::Bounded(NonZeroUsize::new(64).unwrap()),
             memory_profile,
         }

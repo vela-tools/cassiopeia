@@ -4,8 +4,8 @@ use cassiopeia_common::{
     broker_operation::BrokerOperationKind,
     tenant::Tenant,
     upsert_mode::UpsertMode,
+    user_agent::UserAgent,
 };
-use cassiopeia_manifest::output::user_agent::UserAgent;
 use clap::{ArgAction, Args};
 use std::str::FromStr;
 use url::Url;
