@@ -2,12 +2,25 @@
 
 All notable changes to this project will be documented in this file.
 
+## [v1.0.3] - 2026-09-17
+
+### 🐛 Bug Fixes
+- eliminate a bug in csv header detection
+
+### 👷 CI
+- add pages workflow
+
+### 🧹 Chores
+- bump version
+- update dependencies
+
 ## [v1.0.2] - 2026-09-09
 
 ### 🔧 Refactor
 - unify user agent handling on both collector and writer
 
 ### 🧹 Chores
+- update changelog
 - bump version
 
 ## [v1.0.1] - 2026-09-08
