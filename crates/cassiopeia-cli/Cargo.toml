@@ -18,7 +18,7 @@ cassiopeia-reporter.workspace = true
 cassiopeia-smart-data-models.workspace = true
 cassiopeia-terminal-style.workspace = true
 cassiopeia-tui.workspace = true
-clap = { version = "4.6.6", features = ["derive"] }
+clap = { version = "4.6.7", features = ["derive"] }
 clap-markdown = "0.1.5"
 json5format = "0.2.6"
 serde_json = { version = "1.0.151", features = ["preserve_order"] }
@@ -26,7 +26,7 @@ serde_json5 = "0.2.1"
 strum = { version = "0.28.0", features = ["derive"] }
 thiserror = "2.0.20"
 tokio = { version = "1.53.1", features = ["net", "rt", "sync", "time"] }
-toml = "1.1.5"
+toml = "1.1.6"
 
 [dev-dependencies]
 tempfile = "3.27.0"

@@ -17,11 +17,11 @@ dashmap = "6.2.1"
 foldhash = "0.2.0"
 indexmap = "2.14.2"
 rayon = "1.12.0"
-redb = "4.2.0"
+redb = "4.3.0"
 rmp-serde = "1.3.1"
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = { version = "1.0.151", features = ["preserve_order"] }
-smallvec = "1.16.0"
+smallvec = "1.16.1"
 strum = { version = "0.28.0", features = ["derive"] }
 tempfile = "3.27.0"
 thiserror = "2.0.20"

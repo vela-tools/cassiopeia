@@ -8,9 +8,9 @@ license.workspace = true
 repository.workspace = true
 
 [dependencies]
-clap = { version = "4.6.6", features = ["derive"] }
+clap = { version = "4.6.7", features = ["derive"] }
 cpu-time = "1.0.0"
-derive-where = "1.6.1"
+derive-where = "1.7.0"
 derive_more = { version = "2.1.1", features = ["debug", "deref", "display", "from", "from_str", "into", "into_iterator", "is_variant"] }
 http = "1.5.0"
 num-traits = "0.2.19"

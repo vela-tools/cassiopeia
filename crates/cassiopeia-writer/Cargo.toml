@@ -22,11 +22,11 @@ iri-rs = { version = "3.4.1", features = ["serde", "static"] }
 memchr = "2.8.3"
 parking_lot = "0.12.5"
 rayon = "1.12.0"
-reqwest = { version = "0.13.4", features = ["blocking", "gzip"] }
+reqwest = { version = "0.13.5", features = ["blocking", "gzip"] }
 serde = { version = "1.0.229", features = ["derive"] }
 serde-jsonlines = "0.7.0"
 serde_json = { version = "1.0.151", features = ["preserve_order"] }
-sonic-rs = "0.5.8"
+sonic-rs = "0.5.10"
 tempfile = "3.27.0"
 thiserror = "2.0.20"
 url = "2.5.8"

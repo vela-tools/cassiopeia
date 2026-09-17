@@ -29,7 +29,7 @@ cassiopeia-pipeline.workspace = true
 cassiopeia-reporter.workspace = true
 cassiopeia-terminal-style.workspace = true
 bugreport = { version = "0.6.0", default-features = false, features = ["collector_operating_system", "format_markdown"] }
-clap = { version = "4.6.6", features = ["derive", "wrap_help"] }
+clap = { version = "4.6.7", features = ["derive", "wrap_help"] }
 cron = "0.17.0"
 ctrlc = "3.5.2"
 gdt-cpus = { version = "0.2606.1", default-features = false }

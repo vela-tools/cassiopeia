@@ -14,7 +14,7 @@ chardetng = "1.0.0"
 csv = "1.4.0"
 # `Encoding::decode` lives behind encoding_rs's `alloc` feature, which chardetng pulls in with
 # `default-features = false`; declare it here so the decode path is available.
-encoding_rs = { version = "0.8.40", features = ["alloc"] }
+encoding_rs = { version = "0.8.41", features = ["alloc"] }
 getset = "0.1.7"
 lazy-regex = "3.6.1"
 mediatype = { version = "0.23.0", features = ["serde"] }

@@ -16,11 +16,11 @@ convert_case = "0.12.0"
 csv = "1.4.0"
 dbase = { version = "0.8.0", features = ["encoding_rs", "yore"] }
 eccodes = { version = "0.15.1", default-features = false, optional = true }
-encoding_rs = "0.8.40"
+encoding_rs = "0.8.41"
 encoding_rs_io = "0.1.8"
 geo-types = "0.7.20"
 geojson = "1.0.0"
-grib = { version = "0.18.3", default-features = false, features = ["ccsds-unpack-with-rust-aec", "jpeg2000-unpack-with-hayro", "png-unpack-with-png-crate", "time-calculation"] }
+grib = { version = "0.18.5", default-features = false, features = ["ccsds-unpack-with-rust-aec", "jpeg2000-unpack-with-hayro", "png-unpack-with-png-crate", "time-calculation"] }
 indexmap = "2.14.2"
 kml = { version = "0.14.0", features = ["geo-types"] }
 quick-xml = { version = "0.42.0", features = ["encoding"] }

@@ -24,7 +24,7 @@ serde = { version = "1.0.229", features = ["derive", "rc"] }
 serde_json = { version = "1.0.151", features = ["preserve_order"] }
 serde_json5 = "0.2.1"
 strum = { version = "0.28.0", features = ["derive"] }
-tera = { version = "2.3.0", features = ["fast"] }
+tera = { version = "2.4.0", features = ["fast"] }
 tera-contrib = { version = "0.3.0", features = ["base64", "date", "filesize_format", "format", "json", "rand", "regex", "slug", "urlencode"] }
 thiserror = "2.0.20"
 typed-builder = "0.23.2"
