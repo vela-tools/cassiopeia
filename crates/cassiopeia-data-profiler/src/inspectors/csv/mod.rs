@@ -199,22 +199,28 @@ impl CsvInspector {
             return false;
         }
 
-        // Row 0 must read as field labels rather than values on two counts: every cell is textual
-        // (a numeric cell means row 0 is data), and every cell is label-shaped (short and comma-free,
-        // so a multi-word textual value is not mistaken for a header either).
+        // Row 0 must read as field labels rather than values on two counts: no cell carries a genuine
+        // data value, and every cell is label-shaped (short and comma-free, so a multi-word textual
+        // value is not mistaken for a header either).
+        //
+        // A boolean literal (`on`, `off`, `yes`, `no`, `true`, `false`, `y`, `n`) is a bare word that
+        // is equally a valid column label, so a boolean-typed row-0 cell counts as a label here, not a
+        // value. Without this a header column legitimately named `on` types as a boolean, row 0 is
+        // read as data, the file is ingested headerless, and every name-keyed field reference misses
+        // (the entity renders with a null id).
         let Some(first_row) = table.records.first() else {
             return false;
         };
-        let row0_all_text = table
+        let row0_carries_no_value = table
             .column_types
             .iter()
-            .all(|col| col.first().is_none_or(|t| matches!(t, DataType::Text | DataType::Empty)));
+            .all(|col| col.first().is_none_or(|t| matches!(t, DataType::Text | DataType::Empty | DataType::Boolean)));
         let row0_all_labels = !first_row.is_empty()
             && first_row.iter().all(|cell| {
                 let cell = cell.trim();
                 cell.is_empty() || is_field_label(cell)
             });
-        if !row0_all_text || !row0_all_labels {
+        if !row0_carries_no_value || !row0_all_labels {
             return false;
         }
 
@@ -384,12 +390,17 @@ impl CsvInspector {
             match column.first().copied().unwrap_or(DataType::Empty) {
                 // A text label sitting over a numeric or boolean column is header evidence.
                 DataType::Text | DataType::Empty => evidence += 1.0,
+                // A boolean literal (`on`, `off`, `yes`, `no`, `true`, `false`, `y`, `n`) is a bare
+                // word that is equally a valid column label, so row 0 holding one over a boolean
+                // column is genuinely ambiguous and must not be scored as a data row — a header named
+                // `on` otherwise reads as data and the whole entity renders with a null id. It gives
+                // no signal either way.
+                DataType::Boolean => {}
                 // Row 0 fits the column's own type, so it reads as one more data row.
                 row0 if row0 == dominant => evidence -= 1.0,
                 // Typed but a different type: inconclusive, contributes nothing.
                 DataType::Integer
                 | DataType::Float
-                | DataType::Boolean
                 | DataType::Date
                 | DataType::Time
                 | DataType::DateTime
@@ -568,6 +579,29 @@ mod tests {
 
         assert_eq!(dialect.delimiter, b',');
         assert!(dialect.has_headers);
+    }
+
+    #[test]
+    fn a_header_whose_label_spells_a_boolean_word_is_detected() {
+        // A column legitimately named `on` (a camera on/off state) must not defeat header detection.
+        // The header cell `on` matches the boolean-literal pattern, but it is a label, not a value:
+        // read as data, the file ingests headerless, every name-keyed field reference (`device_code`,
+        // `on`) misses, and the entity renders with a null id and no attributes.
+        let sample = "device_code,timestamp,on\nCA001,2026-09-09T13:10:00Z,true\nCA002,2026-09-09T13:11:00Z,false\n";
+        let dialect = CsvInspector::new().inspect(sample.as_bytes()).unwrap();
+
+        assert!(dialect.has_headers);
+    }
+
+    #[test]
+    fn every_boolean_word_column_label_still_detects_a_header() {
+        // The whole boolean vocabulary the type inspector recognises works as a header label.
+        for label in ["on", "off", "yes", "no", "y", "n", "true", "false"] {
+            let sample = format!("device_code,{label}\nCA001,true\nCA002,false\n");
+            let dialect = CsvInspector::new().inspect(sample.as_bytes()).unwrap();
+
+            assert!(dialect.has_headers, "header with a `{label}` column was read as data");
+        }
     }
 
     #[test]
