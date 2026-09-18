@@ -1,4 +1,4 @@
-FROM rust:1.98.0-trixie AS chef
+FROM rust:1.98.1-trixie AS chef
 
 RUN apt-get update \
     && apt-get install -y --no-install-recommends libclang-dev libeccodes-dev pkg-config \
