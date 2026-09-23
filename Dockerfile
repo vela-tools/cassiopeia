@@ -18,7 +18,7 @@ RUN cargo chef cook --release --locked --recipe-path recipe.json
 COPY . .
 RUN cargo build --release --locked --bin cassiopeia
 
-FROM debian:trixie-20260824-slim AS runtime
+FROM debian:trixie-20260918-slim AS runtime
 
 RUN apt-get update \
     && apt-get install -y --no-install-recommends ca-certificates libeccodes0 \
