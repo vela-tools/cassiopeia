@@ -24,12 +24,12 @@ impl ExpanderCompiler {
         let compiled_name = runner.compile(mapping.identity().entity_name());
         mapping.identity_mut().set_compiled_entity_name(Some(compiled_name));
 
-        if let Some(scope) = mapping.identity().scope() {
+        if let Some(scope) = mapping.scope() {
             let compiled_scope = match scope {
                 Scope::Single(source) => CompiledScope::Single(runner.compile(source)),
                 Scope::Multiple(sources) => CompiledScope::Multiple(sources.iter().map(|source| runner.compile(source)).collect()),
             };
-            mapping.identity_mut().set_compiled_scope(Some(compiled_scope));
+            mapping.set_compiled_scope(Some(compiled_scope));
         }
 
         for attribute in mapping.attributes_mut().values_mut() {

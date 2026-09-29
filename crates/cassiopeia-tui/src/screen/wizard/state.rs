@@ -379,9 +379,9 @@ impl WizardState {
     /// editing tree is not valid.
     pub fn build_mapping(&self, data_model: &DataModel, runner: &mut TemplateRunner) -> Result<Mapping, ConversionError> {
         let attributes = to_domain_attributes(&filter_mapped(&self.root_attributes))?;
-        let identity = Identity::new(TemplateSource::new(self.identity_form.entity_id_template.clone()), None);
+        let identity = Identity::new(TemplateSource::new(self.identity_form.entity_id_template.clone()));
 
-        Ok(Mapping::new(Version::V4, data_model.clone(), identity, attributes, runner))
+        Ok(Mapping::new(Version::V4, data_model.clone(), identity, None, attributes, runner))
     }
 }
 

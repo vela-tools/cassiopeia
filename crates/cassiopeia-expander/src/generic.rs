@@ -73,7 +73,7 @@ impl GenericExpander {
         let mut child_contexts = Vec::new();
 
         let main_urn = self.urn_generator.generate_id(mapping, &data)?;
-        let main_scope = self.urn_generator.generate_scope(mapping.identity(), &data)?;
+        let main_scope = self.urn_generator.generate_scope(mapping, &data)?;
 
         for (attribute_name, attribute) in mapping.attributes() {
             if let Some(synthetic) = attribute.synthetic_entity() {
@@ -90,7 +90,7 @@ impl GenericExpander {
                             self.inject_vars(object);
                         }
                         let synthetic_urn = self.urn_generator.generate_id(synthetic, &token_data)?;
-                        let synthetic_scope = self.urn_generator.generate_scope(synthetic.identity(), &token_data)?;
+                        let synthetic_scope = self.urn_generator.generate_scope(synthetic, &token_data)?;
 
                         child_contexts.push(ParentContext::new(
                             ParentContextType::Child(synthetic_urn.clone()),
@@ -101,7 +101,7 @@ impl GenericExpander {
                     }
                 } else {
                     let synthetic_urn = self.urn_generator.generate_id(synthetic, &data)?;
-                    let synthetic_scope = self.urn_generator.generate_scope(synthetic.identity(), &data)?;
+                    let synthetic_scope = self.urn_generator.generate_scope(synthetic, &data)?;
 
                     let parent = ParentContext::new(ParentContextType::Parent(main_urn.clone()), RelationshipPath::flat(attribute_name.clone()));
                     // Each synthetic fragment carries its own copy of the source data; the main fragment
@@ -389,12 +389,13 @@ mod tests {
     }
 
     #[test]
-    fn an_identity_scope_becomes_the_fragment_scope() {
+    fn a_mapping_scope_becomes_the_fragment_scope() {
         let expander = expander(
             r#"{
                 version: "v4",
                 dataModel: "AirQualityObserved",
-                identity: { entityName: "S-{{ id }}", scope: "/Ljubljana" },
+                identity: { entityName: "S-{{ id }}" },
+                scope: "/Ljubljana",
                 attributes: { temperature: { source: "{{ temperature }}" } },
             }"#,
         );
@@ -403,6 +404,78 @@ mod tests {
         let scope = fragments[0].inner().scope().as_ref().unwrap();
 
         assert_eq!(serde_json::to_value(scope).unwrap(), json!("/Ljubljana"));
+    }
+
+    #[test]
+    fn a_list_of_mapping_scopes_resolves_per_record_into_the_fragment_scope() {
+        let expander = expander(
+            r#"{
+                version: "v4",
+                dataModel: "AirQualityObserved",
+                identity: { entityName: "S-{{ id }}" },
+                scope: ["/{{ country }}", "/{{ country }}/{{ city }}"],
+                attributes: { temperature: { source: "{{ temperature }}" } },
+            }"#,
+        );
+
+        let fragments = expander
+            .expand(record(json!({"id": 1, "country": "Slovenia", "city": "Ljubljana", "temperature": 21.5})))
+            .unwrap();
+        let scope = fragments[0].inner().scope().as_ref().unwrap();
+
+        assert_eq!(serde_json::to_value(scope).unwrap(), json!(["/Slovenia", "/Slovenia/Ljubljana"]));
+    }
+
+    #[test]
+    fn a_mapping_without_a_scope_produces_an_unscoped_fragment() {
+        let expander = expander(
+            r#"{
+                version: "v4",
+                dataModel: "AirQualityObserved",
+                identity: { entityName: "S-{{ id }}" },
+                attributes: { temperature: { source: "{{ temperature }}" } },
+            }"#,
+        );
+
+        let fragments = expander.expand(record(json!({"id": 1, "temperature": 21.5}))).unwrap();
+
+        assert!(fragments[0].inner().scope().is_none());
+    }
+
+    #[test]
+    fn a_synthetic_entity_takes_its_own_scope_not_its_parents() {
+        let expander = expander(
+            r#"{
+                version: "v4",
+                dataModel: "Building",
+                identity: { entityName: "B-{{ id }}" },
+                scope: "/Buildings",
+                attributes: {
+                    owner: {
+                        type: "Relationship",
+                        source: "{{ owner_id }}",
+                        target: { entity: "Organization" },
+                        syntheticEntity: {
+                            dataModel: "Organization",
+                            identity: { entityName: "{{ owner_id }}" },
+                            scope: "/Organizations/{{ region }}",
+                            attributes: { name: { source: "{{ owner_name }}" } },
+                        },
+                    },
+                },
+            }"#,
+        );
+
+        let fragments = expander
+            .expand(record(json!({"id": 1, "owner_id": "acme", "owner_name": "ACME", "region": "Coast"})))
+            .unwrap();
+        let scope_of = |target: &str| {
+            let fragment = fragments.iter().find(|fragment| urn(fragment) == target).unwrap();
+            serde_json::to_value(fragment.inner().scope().as_ref().unwrap()).unwrap()
+        };
+
+        assert_eq!(scope_of("urn:ngsi-ld:Building:B-1"), json!("/Buildings"));
+        assert_eq!(scope_of("urn:ngsi-ld:Organization:acme"), json!("/Organizations/Coast"));
     }
 
     #[test]

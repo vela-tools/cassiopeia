@@ -45,7 +45,7 @@ Cassiopeia applies the mapping once to each record. If the source contains sever
 
 JSON5 is the recommended format for mapping files. It keeps configuration documents readable. Comments can explain an unusual source field or modeling decision, trailing commas make edits and diffs less error-prone, and unquoted keys reduce visual noise. Cassiopeia also accepts strict JSON because JSON is a valid subset of JSON5. Use the `.json5` extension for mappings that use JSON5 features. A strict JSON file can use `.json` when another tool requires it.
 
-Every mapping has four top-level parts:
+Every mapping has four required top-level parts:
 
 ~~~json5
 {
@@ -64,11 +64,15 @@ Every mapping has four top-level parts:
 
 `dataModel` names the entity type the mapping produces. It can be an unqualified model name such as `Sensor` or a repository-qualified name such as `dataModel.OCF/Sensor`. A qualified name lets Cassiopeia find a published Smart Data Model's schema. An unqualified name declares a custom model without such a lookup. The [data-model guide](data-models.md) explains how to choose between a published model and one of your own.
 
-`identity` tells Cassiopeia how to build the entity ID and, optionally, its scope.
+`identity` tells Cassiopeia how to build the entity ID.
+
+`scope` is optional and places the entity in one or more NGSI-LD scopes.
 
 `attributes` is an object whose keys are the names of the attributes in the output entity. Each value is an attribute declaration.
 
 Input paths, output destinations, validation policy, and schedules do not belong in this document. Set them on the command line or in a manifest.
+
+Cassiopeia rejects a mapping with any other top-level key, so a misspelled or misplaced key fails when the mapping loads instead of being silently ignored.
 
 ## Choose the entity identity
 
@@ -84,13 +88,15 @@ For a record whose `station_id` is `A-17`, Cassiopeia builds an ID from `Station
 
 The identity should describe the thing represented by the entity. Use a stable source identifier when the source has one. Avoid using a changing measurement as the identity unless each measurement represents a different entity.
 
-An identity can also include one scope or several scopes:
+## Assign scopes
+
+A scope puts the entity into a hierarchy, such as a location or an organization, that consumers can filter on with `scopeQ`. Declare it at the top level of the mapping, next to `identity`:
 
 ~~~json5
 identity: {
     entityName: "Station-{{ station_id }}",
-    scope: "/{{ city }}",
-}
+},
+scope: "/{{ city }}",
 ~~~
 
 For multiple scopes, use an array of templates:
@@ -98,12 +104,14 @@ For multiple scopes, use an array of templates:
 ~~~json5
 identity: {
     entityName: "Station-{{ station_id }}",
-    scope: [
-        "/{{ country }}",
-        "/{{ city }}",
-    ],
-}
+},
+scope: [
+    "/{{ country }}",
+    "/{{ city }}",
+],
 ~~~
+
+Scope is not part of the entity's identity. NGSI-LD identifies an entity by its ID alone, and a scope can be changed after the entity is created, so `scope` does not belong inside `identity`. Cassiopeia rejects a mapping that declares it there.
 
 Cassiopeia resolves scopes per record. An empty or missing scope value does not add a scope to the entity.
 
@@ -540,7 +548,7 @@ owner: {
 }
 ~~~
 
-The synthetic entity uses the same source record but has its own data model, identity, and attributes. Cassiopeia emits it alongside the main entity and links it through the attribute that declares it. The nested mapping inherits the document version, so it does not need its own `version` field.
+The synthetic entity uses the same source record but has its own data model, identity, optional scope, and attributes. It does not inherit the main entity's scope. Cassiopeia emits it alongside the main entity and links it through the attribute that declares it. The nested mapping inherits the document version, so it does not need its own `version` field.
 
 Use a synthetic entity when the source record is the only place where the related entity can be described. A relationship to an entity defined by another source does not need a synthetic entity. It only needs a target declaration.
 

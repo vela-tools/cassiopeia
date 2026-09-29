@@ -7,7 +7,6 @@ use crate::urn::{
 use ahash::RandomState;
 use cassiopeia_mapping::{
     attribute::{Attribute, instance::AttributeInstance},
-    identity::Identity,
     mapping::Mapping,
     scope::CompiledScope,
     template::{
@@ -89,7 +88,7 @@ impl UrnGenerator {
         }
     }
 
-    /// Generates the scope, or scopes, for an entity from its identity configuration.
+    /// Generates the scope, or scopes, for an entity from its mapping's `scope` declaration.
     ///
     /// A scope template that resolves to null or an empty string contributes no scope; a multi-scope
     /// declaration that yields nothing at all resolves to `None` rather than an empty list.
@@ -98,8 +97,8 @@ impl UrnGenerator {
     ///
     /// Returns [`UrnError`] when a scope template fails to resolve or its resolved text is not a
     /// valid NGSI-LD scope.
-    pub fn generate_scope(&self, identity: &Identity, data: &Value) -> Result<Option<NgsiLdScope>> {
-        let Some(compiled_scope) = identity.compiled_scope() else {
+    pub fn generate_scope(&self, mapping: &Mapping, data: &Value) -> Result<Option<NgsiLdScope>> {
+        let Some(compiled_scope) = mapping.compiled_scope() else {
             return Ok(None);
         };
 

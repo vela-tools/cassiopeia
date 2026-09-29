@@ -4,18 +4,24 @@ use crate::{
     geometry_validation::validate,
     identity::Identity,
     observed_at::ObservedAt,
+    scope::{CompiledScope, Scope},
     template::{CompiledTemplate, TemplateSource, resolver::TemplateResolver, runner::TemplateRunner},
     version::Version,
 };
 use cassiopeia_common::error::io::{IoAction, IoError};
 use cassiopeia_ngsi_ld::data_model::DataModel;
-use getset::{Getters, MutGetters};
+use getset::{Getters, MutGetters, Setters};
 use serde::{Deserialize, Serialize};
 use serde_json::Value as JsonValue;
 use std::{fs::read_to_string, path::Path};
 
 /// A mapping document: the declaration of how one source record becomes one NGSI-LD entity.
-#[derive(Debug, Clone, Serialize, Deserialize, Getters, MutGetters)]
+///
+/// `deny_unknown_fields` makes a misplaced or misspelled key a load error: a key the document does
+/// not recognise would otherwise be dropped without a trace, and whatever it declared (a scope, for
+/// one) would silently vanish from every entity the mapping produces.
+#[derive(Debug, Clone, Serialize, Deserialize, Getters, MutGetters, Setters)]
+#[serde(deny_unknown_fields)]
 pub struct Mapping {
     /// The document format version.
     #[getset(get = "pub")]
@@ -32,6 +38,17 @@ pub struct Mapping {
     /// after the document is loaded.
     #[getset(get = "pub", get_mut = "pub")]
     identity: Identity,
+
+    /// The optional scope declaration, resolved per record into the entity's `scope` member (ETSI
+    /// GS CIM 009 v1.9.1 clause 4.18).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[getset(get = "pub")]
+    scope: Option<Scope>,
+
+    /// The compiled `scope`, filled in by the expansion stage once the mapping is loaded.
+    #[serde(skip)]
+    #[getset(get = "pub", set = "pub")]
+    compiled_scope: Option<CompiledScope>,
 
     /// The attribute declarations.
     ///
@@ -60,11 +77,20 @@ pub struct Mapping {
 
 impl Mapping {
     /// Declares a mapping and resolves its temporal fields.
-    pub fn new(version: Version, data_model: DataModel, identity: Identity, attributes: Attributes, runner: &mut TemplateRunner) -> Mapping {
+    pub fn new(
+        version: Version,
+        data_model: DataModel,
+        identity: Identity,
+        scope: Option<Scope>,
+        attributes: Attributes,
+        runner: &mut TemplateRunner,
+    ) -> Mapping {
         let mut mapping = Mapping {
             version,
             data_model,
             identity,
+            scope,
+            compiled_scope: None,
             attributes,
             temporal_source: None,
             observed_at_template: None,
@@ -159,14 +185,25 @@ impl Mapping {
 
 #[cfg(test)]
 mod tests {
-    use crate::{error::MappingError, mapping::Mapping, observed_at::ObservedAt, template::runner::TemplateRunner, version::Version};
+    use crate::{
+        error::MappingError,
+        identity::Identity,
+        mapping::Mapping,
+        observed_at::ObservedAt,
+        scope::Scope,
+        template::{TemplateSource, runner::TemplateRunner},
+        version::Version,
+    };
+    use cassiopeia_ngsi_ld::data_model::DataModel;
+    use indexmap::IndexMap;
     use serde_json::json;
     use std::path::Path;
 
     const TEMPORAL: &str = r#"{
         version: "v4",
         dataModel: "dataModel.Environment/AirQualityObserved",
-        identity: { entityName: "Station-{{ id }}", scope: "/test" },
+        identity: { entityName: "Station-{{ id }}" },
+        scope: "/test",
         attributes: {
             temperature: {
                 source: "{{ temperature }}",
@@ -336,6 +373,100 @@ mod tests {
         }"#;
 
         assert!(Mapping::from_json5(document, Path::new("test.json5"), &mut TemplateRunner::new()).is_err());
+    }
+
+    #[test]
+    fn reads_a_single_scope_declared_beside_the_identity() {
+        assert_eq!(parse(TEMPORAL).scope(), &Some(Scope::Single(TemplateSource::new("/test"))));
+    }
+
+    #[test]
+    fn reads_a_list_of_scopes_declared_beside_the_identity() {
+        let document = r#"{
+            version: "v4",
+            dataModel: "Sensor",
+            identity: { entityName: "S-{{ id }}" },
+            scope: ["/{{ country }}", "/{{ city }}"],
+            attributes: {},
+        }"#;
+
+        assert_eq!(
+            parse(document).scope(),
+            &Some(Scope::Multiple(vec![TemplateSource::new("/{{ country }}"), TemplateSource::new("/{{ city }}")]))
+        );
+    }
+
+    #[test]
+    fn scope_is_optional() {
+        assert_eq!(parse(NON_TEMPORAL).scope(), &None);
+    }
+
+    #[test]
+    fn a_scope_declared_inside_the_identity_is_rejected() {
+        let document = r#"{
+            version: "v4",
+            dataModel: "Sensor",
+            identity: { entityName: "S-{{ id }}", scope: "/test" },
+            attributes: {},
+        }"#;
+
+        assert!(matches!(
+            Mapping::from_json5(document, Path::new("test.json5"), &mut TemplateRunner::new()),
+            Err(MappingError::Parse { .. })
+        ));
+    }
+
+    #[test]
+    fn an_unknown_top_level_key_is_rejected() {
+        let document = r#"{
+            version: "v4",
+            dataModel: "Sensor",
+            identity: { entityName: "S-{{ id }}" },
+            scopes: "/test",
+            attributes: {},
+        }"#;
+
+        assert!(matches!(
+            Mapping::from_json5(document, Path::new("test.json5"), &mut TemplateRunner::new()),
+            Err(MappingError::Parse { .. })
+        ));
+    }
+
+    #[test]
+    fn a_declared_scope_serializes_beside_the_identity() {
+        let mapping = Mapping::new(
+            Version::V4,
+            "Sensor".parse::<DataModel>().unwrap(),
+            Identity::new(TemplateSource::new("S-{{ id }}")),
+            Some(Scope::Single(TemplateSource::new("/test"))),
+            IndexMap::new(),
+            &mut TemplateRunner::new(),
+        );
+
+        assert_eq!(
+            serde_json::to_value(&mapping).unwrap(),
+            json!({
+                "version": "v4",
+                "dataModel": "Sensor",
+                "identity": { "entityName": "S-{{ id }}" },
+                "scope": "/test",
+                "attributes": {},
+            })
+        );
+    }
+
+    #[test]
+    fn an_absent_scope_is_left_out_of_the_wire_form() {
+        let mapping = Mapping::new(
+            Version::V4,
+            "Sensor".parse::<DataModel>().unwrap(),
+            Identity::new(TemplateSource::new("S-{{ id }}")),
+            None,
+            IndexMap::new(),
+            &mut TemplateRunner::new(),
+        );
+
+        assert!(serde_json::to_value(&mapping).unwrap().get("scope").is_none());
     }
 
     #[test]

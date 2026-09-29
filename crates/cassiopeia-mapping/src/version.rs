@@ -10,7 +10,7 @@ use strum::Display;
 #[serde(rename_all = "lowercase")]
 #[strum(serialize_all = "lowercase")]
 pub enum Version {
-    /// Version 4: entity identity is declared as `entityName` plus an optional `scope`.
+    /// Version 4: entity identity is declared as `entityName`, with an optional mapping-level `scope`.
     V4,
 }
 

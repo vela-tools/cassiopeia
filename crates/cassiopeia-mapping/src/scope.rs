@@ -1,10 +1,13 @@
 use crate::template::{CompiledTemplate, TemplateSource};
 use serde::{Deserialize, Serialize};
 
-/// The scope declaration on a mapping's identity, before compilation.
+/// The scope declaration on a mapping, before compilation.
 ///
 /// NGSI-LD entities may carry one scope or several (ETSI GS CIM 009 v1.9.1 clause 4.18), so a
-/// mapping may write either a single template or a list of them.
+/// mapping may write either a single template or a list of them. Scope is an entity member rather
+/// than part of the entity's identity: it can be updated, appended to, or deleted over the entity's
+/// lifetime (clauses 5.6.2, 5.6.3, and 5.6.5), so it sits beside `dataModel` on the mapping instead
+/// of inside `identity`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(untagged)]
 pub enum Scope {

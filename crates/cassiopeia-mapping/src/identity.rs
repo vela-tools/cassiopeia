@@ -1,14 +1,16 @@
-use crate::{
-    scope::{CompiledScope, Scope},
-    template::{CompiledTemplate, TemplateSource},
-};
+use crate::template::{CompiledTemplate, TemplateSource};
 use getset::{Getters, Setters};
 use serde::{Deserialize, Serialize};
 
-/// How a mapping derives an entity's identity from a source record.
+/// How a mapping derives an entity's `id` from a source record.
+///
+/// Only the `id` identifies an NGSI-LD entity (ETSI GS CIM 009 v1.9.1 clause 3.1 and Table 5.2.4-1),
+/// so this block holds nothing but the settings that build it. Entity members that can change over
+/// the entity's lifetime, such as `scope`, are declared on the [`Mapping`](crate::mapping::Mapping)
+/// instead.
 ///
 /// `deny_unknown_fields` enforces the v4 identity shape: a document declaring an unrecognized
-/// field such as `urn` is rejected outright rather than parsed and silently ignored.
+/// field such as `urn` or `scope` is rejected outright rather than parsed and silently ignored.
 #[derive(Debug, Clone, Serialize, Deserialize, Getters, Setters)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct Identity {
@@ -16,52 +18,39 @@ pub struct Identity {
     #[getset(get = "pub")]
     entity_name: TemplateSource,
 
-    /// The optional scope declaration.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    #[getset(get = "pub")]
-    scope: Option<Scope>,
-
     /// The compiled `entity_name`, filled in once the mapping is loaded.
     #[serde(skip)]
     #[getset(get = "pub", set = "pub")]
     compiled_entity_name: Option<CompiledTemplate>,
-
-    /// The compiled `scope`, filled in once the mapping is loaded.
-    #[serde(skip)]
-    #[getset(get = "pub", set = "pub")]
-    compiled_scope: Option<CompiledScope>,
 }
 
 impl Identity {
-    /// Declares an identity from its entity-name template and optional scope.
+    /// Declares an identity from its entity-name template.
     #[must_use]
-    pub const fn new(entity_name: TemplateSource, scope: Option<Scope>) -> Identity {
+    pub const fn new(entity_name: TemplateSource) -> Identity {
         Identity {
             entity_name,
-            scope,
             compiled_entity_name: None,
-            compiled_scope: None,
         }
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use crate::{identity::Identity, scope::Scope, template::TemplateSource};
+    use crate::{identity::Identity, template::TemplateSource};
 
     #[test]
-    fn reads_an_entity_name_and_scope() {
-        let identity: Identity = serde_json::from_str(r#"{"entityName": "Station-{{ id }}", "scope": "/test"}"#).unwrap();
+    fn reads_an_entity_name() {
+        let identity: Identity = serde_json::from_str(r#"{"entityName": "Station-{{ id }}"}"#).unwrap();
 
         assert_eq!(identity.entity_name(), &TemplateSource::new("Station-{{ id }}"));
-        assert_eq!(identity.scope(), &Some(Scope::Single(TemplateSource::new("/test"))));
     }
 
     #[test]
-    fn scope_is_optional() {
-        let identity: Identity = serde_json::from_str(r#"{"entityName": "Station-{{ id }}"}"#).unwrap();
+    fn a_scope_declared_inside_the_identity_is_rejected() {
+        let result = serde_json::from_str::<Identity>(r#"{"entityName": "Station-{{ id }}", "scope": "/test"}"#);
 
-        assert_eq!(identity.scope(), &None);
+        assert!(result.is_err());
     }
 
     #[test]
@@ -73,12 +62,12 @@ mod tests {
 
     #[test]
     fn an_entity_name_is_required() {
-        assert!(serde_json::from_str::<Identity>(r#"{"scope": "/test"}"#).is_err());
+        assert!(serde_json::from_str::<Identity>("{}").is_err());
     }
 
     #[test]
-    fn the_compiled_templates_are_not_part_of_the_wire_form() {
-        let identity = Identity::new(TemplateSource::new("Station-{{ id }}"), None);
+    fn the_compiled_template_is_not_part_of_the_wire_form() {
+        let identity = Identity::new(TemplateSource::new("Station-{{ id }}"));
 
         assert_eq!(serde_json::to_string(&identity).unwrap(), r#"{"entityName":"Station-{{ id }}"}"#);
     }
