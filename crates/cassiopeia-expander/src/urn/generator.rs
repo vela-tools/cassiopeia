@@ -91,7 +91,8 @@ impl UrnGenerator {
     /// Generates the scope, or scopes, for an entity from its mapping's `scope` declaration.
     ///
     /// A scope template that resolves to null or an empty string contributes no scope; a multi-scope
-    /// declaration that yields nothing at all resolves to `None` rather than an empty list.
+    /// declaration that yields nothing at all resolves to `None` rather than an empty list, and one
+    /// whose templates resolve to the same scope yields it once.
     ///
     /// # Errors
     ///
@@ -104,7 +105,7 @@ impl UrnGenerator {
 
         match compiled_scope {
             CompiledScope::Single(template) => match self.resolve_scope_text(template, data)? {
-                Some(text) => Ok(Some(NgsiLdScope::Single(Self::parse_scope(text)?))),
+                Some(text) => Ok(Some(NgsiLdScope::from(Self::parse_scope(text)?))),
                 None => Ok(None),
             },
             CompiledScope::Multiple(templates) => {
@@ -115,7 +116,7 @@ impl UrnGenerator {
                     }
                 }
 
-                if scopes.is_empty() { Ok(None) } else { Ok(Some(NgsiLdScope::List(scopes))) }
+                Ok(NgsiLdScope::from_scopes(scopes))
             }
         }
     }
@@ -252,12 +253,16 @@ impl UrnGenerator {
         UrnBuilder::build(target_entity_type.as_str(), &id)
     }
 
-    /// Resolves one scope template to its text, treating null and empty results as "no scope".
+    /// Resolves one scope template to its text, treating an absent field anywhere in the template,
+    /// or an empty result, as "no scope".
+    ///
+    /// A scope path is only meaningful whole: `/{{ country }}/{{ city }}` over a record with no city
+    /// must contribute no scope rather than `/Slovenia/null`, which is a legal but wrong scope.
     fn resolve_scope_text(&self, template: &CompiledTemplate, data: &Value) -> Result<Option<String>> {
-        let text = match self.resolver.resolve(template, data)? {
-            Value::String(text) => text,
-            Value::Null => return Ok(None),
-            other @ (Value::Bool(_) | Value::Number(_) | Value::Array(_) | Value::Object(_)) => other.to_string(),
+        let text = match self.resolver.resolve_complete(template, data)? {
+            Some(Value::String(text)) => text,
+            None => return Ok(None),
+            Some(other @ (Value::Null | Value::Bool(_) | Value::Number(_) | Value::Array(_) | Value::Object(_))) => other.to_string(),
         };
 
         if text.is_empty() { Ok(None) } else { Ok(Some(text)) }

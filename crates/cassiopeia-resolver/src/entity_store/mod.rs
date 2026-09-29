@@ -1,3 +1,4 @@
+pub(crate) mod concurrent_scopes;
 pub mod dashmap_latest_store;
 pub mod dashmap_series_store;
 pub mod error;
@@ -5,6 +6,7 @@ pub mod merge;
 pub(crate) mod redb_database;
 pub(crate) mod redb_key;
 pub mod redb_latest_store;
+pub(crate) mod redb_scope;
 pub mod redb_series_store;
 pub mod store;
 pub mod stored_fragment;

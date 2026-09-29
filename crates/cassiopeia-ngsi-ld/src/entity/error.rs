@@ -38,12 +38,16 @@ pub enum NgsiLdError {
 
     /// A value was not a legal NGSI-LD scope.
     #[error(
-        "'{rejected}' is not a legal NGSI-LD scope: a scope is one or more '/'-separated segments, each starting with a letter (ETSI GS CIM 009 v1.9.1 clause 4.18)"
+        "'{rejected}' is not a legal NGSI-LD scope: a scope is one or more '/'-separated segments, each starting with a letter and continuing with letters, digits or underscores (ETSI GS CIM 009 v1.9.1 clause 4.18)"
     )]
     InvalidScope {
         /// The value that was rejected.
         rejected: Box<str>,
     },
+
+    /// A `scope` member was an empty array.
+    #[error("a scope array must hold at least one scope: an entity with no scope omits the member (ETSI GS CIM 009 v1.9.1 clause 4.18)")]
+    EmptyScopeList,
 
     /// A Smart Data Model repository qualifier was malformed.
     #[error(

@@ -4,6 +4,7 @@ use crate::{
         merge::deep_merge,
         redb_database::RedbDatabase,
         redb_key::{collect_ids, distinct_id_count, for_each_id_chunk, make_prefix, prefix_end},
+        redb_scope::{PendingScopes, SCOPES_TABLE, read_scope},
         store::{AssembledFragment, AssembledFragments, EntityStore, FragmentWrite, StoredUnit},
         stored_fragment::StoredFragment,
         supersession::supersedes,
@@ -14,7 +15,6 @@ use crate::{
 };
 use ahash::AHashMap;
 use cassiopeia_mapping::observed_at::ObservedAt;
-use cassiopeia_ngsi_ld::entity::scope::NgsiLdScope;
 use redb::{Durability, ReadableDatabase, ReadableTable, TableDefinition};
 use serde_json::Value;
 use smallvec::SmallVec;
@@ -22,7 +22,6 @@ use std::collections::hash_map::Entry;
 use urn_rs::Urn;
 
 const DATA_TABLE: TableDefinition<&[u8], &[u8]> = TableDefinition::new("data");
-const SCOPES_TABLE: TableDefinition<&[u8], &[u8]> = TableDefinition::new("scopes");
 
 /// Persistent disk-backed current-state entity store using [redb](https://docs.rs/redb).
 ///
@@ -61,8 +60,6 @@ struct LatestEntry {
     mapping_id: MappingId,
     data: Option<Value>,
     observed_at: Option<String>,
-    scope: Option<NgsiLdScope>,
-    base_key: Vec<u8>,
 }
 
 impl EntityStore for RedbLatestEntityStore {
@@ -80,6 +77,7 @@ impl EntityStore for RedbLatestEntityStore {
         }
 
         let mut grouped: AHashMap<Vec<u8>, LatestEntry> = AHashMap::new();
+        let mut pending_scopes = PendingScopes::default();
 
         let mut write_txn = self
             .db
@@ -116,19 +114,13 @@ impl EntityStore for RedbLatestEntityStore {
                             }
                             None => (None, None),
                         };
-                        vacant.insert(LatestEntry {
-                            mapping_id,
-                            data,
-                            observed_at,
-                            scope: None,
-                            base_key: base_id.as_str().as_bytes().to_vec(),
-                        })
+                        vacant.insert(LatestEntry { mapping_id, data, observed_at })
                     }
                 };
 
                 apply_write(entry, source_data, temporal, observed_at);
-                if scope.is_some() {
-                    entry.scope = scope;
+                if let Some(scope) = scope {
+                    pending_scopes.add(&base_id, scope);
                 }
             }
 
@@ -144,23 +136,9 @@ impl EntityStore for RedbLatestEntityStore {
                         .insert(key.as_slice(), bytes.as_slice())
                         .map_err(|e| self.db.err(e.into(), StoreAction::Insert))?;
                 }
-
-                if let Some(scope) = entry.scope {
-                    let encoded = rmp_serde::to_vec(&scope)?;
-                    let existing_matches = match scope_table
-                        .get(entry.base_key.as_slice())
-                        .map_err(|e| self.db.err(e.into(), StoreAction::Read))?
-                    {
-                        Some(guard) => guard.value() == encoded.as_slice(),
-                        None => false,
-                    };
-                    if !existing_matches {
-                        scope_table
-                            .insert(entry.base_key.as_slice(), encoded.as_slice())
-                            .map_err(|e| self.db.err(e.into(), StoreAction::Insert))?;
-                    }
-                }
             }
+
+            pending_scopes.flush(&mut scope_table, &self.db)?;
         }
 
         write_txn.commit().map_err(|e| self.db.err(e.into(), StoreAction::CommitTransaction))?;
@@ -203,13 +181,7 @@ impl EntityStore for RedbLatestEntityStore {
         // The prefix scan already returns each mapping in big-endian id order, so the joined unit is
         // deterministic without an extra sort.
         let units = if unit.is_empty() { Vec::new() } else { vec![unit] };
-        let scope = match scope_table
-            .get(base_id.as_str().as_bytes())
-            .map_err(|e| self.db.err(e.into(), StoreAction::Read))?
-        {
-            Some(guard) => Some(rmp_serde::from_slice(guard.value())?),
-            None => None,
-        };
+        let scope = read_scope(&scope_table, base_id, &self.db)?;
 
         Ok(AssembledFragments { scope, units })
     }
@@ -287,7 +259,7 @@ mod tests {
     use crate::{
         entity_store::{
             redb_latest_store::RedbLatestEntityStore,
-            store::{EntityStore, FragmentWrite},
+            store::{EntityStore, FragmentWrite, tests::assert_merges_scopes_per_id},
         },
         mapping_id::MappingId,
     };
@@ -297,6 +269,11 @@ mod tests {
 
     fn urn(value: &str) -> Urn {
         value.parse().unwrap()
+    }
+
+    #[test]
+    fn scopes_from_every_fragment_of_an_id_are_merged() {
+        assert_merges_scopes_per_id(&RedbLatestEntityStore::new().unwrap());
     }
 
     fn write(base_id: &Urn, data: serde_json::Value, mapping: u32, temporal: bool, observed_at: Option<&str>) -> FragmentWrite {

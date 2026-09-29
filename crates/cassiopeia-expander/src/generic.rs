@@ -427,6 +427,61 @@ mod tests {
     }
 
     #[test]
+    fn scope_templates_resolving_to_the_same_scope_yield_it_once() {
+        let expander = expander(
+            r#"{
+                version: "v4",
+                dataModel: "AirQualityObserved",
+                identity: { entityName: "S-{{ id }}" },
+                scope: ["/{{ city }}", "/{{ town }}"],
+                attributes: { temperature: { source: "{{ temperature }}" } },
+            }"#,
+        );
+
+        let fragments = expander
+            .expand(record(json!({"id": 1, "city": "Ljubljana", "town": "Ljubljana", "temperature": 21.5})))
+            .unwrap();
+        let scope = fragments[0].inner().scope().as_ref().unwrap();
+
+        assert_eq!(serde_json::to_value(scope).unwrap(), json!("/Ljubljana"));
+    }
+
+    #[test]
+    fn a_scope_template_with_a_missing_field_contributes_no_scope() {
+        let expander = expander(
+            r#"{
+                version: "v4",
+                dataModel: "AirQualityObserved",
+                identity: { entityName: "S-{{ id }}" },
+                scope: ["/{{ country }}", "/{{ country }}/{{ city }}"],
+                attributes: { temperature: { source: "{{ temperature }}" } },
+            }"#,
+        );
+
+        let fragments = expander.expand(record(json!({"id": 1, "country": "Slovenia", "temperature": 21.5}))).unwrap();
+        let scope = fragments[0].inner().scope().as_ref().unwrap();
+
+        assert_eq!(serde_json::to_value(scope).unwrap(), json!("/Slovenia"));
+    }
+
+    #[test]
+    fn a_single_scope_template_over_a_missing_field_leaves_the_fragment_unscoped() {
+        let expander = expander(
+            r#"{
+                version: "v4",
+                dataModel: "AirQualityObserved",
+                identity: { entityName: "S-{{ id }}" },
+                scope: "/{{ city }}",
+                attributes: { temperature: { source: "{{ temperature }}" } },
+            }"#,
+        );
+
+        let fragments = expander.expand(record(json!({"id": 1, "temperature": 21.5}))).unwrap();
+
+        assert!(fragments[0].inner().scope().is_none());
+    }
+
+    #[test]
     fn a_mapping_without_a_scope_produces_an_unscoped_fragment() {
         let expander = expander(
             r#"{

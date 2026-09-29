@@ -3,15 +3,14 @@ use crate::{
         error::Result,
         redb_database::RedbDatabase,
         redb_key::{collect_ids, for_each_id_chunk, make_prefix, prefix_end},
+        redb_scope::{PendingScopes, SCOPES_TABLE, read_scope},
         store::{AssembledFragment, AssembledFragments, EntityStore, FragmentWrite, StoredUnit},
         stored_fragment::StoredFragment,
     },
     store_action::StoreAction,
     store_write_strategy::StoreWriteStrategy,
 };
-use ahash::AHashMap;
-use cassiopeia_ngsi_ld::entity::scope::NgsiLdScope;
-use redb::{Durability, ReadableDatabase, ReadableTable, ReadableTableMetadata, TableDefinition};
+use redb::{Durability, ReadableDatabase, ReadableTableMetadata, TableDefinition};
 use smallvec::smallvec;
 use std::sync::{
     Arc,
@@ -20,7 +19,6 @@ use std::sync::{
 use urn_rs::Urn;
 
 const DATA_TABLE: TableDefinition<&[u8], &[u8]> = TableDefinition::new("data");
-const SCOPES_TABLE: TableDefinition<&[u8], &[u8]> = TableDefinition::new("scopes");
 
 /// Persistent disk-backed series entity store using [redb](https://docs.rs/redb).
 ///
@@ -74,7 +72,7 @@ impl EntityStore for RedbSeriesEntityStore {
             return Ok(());
         }
 
-        let mut scope_writes: AHashMap<Vec<u8>, NgsiLdScope> = AHashMap::new();
+        let mut pending_scopes = PendingScopes::default();
 
         let mut write_txn = self
             .db
@@ -112,22 +110,11 @@ impl EntityStore for RedbSeriesEntityStore {
                     .map_err(|e| self.db.err(e.into(), StoreAction::Insert))?;
 
                 if let Some(scope) = scope {
-                    scope_writes.insert(base_id.as_str().as_bytes().to_vec(), scope);
+                    pending_scopes.add(&base_id, scope);
                 }
             }
 
-            for (key, scope) in scope_writes {
-                let encoded = rmp_serde::to_vec(&scope)?;
-                let existing_matches = match scope_table.get(key.as_slice()).map_err(|e| self.db.err(e.into(), StoreAction::Read))? {
-                    Some(guard) => guard.value() == encoded.as_slice(),
-                    None => false,
-                };
-                if !existing_matches {
-                    scope_table
-                        .insert(key.as_slice(), encoded.as_slice())
-                        .map_err(|e| self.db.err(e.into(), StoreAction::Insert))?;
-                }
-            }
+            pending_scopes.flush(&mut scope_table, &self.db)?;
         }
 
         write_txn.commit().map_err(|e| self.db.err(e.into(), StoreAction::CommitTransaction))?;
@@ -167,13 +154,7 @@ impl EntityStore for RedbSeriesEntityStore {
             }]);
         }
 
-        let scope = match scope_table
-            .get(base_id.as_str().as_bytes())
-            .map_err(|e| self.db.err(e.into(), StoreAction::Read))?
-        {
-            Some(guard) => Some(rmp_serde::from_slice(guard.value())?),
-            None => None,
-        };
+        let scope = read_scope(&scope_table, base_id, &self.db)?;
 
         Ok(AssembledFragments { scope, units })
     }
@@ -238,7 +219,7 @@ mod tests {
     use crate::{
         entity_store::{
             redb_series_store::RedbSeriesEntityStore,
-            store::{EntityStore, FragmentWrite},
+            store::{EntityStore, FragmentWrite, tests::assert_merges_scopes_per_id},
         },
         mapping_id::MappingId,
     };
@@ -248,6 +229,11 @@ mod tests {
 
     fn urn(value: &str) -> Urn {
         value.parse().unwrap()
+    }
+
+    #[test]
+    fn scopes_from_every_fragment_of_an_id_are_merged() {
+        assert_merges_scopes_per_id(&RedbSeriesEntityStore::new().unwrap());
     }
 
     fn write(base_id: &Urn, data: serde_json::Value, observed_at: &str) -> FragmentWrite {

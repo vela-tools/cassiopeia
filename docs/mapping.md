@@ -113,7 +113,11 @@ scope: [
 
 Scope is not part of the entity's identity. NGSI-LD identifies an entity by its ID alone, and a scope can be changed after the entity is created, so `scope` does not belong inside `identity`. Cassiopeia rejects a mapping that declares it there.
 
-Cassiopeia resolves scopes per record. An empty or missing scope value does not add a scope to the entity.
+Each scope is one or more `/`-separated levels. A level starts with a letter and continues with letters, digits, or underscores, in any script, so `/Ljubljana/Šiška` is valid. Cassiopeia stops with an error when a resolved scope does not follow this form.
+
+Cassiopeia resolves scopes per record. If a field a scope template refers to is missing, null, or empty, that scope is left out rather than written as a partial path. With the array above, a record that has a `country` but no `city` gets only its country scope, not an extra `/null`, and a template such as `/{{ country }}/{{ city }}` never produces `/Slovenia/null`. A record for which no scope resolves gets no `scope` at all.
+
+When several mappings, or several records, contribute to the same entity, the entity receives every distinct scope any of them declared, as NGSI-LD requires when representations of one entity are combined. Duplicates are dropped and the scopes are written in sorted order, so the output is the same on every run. An entity with one scope has a string `scope`; an entity with several has an array.
 
 ## Map an attribute
 

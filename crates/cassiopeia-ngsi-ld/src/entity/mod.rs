@@ -35,11 +35,10 @@ pub struct NgsiLdEntity {
     /// The entity type name.
     #[serde(rename = "type")]
     pub entity_type: NameBuf,
-    /// The Smart Data Model this entity was produced from.
+    /// The scopes the entity belongs to (ETSI GS CIM 009 v1.9.1 clause 4.18), absent when it has none.
     ///
-    /// Carried through the pipeline for schema resolution but never serialized.
+    /// Written by [`SerializeRepr`] rather than the derived serializer, which skips it.
     #[serde(skip)]
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub scope: Option<NgsiLdScope>,
     /// The entity's attributes, flattened into the top-level object on serialization.
     #[serde(flatten)]

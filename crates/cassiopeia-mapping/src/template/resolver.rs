@@ -40,6 +40,27 @@ impl TemplateResolver {
         }
     }
 
+    /// Evaluates one compiled template, yielding `None` when any field it references is absent.
+    ///
+    /// A field is absent when it is missing, null, or empty text. [`resolve`](Self::resolve) renders
+    /// such a gap as the text `null` inside a concatenation, and
+    /// [`resolve_joined`](Self::resolve_joined) drops it; neither suits a value that is only meaningful
+    /// whole, such as an NGSI-LD scope path, where `/Slovenia/null` or `/Slovenia/` would be wrong.
+    /// Tera cannot report which fields a `Complex` template read, so for that shape only an empty
+    /// rendering counts as absent.
+    ///
+    /// # Errors
+    /// Returns [`TemplateError::Render`] when a `Complex` template fails to render in Tera.
+    pub fn resolve_complete(&self, compiled: &CompiledTemplate, data: &JsonValue) -> Result<Option<JsonValue>> {
+        match compiled {
+            // The return type owns its `JsonValue`, so the literal is cloned into an owned string.
+            CompiledTemplate::Static(literal) => Ok(Some(JsonValue::String(literal.clone()))),
+            CompiledTemplate::Simple(key) => Ok(present(key.read(data))),
+            CompiledTemplate::Composite(parts) => Ok(Self::join_complete(parts, data).map(JsonValue::String)),
+            CompiledTemplate::Complex(name) => Ok(present(self.render(name, data)?)),
+        }
+    }
+
     /// Concatenates the resolved text of several templates into one identifier, dropping any part
     /// that resolves to null.
     ///
@@ -88,27 +109,38 @@ impl TemplateResolver {
 
     /// Concatenates the parts of a composite template, stringifying any non-string field value.
     fn join(parts: &[TemplatePart], data: &JsonValue) -> String {
-        // Seed the buffer from the known static text plus a small allowance per dynamic field, so the
-        // common composite (a literal prefix and one field) fills without reallocating.
-        let capacity = parts
+        parts.iter().fold(String::with_capacity(Self::joined_capacity(parts)), |mut out, part| {
+            match part {
+                TemplatePart::Static(literal) => out.push_str(literal),
+                TemplatePart::Dynamic(key) => append_value(&mut out, key.read(data)),
+            }
+            out
+        })
+    }
+
+    /// Concatenates the parts of a composite template like [`join`](Self::join), but yields `None` as
+    /// soon as one field is absent (see [`present`]).
+    fn join_complete(parts: &[TemplatePart], data: &JsonValue) -> Option<String> {
+        parts.iter().try_fold(String::with_capacity(Self::joined_capacity(parts)), |mut out, part| {
+            match part {
+                TemplatePart::Static(literal) => out.push_str(literal),
+                TemplatePart::Dynamic(key) => append_value(&mut out, present(key.read(data))?),
+            }
+            Some(out)
+        })
+    }
+
+    /// Sizes a composite's output buffer from its known static text plus a small allowance per
+    /// dynamic field, so the common composite (a literal prefix and one field) fills without
+    /// reallocating.
+    fn joined_capacity(parts: &[TemplatePart]) -> usize {
+        parts
             .iter()
             .map(|part| match part {
                 TemplatePart::Static(literal) => literal.len(),
                 TemplatePart::Dynamic(_) => 8,
             })
-            .sum();
-        parts.iter().fold(String::with_capacity(capacity), |mut out, part| {
-            match part {
-                TemplatePart::Static(literal) => out.push_str(literal),
-                TemplatePart::Dynamic(key) => match key.read(data) {
-                    JsonValue::String(value) => out.push_str(&value),
-                    other @ (JsonValue::Null | JsonValue::Bool(_) | JsonValue::Number(_) | JsonValue::Array(_) | JsonValue::Object(_)) => {
-                        out.push_str(&other.to_string());
-                    }
-                },
-            }
-            out
-        })
+            .sum()
     }
 
     /// Renders a registered Tera template against a source record.
@@ -174,6 +206,26 @@ impl TemplateResolver {
         }
 
         slots.into_iter().collect()
+    }
+}
+
+/// Keeps a resolved field value, or yields `None` when it is absent: null or empty text.
+fn present(value: JsonValue) -> Option<JsonValue> {
+    match value {
+        JsonValue::Null => None,
+        JsonValue::String(text) if text.is_empty() => None,
+        other @ (JsonValue::String(_) | JsonValue::Bool(_) | JsonValue::Number(_) | JsonValue::Array(_) | JsonValue::Object(_)) => Some(other),
+    }
+}
+
+/// Appends one field value to a composite's output, a string as its text and anything else as its
+/// JSON rendering.
+fn append_value(out: &mut String, value: JsonValue) {
+    match value {
+        JsonValue::String(text) => out.push_str(&text),
+        other @ (JsonValue::Null | JsonValue::Bool(_) | JsonValue::Number(_) | JsonValue::Array(_) | JsonValue::Object(_)) => {
+            out.push_str(&other.to_string());
+        }
     }
 }
 
@@ -244,6 +296,72 @@ mod tests {
         let compiled = CompiledTemplate::Composite(vec![TemplatePart::Static("Station-".to_string()), TemplatePart::Dynamic(FieldPath::new("id"))]);
 
         assert_eq!(resolver.resolve(&compiled, &json!({"id": 42})).unwrap(), json!("Station-42"));
+    }
+
+    #[test]
+    fn a_complete_composite_resolves_to_its_concatenation() {
+        let resolver = TemplateRunner::new().resolver();
+        let compiled = CompiledTemplate::Composite(vec![
+            TemplatePart::Static("/".to_string()),
+            TemplatePart::Dynamic(FieldPath::new("country")),
+            TemplatePart::Static("/".to_string()),
+            TemplatePart::Dynamic(FieldPath::new("city")),
+        ]);
+
+        assert_eq!(
+            resolver
+                .resolve_complete(&compiled, &json!({"country": "Slovenia", "city": "Ljubljana"}))
+                .unwrap(),
+            Some(json!("/Slovenia/Ljubljana"))
+        );
+    }
+
+    #[test]
+    fn a_composite_with_a_missing_null_or_empty_field_is_incomplete() {
+        let resolver = TemplateRunner::new().resolver();
+        let compiled = CompiledTemplate::Composite(vec![
+            TemplatePart::Static("/".to_string()),
+            TemplatePart::Dynamic(FieldPath::new("country")),
+            TemplatePart::Static("/".to_string()),
+            TemplatePart::Dynamic(FieldPath::new("city")),
+        ]);
+
+        for record in [
+            json!({"country": "Slovenia"}),
+            json!({"country": "Slovenia", "city": null}),
+            json!({"country": "Slovenia", "city": ""}),
+        ] {
+            assert_eq!(resolver.resolve_complete(&compiled, &record).unwrap(), None, "{record}");
+        }
+    }
+
+    #[test]
+    fn a_complete_composite_stringifies_a_non_string_field() {
+        let resolver = TemplateRunner::new().resolver();
+        let compiled = CompiledTemplate::Composite(vec![TemplatePart::Static("/Zone".to_string()), TemplatePart::Dynamic(FieldPath::new("zone"))]);
+
+        assert_eq!(resolver.resolve_complete(&compiled, &json!({"zone": 7})).unwrap(), Some(json!("/Zone7")));
+    }
+
+    #[test]
+    fn a_simple_template_over_an_absent_field_is_incomplete() {
+        let resolver = TemplateRunner::new().resolver();
+        let compiled = CompiledTemplate::Simple(FieldPath::new("city"));
+
+        assert_eq!(resolver.resolve_complete(&compiled, &json!({})).unwrap(), None);
+        assert_eq!(resolver.resolve_complete(&compiled, &json!({"city": ""})).unwrap(), None);
+        assert_eq!(
+            resolver.resolve_complete(&compiled, &json!({"city": "/Ljubljana"})).unwrap(),
+            Some(json!("/Ljubljana"))
+        );
+    }
+
+    #[test]
+    fn a_static_template_is_always_complete() {
+        let resolver = TemplateRunner::new().resolver();
+        let compiled = CompiledTemplate::Static("/Ljubljana".to_string());
+
+        assert_eq!(resolver.resolve_complete(&compiled, &json!({})).unwrap(), Some(json!("/Ljubljana")));
     }
 
     #[test]

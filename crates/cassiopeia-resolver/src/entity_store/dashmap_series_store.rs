@@ -1,12 +1,12 @@
 use crate::{
     entity_store::{
+        concurrent_scopes::ConcurrentScopes,
         error::Result,
         store::{AssembledFragment, AssembledFragments, EntityStore, FragmentWrite, StoredUnit},
     },
     store_write_strategy::StoreWriteStrategy,
 };
 use ahash::RandomState;
-use cassiopeia_ngsi_ld::entity::scope::NgsiLdScope;
 use dashmap::DashMap;
 use smallvec::smallvec;
 use std::sync::Arc;
@@ -18,9 +18,9 @@ use urn_rs::Urn;
 /// Assembly returns one emit-unit per fragment, so a temporal id's observations each become a
 /// single-instance entity the fold stage later folds into one `EntityTemporal` (ETSI GS CIM 009
 /// v1.9.1 clause 5.2.20).
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Default)]
 pub struct DashMapSeriesEntityStore {
-    scopes: Arc<DashMap<Urn, NgsiLdScope, RandomState>>,
+    scopes: ConcurrentScopes,
     data: Arc<DashMap<Urn, Vec<AssembledFragment>, RandomState>>,
 }
 
@@ -28,10 +28,7 @@ impl DashMapSeriesEntityStore {
     /// Creates a new, empty in-memory series entity store.
     #[must_use]
     pub fn new() -> DashMapSeriesEntityStore {
-        DashMapSeriesEntityStore {
-            scopes: Arc::new(DashMap::with_hasher(RandomState::new())),
-            data: Arc::new(DashMap::with_hasher(RandomState::new())),
-        }
+        DashMapSeriesEntityStore::default()
     }
 }
 
@@ -65,7 +62,7 @@ impl EntityStore for DashMapSeriesEntityStore {
         }
 
         if let Some(scope) = scope {
-            self.scopes.insert(base_id, scope);
+            self.scopes.merge(base_id, scope);
         }
         Ok(())
     }
@@ -84,7 +81,7 @@ impl EntityStore for DashMapSeriesEntityStore {
             .remove(base_id)
             .map(|(_id, fragments)| fragments.into_iter().map(|fragment| smallvec![fragment]).collect())
             .unwrap_or_default();
-        let scope = self.scopes.get(base_id).map(|entry| entry.clone());
+        let scope = self.scopes.get(base_id);
         Ok(AssembledFragments { scope, units })
     }
 
@@ -111,18 +108,12 @@ impl EntityStore for DashMapSeriesEntityStore {
     }
 }
 
-impl Default for DashMapSeriesEntityStore {
-    fn default() -> DashMapSeriesEntityStore {
-        DashMapSeriesEntityStore::new()
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use crate::{
         entity_store::{
             dashmap_series_store::DashMapSeriesEntityStore,
-            store::{EntityStore, FragmentWrite},
+            store::{EntityStore, FragmentWrite, tests::assert_merges_scopes_per_id},
         },
         mapping_id::MappingId,
     };
@@ -132,6 +123,11 @@ mod tests {
 
     fn urn(value: &str) -> Urn {
         value.parse().unwrap()
+    }
+
+    #[test]
+    fn scopes_from_every_fragment_of_an_id_are_merged() {
+        assert_merges_scopes_per_id(&DashMapSeriesEntityStore::new());
     }
 
     fn write(base_id: &Urn, data: serde_json::Value, observed_at: &str) -> FragmentWrite {

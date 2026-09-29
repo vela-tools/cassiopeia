@@ -178,3 +178,51 @@ impl Clone for Box<dyn EntityStore> {
         self.clone_box()
     }
 }
+
+#[cfg(test)]
+pub(crate) mod tests {
+    use crate::{
+        entity_store::store::{EntityStore, FragmentWrite},
+        mapping_id::MappingId,
+    };
+    use cassiopeia_ngsi_ld::entity::scope::{NgsiLdScope, ScopeBuf};
+    use serde_json::json;
+    use urn_rs::Urn;
+
+    fn write(base_id: &Urn, mapping: u32, scopes: &[&str]) -> FragmentWrite {
+        FragmentWrite {
+            base_id: base_id.clone(),
+            source_data: json!({ "mapping": mapping }),
+            mapping_id: MappingId::new(mapping),
+            temporal: false,
+            observed_at: None,
+            scope: NgsiLdScope::from_scopes(scopes.iter().map(|scope| ScopeBuf::new(*scope).unwrap())),
+        }
+    }
+
+    /// Cross-backend contract every [`EntityStore`] must honour: the scopes every fragment of one id
+    /// declares are merged into one sorted set without duplicates, as clause 4.18 of
+    /// ETSI GS CIM 009 v1.9.1 mandates when representations of one entity are combined. A fragment
+    /// declaring no scope removes none, the merge spans separate writes as well as one batch, and an
+    /// id whose fragments declare no scope assembles without one. Every backend calls this so all of
+    /// them are held to identical behaviour.
+    pub(crate) fn assert_merges_scopes_per_id(store: &dyn EntityStore) {
+        let scoped: Urn = "urn:ngsi-ld:Camera:1".parse().unwrap();
+        let unscoped: Urn = "urn:ngsi-ld:Camera:2".parse().unwrap();
+
+        store.store_fragment(write(&scoped, 1, &["/d", "/b"])).unwrap();
+        store
+            .store_fragment_batch(vec![
+                write(&scoped, 2, &["/b", "/c"]),
+                write(&scoped, 1, &[]),
+                write(&scoped, 3, &["/c", "/d"]),
+                write(&unscoped, 1, &[]),
+            ])
+            .unwrap();
+        store.store_fragment(write(&scoped, 2, &["/a"])).unwrap();
+
+        let scope = store.assemble_entity(&scoped).unwrap().scope;
+        assert_eq!(serde_json::to_value(scope).unwrap(), json!(["/a", "/b", "/c", "/d"]));
+        assert!(store.assemble_entity(&unscoped).unwrap().scope.is_none());
+    }
+}

@@ -45,7 +45,8 @@ pub struct TemporalAggregate {
     id: Urn,
     /// The entity type of the first observation.
     entity_type: NameBuf,
-    /// The Smart Data Model scope of the first observation, retained for schema resolution.
+    /// The scopes of the first observation. The entity store merges every fragment's scopes per id
+    /// before assembly, so every observation of one id carries the same set.
     scope: Option<NgsiLdScope>,
     /// The accumulating attribute occurrences, in first-seen order.
     attributes: AggregatedAttributes,

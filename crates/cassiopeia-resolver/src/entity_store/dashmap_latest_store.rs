@@ -1,5 +1,6 @@
 use crate::{
     entity_store::{
+        concurrent_scopes::ConcurrentScopes,
         error::Result,
         merge::deep_merge,
         store::{AssembledFragment, AssembledFragments, EntityStore, FragmentWrite, StoredUnit},
@@ -10,7 +11,6 @@ use crate::{
 };
 use ahash::{AHashMap, RandomState};
 use cassiopeia_mapping::observed_at::ObservedAt;
-use cassiopeia_ngsi_ld::entity::scope::NgsiLdScope;
 use dashmap::DashMap;
 use serde_json::Value;
 use std::sync::Arc;
@@ -32,9 +32,9 @@ struct LatestFragment {
 /// so a temporal id's many observations never grow the stored footprint. The `exact-eq` feature of
 /// `urn-rs` makes `Urn`'s `Hash`/`Eq` cover the full normalized URN, so keys hash without a
 /// `to_string()` round-trip.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Default)]
 pub struct DashMapLatestEntityStore {
-    scopes: Arc<DashMap<Urn, NgsiLdScope, RandomState>>,
+    scopes: ConcurrentScopes,
     data: Arc<DashMap<Urn, AHashMap<MappingId, LatestFragment>, RandomState>>,
 }
 
@@ -42,10 +42,7 @@ impl DashMapLatestEntityStore {
     /// Creates a new, empty in-memory current-state entity store.
     #[must_use]
     pub fn new() -> DashMapLatestEntityStore {
-        DashMapLatestEntityStore {
-            scopes: Arc::new(DashMap::with_hasher(RandomState::new())),
-            data: Arc::new(DashMap::with_hasher(RandomState::new())),
-        }
+        DashMapLatestEntityStore::default()
     }
 }
 
@@ -87,7 +84,7 @@ impl EntityStore for DashMapLatestEntityStore {
         }
 
         if let Some(scope) = scope {
-            self.scopes.insert(base_id, scope);
+            self.scopes.merge(base_id, scope);
         }
         Ok(())
     }
@@ -114,7 +111,7 @@ impl EntityStore for DashMapLatestEntityStore {
             }
             _ => Vec::new(),
         };
-        let scope = self.scopes.get(base_id).map(|entry| entry.clone());
+        let scope = self.scopes.get(base_id);
         Ok(AssembledFragments { scope, units })
     }
 
@@ -139,12 +136,6 @@ impl EntityStore for DashMapLatestEntityStore {
 
     fn clone_box(&self) -> Box<dyn EntityStore> {
         Box::new(self.clone())
-    }
-}
-
-impl Default for DashMapLatestEntityStore {
-    fn default() -> DashMapLatestEntityStore {
-        DashMapLatestEntityStore::new()
     }
 }
 
@@ -184,7 +175,7 @@ mod tests {
     use crate::{
         entity_store::{
             dashmap_latest_store::DashMapLatestEntityStore,
-            store::{EntityStore, FragmentWrite},
+            store::{EntityStore, FragmentWrite, tests::assert_merges_scopes_per_id},
         },
         mapping_id::MappingId,
     };
@@ -194,6 +185,11 @@ mod tests {
 
     fn urn(value: &str) -> Urn {
         value.parse().unwrap()
+    }
+
+    #[test]
+    fn scopes_from_every_fragment_of_an_id_are_merged() {
+        assert_merges_scopes_per_id(&DashMapLatestEntityStore::new());
     }
 
     fn write(base_id: &Urn, data: serde_json::Value, mapping: u32, temporal: bool, observed_at: Option<&str>) -> FragmentWrite {
