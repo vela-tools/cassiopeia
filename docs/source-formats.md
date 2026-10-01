@@ -181,6 +181,7 @@ A placemark record has the same general shape as a GeoJSON feature:
         "name": "Main station",
         "description": "Central platform",
         "folder": "Stations",
+        "timeStamp": "2026-08-03T10:00:00Z",
         "temperature": "21.5"
     },
     "geometry": {
@@ -193,9 +194,15 @@ A placemark record has the same general shape as a GeoJSON feature:
 }
 ~~~
 
-Cassiopeia places the placemark's `name`, `description`, and extended data in `properties`. Its `id` attribute becomes `id`, and supported KML geometry becomes GeoJSON under `geometry`. A KML `LinearRing` becomes a GeoJSON `LineString`, matching the source semantics of a standalone ring.
+Cassiopeia places the placemark's `name`, `description`, time (see below), and extended data in `properties`. Its `id` attribute becomes `id`, and supported KML geometry becomes GeoJSON under `geometry`. A KML `LinearRing` becomes a GeoJSON `LineString`, matching the source semantics of a standalone ring.
 
 A KML `MultiGeometry` may mix geometry kinds, which GeoJSON's multi-geometries cannot. Cassiopeia folds one into the multi-geometry of its members' family: a single member becomes that geometry, points become a `MultiPoint`, line strings and linear rings a `MultiLineString`, polygons a `MultiPolygon`, and a nested `MultiGeometry` contributes its own members to the same fold. A `MultiGeometry` mixing families has no GeoJSON equivalent and produces no `geometry` key, exactly like a KML geometry kind GeoJSON does not describe.
+
+### Placemark times
+
+KML dates a placemark with a time primitive, and Cassiopeia carries it into `properties` so a mapping can use it. A `<TimeStamp>` becomes `timeStamp`, holding the value of its `<when>`. A `<TimeSpan>` becomes a `timeSpan` object holding whichever of `begin` and `end` the span declares, so an open-ended span has only one of them. A dated KML export can therefore feed a temporal mapping directly, with `{{ properties.timeStamp }}` as the source of `observedAt`, or `{{ properties.timeSpan.begin }}` and `{{ properties.timeSpan.end }}` as the bounds of an observation window.
+
+Cassiopeia copies the values as written, trimming only surrounding whitespace. KML allows a full date and time with or without a UTC offset, a date, a year and month, or a year alone, so declare `transformation: "datetime"` on the attribute or `observedAt` that reads it. An empty `<when>`, or a span without a non-empty bound, adds nothing. Extended data with the same name as `timeStamp` or `timeSpan` takes precedence, as it does over `name` and `description`. Only a placemark's own time primitive is read; one declared on an enclosing `Folder` or `Document` is not applied to the placemarks inside it.
 
 ### Folders and collections
 

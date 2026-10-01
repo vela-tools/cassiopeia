@@ -1,7 +1,7 @@
 use crate::{
     error::IngestorError,
     ingestor::Ingestor,
-    kml::{error::KmlIngestError, extended_data::extract_extended_data, geometry::kml_geometry_to_geojson},
+    kml::{error::KmlIngestError, extended_data::extract_extended_data, geometry::kml_geometry_to_geojson, time_primitive::extract_time_primitive},
 };
 use ::kml::{Kml, KmlReader, types::Placemark};
 use cassiopeia_common::{channel::ChannelSender, collection::CollectionName, format::DataFormat, signal::Signal};
@@ -88,6 +88,7 @@ impl KmlIngestor {
             properties.insert("description".to_string(), Value::String(description));
         }
 
+        extract_time_primitive(&placemark.children, &mut properties);
         extract_extended_data(&placemark.children, &mut properties);
 
         if let Some(id) = placemark.attrs.get("id") {
@@ -221,7 +222,7 @@ mod tests {
         record::Record,
     };
     use mediatype::media_type;
-    use serde_json::Value;
+    use serde_json::{Value, json};
     use std::{collections::HashMap, fs::File, io::Write, sync::mpsc::sync_channel, thread};
     use temp_dir::TempDir;
 
@@ -288,9 +289,9 @@ mod tests {
         assert!(data.contains_key("geometry"));
     }
 
-    // Mirrors the DenHaag "AI Tech Sensor configuration" file: three sibling folders under one
-    // Document, each an implicit schema with its own geometry kind and ExtendedData. Folder names
-    // carry a space (routing must keep them verbatim), and counts are 2/2/3.
+    // Three sibling folders under one Document, each an implicit schema with its own geometry kind
+    // and ExtendedData. Folder names carry a space (routing must keep them verbatim), and counts
+    // are 2/2/3.
     const THREE_FOLDERS: &str = r#"<?xml version="1.0" encoding="UTF-8"?>
 <kml xmlns="http://www.opengis.net/kml/2.2">
   <Document>
@@ -387,6 +388,119 @@ mod tests {
         let records = ingest_all(profiled_kml(FOLDERLESS).1);
         assert_eq!(records.len(), 1);
         assert_eq!(records[0].collection(), &None);
+    }
+
+    fn properties_of(record: &Record) -> &serde_json::Map<String, Value> {
+        record.data().get("properties").and_then(Value::as_object).unwrap()
+    }
+
+    fn single_placemark(body: &str) -> String {
+        format!(
+            r#"<?xml version="1.0" encoding="UTF-8"?>
+<kml xmlns="http://www.opengis.net/kml/2.2">
+  <Document>
+    <Placemark>
+      <name>Station A</name>
+      {body}
+      <Point><coordinates>14.5,46.05,0</coordinates></Point>
+    </Placemark>
+  </Document>
+</kml>"#
+        )
+    }
+
+    #[test]
+    fn a_time_stamp_becomes_the_time_stamp_property() {
+        let records = ingest_all(profiled_kml(&single_placemark("<TimeStamp><when>2007-01-14T21:05:02Z</when></TimeStamp>")).1);
+
+        assert_eq!(properties_of(&records[0]).get("timeStamp"), Some(&json!("2007-01-14T21:05:02Z")));
+    }
+
+    #[test]
+    fn a_time_stamp_with_an_offset_passes_through_verbatim() {
+        let records = ingest_all(profiled_kml(&single_placemark("<TimeStamp><when>1997-07-16T10:30:15+03:00</when></TimeStamp>")).1);
+
+        assert_eq!(properties_of(&records[0]).get("timeStamp"), Some(&json!("1997-07-16T10:30:15+03:00")));
+    }
+
+    #[test]
+    fn surrounding_whitespace_in_a_time_value_is_trimmed() {
+        let records = ingest_all(profiled_kml(&single_placemark("<TimeStamp>\n  <when>\n    2007-01-14\n  </when>\n</TimeStamp>")).1);
+
+        assert_eq!(properties_of(&records[0]).get("timeStamp"), Some(&json!("2007-01-14")));
+    }
+
+    #[test]
+    fn a_time_span_becomes_an_object_holding_both_bounds() {
+        let records = ingest_all(
+            profiled_kml(&single_placemark(
+                "<TimeSpan><begin>2026-08-03T10:00:00Z</begin><end>2026-08-03T10:15:00Z</end></TimeSpan>",
+            ))
+            .1,
+        );
+
+        assert_eq!(
+            properties_of(&records[0]).get("timeSpan"),
+            Some(&json!({"begin": "2026-08-03T10:00:00Z", "end": "2026-08-03T10:15:00Z"}))
+        );
+    }
+
+    #[test]
+    fn an_open_ended_time_span_holds_only_its_present_bound() {
+        let records = ingest_all(profiled_kml(&single_placemark("<TimeSpan><begin>1876-08-01</begin></TimeSpan>")).1);
+
+        assert_eq!(properties_of(&records[0]).get("timeSpan"), Some(&json!({"begin": "1876-08-01"})));
+    }
+
+    #[test]
+    fn empty_time_primitives_contribute_nothing() {
+        let records = ingest_all(profiled_kml(&single_placemark("<TimeStamp><when></when></TimeStamp><TimeSpan><begin> </begin></TimeSpan>")).1);
+        let properties = properties_of(&records[0]);
+
+        assert!(!properties.contains_key("timeStamp"));
+        assert!(!properties.contains_key("timeSpan"));
+    }
+
+    #[test]
+    fn extended_data_of_the_same_name_takes_precedence_over_the_time_stamp() {
+        let records = ingest_all(
+            profiled_kml(&single_placemark(
+                r#"<TimeStamp><when>2007-01-14T21:05:02Z</when></TimeStamp><ExtendedData><Data name="timeStamp"><value>from-data</value></Data></ExtendedData>"#,
+            ))
+            .1,
+        );
+
+        assert_eq!(properties_of(&records[0]).get("timeStamp"), Some(&json!("from-data")));
+    }
+
+    #[test]
+    fn a_placemark_without_a_time_primitive_has_no_time_properties() {
+        let records = ingest_all(profiled_kml(SAMPLE).1);
+        let properties = properties_of(&records[0]);
+
+        assert!(!properties.contains_key("timeStamp"));
+        assert!(!properties.contains_key("timeSpan"));
+    }
+
+    #[test]
+    fn a_foldered_placemark_carries_its_time_stamp_under_the_namespace() {
+        let document = r#"<?xml version="1.0" encoding="UTF-8"?>
+<kml xmlns="http://www.opengis.net/kml/2.2">
+  <Document>
+    <Folder>
+      <name>Readings</name>
+      <Placemark>
+        <TimeStamp><when>2026-08-03T10:00:00Z</when></TimeStamp>
+        <Point><coordinates>14.5,46.05,0</coordinates></Point>
+      </Placemark>
+    </Folder>
+  </Document>
+</kml>"#;
+        let records = ingest_all(profiled_kml(document).1);
+        let nested = records[0].data().get("readings").and_then(Value::as_object).unwrap();
+        let properties = nested.get("properties").and_then(Value::as_object).unwrap();
+
+        assert_eq!(properties.get("timeStamp"), Some(&json!("2026-08-03T10:00:00Z")));
     }
 
     #[test]
