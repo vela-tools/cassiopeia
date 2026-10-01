@@ -1,4 +1,7 @@
-use crate::urn::error::{Result, UrnError};
+use crate::urn::{
+    error::{Result, UrnError},
+    id_segment::IdSegment,
+};
 use urn_rs::{Urn, UrnBuilder as UrnRsBuilder};
 
 /// The namespace identifier every Cassiopeia entity URN carries: `ngsi-ld`.
@@ -9,7 +12,8 @@ pub(crate) struct UrnBuilder;
 
 impl UrnBuilder {
     /// Builds `urn:ngsi-ld:<entity_type>:<id>`.
-    pub(crate) fn build(entity_type: &str, id: &str) -> Result<Urn> {
+    pub(crate) fn build(entity_type: &str, id: &IdSegment) -> Result<Urn> {
+        let id = id.as_str();
         let mut nss = String::with_capacity(entity_type.len() + id.len() + 1);
         nss.push_str(entity_type);
         nss.push(':');

@@ -13,10 +13,11 @@ use cassiopeia_ir::{
     relationship_path::RelationshipPath,
 };
 use cassiopeia_mapping::{attribute::Attribute, mapping::Mapping, template::resolver::TemplateResolver};
-use cassiopeia_ngsi_ld::entity::attribute::NgsiLdAttributeKind;
+use cassiopeia_ngsi_ld::entity::{attribute::NgsiLdAttributeKind, name::NameBuf};
 use rayon::prelude::*;
 use serde_json::{Map, Value, json};
 use std::sync::Arc;
+use urn_rs::Urn;
 
 /// Expands records into fragments, routing each to the mapping its source collection selects.
 ///
@@ -99,15 +100,8 @@ impl GenericExpander {
                         let fragment = Fragment::new(token_data, synthetic_urn, synthetic_scope, None);
                         fragments.push(Mapped::new(fragment, Arc::new(synthetic.clone())));
                     }
-                } else {
-                    let synthetic_urn = self.urn_generator.generate_id(synthetic, &data)?;
-                    let synthetic_scope = self.urn_generator.generate_scope(synthetic, &data)?;
-
-                    let parent = ParentContext::new(ParentContextType::Parent(main_urn.clone()), RelationshipPath::flat(attribute_name.clone()));
-                    // Each synthetic fragment carries its own copy of the source data; the main fragment
-                    // consumes `data` once the loop finishes.
-                    let fragment = Fragment::new(data.clone(), synthetic_urn, synthetic_scope, Some(vec![parent]));
-                    fragments.push(Mapped::new(fragment, Arc::new(synthetic.clone())));
+                } else if let Some(fragment) = self.expand_synthetic_entity(attribute_name, attribute, synthetic, &main_urn, &data)? {
+                    fragments.push(fragment);
                 }
             } else if matches!(attribute.kind(), NgsiLdAttributeKind::ListRelationship) && attribute.target().is_some() && attribute.instances().is_some() {
                 // A list relationship carrying instances (ETSI GS CIM 009 v1.9.1 clause 4.5.5, EXAMPLE
@@ -180,6 +174,49 @@ impl GenericExpander {
         fragments.push(Mapped::new(main_fragment, Arc::clone(mapping)));
 
         Ok(fragments)
+    }
+
+    /// Expands the one synthetic entity a non-list attribute materialises, linked back to the main
+    /// entity through a parent context, or nothing when this record names no target.
+    ///
+    /// The link the main entity carries is minted from the synthetic identity, so it always points at
+    /// the entity emitted here. A record whose synthetic identity, or whose relationship source,
+    /// resolves to no identifier has no target to emit or link: the attribute contributes nothing and
+    /// the main entity is still produced, exactly as a plain Relationship with an absent foreign key
+    /// and a `ListRelationship` with no tokens behave.
+    fn expand_synthetic_entity(
+        &self,
+        attribute_name: &NameBuf,
+        attribute: &Attribute,
+        synthetic: &Mapping,
+        main_urn: &Urn,
+        data: &Value,
+    ) -> Result<Option<Mapped<Fragment>>, ExpanderError> {
+        if attribute.target().is_some() && attribute.source().is_some() {
+            // The minted object is discarded: this only asks whether the relationship source names a
+            // target, under the very definition the plain Relationship path uses.
+            match self.urn_generator.generate_child_id(attribute, data) {
+                Ok(_) => {}
+                Err(UrnError::GeneratedIdEmpty { .. }) => return Ok(None),
+                Err(other) => return Err(other.into()),
+            }
+        }
+
+        let synthetic_urn = match self.urn_generator.generate_id(synthetic, data) {
+            Ok(urn) => urn,
+            Err(UrnError::GeneratedIdEmpty { .. }) => return Ok(None),
+            Err(other) => return Err(other.into()),
+        };
+        let synthetic_scope = self.urn_generator.generate_scope(synthetic, data)?;
+
+        // The parent context owns its URN and path, while the main entity keeps its own for its fragment.
+        let parent = ParentContext::new(ParentContextType::Parent(main_urn.clone()), RelationshipPath::flat(attribute_name.clone()));
+        // Each synthetic fragment carries its own copy of the source data; the main fragment consumes
+        // the record once every attribute has been expanded.
+        let fragment = Fragment::new(data.clone(), synthetic_urn, synthetic_scope, Some(vec![parent]));
+        // The fragment owns its mapping behind an `Arc`, and the synthetic mapping is only borrowed
+        // from the parent attribute here.
+        Ok(Some(Mapped::new(fragment, Arc::new(synthetic.clone()))))
     }
 
     /// Mints the objects of every relationship declared as a sub-attribute of `attribute`, recording
@@ -638,6 +675,100 @@ mod tests {
         // A materialised target is emitted as an entity in its own right, not linked back as a child.
         let country = fragments.iter().find(|fragment| urn(fragment).contains("Country")).unwrap();
         assert!(country.inner().parent_context().is_none());
+    }
+
+    /// An `AircraftModel` mapping over a headerless `planes.dat` record whose single
+    /// `belongsToAircraftType` Relationship materialises its target as a synthetic `AircraftType`
+    /// named by `synthetic_identity`.
+    fn aircraft_expander(synthetic_identity: &str) -> GenericExpander {
+        let document = r#"{
+            version: "v4",
+            dataModel: "AircraftModel",
+            identity: { entityName: "{{ this[2] }}" },
+            attributes: {
+                belongsToAircraftType: {
+                    source: "{% if this[1] %}{{ this[1] }}{% endif %}",
+                    type: "Relationship",
+                    target: { entity: "AircraftType" },
+                    syntheticEntity: {
+                        dataModel: "AircraftType",
+                        identity: { entityName: "SYNTHETIC_IDENTITY" },
+                        attributes: { codeIATA: { source: "{{ this[1] }}", type: "Property", transformation: "string" } },
+                    },
+                },
+            },
+        }"#;
+        expander(&document.replace("SYNTHETIC_IDENTITY", synthetic_identity))
+    }
+
+    /// Asserts that a record whose aircraft-type code is absent yields only the main `BE58` fragment,
+    /// with no synthetic fragment and no relationship context.
+    fn assert_only_the_main_aircraft_model(fragments: &[Mapped<Fragment>]) {
+        assert_eq!(fragments.len(), 1);
+        assert_eq!(urn(&fragments[0]), "urn:ngsi-ld:AircraftModel:BE58");
+        assert!(fragments[0].inner().parent_context().is_none());
+    }
+
+    #[test]
+    fn a_synthetic_relationship_whose_identity_reads_a_null_field_emits_no_target_and_no_link() {
+        let expander = aircraft_expander("{{ this[1] }}");
+
+        let fragments = expander.expand(record(json!({"0": "Beechcraft Baron", "1": null, "2": "BE58"}))).unwrap();
+
+        assert_only_the_main_aircraft_model(&fragments);
+    }
+
+    #[test]
+    fn a_synthetic_relationship_whose_guarded_identity_renders_empty_emits_no_target_and_no_link() {
+        let expander = aircraft_expander("{% if this[1] %}{{ this[1] }}{% endif %}");
+
+        let fragments = expander.expand(record(json!({"0": "Beechcraft Baron", "1": null, "2": "BE58"}))).unwrap();
+
+        assert_only_the_main_aircraft_model(&fragments);
+    }
+
+    #[test]
+    fn a_synthetic_relationship_whose_identity_reads_empty_text_emits_no_target_and_no_link() {
+        let expander = aircraft_expander("{{ this[1] }}");
+
+        let fragments = expander.expand(record(json!({"0": "Beechcraft Baron", "1": "", "2": "BE58"}))).unwrap();
+
+        assert_only_the_main_aircraft_model(&fragments);
+    }
+
+    #[test]
+    fn a_synthetic_relationship_whose_source_is_empty_emits_no_target_even_when_its_identity_resolves() {
+        // The identity's static prefix keeps it non-empty, so only the relationship source, which the
+        // guard renders empty, can tell that this record names no aircraft type.
+        let expander = aircraft_expander("Type-{{ this[2] }}");
+
+        let fragments = expander.expand(record(json!({"0": "Beechcraft Baron", "1": null, "2": "BE58"}))).unwrap();
+
+        assert_only_the_main_aircraft_model(&fragments);
+    }
+
+    #[test]
+    fn a_synthetic_relationship_with_a_present_code_emits_its_target_linked_to_the_main_entity() {
+        let expander = aircraft_expander("{{ this[1] }}");
+
+        let fragments = expander
+            .expand(record(json!({"0": "Embraer 175 (long wing)", "1": "E7W", "2": "E75L"})))
+            .unwrap();
+
+        assert_eq!(fragments.len(), 2);
+        let main = fragments.iter().find(|fragment| urn(fragment) == "urn:ngsi-ld:AircraftModel:E75L").unwrap();
+        let aircraft_type = fragments.iter().find(|fragment| urn(fragment) == "urn:ngsi-ld:AircraftType:E7W").unwrap();
+
+        // A single synthetic Relationship records its one edge on the synthetic fragment, pointing back
+        // at the main entity, rather than as a child context on the main fragment.
+        assert!(main.inner().parent_context().is_none());
+        let contexts = aircraft_type.inner().parent_context().as_ref().unwrap();
+        assert_eq!(contexts.len(), 1);
+        assert_eq!(contexts[0].property().to_string(), "belongsToAircraftType");
+        match contexts[0].urn() {
+            ParentContextType::Parent(parent) => assert_eq!(parent.to_string(), "urn:ngsi-ld:AircraftModel:E75L"),
+            ParentContextType::Child(_) => panic!("a synthetic entity must link back to its parent"),
+        }
     }
 
     fn child_urns(fragment: &Mapped<Fragment>) -> Vec<String> {

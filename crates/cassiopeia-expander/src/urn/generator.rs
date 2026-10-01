@@ -1,8 +1,8 @@
 use crate::urn::{
     analysis::Analysis,
     builder::UrnBuilder,
-    cleaner::Cleaner,
     error::{Result, UrnError},
+    id_segment::IdSegment,
 };
 use ahash::RandomState;
 use cassiopeia_mapping::{
@@ -20,6 +20,7 @@ use cassiopeia_ngsi_ld::entity::{
 };
 use dashmap::DashMap;
 use serde_json::Value;
+use std::slice;
 use urn_rs::Urn;
 
 /// How a resolved identifier is turned into a unique URN.
@@ -66,24 +67,18 @@ impl UrnGenerator {
     ///
     /// # Errors
     ///
-    /// Returns [`UrnError`] when the identity template is missing, resolves to an empty identifier,
-    /// or the built URN is malformed.
+    /// Returns [`UrnError::GeneratedIdEmpty`] when the identity resolves to null, to empty text, or
+    /// to text with no URN-safe character, and another [`UrnError`] when the identity template is
+    /// missing or the built URN is malformed.
     pub fn generate_id(&self, mapping: &Mapping, data: &Value) -> Result<Urn> {
         let entity_type = mapping.data_model().entity_type();
-        let strategy = Self::determine_strategy(mapping);
-
         let template = mapping.identity().compiled_entity_name().as_ref().ok_or(UrnError::RelationshipMissingSource)?;
-        let raw_id = self.resolver.resolve(template, data)?.to_string();
-        if raw_id.is_empty() {
-            return Err(UrnError::GeneratedIdEmpty {
-                // The error owns the type name after the borrowed mapping is dropped.
-                target_entity_type: entity_type.clone(),
-            });
-        }
-        let entity_type = entity_type.as_str();
+        // The identity resolves through the same definition of "the identifier a source produces" as
+        // a relationship object does, so a null identity is absent rather than the text `null`.
+        let raw_id = self.resolver.resolve_joined(slice::from_ref(template), data)?;
 
-        match strategy {
-            DeduplicationStrategy::Direct => Self::build_direct_urn(entity_type, &raw_id),
+        match Self::determine_strategy(mapping) {
+            DeduplicationStrategy::Direct => Self::generate_target_id(entity_type, &raw_id),
             DeduplicationStrategy::Increment => self.build_incrementing_urn(entity_type, &raw_id),
         }
     }
@@ -146,7 +141,7 @@ impl UrnGenerator {
         };
 
         let target = attribute.target().as_ref().ok_or(UrnError::NoRelationshipTarget)?;
-        self.generate_target_id(target.entity().entity_type(), &raw_id)
+        Self::generate_target_id(target.entity().entity_type(), &raw_id)
     }
 
     /// Mints the target URN for one instance of a multi-attribute Relationship from that instance's
@@ -168,7 +163,7 @@ impl UrnGenerator {
             None => return Err(UrnError::RelationshipMissingSource),
         };
 
-        self.generate_target_id(target.entity().entity_type(), &raw_id)
+        Self::generate_target_id(target.entity().entity_type(), &raw_id)
     }
 
     /// Mints the target URNs for one instance of a multi-attribute `ListRelationship`, one per token
@@ -190,7 +185,7 @@ impl UrnGenerator {
             None => Vec::new(),
         };
 
-        tokens.iter().map(|token| self.generate_target_id(entity_type, token)).collect()
+        tokens.iter().map(|token| Self::generate_target_id(entity_type, token)).collect()
     }
 
     /// Generates the URNs of every entity a list-relationship attribute points at.
@@ -208,7 +203,7 @@ impl UrnGenerator {
 
         self.source_identifiers(attribute, data)?
             .iter()
-            .map(|identifier| self.generate_target_id(entity_type, identifier))
+            .map(|identifier| Self::generate_target_id(entity_type, identifier))
             .collect()
     }
 
@@ -240,17 +235,18 @@ impl UrnGenerator {
     ///
     /// # Errors
     ///
-    /// Returns [`UrnError`] when `raw_id` is empty or the built URN is malformed.
-    pub fn generate_target_id(&self, target_entity_type: &NameBuf, raw_id: &str) -> Result<Urn> {
-        if raw_id.is_empty() {
-            return Err(UrnError::GeneratedIdEmpty {
-                // The error owns the type name after the borrowed target is dropped.
-                target_entity_type: target_entity_type.clone(),
-            });
-        }
+    /// Returns [`UrnError::GeneratedIdEmpty`] when `raw_id` cleans to nothing, and
+    /// [`UrnError::BuildUrn`] when the built URN is malformed.
+    pub fn generate_target_id(target_entity_type: &NameBuf, raw_id: &str) -> Result<Urn> {
+        UrnBuilder::build(target_entity_type.as_str(), &Self::segment(target_entity_type, raw_id)?)
+    }
 
-        let id = Cleaner::clean(raw_id);
-        UrnBuilder::build(target_entity_type.as_str(), &id)
+    /// Cleans a raw identifier into the URN's identifier segment, failing when nothing survives.
+    fn segment(entity_type: &NameBuf, raw_id: &str) -> Result<IdSegment> {
+        IdSegment::clean(raw_id).ok_or_else(|| UrnError::GeneratedIdEmpty {
+            // The error owns the type name after the borrowed mapping or target is dropped.
+            target_entity_type: entity_type.clone(),
+        })
     }
 
     /// Resolves one scope template to its text, treating an absent field anywhere in the template,
@@ -299,24 +295,106 @@ impl UrnGenerator {
         }
     }
 
-    /// Builds a URN from a raw identifier with no deduplication.
-    fn build_direct_urn(entity_type: &str, raw_id: &str) -> Result<Urn> {
-        let id = Cleaner::clean(raw_id);
-        UrnBuilder::build(entity_type, &id)
-    }
-
     /// Builds a URN with a per-identifier numeric suffix.
-    fn build_incrementing_urn(&self, entity_type: &str, raw_id: &str) -> Result<Urn> {
-        let mut count = self.counter.entry(raw_id.to_string()).or_insert(0);
-        *count += 1;
-
-        let base_id = Cleaner::clean(raw_id);
-        let final_id = if base_id.ends_with('-') {
-            format!("{base_id}{}", *count)
-        } else {
-            format!("{base_id}-{}", *count)
+    ///
+    /// The identifier is cleaned before the counter advances, so an empty identity fails without
+    /// minting `<Type>:-1` and without consuming a count.
+    fn build_incrementing_urn(&self, entity_type: &NameBuf, raw_id: &str) -> Result<Urn> {
+        let segment = Self::segment(entity_type, raw_id)?;
+        let count = {
+            let mut count = self.counter.entry(raw_id.to_string()).or_insert(0);
+            *count += 1;
+            *count
         };
 
-        UrnBuilder::build(entity_type, &final_id)
+        UrnBuilder::build(entity_type.as_str(), &segment.with_suffix(count))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::{
+        compiler::ExpanderCompiler,
+        urn::{error::UrnError, generator::UrnGenerator},
+    };
+    use cassiopeia_mapping::{mapping::Mapping, template::runner::TemplateRunner};
+    use serde_json::{Value, json};
+    use std::path::Path;
+
+    /// Mints the identity of an `AircraftType` named by `identity` for one record.
+    fn generate_aircraft_type_id(identity: &str, data: &Value) -> Result<String, UrnError> {
+        let document = r#"{
+            version: "v4",
+            dataModel: "AircraftType",
+            identity: { entityName: "IDENTITY" },
+            attributes: { codeIATA: { source: "{{ code }}" } },
+        }"#
+        .replace("IDENTITY", identity);
+        let mut runner = TemplateRunner::new();
+        let mut mapping = Mapping::from_json5(&document, Path::new("test.json5"), &mut runner).unwrap();
+        ExpanderCompiler::compile(&mut mapping, &mut runner);
+        let generator = UrnGenerator::new(runner.resolver());
+
+        generator.generate_id(&mapping, data).map(|urn| urn.to_string())
+    }
+
+    fn is_generated_id_empty(result: &Result<String, UrnError>) -> bool {
+        matches!(result, Err(UrnError::GeneratedIdEmpty { target_entity_type }) if target_entity_type.as_str() == "AircraftType")
+    }
+
+    #[test]
+    fn an_identity_resolving_to_null_is_empty_rather_than_the_text_null() {
+        let result = generate_aircraft_type_id("{{ code }}", &json!({"code": null}));
+
+        assert!(is_generated_id_empty(&result), "{result:?}");
+    }
+
+    #[test]
+    fn an_identity_over_a_missing_field_is_empty_rather_than_the_text_null() {
+        let result = generate_aircraft_type_id("{{ code }}", &json!({}));
+
+        assert!(is_generated_id_empty(&result), "{result:?}");
+    }
+
+    #[test]
+    fn an_identity_resolving_to_empty_text_is_empty() {
+        let result = generate_aircraft_type_id("{{ code }}", &json!({"code": ""}));
+
+        assert!(is_generated_id_empty(&result), "{result:?}");
+    }
+
+    #[test]
+    fn a_tera_identity_rendering_empty_text_is_empty() {
+        let result = generate_aircraft_type_id("{% if code %}{{ code }}{% endif %}", &json!({"code": null}));
+
+        assert!(is_generated_id_empty(&result), "{result:?}");
+    }
+
+    #[test]
+    fn an_identity_cleaning_to_nothing_is_empty() {
+        let result = generate_aircraft_type_id("{{ code }}", &json!({"code": "!?"}));
+
+        assert!(is_generated_id_empty(&result), "{result:?}");
+    }
+
+    #[test]
+    fn a_static_identity_cleaning_to_nothing_is_empty_rather_than_a_bare_counter() {
+        let result = generate_aircraft_type_id("!?", &json!({"code": "E7W"}));
+
+        assert!(is_generated_id_empty(&result), "{result:?}");
+    }
+
+    #[test]
+    fn a_present_identity_mints_its_urn() {
+        let result = generate_aircraft_type_id("{{ code }}", &json!({"code": "E7W"}));
+
+        assert_eq!(result.unwrap(), "urn:ngsi-ld:AircraftType:E7W");
+    }
+
+    #[test]
+    fn a_numeric_identity_mints_its_digits() {
+        let result = generate_aircraft_type_id("{{ code }}", &json!({"code": 320}));
+
+        assert_eq!(result.unwrap(), "urn:ngsi-ld:AircraftType:320");
     }
 }
