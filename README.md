@@ -67,7 +67,7 @@ cat > element.json5 <<'MAPPING'
         name: {
             source: "{{ name }}",
         },
-        // A direct copy stays text, so this transformation makes the atomic number a real number.
+        // Without a transformation the value is written as text, so this one makes the atomic number a real number.
         atomicNumber: {
             source: "{{ atomicNumber }}",
             transformation: "integer",

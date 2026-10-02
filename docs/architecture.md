@@ -62,7 +62,7 @@ Coordinate conversion is part of input preparation. Source coordinates are repro
 
 Following ingestion, the data enters the Expander for structural expansion. A source record often contains data for more than one logical entity, so one record can produce several partial contributions. For example, a row describing a transit station may produce a station contribution and contributions for associated equipment.
 
-The Expander applies the selected mapping, derives entity identities, and creates relationship references. A mapping can also ask it to materialize a related synthetic entity from the same record. The [mapping guide](mapping.md) covers those mapping features in detail. The Expander creates the pieces that the resolver will combine; it does not build the final NGSI-LD document.
+The Expander applies the selected mapping, derives entity identities, and creates relationship references. A record whose identity resolves to nothing is skipped with a warning, while a relationship whose target resolves to nothing is left out and the entity is kept. A mapping can also ask it to materialize a related synthetic entity from the same record. The [mapping guide](mapping.md) covers those mapping features in detail. The Expander creates the pieces that the resolver will combine; it does not build the final NGSI-LD document.
 
 ### Resolution
 
@@ -72,9 +72,9 @@ The store can be memory backed for normal workloads or disk backed for datasets 
 
 ### Assembly, extraction, and transformation
 
-Once the input phase is complete, the assembler scans the resolver's store and combines each entity id's stored contributions, scope, and relationships into an assembled entity. This is the resolver's output side, and it runs as its own stage: a current-state store yields one assembled entity per id, while a series store yields one per observation. The extractor then evaluates the mapping against each assembled entity's source data, resolving attribute values, metadata, nested attributes, language maps, and relationships. The transformer expresses those resolved values in the NGSI-LD domain model.
+Once the input phase is complete, the assembler scans the resolver's store and combines each entity id's stored contributions, relationships, and scopes into an assembled entity. The scopes are merged as a union, so an entity carries every distinct scope its contributions declared. This is the resolver's output side, and it runs as its own stage: a current-state store yields one assembled entity per id, while a series store yields one per observation. The extractor then evaluates the mapping against each assembled entity's source data, resolving attribute values, metadata, nested attributes, language maps, and relationships. The transformer expresses those resolved values in the NGSI-LD domain model.
 
-Keeping these responsibilities separate makes the boundary clear. Assembly answers "which stored contributions make up this entity?" Extraction answers "what value does this mapping produce?" Transformation answers "how is that value represented in NGSI-LD?" A failed or non-finite calculation produces an absent attribute rather than invalidating the whole source record.
+Keeping these responsibilities separate makes the boundary clear. Assembly answers "which stored contributions make up this entity?" Extraction answers "what value does this mapping produce?" Transformation answers "how is that value represented in NGSI-LD?" A non-finite calculation produces an absent attribute, and a template that fails to render drops only its own attribute with a warning. Neither invalidates the whole source record.
 
 ### Validation
 
@@ -130,11 +130,13 @@ Qualified and unqualified data models are also distinct. A qualified model name 
 
 ## Mappings and templates
 
-A mapping is a reusable description of how source data becomes an entity. It defines the data model, identity, attributes, relationships, metadata, and any nested or synthetic entities. Mappings do not know where a job runs or where its output goes. The [mapping guide](mapping.md) explains the document and transformation rules, while the [templates reference](templates.md) covers the expression language and built-in helpers.
+A mapping is a reusable description of how source data becomes an entity. It defines the data model, identity, scope, attributes, relationships, metadata, and any nested or synthetic entities. Mappings do not know where a job runs or where its output goes. The [mapping guide](mapping.md) explains the document and transformation rules, while the [templates reference](templates.md) covers the expression language and built-in helpers.
 
-The mapping engine treats common expressions as direct work. Static values, field lookups, and simple concatenation avoid the full template evaluator. Expressions that need functions, filters, or control flow use the evaluator. This keeps ordinary mappings inexpensive without limiting more complex transformations. The implementation detail matters here because mappings are evaluated for every source record; usage examples belong in the [templates reference](templates.md).
+The mapping engine resolves the simplest templates directly, without Tera. A direct template is literal text, a plain field reference, or literal text joined with plain references. A plain reference is a dotted path of names, including names outside ASCII such as `{{ čas }}`, or a key or column read through the record, `this['key']` or `this[n]`. Every other template, including any with a filter, function, operator, literal, tag, or comment, goes through Tera. This keeps ordinary mappings inexpensive without limiting more complex transformations. The implementation detail matters here because mappings are evaluated for every source record; usage examples belong in the [templates reference](templates.md).
 
-Mappings can clean values, perform calculations, work with time, and construct geometry. A failed or non-finite calculation removes the affected attribute and allows the rest of the record to continue.
+Every template is compiled when the mapping is loaded, before any record is read. A malformed template, an unknown filter, function, or test, or a field name Tera would misread fails the run at that point, with an error that names the mapping file and the template's place in it.
+
+Mappings can clean values, perform calculations, work with time, and construct geometry. A non-finite calculation removes the affected attribute. A template that fails to render for one record removes its attribute with a warning, and a template that names an entity, such as its identity, skips the record with a warning. The rest of the run continues in each case.
 
 ## Manifests, configuration, and scheduling
 

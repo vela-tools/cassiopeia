@@ -11,7 +11,7 @@ The guides below form a suggested path. Each one builds on the last: install the
 1. [Getting started](getting-started.md): install Cassiopeia from a prebuilt release binary or from source, including the optional GRIB1 system dependency.
 2. [Concepts](concepts.md): learn what Cassiopeia produces, how a mapping differs from a manifest, and how a record moves through the pipeline. Read this before the how-to guides.
 3. [Source formats](source-formats.md): learn the record shape Cassiopeia produces for CSV, JSON, GeoJSON, KML/KMZ, XML, Shapefiles, and GRIB, along with its format detection. This comes before mapping because mappings use the record, not the raw file.
-4. [Write a mapping](mapping.md): turn a record into an entity by defining its identity, attributes, templates, transformations, nested values, relationships, metadata, and synthetic entities.
+4. [Write a mapping](mapping.md): turn a record into an entity by defining its identity, scope, attributes, templates, transformations, nested values, relationships, metadata, and synthetic entities.
 5. [Templates](templates.md): learn the Tera syntax and the Cassiopeia filters and functions available to a mapping's `source` expressions.
 6. [Choosing a data model](data-models.md): learn what a data model is, when a published Smart Data Model fits, when a custom model is the better choice, and the tradeoffs of each.
 7. [Output](output.md): learn about file framing, NGSI-LD representations, JSON-LD contexts, null handling, temporal output (current-state and series), and delivery to a context broker.

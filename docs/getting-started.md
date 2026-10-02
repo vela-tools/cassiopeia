@@ -4,7 +4,7 @@ This guide gets Cassiopeia installed and verifies that it runs. Choose a prebuil
 
 ## Prerequisites
 
-Cassiopeia is written in Rust and builds with Cargo. You need a recent stable toolchain. The workspace uses the 2024 edition, so install Rust 1.85 or newer. If Rust is not installed, install it with [rustup](https://rustup.rs/):
+Cassiopeia is written in Rust and builds with Cargo. You need a recent stable toolchain. The workspace uses the 2024 edition and declares Rust 1.96 as its minimum, so install Rust 1.96 or newer. If Rust is not installed, install it with [rustup](https://rustup.rs/):
 
 ```bash
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
@@ -16,11 +16,11 @@ Then either restart your shell or source the Cargo environment for the current s
 source "$HOME/.cargo/env"
 ```
 
-GRIB1 is the only source format that needs a system library. Whether you need that library depends on the build you choose, so read the next section before building.
+GRIB is the only source format that needs a system library. Whether you need that library depends on the build you choose, so read the next section before building.
 
 ## GRIB1 and ecCodes
 
-GRIB comes in two editions. GRIB2 is handled entirely in Rust and needs nothing extra. GRIB1 is decoded through [ecCodes](https://confluence.ecmwf.int/display/ECC), the ECMWF C library, using the `eccodes-sys` crate. GRIB1 support is controlled by the `grib1` Cargo feature, which is **on by default**. A default build therefore links ecCodes; a build without the feature does not.
+GRIB comes in two editions. GRIB1 is decoded through [ecCodes](https://confluence.ecmwf.int/display/ECC), the ECMWF C library, using the `eccodes-sys` crate. GRIB1 support is controlled by the `grib1` Cargo feature, which is **on by default**. The `grib2-full` feature, also on by default, routes GRIB2 through ecCodes as well, so it can read projected grids. A default build therefore links ecCodes. A build with neither feature does not, and decodes GRIB2 with a pure-Rust reader that handles only regular latitude/longitude grids. The [source-format guide](source-formats.md#backends-and-features) describes the two backends.
 
 You can build with GRIB1 and install the dependencies below, or leave GRIB1 out. Add one Cargo flag to whichever install command you use, as shown in [Installing](#installing).
 
@@ -42,7 +42,7 @@ Debian or Ubuntu:
 sudo apt install libeccodes-dev libclang-dev pkg-config
 ```
 
-If you do not need GRIB1, skip these dependencies and add `--no-default-features` to the install command you choose below. That build does not link ecCodes or require a C library, and GRIB2 still works. It reports GRIB1 input as unsupported instead of decoding it.
+If you do not need GRIB1, skip these dependencies and add `--no-default-features` to the install command you choose below. That build does not link ecCodes or require a C library, and GRIB2 on a regular latitude/longitude grid still works. It reports GRIB1 input as unsupported instead of decoding it.
 
 ## Installing
 
@@ -82,7 +82,7 @@ Clone the repository if you want a local checkout of the source. The worked exam
 
 ```bash
 git clone https://github.com/vela-tools/cassiopeia.git
-cd Cassiopeia
+cd cassiopeia
 cargo install --path .
 ```
 

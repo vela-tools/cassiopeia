@@ -201,11 +201,11 @@ Its value member is `valueList`. From the `BicycleCounter` of [example 24](https
 
 **When to use it.** Use a `ListProperty` for an ordered sequence such as hourly readings, ranked results, or ordered steps. Use a plain `Property` with an array when order does not matter. Use `ListRelationship` when the elements are links to other entities. In the example above, `valueList[7]` represents the 07:00 count because the list preserves positions.
 
-Produce it with Cassiopeia: `type: "ListProperty"` with `transformation: "array"`; see the [mapping guide](../mapping.md#listproperty-and-jsonproperty).
+Produce it with Cassiopeia: `type: "ListProperty"` with `transformation: "array"`; see the [mapping guide](../mapping.md#listproperty-and-jsonproperty). The transformation collects array values but does not split text, so build a list from a field such as `"BS IN"` with a template like `{{ codes | split(pat=' ') }}` (see [Keep a value's type](../templates.md#keep-a-values-type)).
 
 ## JsonProperty
 
-A `JsonProperty` holds an arbitrary JSON value unchanged (ETSI GS CIM 009 v1.9.1 clause 4.5.24). The source value may be an object, array, or nested combination, and it is stored under `json` without being split into NGSI-LD attributes. This type is useful when the value is a JSON document or its shape varies between records.
+A `JsonProperty` holds an arbitrary JSON value unchanged (ETSI GS CIM 009 v1.9.1 clause 4.5.24). The value may be an object, array, or nested combination, and it is stored under `json` without being split into NGSI-LD attributes. This type is useful when the value is a JSON document or its shape varies between records.
 
 Its value member is `json`. In the `WeatherAlert` from [example 25](https://github.com/vela-tools/cassiopeia-examples/blob/main/examples/25-geojson-json-property/example.md), an open-ended `parameters` block stays intact:
 
@@ -245,7 +245,7 @@ Its value member is `json`. In the `WeatherAlert` from [example 25](https://gith
 
 **When to use it.** Use a `JsonProperty` when a value changes shape between records or is an opaque document that the consumer parses. Prefer real attributes, a nested `Property` built with `mappings`, or top-level attributes when the structure is stable and should be queried. The inner keys of a `JsonProperty` are not NGSI-LD attributes and cannot be targeted by NGSI-LD queries. A custom JSON Schema can still validate the raw JSON when that is useful.
 
-Produce it with Cassiopeia: `type: "JsonProperty"` with `transformation: "object"`; see the [mapping guide](../mapping.md#listproperty-and-jsonproperty).
+Produce it with Cassiopeia: `type: "JsonProperty"` with `transformation: "object"` for an object, or `transformation: "array"` for an array; see the [mapping guide](../mapping.md#listproperty-and-jsonproperty). Declare one of them: without a transformation, the default `string` transformation writes the value as compact JSON text. `object` keeps a non-empty object and produces no attribute for anything else. It does not parse text, so decode a field that holds JSON text with `{{ payload | json_decode }}` first.
 
 ## Attribute metadata
 

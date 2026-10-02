@@ -77,9 +77,9 @@ The first step uses the same searchable catalogue as the Explorer, with one addi
 
 ### 2. Identity configuration
 
-Next, the Wizard configures how each produced entity's ID is built. The **Entity ID Template** is the active field. It is a template such as `{{ id }}` that is filled per record, with optional site, service, and group prefixes that prepend fixed segments to every ID. Press `[Enter]` to move on to the attributes.
+Next, the Wizard configures how each produced entity's ID is built. The **Entity ID Template** is the active field. It is a template such as `{{ id }}` that is filled per record, and it becomes the mapping's `identity.entityName`. Press `[Enter]` to move on to the attributes.
 
-![Wizard identity configuration: prefix fields above an active entity id template field showing double-brace id](assets/cassiopeia-wizard-2.png)
+![Wizard identity configuration: an active entity id template field showing double-brace id](assets/cassiopeia-wizard-2.png)
 
 ### 3. Attribute list
 
@@ -101,4 +101,4 @@ The final step previews the mapping and writes it out. The output file is named 
 
 ![Wizard save step: a save preview above the output file name ending in dot json5](assets/cassiopeia-wizard-5.png)
 
-The saved `.json5` is an ordinary mapping. Run it against a source with `cassiopeia map`, just like a hand-written mapping. See the [mapping guide](mapping.md) for the document shape and the [examples](https://github.com/vela-tools/cassiopeia-examples#the-examples) for complete runs.
+The saved `.json5` is an ordinary mapping. Run it against a source with `cassiopeia map`, just like a hand-written mapping. `cassiopeia map` compiles every template when it loads the mapping, so a template typed incorrectly in the Wizard stops the run with an error naming the attribute and the mapping file. See the [mapping guide](mapping.md) for the document shape and the [examples](https://github.com/vela-tools/cassiopeia-examples#the-examples) for complete runs.

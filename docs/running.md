@@ -85,7 +85,7 @@ The [output guide](output.md#send-to-a-context-broker) documents the operations,
 Three flags shape the entities themselves, independently of the destination:
 
 - `--writer-representation`: the NGSI-LD representation for written entities: `normalized` (the default), `concise`, or `simplified`. Choose it for whatever consumes the output.
-- `--writer-skip-null`: `skip` (the default) omits null-valued attributes; `include` keeps them.
+- `--writer-skip-null`: `skip` (the default) omits attributes with a null or empty value, such as empty text; `include` keeps them. An attribute whose source resolves to nothing is absent either way (see [Handle null and empty values](output.md#handle-null-and-empty-values)).
 - `--temporal-representation`: the temporal output shape. `series` folds each base ID's observations into a single temporal entity with time-ordered instance arrays (an EntityTemporal, ETSI GS CIM 009 v1.9.1 clause 5.2.20); absent writes current-state, with one entity per ID and each attribute keeping its latest observation. This applies to file and broker writers. It is **not** the same as `--broker-operation temporal`: this flag shapes the output, while the broker operation only selects the temporal endpoint. A `series` representation against a broker requires `--broker-operation temporal`.
 
 The [representation guide](representation.md) explains how the written representation stays independent of the one validation checks; the [output guide](output.md#temporal-output) explains the temporal shapes.
@@ -144,6 +144,26 @@ Reasons
 Each row is one reason code, how many occurrences it accounted for, and one example of it. The codes are stable, so they can be grepped for and quoted in a bug report. The rows are ordered worst first: errors before warnings, and within each, the loudest reason first.
 
 The block is drawn only when the run actually counted something to explain. A clean run ends at the counters.
+
+### Mapping problems
+
+Cassiopeia checks every template in a mapping when it loads the mapping. A template it cannot compile fails the cycle before any record is read, and `--on-failure` decides the exit status as for any other failed cycle. The error names the template's place in the mapping and the mapping file, and its second line says what to change:
+
+~~~text
+× The attribute `station` template in the mapping document at 'station.json5' cannot be compiled
+  ╰─ `station-id` in `{{ station-id }}` is ambiguous: write `this['station-id']` to read the field, or `station - id` to subtract
+~~~
+
+Problems that depend on one record's data do not stop the run. Each is a warning, and the `Reasons` block counts it under one of these codes:
+
+| Code | What happened |
+| --- | --- |
+| `expander-urn-ungeneratable` | The record's identity resolved to nothing, or a template that names an entity failed to render, so Cassiopeia skipped the record. An identity resolves to nothing when a field it reads is missing, null, or empty, or when its text has no letter or digit, such as `-`. The templates that name an entity are `identity.entityName`, a `scope` template, a relationship's `source`, and a synthetic entity's identity. A scope or relationship target that resolves to nothing, rather than failing, is left out without a warning. |
+| `extractor-template-unresolvable` | An attribute's template failed to render for one entity. Cassiopeia dropped that attribute and kept the entity. The warning names the template, the mapping file, an entity that lost the attribute, and a hint. |
+| `extractor-timestamp-unreadable` | A value read with a `datetime`, `date`, or `time` transformation is text Cassiopeia cannot read as a date and time. The attribute is dropped, or, for an `observedAt`, the attribute is written without it. |
+| `transform-observed-at-unreadable` | An `observedAt` declared without a transformation could not be read as a date and time, so the attribute is written without it. |
+
+With `--verbose`, each of these also lists its causes, including Tera's own message when Tera reported one. For a template rejected at load time, that message gives the column where Tera stopped. The [templates reference](templates.md#when-a-template-fails) lists what fails at load time and how to guard a template against a missing field.
 
 ## Control how the run behaves
 

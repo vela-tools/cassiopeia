@@ -105,9 +105,9 @@ output: {
 }
 ~~~
 
-With `skip`, Cassiopeia omits attributes whose value is null. The serializer also treats empty strings and empty language or list values as empty for the attribute kinds where that distinction applies. With `include`, those values remain in the serialized entity. The writer default is `skip`.
+With `skip`, Cassiopeia omits attributes whose value is null or empty. An empty string counts as empty for a `Property` or `JsonProperty`, as do an empty `languageMap` and an empty `valueList`. With `include`, those attributes remain in the serialized entity, so a source field holding empty text is written as `"value": ""`. The writer default is `skip`.
 
-Null handling is separate from source resolution. A mapping can resolve a missing source field to `null`. The `skipNull` setting decides whether Cassiopeia writes the resulting attribute.
+`skipNull` acts only on attributes the mapping produced. An attribute whose source resolves to nothing is never produced, so it is absent under either setting. That covers a reference to a field the record does not have or holds as null, a template of text and references with any such field, a transformation that cannot use the value, and a template that fails to render. The [templates reference](templates.md#read-the-record) explains when a source resolves to nothing.
 
 ## Temporal output
 

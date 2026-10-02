@@ -172,41 +172,47 @@ Properties remain under `properties`, so a source field called `name` is address
 
 KML and KMZ are geospatial document formats, with KMZ being the zipped form of KML. Cassiopeia walks nested `Document` and `Folder` structures and emits one record for each `Placemark`.
 
-A placemark record has the same general shape as a GeoJSON feature:
+A placemark record has the same general shape as a GeoJSON feature. This placemark sits in a folder named `Stations`, so its data is nested under the folder's snake-case name, `stations` (see [Folders and collections](#folders-and-collections)):
 
 ~~~json
 {
-    "id": "station-17",
-    "properties": {
-        "name": "Main station",
-        "description": "Central platform",
-        "folder": "Stations",
-        "timeStamp": "2026-08-03T10:00:00Z",
-        "temperature": "21.5"
-    },
-    "geometry": {
-        "type": "Point",
-        "coordinates": [
-            14.51,
-            46.05
-        ]
+    "stations": {
+        "id": "station-17",
+        "properties": {
+            "folder": "Stations",
+            "name": "Main station",
+            "description": "Central platform",
+            "timeStamp": "2026-08-03T10:00:00Z",
+            "temperature": "21.5"
+        },
+        "geometry": {
+            "type": "Point",
+            "coordinates": [
+                14.51,
+                46.05
+            ]
+        }
     }
 }
 ~~~
 
-Cassiopeia places the placemark's `name`, `description`, time (see below), and extended data in `properties`. Its `id` attribute becomes `id`, and supported KML geometry becomes GeoJSON under `geometry`. A KML `LinearRing` becomes a GeoJSON `LineString`, matching the source semantics of a standalone ring.
+A mapping reads this placemark's name as `{{ stations.properties.name }}`. A placemark outside any folder has `id`, `properties`, and `geometry` at the top level of the record, with no `folder` member, and its name is `{{ properties.name }}`.
+
+Cassiopeia places the placemark's `name`, `description`, time (see below), and extended data in `properties`, along with the name of its folder as `folder`. Its `id` attribute becomes `id`, and supported KML geometry becomes GeoJSON under `geometry`. A KML `LinearRing` becomes a GeoJSON `LineString`, matching the source semantics of a standalone ring.
 
 A KML `MultiGeometry` may mix geometry kinds, which GeoJSON's multi-geometries cannot. Cassiopeia folds one into the multi-geometry of its members' family: a single member becomes that geometry, points become a `MultiPoint`, line strings and linear rings a `MultiLineString`, polygons a `MultiPolygon`, and a nested `MultiGeometry` contributes its own members to the same fold. A `MultiGeometry` mixing families has no GeoJSON equivalent and produces no `geometry` key, exactly like a KML geometry kind GeoJSON does not describe.
 
 ### Placemark times
 
-KML dates a placemark with a time primitive, and Cassiopeia carries it into `properties` so a mapping can use it. A `<TimeStamp>` becomes `timeStamp`, holding the value of its `<when>`. A `<TimeSpan>` becomes a `timeSpan` object holding whichever of `begin` and `end` the span declares, so an open-ended span has only one of them. A dated KML export can therefore feed a temporal mapping directly, with `{{ properties.timeStamp }}` as the source of `observedAt`, or `{{ properties.timeSpan.begin }}` and `{{ properties.timeSpan.end }}` as the bounds of an observation window.
+KML dates a placemark with a time primitive, and Cassiopeia carries it into `properties` so a mapping can use it. A `<TimeStamp>` becomes `timeStamp`, holding the value of its `<when>`. A `<TimeSpan>` becomes a `timeSpan` object holding whichever of `begin` and `end` the span declares, so an open-ended span has only one of them. A dated KML export can therefore feed a temporal mapping directly, with `{{ properties.timeStamp }}` as the source of `observedAt`, or `{{ properties.timeSpan.begin }}` and `{{ properties.timeSpan.end }}` as the bounds of an observation window. For a placemark inside a folder, the same values sit under the folder's namespace, such as `{{ stations.properties.timeStamp }}`.
 
-Cassiopeia copies the values as written, trimming only surrounding whitespace. KML allows a full date and time with or without a UTC offset, a date, a year and month, or a year alone, so declare `transformation: "datetime"` on the attribute or `observedAt` that reads it. An empty `<when>`, or a span without a non-empty bound, adds nothing. Extended data with the same name as `timeStamp` or `timeSpan` takes precedence, as it does over `name` and `description`. Only a placemark's own time primitive is read; one declared on an enclosing `Folder` or `Document` is not applied to the placemarks inside it.
+Cassiopeia copies the values as written, trimming only surrounding whitespace, and keeps them as strings. An empty `<when>`, or a span without a non-empty bound, adds nothing. Extended data with the same name as `timeStamp` or `timeSpan` takes precedence, as it does over `name` and `description`. Only a placemark's own time primitive is read. One declared on an enclosing `Folder` or `Document` is not applied to the placemarks inside it, and the `<when>` elements of a `gx:Track` are not read.
+
+KML allows a full date and time with or without a UTC offset, a date, a year and month, or a year alone. Declare `transformation: "datetime"` on the attribute or `observedAt` that reads one. That transformation reads a date and time with a UTC offset or `Z`, such as `2026-08-03T10:00:00Z`, and reads a date alone, such as `2026-08-03`, as midnight UTC. It does not read a year alone, a year and month, or a `T`-separated date and time without an offset, such as `2026-08-03T10:00:00`. An attribute with such a value is dropped, and an `observedAt` with one is left off its attribute, and the run warns in both cases. When the source writes these shapes, map the attribute without a transformation to keep the value as a string.
 
 ### Folders and collections
 
-A placemark inside a folder carries that folder's name as its collection label. Cassiopeia preserves the original folder name, including spaces and capitalization, so a manifest can route different folders to different mappings. It also nests folder data under a snake-case namespace in the record. For example, a folder named `Camera Area` is available through `camera_area`, as in `{{ camera_area.properties.name }}`.
+A placemark inside a folder carries that folder's name as its collection label. Cassiopeia preserves the original folder name, including spaces and capitalization, so a manifest can route different folders to different mappings. It also nests folder data under a snake-case namespace in the record. For example, a folder named `Camera Area` is available through `camera_area`, as in `{{ camera_area.properties.name }}`. In nested folders, the innermost named folder supplies both the label and the namespace.
 
 A placemark outside a folder has no collection label. A mapping binding that expects a collection cannot match it.
 
@@ -323,7 +329,7 @@ Masked parameter values are omitted from a record. A grid cell for which every p
 
 ### Canonical parameter names
 
-Both editions use the same name for a physical quantity, regardless of backend: a short, space-free, level-independent `snake_case` key. The key is meant to be read directly in a template, as in `{{ temperature }}`. A spaced WMO name would require `this['...']` bracket access, while a kebab-case name such as `wind-u` would be parsed as subtraction. The same mapping therefore works across editions and backends. The canonical set is a curated vocabulary. Here are some of the most common keys:
+Both editions use the same name for a physical quantity, regardless of backend: a short, space-free, level-independent `snake_case` key. The key is meant to be read directly in a template, as in `{{ temperature }}`. A spaced WMO name would require `this['...']` bracket access. A kebab-case name such as `wind-u` would need it too: Cassiopeia rejects `{{ wind-u }}` when it loads the mapping, because Tera would read it as the subtraction `wind - u`, and the error suggests `this['wind-u']` instead. The same mapping therefore works across editions and backends. The canonical set is a curated vocabulary. Here are some of the most common keys:
 
 | Canonical key | Meaning | GRIB2 (discipline, category, number) | GRIB1 indicator |
 | --- | --- | --- | --- |

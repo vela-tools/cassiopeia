@@ -186,7 +186,7 @@ retry: {
 },
 ~~~
 
-## Examples in the tree
+## Examples
 
 - [Example 9](https://github.com/vela-tools/cassiopeia-examples/blob/main/examples/09-csv-manifest/example.md) pairs two CSV sources with two mappings in one file-output run.
 - [Example 23](https://github.com/vela-tools/cassiopeia-examples/blob/main/examples/23-json-scheduling/example.md) polls a live JSON feed every five minutes and upserts to a broker, using `schedule`, `retry`, and `onFailure`.

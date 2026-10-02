@@ -45,7 +45,7 @@ Usually, one record produces one entity. A mapping can also produce a synthetic 
 
 ## Mappings
 
-A mapping tells Cassiopeia how to turn a record into an entity. It chooses the data model, defines the entity's identity, and declares its attributes. Templates read values from the record with `{{ field }}` placeholders. For example, `Station-{{ id }}` becomes `Station-7` when `id` is `7`.
+A mapping tells Cassiopeia how to turn a record into an entity. It chooses the data model, defines the entity's identity and, optionally, the scopes it belongs to, and declares its attributes. Templates read values from the record with `{{ field }}` placeholders. For example, `Station-{{ id }}` becomes `Station-7` when `id` is `7`.
 
 Mappings are JSON5 documents. They contain the detailed rules for the transformation.
 
