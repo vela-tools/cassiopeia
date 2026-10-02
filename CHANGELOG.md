@@ -2,6 +2,43 @@
 
 All notable changes to this project will be documented in this file.
 
+## [v1.1.0] - 2026-10-02
+
+### 🏗️ Build
+- add cargo machete override
+
+### 🐛 Bug Fixes
+- keep the structure of list and json properties declared without a transformation
+- map a constant identity to one entity and warn when merged records disagree ⚠️ **BREAKING**
+- read numeric unix epochs and report unreadable non-text timestamps
+- give every template failure a located, actionable message
+- route every non-plain template through tera
+- resolve a composite template with a missing field to nothing
+- reject a mapping whose template does not compile
+- treat separator-only identifiers as no target
+- carry relationship instance grouping and drop unmintable list tokens
+- render arrays and objects as compact text
+- array/object transformations stop treating blanks and text as values
+- do not emit relationships to null synthetic entities
+- union scopes per entity and drop scopes with missing fields
+- move scope out of identity to the top level of a mapping ⚠️ **BREAKING**
+
+### 📚 Documentation
+- document template, identity and scope behaviour since v1.0.3
+- move worked examples to the examples repository
+
+### 🔧 Refactor
+- split attribute assembly out of the ngsi-ld transformer
+
+### 🚀 Features
+- drop only the attribute when its template fails
+- keep the type of a single template expression
+- temporal properties in kml
+
+### 🧹 Chores
+- update dependencies
+- bump version
+
 ## [v1.0.3] - 2026-09-17
 
 ### 🐛 Bug Fixes
