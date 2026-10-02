@@ -1,17 +1,15 @@
 use crate::template::{
     CompiledTemplate,
-    TemplatePart,
     TemplateSource,
     compile_error::TemplateCompileError,
     contrib,
-    field_path::FieldPath,
+    direct_form,
     filter,
     function,
     resolver::TemplateResolver,
     template_name::TemplateName,
     value_expression,
 };
-use lazy_regex::regex;
 use std::sync::Arc;
 use tera::Tera;
 
@@ -55,94 +53,45 @@ impl TemplateRunner {
     ///
     /// # Errors
     /// Returns a [`TemplateCompileError`] when the expression needs Tera and Tera will not register
-    /// it as written: a syntax error, or a filter, function, or test that is not registered.
+    /// it as written: a syntax error, such as an unclosed `{{`, `{%`, or `{#`, or a filter,
+    /// function, or test that is not registered.
     pub fn compile(&mut self, source: &TemplateSource) -> Result<CompiledTemplate, TemplateCompileError> {
         let text = source.as_str();
 
-        if !text.contains("{{") && !text.contains("{%") {
-            return Ok(CompiledTemplate::Static(text.to_string()));
+        // Literals, lone field references, and concatenations of the two resolve without Tera on
+        // the per-record path; only what that grammar rejects is registered with the engine.
+        if let Some(direct) = direct_form::compile(text) {
+            return Ok(direct);
         }
 
-        if Self::needs_tera(text) {
-            let name = TemplateName::for_source(text);
-            let tera = Arc::make_mut(&mut self.tera);
-            // Registering the same expression twice is not an error: the name is a digest of the
-            // expression, so a repeat registration replaces an identical template. The typed form is
-            // derived from the source alone, so a digest of the source still names it uniquely.
-            if let Some(typed) = value_expression::typed_form(text)
-                && tera.add_raw_template(name.as_str(), &typed).is_ok()
-            {
-                return Ok(CompiledTemplate::Expression(name));
-            }
-            // A source the typed rewrite does not apply to, or whose rewrite Tera will not parse,
-            // renders as written: to text. The rewrite can fail where the source parses, since its
-            // added parentheses count against Tera's expression nesting limit, so only registering
-            // the source as written decides whether the expression is valid. A failed registration
-            // leaves the engine as it was.
-            tera.add_raw_template(name.as_str(), text).map_err(|cause| TemplateCompileError {
-                // The error outlives the mapping the expression is borrowed from.
-                template: source.clone(),
-                source: cause,
-            })?;
-
-            return Ok(CompiledTemplate::Complex(name));
+        let name = TemplateName::for_source(text);
+        let tera = Arc::make_mut(&mut self.tera);
+        // Registering the same expression twice is not an error: the name is a digest of the
+        // expression, so a repeat registration replaces an identical template. The typed form is
+        // derived from the source alone, so a digest of the source still names it uniquely.
+        if let Some(typed) = value_expression::typed_form(text)
+            && tera.add_raw_template(name.as_str(), &typed).is_ok()
+        {
+            return Ok(CompiledTemplate::Expression(name));
         }
+        // A source the typed rewrite does not apply to, or whose rewrite Tera will not parse,
+        // renders as written: to text. The rewrite can fail where the source parses, since its
+        // added parentheses count against Tera's expression nesting limit, so only registering
+        // the source as written decides whether the expression is valid. A failed registration
+        // leaves the engine as it was.
+        tera.add_raw_template(name.as_str(), text).map_err(|cause| TemplateCompileError {
+            // The error outlives the mapping the expression is borrowed from.
+            template: source.clone(),
+            source: cause,
+        })?;
 
-        Ok(Self::split(text))
-    }
-
-    /// Decides whether an expression needs the full templating engine.
-    ///
-    /// Positional and bracketed `this[...]` accessors are stripped first: a named form such as
-    /// `this['CO(GT)']` embeds parentheses that would otherwise read as a Tera function call, and a
-    /// positional `this[0]` addresses a headerless column that direct lookup already resolves.
-    fn needs_tera(source: &str) -> bool {
-        let bare = regex!(r"this\[(?:'[^']*'|\d+)\]").replace_all(source, "");
-
-        bare.contains('|') || bare.contains('(') || bare.contains(" if ")
-    }
-
-    /// Splits an interpolating expression into literal and field-reference parts.
-    fn split(source: &str) -> CompiledTemplate {
-        let reference = regex!(r"\{\{\s*(?:this\['([^']+)'\]|this\[(\d+)\]|([^}]+))\s*\}\}");
-        let mut parts = Vec::new();
-        let mut consumed = 0;
-
-        for captures in reference.captures_iter(source) {
-            let Some(whole) = captures.get(0) else {
-                continue;
-            };
-            if whole.start() > consumed {
-                parts.push(TemplatePart::Static(source[consumed..whole.start()].to_string()));
-            }
-
-            // Group 1 is the named `this['Key']` form, group 2 the positional `this[0]` form (its
-            // digits are the column key), and group 3 the bare `key` form.
-            let key = captures
-                .get(1)
-                .or_else(|| captures.get(2))
-                .or_else(|| captures.get(3))
-                .map(|key| key.as_str().trim())
-                .unwrap_or_default();
-            parts.push(TemplatePart::Dynamic(FieldPath::new(key)));
-
-            consumed = whole.end();
-        }
-
-        if consumed < source.len() {
-            parts.push(TemplatePart::Static(source[consumed..].to_string()));
-        }
-
-        match parts.as_slice() {
-            [TemplatePart::Dynamic(key)] => CompiledTemplate::Simple(key.clone()),
-            _ => CompiledTemplate::Composite(parts),
-        }
+        Ok(CompiledTemplate::Complex(name))
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use crate::template::{CompiledTemplate, TemplateSource, compile_error::TemplateCompileError, runner::TemplateRunner};
+    use crate::template::{CompiledTemplate, TemplatePart, TemplateSource, compile_error::TemplateCompileError, runner::TemplateRunner};
     use serde_json::{Value as JsonValue, json};
     use std::error::Error;
 
@@ -428,6 +377,218 @@ mod tests {
     #[test]
     fn an_expression_past_the_nesting_limit_as_written_is_a_compile_error() {
         assert_eq!(compile_error(&parenthesised(40)).template, TemplateSource::new(parenthesised(40)));
+    }
+
+    #[test]
+    fn a_loop_compiles_to_a_textual_tera_template_that_renders_every_iteration() {
+        let source = "{% for x in xs %}{{ x }} {% endfor %}";
+        let (_, compiled) = compile(source);
+
+        assert!(matches!(compiled, CompiledTemplate::Complex(_)));
+        assert_eq!(resolve(source, &json!({"xs": ["a", "b"]})), json!("a b "));
+    }
+
+    #[test]
+    fn a_conditional_written_without_spaces_compiles_to_a_typed_tera_template() {
+        let source = "{%if a%}{{ a }}{%endif%}";
+        let (_, compiled) = compile(source);
+
+        assert!(matches!(compiled, CompiledTemplate::Expression(_)));
+        assert_eq!(resolve(source, &json!({"a": "x"})), json!("x"));
+    }
+
+    #[test]
+    fn an_assignment_compiles_to_a_typed_tera_template() {
+        let source = "{% set x = a %}{{ x }}";
+        let (_, compiled) = compile(source);
+
+        assert!(matches!(compiled, CompiledTemplate::Expression(_)));
+        assert_eq!(resolve(source, &json!({"a": 5})), json!(5));
+    }
+
+    #[test]
+    fn a_comment_beside_a_field_reference_compiles_to_a_typed_tera_template() {
+        let source = "{# note #}{{ a }}";
+        let (_, compiled) = compile(source);
+
+        assert!(matches!(compiled, CompiledTemplate::Expression(_)));
+        assert_eq!(resolve(source, &json!({"a": 5})), json!(5));
+    }
+
+    #[test]
+    fn an_unfiltered_arithmetic_expression_resolves_to_a_number() {
+        let (_, compiled) = compile("{{ a + 1 }}");
+
+        assert!(matches!(compiled, CompiledTemplate::Expression(_)));
+        assert_eq!(resolve("{{ a + 1 }}", &json!({"a": 2})), json!(3));
+    }
+
+    #[test]
+    fn an_unfiltered_concatenation_compiles_to_a_typed_tera_template() {
+        let (_, compiled) = compile("{{ a ~ '-' ~ b }}");
+
+        assert!(matches!(compiled, CompiledTemplate::Expression(_)));
+        assert_eq!(resolve("{{ a ~ '-' ~ b }}", &json!({"a": "x", "b": "y"})), json!("x-y"));
+    }
+
+    #[test]
+    fn literal_expressions_compile_to_typed_tera_templates_yielding_the_literal() {
+        assert_eq!(resolve(r#"{{ "lit" }}"#, &json!({"lit": "field"})), json!("lit"));
+        assert_eq!(resolve("{{ 42 }}", &json!({})), json!(42));
+        assert_eq!(resolve("{{ true }}", &json!({"true": "field"})), json!(true));
+        assert_eq!(resolve("{{ none }}", &json!({"none": "field"})), JsonValue::Null);
+    }
+
+    #[test]
+    fn a_negation_compiles_to_a_typed_tera_template() {
+        let (_, compiled) = compile("{{ not a }}");
+
+        assert!(matches!(compiled, CompiledTemplate::Expression(_)));
+        assert_eq!(resolve("{{ not a }}", &json!({"a": false})), json!(true));
+    }
+
+    #[test]
+    fn expressions_that_are_not_a_plain_field_reference_take_the_tera_path() {
+        for source in [
+            "{{ a * 2 }}",
+            "{{ a == b }}",
+            "{{ a . b }}",
+            "{{ a['b'] }}",
+            "{{ this }}",
+            "{{ this.a }}",
+            r#"{{ this["a"] }}"#,
+            "{{ this['a.b'] }}",
+            "{{- a -}}",
+            "{{ __tera_context }}",
+        ] {
+            let (_, compiled) = compile(source);
+
+            assert!(
+                matches!(compiled, CompiledTemplate::Expression(_) | CompiledTemplate::Complex(_)),
+                "{source}: {compiled:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_field_reference_reached_through_tera_reads_what_a_direct_lookup_would() {
+        let data = json!({"a": {"b": 1}, "this": "shadowed", "a.b": "flat"});
+
+        assert_eq!(resolve("{{ a . b }}", &data), json!(1));
+        assert_eq!(resolve("{{ a['b'] }}", &data), json!(1));
+        assert_eq!(resolve("{{ this.a.b }}", &data), json!(1));
+        assert_eq!(resolve("{{ this['a.b'] }}", &data), json!("flat"));
+        assert_eq!(resolve("{{- a.b -}}", &data), json!(1));
+    }
+
+    #[test]
+    fn a_direct_lookup_reads_what_tera_reads_for_the_same_reference() {
+        let named = json!({
+            "and": 1, "in": 2, "is": 3, "or": 4, "loop": 5, "self": 6, "context": 7,
+            "a": {"not": 8, "none": 9, "b": {"c": 10}}, "CO(GT)": 11, "": 12, "vars": {"x": 13},
+        });
+        let positional = json!({"0": "zero", "1": "one", "7": "seven", "2": "two", "3": "three", "4": "four", "5": "five", "6": "six"});
+
+        for (reference, data) in [
+            ("and", &named),
+            ("in", &named),
+            ("is", &named),
+            ("or", &named),
+            ("loop", &named),
+            ("self", &named),
+            ("context", &named),
+            ("a.not", &named),
+            ("a.none", &named),
+            ("a.b.c", &named),
+            ("this['CO(GT)']", &named),
+            ("this['']", &named),
+            ("vars.x", &named),
+            ("this[1]", &positional),
+            ("this[007]", &positional),
+        ] {
+            let (_, direct) = compile(&format!("{{{{ {reference} }}}}"));
+            assert!(matches!(direct, CompiledTemplate::Simple(_)), "{reference}: {direct:?}");
+
+            // The identity filter pair forces the same reference through Tera.
+            let through_tera = format!("{{{{ {reference} | json_encode | json_decode }}}}");
+            assert_eq!(resolve(&format!("{{{{ {reference} }}}}"), data), resolve(&through_tera, data), "{reference}");
+        }
+    }
+
+    #[test]
+    fn a_dotted_path_compiles_to_a_direct_lookup() {
+        let (_, compiled) = compile("{{ a.b.c }}");
+
+        assert!(matches!(compiled, CompiledTemplate::Simple(key) if key.as_str() == "a.b.c"));
+    }
+
+    #[test]
+    fn the_whole_record_reference_compiles_to_a_direct_lookup() {
+        let (_, compiled) = compile("{{ context }}");
+
+        assert!(matches!(compiled, CompiledTemplate::Simple(key) if key.as_str() == "context"));
+    }
+
+    #[test]
+    fn whitespace_around_a_field_reference_compiles_to_the_same_direct_lookup() {
+        for source in ["{{   id   }}", "{{id}}", "{{\n\tid\n}}"] {
+            let (_, compiled) = compile(source);
+
+            assert!(
+                matches!(&compiled, CompiledTemplate::Simple(key) if key.as_str() == "id"),
+                "{source}: {compiled:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_positional_accessor_with_leading_zeros_names_the_column_tera_would_index() {
+        let (_, compiled) = compile("{{ this[007] }}");
+
+        assert!(matches!(compiled, CompiledTemplate::Simple(key) if key.as_str() == "7"));
+    }
+
+    #[test]
+    fn literal_text_around_several_field_references_compiles_to_a_concatenation() {
+        let (_, compiled) = compile("/{{ country }}/{{ this['City Name'] }}-{{ this[0] }}");
+
+        let CompiledTemplate::Composite(parts) = compiled else {
+            panic!("expected a concatenation, got {compiled:?}");
+        };
+        let rendered: Vec<String> = parts
+            .iter()
+            .map(|part| match part {
+                TemplatePart::Static(literal) => format!("static:{literal}"),
+                TemplatePart::Dynamic(key) => format!("field:{key}"),
+            })
+            .collect();
+        assert_eq!(rendered, ["static:/", "field:country", "static:/", "field:City Name", "static:-", "field:0"]);
+    }
+
+    #[test]
+    fn a_closing_brace_after_a_field_reference_stays_literal_text_as_tera_reads_it() {
+        assert_eq!(resolve("{{ a }}}", &json!({"a": "x"})), json!("x}"));
+    }
+
+    #[test]
+    fn an_unclosed_field_reference_is_a_compile_error() {
+        for source in ["Station-{{ id", "{{ a", "{{ a }} and {{ b"] {
+            assert_eq!(compile_error(source).template, TemplateSource::new(source), "{source}");
+        }
+    }
+
+    #[test]
+    fn an_unclosed_tag_or_comment_is_a_compile_error() {
+        for source in ["{%if a%}{{ a }}", "{% for x in xs %}{{ x }}", "{# note {{ a }}", "{% if a %}"] {
+            assert_eq!(compile_error(source).template, TemplateSource::new(source), "{source}");
+        }
+    }
+
+    #[test]
+    fn an_expression_tera_cannot_parse_is_a_compile_error() {
+        for source in ["{{ a.0 }}", "{{ a b }}", "{{ not }}", "{{ a.true }}"] {
+            assert_eq!(compile_error(source).template, TemplateSource::new(source), "{source}");
+        }
     }
 
     #[test]

@@ -217,6 +217,30 @@ mod tests {
     }
 
     #[test]
+    fn an_attribute_source_with_an_unclosed_field_reference_is_rejected_naming_the_document_and_the_attribute() {
+        let document = document("S-{{ id }}", "", r#"{ stationName: { source: "Station-{{ id" } }"#);
+
+        assert_eq!(rejection(&document), (attribute("stationName"), TemplateSource::new("Station-{{ id")));
+        let message = compile(&document).unwrap_err().to_string();
+        assert!(message.contains(ORIGIN));
+        assert!(message.contains("stationName"));
+    }
+
+    #[test]
+    fn an_entity_name_with_an_unclosed_field_reference_is_rejected() {
+        let document = document("S-{{ id", "", "{}");
+
+        assert_eq!(rejection(&document), (TemplateSite::EntityName, TemplateSource::new("S-{{ id")));
+    }
+
+    #[test]
+    fn an_attribute_source_with_an_unfiltered_unclosed_conditional_is_rejected() {
+        let document = document("S-{{ id }}", "", r#"{ temperature: { source: "{%if t%}{{ t }}" } }"#);
+
+        assert_eq!(rejection(&document), (attribute("temperature"), TemplateSource::new("{%if t%}{{ t }}")));
+    }
+
+    #[test]
     fn an_attribute_source_with_an_unregistered_filter_is_rejected() {
         let document = document("S-{{ id }}", "", r#"{ temperature: { source: "{{ t | no_such_filter }}" } }"#);
 

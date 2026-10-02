@@ -1,5 +1,6 @@
 pub mod compile_error;
 pub mod contrib;
+pub(crate) mod direct_form;
 pub mod error;
 pub mod field_path;
 pub mod filter;

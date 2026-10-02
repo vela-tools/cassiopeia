@@ -1302,6 +1302,27 @@ mod tests {
     }
 
     #[test]
+    fn a_loop_source_renders_every_iteration_to_text() {
+        let value = extract_label(r#"{ source: "{% for c in codes %}{{ c }} {% endfor %}" }"#, json!({"codes": ["a", "b"]}));
+
+        assert_eq!(value, Some(Value::String("a b ".into())));
+    }
+
+    #[test]
+    fn an_unfiltered_arithmetic_source_under_an_integer_transformation_yields_its_number() {
+        let value = extract_label(r#"{ source: "{{ n + 1 }}", transformation: "integer" }"#, json!({"n": 2}));
+
+        assert_eq!(value, Some(Value::from(json!(3))));
+    }
+
+    #[test]
+    fn a_whole_record_reference_written_without_spaces_binds_the_whole_record() {
+        let value = extract_label(r#"{ source: "{{context}}", transformation: "object" }"#, json!({"a": 1, "b": "x"}));
+
+        assert_eq!(value, Some(Value::from(json!({"a": 1, "b": "x"}))));
+    }
+
+    #[test]
     fn a_failed_relationship_property_drops_the_relationship_with_it() {
         let (resolver, mapping) = prepare(
             r#"{

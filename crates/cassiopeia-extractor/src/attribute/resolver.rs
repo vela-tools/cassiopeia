@@ -19,6 +19,9 @@ use compact_str::CompactString;
 use serde_json::Value as JsonValue;
 use smallvec::smallvec;
 
+/// The field reference a lone source template reads to receive the whole record as its value.
+const WHOLE_RECORD: &str = "context";
+
 /// Resolves one attribute declaration into its NGSI-LD value.
 ///
 /// The declaration's [`NgsiLdAttributeKind`] and shape select the resolution path: a relationship
@@ -165,12 +168,17 @@ fn resolve_child(ctx: &ResolutionContext, key: &NameBuf, config: &Attribute) -> 
 
 /// Reads the raw source values a declaration is built from, one per template.
 ///
-/// The literal `{{ context }}` binds the whole record; otherwise each source template is evaluated
-/// against the record, or, when a source was written as a literal that never compiled, taken
-/// verbatim. Taking the source and its compiled templates as arguments lets both an [`Attribute`] and
-/// one of its [`AttributeInstance`]s be read through the same path.
+/// A single source string that is the lone reference `{{ context }}` binds the whole record;
+/// otherwise each source template is evaluated against the record, or, when a source was written as
+/// a literal that never compiled, taken verbatim. Taking the source and its compiled templates as
+/// arguments lets both an [`Attribute`] and one of its [`AttributeInstance`]s be read through the
+/// same path.
 fn collect_source_parts(ctx: &ResolutionContext, source: Option<&JsonValue>, compiled: Option<&Vec<CompiledTemplate>>) -> Result<SourceParts> {
-    if matches!(source, Some(JsonValue::String(source)) if source == "{{ context }}") {
+    // The compiled form, not the source text, decides: `{{context}}` and `{{ context }}` are the
+    // same reference however they are spaced.
+    if matches!(source, Some(JsonValue::String(_)))
+        && matches!(compiled.map(Vec::as_slice), Some([CompiledTemplate::Simple(path)]) if path.as_str() == WHOLE_RECORD)
+    {
         return Ok(smallvec![ctx.data.clone()]);
     }
 
