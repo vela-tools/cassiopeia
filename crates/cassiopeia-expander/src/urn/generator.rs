@@ -67,15 +67,15 @@ impl UrnGenerator {
     ///
     /// # Errors
     ///
-    /// Returns [`UrnError::GeneratedIdEmpty`] when the identity resolves to null, to empty text, or
-    /// to text with no URN-safe character, and another [`UrnError`] when the identity template is
-    /// missing or the built URN is malformed.
+    /// Returns [`UrnError::GeneratedIdEmpty`] when the identity resolves to null, to empty text, to
+    /// a composite with any field absent, or to text with no URN-safe character, and another
+    /// [`UrnError`] when the identity template is missing or the built URN is malformed.
     pub fn generate_id(&self, mapping: &Mapping, data: &Value) -> Result<Urn> {
         let entity_type = mapping.data_model().entity_type();
         let template = mapping.identity().compiled_entity_name().as_ref().ok_or(UrnError::RelationshipMissingSource)?;
         // The identity resolves through the same definition of "the identifier a source produces" as
-        // a relationship object does, so a null identity is absent rather than the text `null`.
-        let raw_id = self.resolver.resolve_joined(slice::from_ref(template), data)?;
+        // a relationship object does, so an identity over an absent field names no entity.
+        let raw_id = self.resolve_identifier(slice::from_ref(template), entity_type, data)?;
 
         match Self::determine_strategy(mapping) {
             DeduplicationStrategy::Direct => Self::generate_target_id(entity_type, &raw_id),
@@ -123,11 +123,13 @@ impl UrnGenerator {
     ///
     /// # Errors
     ///
-    /// Returns [`UrnError`] when the relationship has no usable source, no target, or the built URN
-    /// is malformed.
+    /// Returns [`UrnError::GeneratedIdEmpty`] when the source names no target, because a field it
+    /// reads is absent or its text has no URN-safe character, and another [`UrnError`] when the
+    /// relationship has no usable source, no target, or the built URN is malformed.
     pub fn generate_child_id(&self, attribute: &Attribute, data: &Value) -> Result<Urn> {
+        let target = attribute.target().as_ref().ok_or(UrnError::NoRelationshipTarget)?;
         let raw_id = match attribute.compiled_source() {
-            Some(templates) => self.resolver.resolve_joined(templates, data)?,
+            Some(templates) => self.resolve_identifier(templates, target.entity().entity_type(), data)?,
             // No compiled source: fall back to the raw literal, cloned because the attribute is only
             // borrowed here and the identifier must be owned to build the URN.
             None => match attribute.source() {
@@ -140,7 +142,6 @@ impl UrnGenerator {
             },
         };
 
-        let target = attribute.target().as_ref().ok_or(UrnError::NoRelationshipTarget)?;
         Self::generate_target_id(target.entity().entity_type(), &raw_id)
     }
 
@@ -159,7 +160,7 @@ impl UrnGenerator {
     pub fn generate_instance_child_id(&self, instance: &AttributeInstance, attribute: &Attribute, data: &Value) -> Result<Urn> {
         let target = attribute.target().as_ref().ok_or(UrnError::NoRelationshipTarget)?;
         let raw_id = match instance.compiled_source() {
-            Some(templates) => self.resolver.resolve_joined(templates, data)?,
+            Some(templates) => self.resolve_identifier(templates, target.entity().entity_type(), data)?,
             None => return Err(UrnError::RelationshipMissingSource),
         };
 
@@ -171,7 +172,7 @@ impl UrnGenerator {
     ///
     /// The instance source is tokenized exactly as a plain list relationship's is
     /// ([`resolve_tokens`](TemplateResolver::resolve_tokens)) and minted through the same
-    /// [`mint_targets`](Self::mint_targets), so a token that names no target is dropped here too. An
+    /// `mint_targets`, so a token that names no target is dropped here too. An
     /// instance left with no token yields an empty vector; the caller records each object under its
     /// instance, so an empty instance is simply absent (ETSI GS CIM 009 v1.9.1 clause 4.5.5, EXAMPLE
     /// 19).
@@ -196,7 +197,7 @@ impl UrnGenerator {
     /// contributes one identifier per element, and a string contributes one per whitespace- or
     /// comma-separated token, so a single field holding several ids (a route's space-separated
     /// equipment codes, say) fans out into one relationship object each. A token that names no target
-    /// is dropped (see [`mint_targets`](Self::mint_targets)).
+    /// is dropped (see `mint_targets`).
     ///
     /// # Errors
     /// Returns [`UrnError`] when the relationship declares no target, a source template fails to
@@ -259,12 +260,26 @@ impl UrnGenerator {
         UrnBuilder::build(target_entity_type.as_str(), &Self::segment(target_entity_type, raw_id)?)
     }
 
+    /// Resolves the raw identifier a source's templates join into, an absent one (see
+    /// [`resolve_joined`](TemplateResolver::resolve_joined)) being an empty identifier for
+    /// `entity_type`.
+    fn resolve_identifier(&self, templates: &[CompiledTemplate], entity_type: &NameBuf, data: &Value) -> Result<String> {
+        self.resolver
+            .resolve_joined(templates, data)?
+            .ok_or_else(|| Self::empty_identifier(entity_type))
+    }
+
     /// Cleans a raw identifier into the URN's identifier segment, failing when nothing survives.
     fn segment(entity_type: &NameBuf, raw_id: &str) -> Result<IdSegment> {
-        IdSegment::clean(raw_id).ok_or_else(|| UrnError::GeneratedIdEmpty {
+        IdSegment::clean(raw_id).ok_or_else(|| Self::empty_identifier(entity_type))
+    }
+
+    /// The error for an identifier that names no `entity_type` entity.
+    fn empty_identifier(entity_type: &NameBuf) -> UrnError {
+        UrnError::GeneratedIdEmpty {
             // The error owns the type name after the borrowed mapping or target is dropped.
             target_entity_type: entity_type.clone(),
-        })
+        }
     }
 
     /// Resolves one scope template to its text, treating an absent field anywhere in the template,
@@ -372,6 +387,22 @@ mod tests {
         let result = generate_aircraft_type_id("{{ code }}", &json!({}));
 
         assert!(is_generated_id_empty(&result), "{result:?}");
+    }
+
+    #[test]
+    fn a_composite_identity_over_a_missing_null_or_empty_field_is_empty_rather_than_the_text_null() {
+        for record in [json!({}), json!({"code": null}), json!({"code": ""})] {
+            let result = generate_aircraft_type_id("Type-{{ code }}", &record);
+
+            assert!(is_generated_id_empty(&result), "{record}: {result:?}");
+        }
+    }
+
+    #[test]
+    fn a_composite_identity_with_its_field_present_mints_its_urn() {
+        let result = generate_aircraft_type_id("Type-{{ code }}", &json!({"code": 320}));
+
+        assert_eq!(result.unwrap(), "urn:ngsi-ld:AircraftType:Type-320");
     }
 
     #[test]

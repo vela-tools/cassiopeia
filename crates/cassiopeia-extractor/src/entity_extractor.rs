@@ -343,6 +343,53 @@ mod tests {
     }
 
     #[test]
+    fn a_composite_property_over_a_missing_null_or_empty_field_is_absent_rather_than_holding_the_text_null() {
+        let (resolver, mapping) = prepare(
+            r#"{
+                version: "v4",
+                dataModel: "Person",
+                identity: { entityName: "Person-{{ id }}" },
+                attributes: { name: { source: "{{ first }} {{ last }}" }, reference: { source: "{{ id }}" } },
+            }"#,
+        );
+        let extractor = EntityExtractor::new(resolver);
+
+        for record in [
+            json!({"id": "1", "first": "John"}),
+            json!({"id": "1", "first": "John", "last": null}),
+            json!({"id": "1", "first": "John", "last": ""}),
+        ] {
+            let mapped = AssembledEntity::from_single(entity("urn:ngsi-ld:Person:1", record), Arc::clone(&mapping));
+            let (result, _) = extractor.extract(mapped, &DroppedAttributes::new()).unwrap().into_parts();
+            let values = result.values().as_ref().expect("values set");
+
+            assert!(!values.contains_key(&name("name")), "{values:?}");
+            assert!(values.contains_key(&name("reference")));
+        }
+    }
+
+    #[test]
+    fn a_composite_property_with_every_field_present_holds_the_joined_text() {
+        let (resolver, mapping) = prepare(
+            r#"{
+                version: "v4",
+                dataModel: "Person",
+                identity: { entityName: "Person-{{ id }}" },
+                attributes: { name: { source: "{{ first }} {{ last }}" } },
+            }"#,
+        );
+        let extractor = EntityExtractor::new(resolver);
+
+        let mapped = AssembledEntity::from_single(entity("urn:ngsi-ld:Person:1", json!({"id": "1", "first": "John", "last": "Doe"})), mapping);
+        let (result, _) = extractor.extract(mapped, &DroppedAttributes::new()).unwrap().into_parts();
+
+        assert_eq!(
+            result.values().as_ref().expect("values set").get(&name("name")),
+            Some(&Value::String("John Doe".into()))
+        );
+    }
+
+    #[test]
     fn a_declared_conversion_keeps_the_same_geometry_attribute() {
         let (resolver, mapping) = prepare(
             r#"{

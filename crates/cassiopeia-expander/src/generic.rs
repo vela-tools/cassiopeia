@@ -398,6 +398,28 @@ mod tests {
     }
 
     #[test]
+    fn a_composite_identity_over_a_missing_null_or_empty_field_fails_expansion_as_ungeneratable() {
+        let expander = expander(
+            r#"{
+                version: "v4",
+                dataModel: "AirQualityObserved",
+                identity: { entityName: "Station-{{ id }}" },
+                attributes: { temperature: { source: "{{ temperature }}" } },
+            }"#,
+        );
+
+        for data in [
+            json!({"temperature": 21.5}),
+            json!({"id": null, "temperature": 21.5}),
+            json!({"id": "", "temperature": 21.5}),
+        ] {
+            let error = expander.expand(record(data)).unwrap_err();
+
+            assert!(matches!(error, ExpanderError::Urn(UrnError::GeneratedIdEmpty { .. })), "{error:?}");
+        }
+    }
+
+    #[test]
     fn a_run_variable_resolves_in_the_identity() {
         let mut vars = Map::new();
         vars.insert("region".to_string(), json!("Ljubljana"));
@@ -419,7 +441,7 @@ mod tests {
     #[test]
     fn a_run_variable_is_absent_when_the_lane_declares_none() {
         // With no vars injected there is no `vars` key, so `{{ vars.region }}` reads as a missing
-        // field, stringifying to `null` in a composite, exactly as any other absent field would.
+        // field and the composite identity names no entity, exactly as any other absent field would.
         let expander = expander(
             r#"{
                 version: "v4",
@@ -429,9 +451,9 @@ mod tests {
             }"#,
         );
 
-        let fragments = expander.expand(record(json!({"id": 1, "temperature": 21.5}))).unwrap();
+        let error = expander.expand(record(json!({"id": 1, "temperature": 21.5}))).unwrap_err();
 
-        assert_eq!(urn(&fragments[0]), "urn:ngsi-ld:Sensor:Snull-1");
+        assert!(matches!(error, ExpanderError::Urn(UrnError::GeneratedIdEmpty { .. })), "{error:?}");
     }
 
     #[test]
@@ -636,6 +658,52 @@ mod tests {
         }
     }
 
+    /// An `AirQualityObserved` mapping whose `refRoad` Relationship reads its target from `source`.
+    fn road_expander(source: &str) -> GenericExpander {
+        expander(
+            &r#"{
+                version: "v4",
+                dataModel: "AirQualityObserved",
+                identity: { entityName: "Station-{{ id }}" },
+                attributes: {
+                    refRoad: { source: SOURCE, type: "Relationship", target: { entity: "Road" } },
+                },
+            }"#
+            .replace("SOURCE", source),
+        )
+    }
+
+    #[test]
+    fn a_relationship_whose_composite_source_reads_a_missing_field_mints_no_link_and_keeps_the_entity() {
+        let expander = road_expander(r#""Road-{{ road_id }}""#);
+
+        let fragments = expander.expand(record(json!({"id": 1}))).unwrap();
+
+        assert_eq!(fragments.len(), 1);
+        assert_eq!(urn(&fragments[0]), "urn:ngsi-ld:AirQualityObserved:Station-1");
+        assert!(fragments[0].inner().parent_context().is_none());
+    }
+
+    #[test]
+    fn a_relationship_whose_list_form_source_has_an_absent_field_part_mints_no_link_and_keeps_the_entity() {
+        let expander = road_expander(r#"["Road-", "{{ road_id }}"]"#);
+
+        let fragments = expander.expand(record(json!({"id": 1, "road_id": null}))).unwrap();
+
+        assert_eq!(fragments.len(), 1);
+        assert_eq!(urn(&fragments[0]), "urn:ngsi-ld:AirQualityObserved:Station-1");
+        assert!(fragments[0].inner().parent_context().is_none());
+    }
+
+    #[test]
+    fn a_relationship_whose_list_form_source_has_every_field_part_present_links_the_joined_target() {
+        let expander = road_expander(r#"["Road-", "{{ road_id }}"]"#);
+
+        let fragments = expander.expand(record(json!({"id": 1, "road_id": 99}))).unwrap();
+
+        assert_eq!(child_urns(&fragments[0]), ["urn:ngsi-ld:Road:Road-99"]);
+    }
+
     #[test]
     fn a_synthetic_entity_produces_a_second_fragment_linked_to_the_main_one() {
         let expander = expander(
@@ -778,6 +846,17 @@ mod tests {
     }
 
     #[test]
+    fn a_synthetic_relationship_whose_composite_identity_reads_a_missing_field_emits_no_target_and_no_link() {
+        // The relationship source `this[1]` is present, so only the synthetic identity's absent
+        // `this[3]` can tell that this record names no aircraft type.
+        let expander = aircraft_expander("Type-{{ this[3] }}");
+
+        let fragments = expander.expand(record(json!({"0": "Beechcraft Baron", "1": "E7W", "2": "BE58"}))).unwrap();
+
+        assert_only_the_main_aircraft_model(&fragments);
+    }
+
+    #[test]
     fn a_synthetic_relationship_whose_source_is_empty_emits_no_target_even_when_its_identity_resolves() {
         // The identity's static prefix keeps it non-empty, so only the relationship source, which the
         // guard renders empty, can tell that this record names no aircraft type.
@@ -889,6 +968,35 @@ mod tests {
                 ("servesAirport#0".to_string(), "urn:ngsi-ld:Airport:1".to_string()),
                 ("servesAirport#2".to_string(), "urn:ngsi-ld:Airport:3".to_string()),
             ]
+        );
+    }
+
+    #[test]
+    fn a_relationship_instance_whose_composite_source_reads_a_missing_field_mints_nothing_and_the_others_keep_their_index() {
+        let expander = expander(
+            r#"{
+                version: "v4",
+                dataModel: "Flight",
+                identity: { entityName: "F-{{ id }}" },
+                attributes: {
+                    servesAirport: {
+                        type: "Relationship",
+                        target: { entity: "Airport" },
+                        instances: [
+                            { source: "Airport-{{ dep }}", properties: { datasetId: { source: "urn:ngsi-ld:dataset:role:departure" } } },
+                            { source: "Airport-{{ arr }}", properties: { datasetId: { source: "urn:ngsi-ld:dataset:role:arrival" } } },
+                        ],
+                    },
+                },
+            }"#,
+        );
+
+        let fragments = expander.expand(record(json!({"id": 1, "arr": 340}))).unwrap();
+
+        assert_eq!(fragments.len(), 1);
+        assert_eq!(
+            edges(&fragments[0]),
+            [("servesAirport#1".to_string(), "urn:ngsi-ld:Airport:Airport-340".to_string())]
         );
     }
 
@@ -1061,6 +1169,26 @@ mod tests {
         assert_eq!(fragments.len(), 1);
         assert_eq!(urn(&fragments[0]), "urn:ngsi-ld:Route:R-1");
         assert_eq!(child_urns(&fragments[0]), ["urn:ngsi-ld:Equipment:744", "urn:ngsi-ld:Equipment:777"]);
+    }
+
+    #[test]
+    fn a_list_relationship_whose_composite_source_reads_a_missing_field_mints_no_objects_and_keeps_the_entity() {
+        let expander = expander(
+            r#"{
+                version: "v4",
+                dataModel: "Route",
+                identity: { entityName: "R-{{ id }}" },
+                attributes: {
+                    usesEquipment: { type: "ListRelationship", source: "Eq-{{ equipment }}", target: { entity: "Equipment" } },
+                },
+            }"#,
+        );
+
+        let fragments = expander.expand(record(json!({"id": 1}))).unwrap();
+
+        assert_eq!(fragments.len(), 1);
+        assert_eq!(urn(&fragments[0]), "urn:ngsi-ld:Route:R-1");
+        assert!(fragments[0].inner().parent_context().is_none());
     }
 
     #[test]

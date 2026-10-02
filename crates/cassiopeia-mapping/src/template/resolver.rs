@@ -26,7 +26,9 @@ impl TemplateResolver {
     /// Evaluates one compiled template against a source record.
     ///
     /// Only `Expression` and `Complex` templates enter Tera; the other shapes are resolved by direct
-    /// lookup, which is what keeps the common case out of the templating engine entirely.
+    /// lookup, which is what keeps the common case out of the templating engine entirely. A
+    /// `Composite` resolves to null when any field it interpolates is missing, null, or empty text,
+    /// exactly as a lone `Simple` field reference over that field does.
     ///
     /// # Errors
     /// Returns [`TemplateError::Render`] when a Tera template fails to render, and
@@ -37,20 +39,19 @@ impl TemplateResolver {
             // The return type owns its `JsonValue`, so the literal is cloned into an owned string.
             CompiledTemplate::Static(literal) => Ok(JsonValue::String(literal.clone())),
             CompiledTemplate::Simple(key) => Ok(key.read(data)),
-            CompiledTemplate::Composite(parts) => Ok(JsonValue::String(Self::join(parts, data))),
+            CompiledTemplate::Composite(parts) => Ok(Self::join_complete(parts, data).map_or(JsonValue::Null, JsonValue::String)),
             CompiledTemplate::Expression(name) => self.evaluate(name, data),
             CompiledTemplate::Complex(name) => Ok(JsonValue::String(self.render(name, data)?)),
         }
     }
 
-    /// Evaluates one compiled template, yielding `None` when any field it references is absent.
+    /// Evaluates one compiled template, yielding `None` when the value it produces is absent.
     ///
-    /// A field is absent when it is missing, null, or empty text. [`resolve`](Self::resolve) renders
-    /// such a gap as the text `null` inside a concatenation, and
-    /// [`resolve_joined`](Self::resolve_joined) drops it; neither suits a value that is only meaningful
-    /// whole, such as an NGSI-LD scope path, where `/Slovenia/null` or `/Slovenia/` would be wrong.
-    /// Tera cannot report which fields a template read, so for an `Expression` template only a null
-    /// or empty value counts as absent, and for a `Complex` one only an empty rendering.
+    /// A value is absent when it is null or empty text, which is what
+    /// [`resolve`](Self::resolve) yields for a missing field, a `Composite` with any field absent, a
+    /// suppressed `Expression`, and a `Complex` template rendering nothing. Tera cannot report which
+    /// fields a template read, so an `Expression` or `Complex` template is judged by its result alone.
+    /// A static literal is never absent: it reads no field, so it is complete by construction.
     ///
     /// # Errors
     /// Returns the errors of [`resolve`](Self::resolve).
@@ -58,46 +59,42 @@ impl TemplateResolver {
         match compiled {
             // The return type owns its `JsonValue`, so the literal is cloned into an owned string.
             CompiledTemplate::Static(literal) => Ok(Some(JsonValue::String(literal.clone()))),
-            CompiledTemplate::Simple(key) => Ok(present(key.read(data))),
-            CompiledTemplate::Composite(parts) => Ok(Self::join_complete(parts, data).map(JsonValue::String)),
-            CompiledTemplate::Expression(name) => Ok(present(self.evaluate(name, data)?)),
-            CompiledTemplate::Complex(name) => Ok(present(JsonValue::String(self.render(name, data)?))),
+            CompiledTemplate::Simple(_) | CompiledTemplate::Composite(_) | CompiledTemplate::Expression(_) | CompiledTemplate::Complex(_) => {
+                Ok(present(self.resolve(compiled, data)?))
+            }
         }
     }
 
-    /// Concatenates the resolved text of several templates into one identifier, dropping any part
-    /// that resolves to null.
+    /// Concatenates the resolved text of several templates into one identifier, or yields `None`
+    /// when any template that reads the record resolves to an absent value.
     ///
-    /// This is the single definition of "the identifier a source produces". The relationship URN
-    /// minted in the expander and the per-instance metadata compaction in the extractor both resolve
-    /// a source through this, so a relationship instance survives in one stage exactly when it
-    /// survives in the other (ETSI GS CIM 009 v1.9.1 clause 4.5.5). Unlike [`join`](Self::join), a
-    /// null part contributes nothing rather than the text `null`, so an absent field yields an empty
-    /// identifier the caller can drop.
+    /// This is the single definition of "the identifier a source produces": the expander mints an
+    /// entity's own URN, and the URN of every Relationship object, from it. An identifier is only
+    /// meaningful whole, so a source declared as `["Airport-", "{{ id }}"]` over a record with no
+    /// `id` names no entity rather than `Airport-`, which would be a well-formed RFC 8141 URN for an
+    /// entity that does not exist and would merge every such record into it. Static parts read no
+    /// field and never make the identifier absent.
     ///
     /// # Errors
     /// Returns the errors of [`resolve`](Self::resolve).
-    pub fn resolve_joined(&self, templates: &[CompiledTemplate], data: &JsonValue) -> Result<String> {
+    pub fn resolve_joined(&self, templates: &[CompiledTemplate], data: &JsonValue) -> Result<Option<String>> {
         let mut combined = String::new();
         for template in templates {
-            match self.resolve(template, data)? {
-                JsonValue::String(text) => combined.push_str(&text),
-                JsonValue::Null => {}
-                other @ (JsonValue::Bool(_) | JsonValue::Number(_) | JsonValue::Array(_) | JsonValue::Object(_)) => {
-                    combined.push_str(&other.to_string());
-                }
+            match self.resolve_complete(template, data)? {
+                Some(value) => append_value(&mut combined, value),
+                None => return Ok(None),
             }
         }
 
-        Ok(combined)
+        Ok(Some(combined))
     }
 
     /// Resolves several templates and splits their combined output into identifier tokens.
     ///
     /// A resolved array contributes one token per element and a string one per whitespace- or
-    /// comma-separated token, empty tokens dropped so they cannot mint an empty URN. The expander
-    /// tokenizes a list relationship's source through this to mint one relationship object per
-    /// token.
+    /// comma-separated token, empty tokens dropped so they cannot mint an empty URN. An absent value,
+    /// including a `Composite` with any field absent, contributes no token. The expander tokenizes a
+    /// list relationship's source through this to mint one relationship object per token.
     ///
     /// # Errors
     /// Returns the errors of [`resolve`](Self::resolve).
@@ -110,19 +107,13 @@ impl TemplateResolver {
         Ok(tokens)
     }
 
-    /// Concatenates the parts of a composite template, stringifying any non-string field value.
-    fn join(parts: &[TemplatePart], data: &JsonValue) -> String {
-        parts.iter().fold(String::with_capacity(Self::joined_capacity(parts)), |mut out, part| {
-            match part {
-                TemplatePart::Static(literal) => out.push_str(literal),
-                TemplatePart::Dynamic(key) => append_value(&mut out, key.read(data)),
-            }
-            out
-        })
-    }
-
-    /// Concatenates the parts of a composite template like [`join`](Self::join), but yields `None` as
-    /// soon as one field is absent (see [`present`]).
+    /// Concatenates the parts of a composite template, stringifying any non-string field value, or
+    /// yields `None` as soon as one field is absent (see [`present`]).
+    ///
+    /// This is the only way a composite is joined. Writing an absent field as the text `null`, or
+    /// as nothing, would turn `Station-{{ id }}` over a record with no `id` into `Station-null` or
+    /// `Station-`: a legal NGSI-LD entity id (ETSI GS CIM 009 v1.9.1 clause 4.5.1) that names an
+    /// entity the source never described, into which every such record would merge.
     fn join_complete(parts: &[TemplatePart], data: &JsonValue) -> Option<String> {
         parts.iter().try_fold(String::with_capacity(Self::joined_capacity(parts)), |mut out, part| {
             match part {
@@ -320,6 +311,31 @@ mod tests {
     }
 
     #[test]
+    fn a_composite_with_every_field_present_resolves_to_its_concatenation() {
+        let resolver = TemplateRunner::new().resolver();
+        let compiled = CompiledTemplate::Composite(vec![
+            TemplatePart::Dynamic(FieldPath::new("first")),
+            TemplatePart::Static(" ".to_string()),
+            TemplatePart::Dynamic(FieldPath::new("last")),
+        ]);
+
+        assert_eq!(
+            resolver.resolve(&compiled, &json!({"first": "John", "last": "Doe"})).unwrap(),
+            json!("John Doe")
+        );
+    }
+
+    #[test]
+    fn a_composite_with_a_missing_null_or_empty_field_resolves_to_null_rather_than_the_text_null() {
+        let resolver = TemplateRunner::new().resolver();
+        let compiled = CompiledTemplate::Composite(vec![TemplatePart::Static("Station-".to_string()), TemplatePart::Dynamic(FieldPath::new("id"))]);
+
+        for record in [json!({}), json!({"id": null}), json!({"id": ""})] {
+            assert_eq!(resolver.resolve(&compiled, &record).unwrap(), json!(null), "{record}");
+        }
+    }
+
+    #[test]
     fn a_complete_composite_resolves_to_its_concatenation() {
         let resolver = TemplateRunner::new().resolver();
         let compiled = CompiledTemplate::Composite(vec![
@@ -398,15 +414,47 @@ mod tests {
         let resolver = TemplateRunner::new().resolver();
         let templates = vec![CompiledTemplate::Static("Airport-".to_string()), CompiledTemplate::Simple(FieldPath::new("id"))];
 
-        assert_eq!(resolver.resolve_joined(&templates, &json!({"id": 535})).unwrap(), "Airport-535");
+        assert_eq!(
+            resolver.resolve_joined(&templates, &json!({"id": 535})).unwrap().as_deref(),
+            Some("Airport-535")
+        );
     }
 
     #[test]
-    fn resolve_joined_skips_a_null_part_rather_than_writing_null() {
+    fn resolve_joined_of_a_lone_absent_field_is_absent_rather_than_the_text_null() {
         let resolver = TemplateRunner::new().resolver();
         let templates = vec![CompiledTemplate::Simple(FieldPath::new("missing"))];
 
-        assert_eq!(resolver.resolve_joined(&templates, &json!({})).unwrap(), "");
+        assert_eq!(resolver.resolve_joined(&templates, &json!({})).unwrap(), None);
+    }
+
+    #[test]
+    fn resolve_joined_is_absent_when_a_field_part_is_absent_rather_than_joining_the_static_parts() {
+        let resolver = TemplateRunner::new().resolver();
+        let templates = vec![CompiledTemplate::Static("Airport-".to_string()), CompiledTemplate::Simple(FieldPath::new("id"))];
+
+        for record in [json!({}), json!({"id": null}), json!({"id": ""})] {
+            assert_eq!(resolver.resolve_joined(&templates, &record).unwrap(), None, "{record}");
+        }
+    }
+
+    #[test]
+    fn resolve_joined_joins_static_only_parts() {
+        let resolver = TemplateRunner::new().resolver();
+        let templates = vec![CompiledTemplate::Static("Airport-".to_string()), CompiledTemplate::Static("LJU".to_string())];
+
+        assert_eq!(resolver.resolve_joined(&templates, &json!({})).unwrap().as_deref(), Some("Airport-LJU"));
+    }
+
+    #[test]
+    fn resolve_tokens_yields_no_token_for_a_composite_over_an_absent_field() {
+        let resolver = TemplateRunner::new().resolver();
+        let templates = vec![CompiledTemplate::Composite(vec![
+            TemplatePart::Static("Gate-".to_string()),
+            TemplatePart::Dynamic(FieldPath::new("gate")),
+        ])];
+
+        assert!(resolver.resolve_tokens(&templates, &json!({})).unwrap().is_empty());
     }
 
     #[test]
@@ -453,7 +501,10 @@ mod tests {
         let templates = vec![runner.compile(&TemplateSource::new("{{ codes | split(pat=' ') }}")).unwrap()];
         let resolver = runner.resolver();
 
-        assert_eq!(resolver.resolve_joined(&templates, &json!({"codes": "BS IN"})).unwrap(), r#"["BS","IN"]"#);
+        assert_eq!(
+            resolver.resolve_joined(&templates, &json!({"codes": "BS IN"})).unwrap().as_deref(),
+            Some(r#"["BS","IN"]"#)
+        );
     }
 
     #[test]
