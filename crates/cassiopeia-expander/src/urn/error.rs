@@ -20,8 +20,9 @@ pub enum UrnError {
         source: UrnRsError,
     },
 
-    /// A template failed to resolve against the source record.
-    #[error("Template resolution failed")]
+    /// A template failed to resolve against the source record. The template's own error names its
+    /// declaration and mapping document, so it is the whole message.
+    #[error(transparent)]
     Template(#[from] TemplateError),
 
     /// A resolved scope value is not a valid NGSI-LD scope.

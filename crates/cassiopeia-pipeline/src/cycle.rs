@@ -169,10 +169,15 @@ fn compile_mapping(compiled: &mut HashMap<PathBuf, Arc<Mapping>>, runner: &mut T
 mod tests {
     use crate::{cycle::build_router, error::PipelineError};
     use cassiopeia_common::collection::CollectionName;
-    use cassiopeia_diagnostic::code::{diagnostic_code::DiagnosticCode, run_code::RunCode};
+    use cassiopeia_diagnostic::{
+        code::{diagnostic_code::DiagnosticCode, run_code::RunCode},
+        diagnostic_builder::from_error,
+        severity::Severity,
+    };
     use cassiopeia_expander::router::MappingRouter;
     use cassiopeia_manifest::mapping_binding::{CollectionMapping, MappingBinding};
     use cassiopeia_mapping::{error::MappingError, template::runner::TemplateRunner, template_site::TemplateSite};
+    use cassiopeia_ngsi_ld::entity::name::NameBuf;
     use std::{collections::HashMap, fs, path::PathBuf, sync::Arc};
     use temp_dir::TempDir;
 
@@ -246,10 +251,101 @@ mod tests {
 
         assert!(matches!(
             &error,
-            PipelineError::Mapping(MappingError::UncompilableTemplate { path: reported, site: TemplateSite::Attribute(name), .. })
-                if *reported == path && name.as_str() == "temperature"
+            PipelineError::Mapping(MappingError::UncompilableTemplate { location, .. })
+                if *location.document == *path && location.site == TemplateSite::Attribute(NameBuf::new("temperature").unwrap())
         ));
         assert_eq!(DiagnosticCode::from(&error), DiagnosticCode::Run(RunCode::MappingUnusable));
         assert!(compiled.is_empty());
+    }
+
+    /// The headline and cause chain a mapping whose `temperature` attribute has `source` fails to
+    /// load with, the temporary directory written as `<dir>`: what the CLI prints, the concise form
+    /// showing the headline and the first cause, the verbose form every cause.
+    fn load_failure(source: &str) -> (String, Vec<String>) {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("sensor.json5");
+        fs::write(
+            &path,
+            format!(r#"{{ version: "v4", dataModel: "Sensor", identity: {{ entityName: "S-{{{{ id }}}}" }}, attributes: {{ temperature: {{ source: "{source}" }} }} }}"#),
+        )
+        .unwrap();
+        let binding = MappingBinding::Single { mapping: path };
+
+        let Err(error) = build_router(&binding, &mut HashMap::new(), &mut TemplateRunner::new()) else {
+            panic!("a mapping with an uncompilable template must not build a router");
+        };
+        let diagnostic = from_error(Severity::Error, DiagnosticCode::from(&error), &error).build();
+        let directory = dir.path().display().to_string();
+
+        (
+            diagnostic.headline().replace(&directory, "<dir>"),
+            diagnostic.causes().iter().map(|cause| cause.as_str().to_string()).collect(),
+        )
+    }
+
+    /// The headline every load failure of the `temperature` attribute carries.
+    const TEMPERATURE_HEADLINE: &str = "The attribute `temperature` template in the mapping document at '<dir>/sensor.json5' cannot be compiled";
+
+    #[test]
+    fn a_hyphenated_name_fails_to_load_with_both_spellings_as_the_hint() {
+        assert_eq!(
+            load_failure("{{ station-id }}"),
+            (
+                TEMPERATURE_HEADLINE.to_string(),
+                vec![
+                    "`station-id` in `{{ station-id }}` is ambiguous: write `this['station-id']` to read the field, or `station - id` to subtract".to_string()
+                ]
+            )
+        );
+    }
+
+    #[test]
+    fn a_non_ascii_name_in_an_expression_fails_to_load_with_the_bracketed_spelling_then_teras_report() {
+        assert_eq!(
+            load_failure("{{ čas | upper }}"),
+            (
+                TEMPERATURE_HEADLINE.to_string(),
+                vec![
+                    "`čas` in `{{ čas | upper }}` is not a name Tera can read: write `this['čas']` to read the field".to_string(),
+                    "Tera: Unexpected character at column 4".to_string(),
+                ]
+            )
+        );
+    }
+
+    #[test]
+    fn an_unclosed_expression_fails_to_load_naming_the_delimiter_and_never_the_registration_digest() {
+        assert_eq!(
+            load_failure("{{ t | upper "),
+            (
+                TEMPERATURE_HEADLINE.to_string(),
+                vec![
+                    "`{{` opened at column 1 of `{{ t | upper ` is never closed: close it with `}}`".to_string(),
+                    "Tera: Unexpected end of input at column 13".to_string(),
+                ]
+            )
+        );
+    }
+
+    #[test]
+    fn a_missing_end_tag_fails_to_load_naming_the_open_block() {
+        assert_eq!(
+            load_failure("{% if t %}{{ t | upper }}").1,
+            vec![
+                "`{% if %}` opened at column 1 of `{% if t %}{{ t | upper }}` is never closed: add `{% endif %}`".to_string(),
+                "Tera: Unexpected end of input at column 26".to_string(),
+            ]
+        );
+    }
+
+    #[test]
+    fn a_misspelt_filter_fails_to_load_suggesting_the_registered_one() {
+        assert_eq!(
+            load_failure("{{ t | uper }}").1,
+            vec![
+                "Unknown filter `uper` in `{{ t | uper }}`: did you mean `upper`?".to_string(),
+                "Tera: Unknown filter `uper` at column 8".to_string(),
+            ]
+        );
     }
 }

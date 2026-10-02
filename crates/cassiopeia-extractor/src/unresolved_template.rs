@@ -43,13 +43,25 @@ impl UnresolvedTemplate {
 #[cfg(test)]
 mod tests {
     use crate::unresolved_template::UnresolvedTemplate;
-    use cassiopeia_mapping::template::{error::TemplateError, template_name::TemplateName};
+    use cassiopeia_mapping::{
+        template::{
+            TemplateSource,
+            error::{ResolutionFailure, TemplateError},
+        },
+        template_location::TemplateLocation,
+        template_site::TemplateSite,
+    };
+    use cassiopeia_ngsi_ld::entity::name::NameBuf;
+    use std::{path::Path, sync::Arc};
     use urn_rs::Urn;
 
     fn failure(source: &str) -> TemplateError {
-        TemplateError::Decode {
-            template: TemplateName::for_source(source),
-            source: serde_json::from_str::<serde_json::Value>("[").unwrap_err(),
+        TemplateError {
+            location: TemplateLocation::new(Arc::from(Path::new("sensor.json5")), TemplateSite::Attribute(NameBuf::new("codes").unwrap())),
+            failure: Box::new(ResolutionFailure::Decode {
+                template: TemplateSource::new(source),
+                source: serde_json::from_str::<serde_json::Value>("[").unwrap_err(),
+            }),
         }
     }
 
@@ -61,7 +73,9 @@ mod tests {
         record.count_another();
 
         assert_eq!(record.entity, first);
-        assert!(matches!(&record.error, TemplateError::Decode { template, .. } if *template == TemplateName::for_source("{{ a | split(pat=' ') }}")));
+        assert!(
+            matches!(record.error.failure.as_ref(), ResolutionFailure::Decode { template, .. } if *template == TemplateSource::new("{{ a | split(pat=' ') }}"))
+        );
         assert_eq!(record.occurrences.get(), 3);
     }
 }

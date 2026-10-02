@@ -1,8 +1,9 @@
 use crate::template::{
     CompiledTemplate,
     TemplatePart,
-    error::{Result, TemplateError},
-    template_name::TemplateName,
+    error::{ResolutionFailure, Result},
+    registered_template::RegisteredTemplate,
+    render_diagnosis::diagnose,
 };
 use serde_json::{Map, Value as JsonValue};
 use std::sync::Arc;
@@ -31,17 +32,18 @@ impl TemplateResolver {
     /// exactly as a lone `Simple` field reference over that field does.
     ///
     /// # Errors
-    /// Returns [`TemplateError::Render`] when a Tera template fails to render, and
-    /// [`TemplateError::Decode`] when an `Expression` template's rendering is not the JSON encoding
-    /// of a value.
+    /// Returns a [`TemplateError`](crate::template::error::TemplateError) when a Tera template fails
+    /// to render, or an `Expression` template's rendering is not the JSON encoding of a value; it
+    /// names the template's declaration, and its [`ResolutionFailure`] names a field the record lacks
+    /// or holds as null when that is what Tera failed on.
     pub fn resolve(&self, compiled: &CompiledTemplate, data: &JsonValue) -> Result<JsonValue> {
         match compiled {
             // The return type owns its `JsonValue`, so the literal is cloned into an owned string.
             CompiledTemplate::Static(literal) => Ok(JsonValue::String(literal.clone())),
             CompiledTemplate::Simple(key) => Ok(key.read(data)),
             CompiledTemplate::Composite(parts) => Ok(Self::join_complete(parts, data).map_or(JsonValue::Null, JsonValue::String)),
-            CompiledTemplate::Expression(name) => self.evaluate(name, data),
-            CompiledTemplate::Complex(name) => Ok(JsonValue::String(self.render(name, data)?)),
+            CompiledTemplate::Expression(template) => self.evaluate(template, data),
+            CompiledTemplate::Complex(template) => Ok(JsonValue::String(self.render(template, data)?)),
         }
     }
 
@@ -143,16 +145,19 @@ impl TemplateResolver {
     /// [`typed_form`](crate::template::value_expression::typed_form)), so the rendering is either that
     /// encoding, padded only by the whitespace around the guards, or nothing at all when a guard
     /// suppressed the expression; nothing is an absent value.
-    fn evaluate(&self, name: &TemplateName, data: &JsonValue) -> Result<JsonValue> {
-        let rendered = self.render(name, data)?;
+    fn evaluate(&self, template: &RegisteredTemplate, data: &JsonValue) -> Result<JsonValue> {
+        let rendered = self.render(template, data)?;
         let encoded = rendered.trim();
         if encoded.is_empty() {
             return Ok(JsonValue::Null);
         }
 
-        serde_json::from_str(encoded).map_err(|source| TemplateError::Decode {
-            template: name.clone(),
-            source,
+        serde_json::from_str(encoded).map_err(|source| {
+            template.fail(ResolutionFailure::Decode {
+                // The failure outlives the mapping the template is borrowed from.
+                template: template.source.clone(),
+                source,
+            })
         })
     }
 
@@ -163,7 +168,7 @@ impl TemplateResolver {
     /// positional (headerless) record is bound to `this` as an array instead, so a Tera expression
     /// can index it as `this[0]`; object key access, which the direct-lookup path uses, cannot be
     /// written inside a Tera expression.
-    fn render(&self, name: &TemplateName, data: &JsonValue) -> Result<String> {
+    fn render(&self, template: &RegisteredTemplate, data: &JsonValue) -> Result<String> {
         let mut context = Context::new();
 
         if let Some(fields) = data.as_object() {
@@ -182,10 +187,9 @@ impl TemplateResolver {
             context.insert("this", data);
         }
 
-        self.tera.render(name.as_str(), &context).map_err(|source| TemplateError::Render {
-            template: name.clone(),
-            source,
-        })
+        self.tera
+            .render(template.name.as_str(), &context)
+            .map_err(|engine| template.fail(diagnose(&self.tera, template, data, engine)))
     }
 
     /// Views a record as a positional array when its keys are exactly the contiguous zero-based
@@ -275,16 +279,28 @@ const fn is_identifier_separator(character: char) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use crate::template::{
-        CompiledTemplate,
-        TemplatePart,
-        TemplateSource,
-        field_path::FieldPath,
-        resolver::collect_identifiers,
-        runner::TemplateRunner,
-        template_name::TemplateName,
+    use crate::{
+        template::{
+            CompiledTemplate,
+            TemplatePart,
+            TemplateSource,
+            error::ResolutionFailure,
+            field_path::FieldPath,
+            registered_template::RegisteredTemplate,
+            resolver::collect_identifiers,
+            runner::TemplateRunner,
+            template_name::TemplateName,
+        },
+        template_location::TemplateLocation,
+        template_site::TemplateSite,
     };
-    use serde_json::json;
+    use cassiopeia_ngsi_ld::entity::name::NameBuf;
+    use serde_json::{Value as JsonValue, json};
+    use std::{path::Path, sync::Arc};
+
+    fn location() -> TemplateLocation {
+        TemplateLocation::new(Arc::from(Path::new("sensor.json5")), TemplateSite::Attribute(NameBuf::new("value").unwrap()))
+    }
 
     #[test]
     fn a_static_template_resolves_to_its_literal() {
@@ -404,9 +420,43 @@ mod tests {
     #[test]
     fn rendering_a_template_that_was_never_registered_is_an_error() {
         let resolver = TemplateRunner::new().resolver();
-        let compiled = CompiledTemplate::Complex(TemplateName::for_source("{{ missing | upper }}"));
+        let compiled = CompiledTemplate::Complex(RegisteredTemplate {
+            name: TemplateName::for_source("{{ missing | upper }}"),
+            source: TemplateSource::new("{{ missing | upper }}"),
+            location: location(),
+        });
 
         assert!(resolver.resolve(&compiled, &json!({})).is_err());
+    }
+
+    #[test]
+    fn a_failure_to_render_names_the_declaration_and_the_field_the_record_lacks() {
+        let mut runner = TemplateRunner::new();
+        let compiled = runner.compile(&TemplateSource::new("{{ n + 1 }}"), &location()).unwrap();
+
+        let error = runner.resolver().resolve(&compiled, &json!({"id": "a"})).unwrap_err();
+
+        assert_eq!(error.location, location());
+        assert!(matches!(error.failure.as_ref(), ResolutionFailure::MissingField { field, .. } if field.as_str() == "n"));
+    }
+
+    #[test]
+    fn a_failure_on_a_null_field_names_that_field() {
+        let mut runner = TemplateRunner::new();
+        let compiled = runner.compile(&TemplateSource::new("{{ code | split(pat=' ') }}"), &location()).unwrap();
+
+        let error = runner.resolver().resolve(&compiled, &json!({"code": null})).unwrap_err();
+
+        assert!(matches!(error.failure.as_ref(), ResolutionFailure::NullField { field, .. } if field.as_str() == "code"));
+    }
+
+    #[test]
+    fn a_guard_keeps_a_missing_field_from_failing_the_template() {
+        let mut runner = TemplateRunner::new();
+        let compiled = runner.compile(&TemplateSource::new("{% if n %}{{ n + 1 }}{% endif %}"), &location()).unwrap();
+
+        assert_eq!(runner.resolver().resolve(&compiled, &json!({"id": "a"})).unwrap(), JsonValue::Null);
+        assert_eq!(runner.resolver().resolve(&compiled, &json!({"n": 1})).unwrap(), json!(2));
     }
 
     #[test]
@@ -479,7 +529,9 @@ mod tests {
     #[test]
     fn a_suppressed_expression_is_incomplete() {
         let mut runner = TemplateRunner::new();
-        let compiled = runner.compile(&TemplateSource::new("{% if city %}{{ city | upper }}{% endif %}")).unwrap();
+        let compiled = runner
+            .compile(&TemplateSource::new("{% if city %}{{ city | upper }}{% endif %}"), &location())
+            .unwrap();
         let resolver = runner.resolver();
 
         assert_eq!(resolver.resolve_complete(&compiled, &json!({"city": null})).unwrap(), None);
@@ -489,7 +541,7 @@ mod tests {
     #[test]
     fn resolve_tokens_yields_one_token_per_element_of_a_split_expression() {
         let mut runner = TemplateRunner::new();
-        let templates = vec![runner.compile(&TemplateSource::new("{{ equipment | split(pat=';') }}")).unwrap()];
+        let templates = vec![runner.compile(&TemplateSource::new("{{ equipment | split(pat=';') }}"), &location()).unwrap()];
         let resolver = runner.resolver();
 
         assert_eq!(resolver.resolve_tokens(&templates, &json!({"equipment": "744;777"})).unwrap(), ["744", "777"]);
@@ -498,7 +550,7 @@ mod tests {
     #[test]
     fn resolve_joined_writes_an_expression_array_as_compact_json() {
         let mut runner = TemplateRunner::new();
-        let templates = vec![runner.compile(&TemplateSource::new("{{ codes | split(pat=' ') }}")).unwrap()];
+        let templates = vec![runner.compile(&TemplateSource::new("{{ codes | split(pat=' ') }}"), &location()).unwrap()];
         let resolver = runner.resolver();
 
         assert_eq!(

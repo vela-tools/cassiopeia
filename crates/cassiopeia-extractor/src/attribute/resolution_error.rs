@@ -30,13 +30,25 @@ pub(crate) type Result<T> = result::Result<T, ResolutionError>;
 #[cfg(test)]
 mod tests {
     use crate::attribute::resolution_error::ResolutionError;
-    use cassiopeia_mapping::template::{error::TemplateError, template_name::TemplateName};
+    use cassiopeia_mapping::{
+        template::{
+            TemplateSource,
+            error::{ResolutionFailure, TemplateError},
+        },
+        template_location::TemplateLocation,
+        template_site::TemplateSite,
+    };
+    use cassiopeia_ngsi_ld::entity::name::NameBuf;
+    use std::{path::Path, sync::Arc};
 
     #[test]
     fn a_template_failure_converts_into_the_template_variant() {
-        let failure = TemplateError::Decode {
-            template: TemplateName::for_source("{{ a | json_decode }}"),
-            source: serde_json::from_str::<serde_json::Value>("[").unwrap_err(),
+        let failure = TemplateError {
+            location: TemplateLocation::new(Arc::from(Path::new("sensor.json5")), TemplateSite::Attribute(NameBuf::new("codes").unwrap())),
+            failure: Box::new(ResolutionFailure::Decode {
+                template: TemplateSource::new("{{ a | json_decode }}"),
+                source: serde_json::from_str::<serde_json::Value>("[").unwrap_err(),
+            }),
         };
 
         let error = ResolutionError::from(failure);

@@ -1,5 +1,8 @@
-use crate::template::numeric_value::{finite_or_none, number_from_value};
-use tera::{Kwargs, State, Tera, TeraResult, Value};
+use crate::template::{
+    numeric_value::{finite_or_none, number_from_value},
+    registrar::Registrar,
+};
+use tera::{Kwargs, State, TeraResult, Value};
 
 /// Registers the elementary unary math filters on a Tera engine.
 ///
@@ -17,26 +20,26 @@ use tera::{Kwargs, State, Tera, TeraResult, Value};
 /// | `ln` | natural logarithm |
 /// | `log10` | base-10 logarithm |
 /// | `log2` | base-2 logarithm |
-pub fn register(tera: &mut Tera) {
-    tera.register_filter("sqrt", |value: &Value, _kwargs: Kwargs, _state: &State| -> TeraResult<Value> {
+pub fn register(registrar: &mut Registrar) {
+    registrar.filter("sqrt", |value: &Value, _kwargs: Kwargs, _state: &State| -> TeraResult<Value> {
         Ok(finite_or_none(number_from_value(value, "sqrt")?.sqrt()))
     });
-    tera.register_filter("cbrt", |value: &Value, _kwargs: Kwargs, _state: &State| -> TeraResult<Value> {
+    registrar.filter("cbrt", |value: &Value, _kwargs: Kwargs, _state: &State| -> TeraResult<Value> {
         Ok(finite_or_none(number_from_value(value, "cbrt")?.cbrt()))
     });
-    tera.register_filter("sign", |value: &Value, _kwargs: Kwargs, _state: &State| -> TeraResult<Value> {
+    registrar.filter("sign", |value: &Value, _kwargs: Kwargs, _state: &State| -> TeraResult<Value> {
         Ok(finite_or_none(sign(number_from_value(value, "sign")?)))
     });
-    tera.register_filter("exp", |value: &Value, _kwargs: Kwargs, _state: &State| -> TeraResult<Value> {
+    registrar.filter("exp", |value: &Value, _kwargs: Kwargs, _state: &State| -> TeraResult<Value> {
         Ok(finite_or_none(number_from_value(value, "exp")?.exp()))
     });
-    tera.register_filter("ln", |value: &Value, _kwargs: Kwargs, _state: &State| -> TeraResult<Value> {
+    registrar.filter("ln", |value: &Value, _kwargs: Kwargs, _state: &State| -> TeraResult<Value> {
         Ok(finite_or_none(number_from_value(value, "ln")?.ln()))
     });
-    tera.register_filter("log10", |value: &Value, _kwargs: Kwargs, _state: &State| -> TeraResult<Value> {
+    registrar.filter("log10", |value: &Value, _kwargs: Kwargs, _state: &State| -> TeraResult<Value> {
         Ok(finite_or_none(number_from_value(value, "log10")?.log10()))
     });
-    tera.register_filter("log2", |value: &Value, _kwargs: Kwargs, _state: &State| -> TeraResult<Value> {
+    registrar.filter("log2", |value: &Value, _kwargs: Kwargs, _state: &State| -> TeraResult<Value> {
         Ok(finite_or_none(number_from_value(value, "log2")?.log2()))
     });
 }
@@ -51,13 +54,14 @@ fn sign(value: f64) -> f64 {
 
 #[cfg(test)]
 mod tests {
-    use crate::template::filter::elementary::register;
+    use crate::template::{filter::elementary::register, registrar::Registrar};
     use std::f64::consts::E;
-    use tera::{Context, Tera, Value};
+    use tera::{Context, Value};
 
     fn apply(template: &str, value: Value) -> Result<String, tera::Error> {
-        let mut tera = Tera::default();
-        register(&mut tera);
+        let mut registrar = Registrar::with_engine_builtins();
+        register(&mut registrar);
+        let (mut tera, _) = registrar.finish();
         tera.add_raw_template("t", template).unwrap();
 
         let mut context = Context::new();

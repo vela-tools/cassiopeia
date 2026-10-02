@@ -345,7 +345,7 @@ mod tests {
     use cassiopeia_ir::{fragment::Fragment, mapped::Mapped, parent_context::ParentContextType, record::Record};
     use cassiopeia_mapping::{mapping::Mapping, template::runner::TemplateRunner};
     use serde_json::{Map, Value, json};
-    use std::{path::Path, sync::Arc};
+    use std::{error::Error, path::Path, sync::Arc};
 
     fn compiled(document: &str, runner: &mut TemplateRunner) -> Arc<Mapping> {
         let mut mapping = Mapping::from_json5(document, Path::new("test.json5"), runner).unwrap();
@@ -1492,5 +1492,31 @@ mod tests {
         let fragments = expander.expand(record(json!({"id": 1, "road": 9}))).unwrap();
 
         assert_eq!(edges(&fragments[0]), vec![("refRoad".to_string(), "urn:ngsi-ld:Road:9".to_string())]);
+    }
+
+    #[test]
+    fn a_failing_identity_template_names_its_declaration_and_the_missing_field() {
+        let expander = expander(
+            r#"{
+                version: "v4",
+                dataModel: "Sensor",
+                identity: { entityName: "{{ missing | upper }}" },
+                attributes: { temperature: { source: "{{ t }}" } },
+            }"#,
+        );
+
+        let error = expander.expand(record(json!({"t": 1}))).unwrap_err();
+
+        assert!(matches!(error, ExpanderError::Urn(UrnError::Template(_))), "{error:?}");
+        assert_eq!(
+            error.to_string(),
+            "The identity.entityName template in the mapping document at 'test.json5' could not be resolved"
+        );
+        let hint = error.source().expect("the hint is chained");
+        assert_eq!(
+            hint.to_string(),
+            "`{{ missing | upper }}` reads `missing`, which this record does not have: guard it with `{% if missing %}…{% endif %}` or default it with `missing | default(value=…)`"
+        );
+        assert!(hint.source().expect("Tera's report is chained").to_string().starts_with("Tera: "));
     }
 }

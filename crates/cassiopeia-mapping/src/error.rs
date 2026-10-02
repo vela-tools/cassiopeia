@@ -1,4 +1,4 @@
-use crate::{template::compile_error::TemplateCompileError, template_site::TemplateSite};
+use crate::{template::compile_error::TemplateCompileError, template_location::TemplateLocation};
 use cassiopeia_common::error::io::IoError;
 use cassiopeia_geometry::error::GeometryError;
 use cassiopeia_ngsi_ld::entity::name::NameBuf;
@@ -22,16 +22,14 @@ pub enum MappingError {
         source: serde_json5::Error,
     },
 
-    /// A template in the mapping is not valid template syntax, so no record could ever render it.
-    #[error("The {site} template in the mapping document at '{}' cannot be compiled", path.display())]
+    /// A template in the mapping cannot be compiled, so no record could ever render it.
+    #[error("The {location} cannot be compiled")]
     UncompilableTemplate {
-        /// The document declaring the template.
-        path: PathBuf,
-        /// Where in the document the template is declared.
-        site: TemplateSite,
-        /// The compilation failure, naming the template and chaining the engine's own report. Boxed
-        /// so this variant does not enlarge every `Result` carrying the error past the large-error
-        /// threshold.
+        /// Where the template is declared: the document and the declaration within it.
+        location: TemplateLocation,
+        /// The compilation failure, naming the template and what to change, and chaining Tera's own
+        /// report where Tera refused it. Boxed so this variant does not enlarge every `Result`
+        /// carrying the error past the large-error threshold.
         #[source]
         source: Box<TemplateCompileError>,
     },
@@ -55,21 +53,33 @@ pub type Result<T, E = MappingError> = result::Result<T, E>;
 mod tests {
     use crate::{
         error::MappingError,
-        template::{TemplateSource, compile_error::TemplateCompileError},
+        template::{TemplateSource, compile_error::TemplateCompileError, engine_report::EngineReport, identifier_lint::ambiguous_hyphen},
+        template_location::TemplateLocation,
         template_site::TemplateSite,
     };
     use cassiopeia_common::error::io::{IoAction, IoError};
     use cassiopeia_ngsi_ld::entity::name::NameBuf;
-    use std::{error::Error, io, path::PathBuf};
+    use std::{
+        error::Error,
+        io,
+        path::{Path, PathBuf},
+        sync::Arc,
+    };
+
+    fn temperature() -> TemplateLocation {
+        TemplateLocation::new(
+            Arc::from(Path::new("/maps/sensor.json5")),
+            TemplateSite::Attribute(NameBuf::new("temperature").unwrap()),
+        )
+    }
 
     #[test]
     fn an_uncompilable_template_names_the_document_and_the_site_and_chains_the_template() {
         let error = MappingError::UncompilableTemplate {
-            path: PathBuf::from("/maps/sensor.json5"),
-            site: TemplateSite::Attribute(NameBuf::new("temperature").unwrap()),
-            source: Box::new(TemplateCompileError {
+            location: temperature(),
+            source: Box::new(TemplateCompileError::Syntax {
                 template: TemplateSource::new("{{ t | upper "),
-                source: tera::Error::message("Unexpected end of input"),
+                source: EngineReport::unlocated(tera::Error::message("Unexpected end of input")),
             }),
         };
 
@@ -79,7 +89,26 @@ mod tests {
         );
         let template = error.source().expect("the template failure is chained");
         assert!(template.to_string().contains("{{ t | upper "));
-        assert_eq!(template.source().expect("the engine report is chained").to_string(), "Unexpected end of input");
+        assert_eq!(
+            template.source().expect("the engine report is chained").to_string(),
+            "Tera: Unexpected end of input"
+        );
+    }
+
+    #[test]
+    fn an_ambiguous_hyphen_is_reported_under_the_template_headline_with_the_hint_as_its_cause() {
+        let error = MappingError::UncompilableTemplate {
+            location: temperature(),
+            source: Box::new(TemplateCompileError::AmbiguousHyphen {
+                template: TemplateSource::new("{{ station-id }}"),
+                reference: ambiguous_hyphen("{{ station-id }}").unwrap(),
+            }),
+        };
+
+        assert_eq!(
+            error.source().expect("the hint is chained").to_string(),
+            "`station-id` in `{{ station-id }}` is ambiguous: write `this['station-id']` to read the field, or `station - id` to subtract"
+        );
     }
 
     #[test]

@@ -1,5 +1,6 @@
+use crate::template::registrar::Registrar;
 use serde_json::Value as JsonValue;
-use tera::{Error, Kwargs, State, Tera, TeraResult, Value};
+use tera::{Error, Kwargs, State, TeraResult, Value};
 
 /// Registers the `json_decode` filter on a Tera engine.
 ///
@@ -13,8 +14,8 @@ use tera::{Error, Kwargs, State, Tera, TeraResult, Value};
 /// that already arrived structured; an empty or absent value yields a null, so the attribute simply
 /// drops. Only a non-empty string that is not valid JSON is an error, since that is malformed source
 /// data worth surfacing rather than silently discarding.
-pub fn register(tera: &mut Tera) {
-    tera.register_filter("json_decode", |value: &Value, _kwargs: Kwargs, _state: &State| -> TeraResult<Value> {
+pub fn register(registrar: &mut Registrar) {
+    registrar.filter("json_decode", |value: &Value, _kwargs: Kwargs, _state: &State| -> TeraResult<Value> {
         decode(value)
     });
 }
@@ -35,12 +36,13 @@ fn decode(value: &Value) -> TeraResult<Value> {
 
 #[cfg(test)]
 mod tests {
-    use crate::template::filter::json_decode::register;
-    use tera::{Context, Tera, Value};
+    use crate::template::{filter::json_decode::register, registrar::Registrar};
+    use tera::{Context, Value};
 
     fn render(template: &str, value: Value) -> Result<String, tera::Error> {
-        let mut tera = Tera::default();
-        register(&mut tera);
+        let mut registrar = Registrar::with_engine_builtins();
+        register(&mut registrar);
+        let (mut tera, _) = registrar.finish();
         tera.add_raw_template("t", template).unwrap();
 
         let mut context = Context::new();

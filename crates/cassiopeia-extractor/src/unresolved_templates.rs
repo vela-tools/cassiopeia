@@ -57,8 +57,16 @@ impl UnresolvedTemplates {
 #[cfg(test)]
 mod tests {
     use crate::unresolved_templates::UnresolvedTemplates;
-    use cassiopeia_mapping::template::{error::TemplateError, template_name::TemplateName};
+    use cassiopeia_mapping::{
+        template::{
+            TemplateSource,
+            error::{ResolutionFailure, TemplateError},
+        },
+        template_location::TemplateLocation,
+        template_site::TemplateSite,
+    };
     use cassiopeia_ngsi_ld::entity::name::NameBuf;
+    use std::{path::Path, sync::Arc};
     use urn_rs::Urn;
 
     fn name(value: &str) -> NameBuf {
@@ -70,9 +78,12 @@ mod tests {
     }
 
     fn failure() -> TemplateError {
-        TemplateError::Decode {
-            template: TemplateName::for_source("{{ codes | split(pat=' ') }}"),
-            source: serde_json::from_str::<serde_json::Value>("[").unwrap_err(),
+        TemplateError {
+            location: TemplateLocation::new(Arc::from(Path::new("sensor.json5")), TemplateSite::Attribute(NameBuf::new("codes").unwrap())),
+            failure: Box::new(ResolutionFailure::Decode {
+                template: TemplateSource::new("{{ codes | split(pat=' ') }}"),
+                source: serde_json::from_str::<serde_json::Value>("[").unwrap_err(),
+            }),
         }
     }
 

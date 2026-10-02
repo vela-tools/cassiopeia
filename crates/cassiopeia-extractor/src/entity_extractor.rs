@@ -125,7 +125,8 @@ mod tests {
     };
     use cassiopeia_mapping::{
         mapping::Mapping,
-        template::{resolver::TemplateResolver, runner::TemplateRunner},
+        template::{error::ResolutionFailure, resolver::TemplateResolver, runner::TemplateRunner},
+        template_site::TemplateSite,
     };
     use cassiopeia_ngsi_ld::{
         entity::{attribute::NgsiLdAttributeKind, name::NameBuf},
@@ -1394,5 +1395,35 @@ mod tests {
             result.values().as_ref().expect("values set").get(&name("codes")),
             Some(&Value::from(json!(["X", 2])))
         );
+    }
+
+    #[test]
+    fn a_lone_non_ascii_field_reference_reads_its_column() {
+        let value = extract_label(r#"{ source: "{{ čas }}" }"#, json!({"čas": "10:00"}));
+
+        assert_eq!(value, Some(Value::String("10:00".into())));
+    }
+
+    #[test]
+    fn a_filter_over_a_null_field_records_a_failure_naming_the_field_and_the_declaration() {
+        let (resolver, mapping) = prepare(
+            r#"{
+                version: "v4",
+                dataModel: "Item",
+                identity: { entityName: "Item-1" },
+                attributes: { codes: { source: "{{ code | split(pat=' ') }}" } },
+            }"#,
+        );
+        let extractor = EntityExtractor::new(resolver);
+        let dropped = DroppedAttributes::new();
+        let mapped = AssembledEntity::from_single(entity("urn:ngsi-ld:Item:1", json!({"code": null})), mapping);
+
+        extractor.extract(mapped, &dropped).unwrap();
+
+        let entries = dropped.templates.into_entries();
+        let error = &entries[0].1.error;
+        assert_eq!(error.location.site, TemplateSite::Attribute(name("codes")));
+        assert_eq!(*error.location.document, *Path::new("test.json5"));
+        assert!(matches!(error.failure.as_ref(), ResolutionFailure::NullField { field, .. } if field.as_str() == "code"));
     }
 }

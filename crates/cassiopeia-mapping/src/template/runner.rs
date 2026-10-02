@@ -1,14 +1,22 @@
-use crate::template::{
-    CompiledTemplate,
-    TemplateSource,
-    compile_error::TemplateCompileError,
-    contrib,
-    direct_form,
-    filter,
-    function,
-    resolver::TemplateResolver,
-    template_name::TemplateName,
-    value_expression,
+use crate::{
+    template::{
+        CompiledTemplate,
+        TemplateSource,
+        compile_diagnosis::diagnose,
+        compile_error::TemplateCompileError,
+        contrib,
+        direct_form,
+        filter,
+        function,
+        identifier_lint::ambiguous_hyphen,
+        registered_template::RegisteredTemplate,
+        registrar::Registrar,
+        resolver::TemplateResolver,
+        template_name::TemplateName,
+        value_expression,
+        vocabulary::Vocabulary,
+    },
+    template_location::TemplateLocation,
 };
 use std::sync::Arc;
 use tera::Tera;
@@ -19,7 +27,11 @@ use tera::Tera;
 /// per-record path uses.
 #[derive(Clone)]
 pub struct TemplateRunner {
+    /// The engine every template that needs Tera is registered with.
     tera: Arc<Tera>,
+    /// The names of the filters, functions, and tests registered with the engine, which a misspelt
+    /// name is matched against.
+    vocabulary: Arc<Vocabulary>,
 }
 
 impl Default for TemplateRunner {
@@ -32,12 +44,16 @@ impl TemplateRunner {
     /// Builds a runner with every Cassiopeia filter registered.
     #[must_use]
     pub fn new() -> TemplateRunner {
-        let mut tera = Tera::default();
-        filter::register(&mut tera);
-        function::register(&mut tera);
-        contrib::register(&mut tera);
+        let mut registrar = Registrar::with_engine_builtins();
+        filter::register(&mut registrar);
+        function::register(&mut registrar);
+        contrib::register(&mut registrar);
+        let (tera, vocabulary) = registrar.finish();
 
-        TemplateRunner { tera: Arc::new(tera) }
+        TemplateRunner {
+            tera: Arc::new(tera),
+            vocabulary: Arc::new(vocabulary),
+        }
     }
 
     /// Hands out a lock-free resolver sharing this runner's engine.
@@ -49,13 +65,16 @@ impl TemplateRunner {
         TemplateResolver::new(Arc::clone(&self.tera))
     }
 
-    /// Classifies one template expression and, when it needs Tera, registers it with the engine.
+    /// Classifies one template expression declared at `location` and, when it needs Tera, registers
+    /// it with the engine.
     ///
     /// # Errors
-    /// Returns a [`TemplateCompileError`] when the expression needs Tera and Tera will not register
-    /// it as written: a syntax error, such as an unclosed `{{`, `{%`, or `{#`, or a filter,
+    /// Returns a [`TemplateCompileError`], boxed so the `Result` every template passes through stays
+    /// small, when the expression needs Tera and either joins two names with an unspaced hyphen,
+    /// which Tera would silently read as a subtraction, or Tera will not register it as written: a
+    /// syntax error, such as an unclosed `{{`, `{%`, or `{#`, a name Tera cannot read, or a filter,
     /// function, or test that is not registered.
-    pub fn compile(&mut self, source: &TemplateSource) -> Result<CompiledTemplate, TemplateCompileError> {
+    pub fn compile(&mut self, source: &TemplateSource, location: &TemplateLocation) -> Result<CompiledTemplate, Box<TemplateCompileError>> {
         let text = source.as_str();
 
         // Literals, lone field references, and concatenations of the two resolve without Tera on
@@ -63,7 +82,21 @@ impl TemplateRunner {
         if let Some(direct) = direct_form::compile(text) {
             return Ok(direct);
         }
+        if let Some(reference) = ambiguous_hyphen(text) {
+            return Err(Box::new(TemplateCompileError::AmbiguousHyphen {
+                // The error outlives the mapping the expression is borrowed from.
+                template: source.clone(),
+                reference,
+            }));
+        }
 
+        // The registered template outlives the mapping the expression and its location are
+        // borrowed from.
+        let registered = |name| RegisteredTemplate {
+            name,
+            source: source.clone(),
+            location: location.clone(),
+        };
         let name = TemplateName::for_source(text);
         let tera = Arc::make_mut(&mut self.tera);
         // Registering the same expression twice is not an error: the name is a digest of the
@@ -72,38 +105,43 @@ impl TemplateRunner {
         if let Some(typed) = value_expression::typed_form(text)
             && tera.add_raw_template(name.as_str(), &typed).is_ok()
         {
-            return Ok(CompiledTemplate::Expression(name));
+            return Ok(CompiledTemplate::Expression(registered(name)));
         }
         // A source the typed rewrite does not apply to, or whose rewrite Tera will not parse,
         // renders as written: to text. The rewrite can fail where the source parses, since its
         // added parentheses count against Tera's expression nesting limit, so only registering
         // the source as written decides whether the expression is valid. A failed registration
         // leaves the engine as it was.
-        tera.add_raw_template(name.as_str(), text).map_err(|cause| TemplateCompileError {
-            // The error outlives the mapping the expression is borrowed from.
-            template: source.clone(),
-            source: cause,
-        })?;
-
-        Ok(CompiledTemplate::Complex(name))
+        match tera.add_raw_template(name.as_str(), text) {
+            Ok(()) => Ok(CompiledTemplate::Complex(registered(name))),
+            Err(engine) => Err(Box::new(diagnose(source, engine, &self.vocabulary))),
+        }
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use crate::template::{CompiledTemplate, TemplatePart, TemplateSource, compile_error::TemplateCompileError, runner::TemplateRunner};
+    use crate::{
+        template::{CompiledTemplate, TemplatePart, TemplateSource, compile_error::TemplateCompileError, runner::TemplateRunner},
+        template_location::TemplateLocation,
+        template_site::TemplateSite,
+    };
     use serde_json::{Value as JsonValue, json};
-    use std::error::Error;
+    use std::{error::Error, path::Path, sync::Arc};
+
+    fn location() -> TemplateLocation {
+        TemplateLocation::new(Arc::from(Path::new("sensor.json5")), TemplateSite::EntityName)
+    }
 
     fn compile(source: &str) -> (TemplateRunner, CompiledTemplate) {
         let mut runner = TemplateRunner::new();
-        let compiled = runner.compile(&TemplateSource::new(source)).unwrap();
+        let compiled = runner.compile(&TemplateSource::new(source), &location()).unwrap();
 
         (runner, compiled)
     }
 
     fn compile_error(source: &str) -> TemplateCompileError {
-        TemplateRunner::new().compile(&TemplateSource::new(source)).unwrap_err()
+        *TemplateRunner::new().compile(&TemplateSource::new(source), &location()).unwrap_err()
     }
 
     /// An expression wrapped in `depth` pairs of parentheses, filtered so it takes the Tera path.
@@ -300,8 +338,8 @@ mod tests {
     #[test]
     fn compiling_the_same_expression_twice_yields_the_same_template_name() {
         let mut runner = TemplateRunner::new();
-        let first = runner.compile(&TemplateSource::new("{{ name | upper }}")).unwrap();
-        let second = runner.compile(&TemplateSource::new("{{ name | upper }}")).unwrap();
+        let first = runner.compile(&TemplateSource::new("{{ name | upper }}"), &location()).unwrap();
+        let second = runner.compile(&TemplateSource::new("{{ name | upper }}"), &location()).unwrap();
 
         match (first, second) {
             (CompiledTemplate::Expression(first), CompiledTemplate::Expression(second)) => assert_eq!(first, second),
@@ -312,7 +350,7 @@ mod tests {
     #[test]
     fn a_resolver_taken_after_compilation_can_render_the_registered_template() {
         let mut runner = TemplateRunner::new();
-        let compiled = runner.compile(&TemplateSource::new("{{ value | upper }}")).unwrap();
+        let compiled = runner.compile(&TemplateSource::new("{{ value | upper }}"), &location()).unwrap();
         let resolver = runner.resolver();
 
         assert_eq!(resolver.resolve(&compiled, &json!({"value": "x"})).unwrap(), json!("X"));
@@ -329,7 +367,7 @@ mod tests {
     fn an_unclosed_expression_is_a_compile_error_naming_the_template_and_chaining_the_engine_report() {
         let error = compile_error("{{ a | upper ");
 
-        assert_eq!(error.template, TemplateSource::new("{{ a | upper "));
+        assert_eq!(error.template(), &TemplateSource::new("{{ a | upper "));
         assert!(error.to_string().contains("{{ a | upper "));
         assert!(
             error
@@ -346,14 +384,9 @@ mod tests {
         // written, not the rewrite.
         let error = compile_error("{% if a %}{{ a | upper }}");
 
-        assert_eq!(error.template, TemplateSource::new("{% if a %}{{ a | upper }}"));
-        assert!(
-            error
-                .source()
-                .expect("the engine report is chained")
-                .to_string()
-                .contains("{% if a %}{{ a | upper }}")
-        );
+        assert_eq!(error.template(), &TemplateSource::new("{% if a %}{{ a | upper }}"));
+        assert!(error.to_string().contains("{% if a %}{{ a | upper }}"));
+        assert!(error.source().expect("the engine report is chained").to_string().starts_with("Tera: "));
     }
 
     #[test]
@@ -376,7 +409,7 @@ mod tests {
 
     #[test]
     fn an_expression_past_the_nesting_limit_as_written_is_a_compile_error() {
-        assert_eq!(compile_error(&parenthesised(40)).template, TemplateSource::new(parenthesised(40)));
+        assert_eq!(compile_error(&parenthesised(40)).template(), &TemplateSource::new(parenthesised(40)));
     }
 
     #[test]
@@ -573,30 +606,144 @@ mod tests {
     #[test]
     fn an_unclosed_field_reference_is_a_compile_error() {
         for source in ["Station-{{ id", "{{ a", "{{ a }} and {{ b"] {
-            assert_eq!(compile_error(source).template, TemplateSource::new(source), "{source}");
+            assert_eq!(compile_error(source).template(), &TemplateSource::new(source), "{source}");
         }
     }
 
     #[test]
     fn an_unclosed_tag_or_comment_is_a_compile_error() {
         for source in ["{%if a%}{{ a }}", "{% for x in xs %}{{ x }}", "{# note {{ a }}", "{% if a %}"] {
-            assert_eq!(compile_error(source).template, TemplateSource::new(source), "{source}");
+            assert_eq!(compile_error(source).template(), &TemplateSource::new(source), "{source}");
         }
     }
 
     #[test]
     fn an_expression_tera_cannot_parse_is_a_compile_error() {
         for source in ["{{ a.0 }}", "{{ a b }}", "{{ not }}", "{{ a.true }}"] {
-            assert_eq!(compile_error(source).template, TemplateSource::new(source), "{source}");
+            assert_eq!(compile_error(source).template(), &TemplateSource::new(source), "{source}");
         }
     }
 
     #[test]
     fn a_failed_compilation_leaves_earlier_templates_renderable() {
         let mut runner = TemplateRunner::new();
-        let compiled = runner.compile(&TemplateSource::new("{{ value | upper }}")).unwrap();
-        assert!(runner.compile(&TemplateSource::new("{{ value | upper ")).is_err());
+        let compiled = runner.compile(&TemplateSource::new("{{ value | upper }}"), &location()).unwrap();
+        assert!(runner.compile(&TemplateSource::new("{{ value | upper "), &location()).is_err());
 
         assert_eq!(runner.resolver().resolve(&compiled, &json!({"value": "x"})).unwrap(), json!("X"));
+    }
+
+    #[test]
+    fn an_unspaced_hyphen_between_names_is_rejected_naming_the_token() {
+        for (source, token) in [
+            ("{{ station-id }}", "station-id"),
+            ("{{ station-id | upper }}", "station-id"),
+            ("{% if station-id %}x{% endif %}", "station-id"),
+            ("{{ a-b-c }}", "a-b-c"),
+        ] {
+            assert!(
+                matches!(compile_error(source), TemplateCompileError::AmbiguousHyphen { reference, .. } if reference.written() == token),
+                "{source}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_hyphen_that_is_spaced_numeric_quoted_raw_or_outside_the_delimiters_compiles() {
+        for source in [
+            "{{ a - b }}",
+            "{{ a -b }}",
+            "{{ a- b }}",
+            "{{ n-1 }}",
+            "{{ 1-n }}",
+            "{{ this['a-b'] }}",
+            r#"{{ "a-b" }}"#,
+            "{{ 'x-y' | upper }}",
+            "Station-{{ id }}",
+            "{{ a }}-{{ b }}",
+            "{# a-b #}{{ a }}",
+            "{% raw %}{{ a-b }}{% endraw %}",
+        ] {
+            let mut runner = TemplateRunner::new();
+            assert!(runner.compile(&TemplateSource::new(source), &location()).is_ok(), "{source}");
+        }
+    }
+
+    #[test]
+    fn a_spaced_hyphen_subtracts_numbers() {
+        assert_eq!(resolve("{{ a - b }}", &json!({"a": 5, "b": 2})), json!(3));
+    }
+
+    #[test]
+    fn a_hyphen_beside_a_number_subtracts_it() {
+        assert_eq!(resolve("{{ n-1 }}", &json!({"n": 5})), json!(4));
+        assert_eq!(resolve("{{ 10-n }}", &json!({"n": 4})), json!(6));
+    }
+
+    #[test]
+    fn a_bracketed_hyphenated_key_reads_the_field() {
+        assert_eq!(resolve("{{ this['station-id'] | upper }}", &json!({"station-id": "s1"})), json!("S1"));
+    }
+
+    #[test]
+    fn a_non_ascii_name_inside_an_expression_is_rejected_naming_it_and_chaining_teras_report() {
+        for (source, identifier) in [
+            ("{{ čas | upper }}", "čas"),
+            ("{% if čas %}{{ čas }}{% endif %}", "čas"),
+            ("{{ Città ~ '-' }}", "Città"),
+        ] {
+            let error = compile_error(source);
+
+            assert!(
+                matches!(&error, TemplateCompileError::NonAsciiIdentifier { reference, .. } if reference.written() == identifier),
+                "{source}: {error:?}"
+            );
+            assert!(error.to_string().contains(&format!("this['{identifier}']")), "{error}");
+            assert!(
+                error
+                    .source()
+                    .expect("Tera's report is chained")
+                    .to_string()
+                    .starts_with("Tera: Unexpected character")
+            );
+        }
+    }
+
+    #[test]
+    fn non_ascii_text_in_a_string_literal_compiles() {
+        assert_eq!(resolve(r#"{{ "čas" }}"#, &json!({})), json!("čas"));
+        assert_eq!(resolve(r#"{{ x | replace(from="č", to="c") }}"#, &json!({"x": "čas"})), json!("cas"));
+    }
+
+    #[test]
+    fn a_lone_non_ascii_reference_reads_its_field_without_tera() {
+        let (_, compiled) = compile("{{ čas }}");
+
+        assert!(matches!(&compiled, CompiledTemplate::Simple(key) if key.as_str() == "čas"));
+        assert_eq!(resolve("{{ čas }}", &json!({"čas": "10:00"})), json!("10:00"));
+        assert_eq!(resolve("Ura-{{ čas }}", &json!({"čas": "10:00"})), json!("Ura-10:00"));
+    }
+
+    #[test]
+    fn a_misspelt_filter_is_rejected_suggesting_the_registered_one() {
+        assert!(matches!(
+            compile_error("{{ t | uper }}"),
+            TemplateCompileError::MisspelledCallable { name, suggestion: "upper", .. } if name == "uper"
+        ));
+        assert!(matches!(
+            compile_error("{{ t | json_decod }}"),
+            TemplateCompileError::MisspelledCallable { suggestion: "json_decode", .. }
+        ));
+    }
+
+    #[test]
+    fn a_compiled_template_carries_its_source_and_location() {
+        let (_, compiled) = compile("{{ name | upper }}");
+
+        let CompiledTemplate::Expression(template) = compiled else {
+            panic!("expected a typed Tera template, got {compiled:?}");
+        };
+        assert_eq!(template.source, TemplateSource::new("{{ name | upper }}"));
+        assert_eq!(template.location, location());
     }
 }

@@ -779,11 +779,13 @@ dependencies = [
  "serde",
  "serde_json",
  "serde_json5",
+ "strsim",
  "strum",
  "tera",
  "tera-contrib",
  "thiserror 2.0.21",
  "typed-builder",
+ "unicode-ident",
 ]
 
 [[package]]

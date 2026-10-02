@@ -1,5 +1,8 @@
-use crate::template::numeric_value::{finite_or_none, number_from_value};
-use tera::{Kwargs, State, Tera, TeraResult, Value};
+use crate::template::{
+    numeric_value::{finite_or_none, number_from_value},
+    registrar::Registrar,
+};
+use tera::{Kwargs, State, TeraResult, Value};
 
 /// Registers the directional rounding filters on a Tera engine.
 ///
@@ -12,26 +15,27 @@ use tera::{Kwargs, State, Tera, TeraResult, Value};
 /// | `floor` | toward negative infinity |
 /// | `ceil` | toward positive infinity |
 /// | `trunc` | toward zero (drop the fraction) |
-pub fn register(tera: &mut Tera) {
-    tera.register_filter("floor", |value: &Value, _kwargs: Kwargs, _state: &State| -> TeraResult<Value> {
+pub fn register(registrar: &mut Registrar) {
+    registrar.filter("floor", |value: &Value, _kwargs: Kwargs, _state: &State| -> TeraResult<Value> {
         Ok(finite_or_none(number_from_value(value, "floor")?.floor()))
     });
-    tera.register_filter("ceil", |value: &Value, _kwargs: Kwargs, _state: &State| -> TeraResult<Value> {
+    registrar.filter("ceil", |value: &Value, _kwargs: Kwargs, _state: &State| -> TeraResult<Value> {
         Ok(finite_or_none(number_from_value(value, "ceil")?.ceil()))
     });
-    tera.register_filter("trunc", |value: &Value, _kwargs: Kwargs, _state: &State| -> TeraResult<Value> {
+    registrar.filter("trunc", |value: &Value, _kwargs: Kwargs, _state: &State| -> TeraResult<Value> {
         Ok(finite_or_none(number_from_value(value, "trunc")?.trunc()))
     });
 }
 
 #[cfg(test)]
 mod tests {
-    use crate::template::filter::rounding::register;
-    use tera::{Context, Tera, Value};
+    use crate::template::{filter::rounding::register, registrar::Registrar};
+    use tera::{Context, Value};
 
     fn apply(template: &str, value: Value) -> Result<String, tera::Error> {
-        let mut tera = Tera::default();
-        register(&mut tera);
+        let mut registrar = Registrar::with_engine_builtins();
+        register(&mut registrar);
+        let (mut tera, _) = registrar.finish();
         tera.add_raw_template("t", template).unwrap();
 
         let mut context = Context::new();

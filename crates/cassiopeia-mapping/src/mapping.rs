@@ -6,6 +6,7 @@ use crate::{
     observed_at::ObservedAt,
     scope::{CompiledScope, Scope},
     template::{CompiledTemplate, TemplateSource, resolver::TemplateResolver, runner::TemplateRunner},
+    template_location::TemplateLocation,
     template_site::TemplateSite,
     version::Version,
 };
@@ -14,7 +15,7 @@ use cassiopeia_ngsi_ld::data_model::DataModel;
 use getset::{Getters, MutGetters, Setters};
 use serde::{Deserialize, Serialize};
 use serde_json::Value as JsonValue;
-use std::{fs::read_to_string, path::Path};
+use std::{fs::read_to_string, path::Path, sync::Arc};
 
 /// A mapping document: the declaration of how one source record becomes one NGSI-LD entity.
 ///
@@ -190,16 +191,13 @@ impl Mapping {
     fn compile_temporal_fields(&mut self, origin: &Path, runner: &mut TemplateRunner) -> Result<()> {
         let temporal_source = self.iter_all_attributes().find_map(Attribute::observed_at_source);
 
-        self.observed_at_template =
-            temporal_source
-                .as_ref()
-                .map(|source| runner.compile(source))
-                .transpose()
-                .map_err(|source| MappingError::UncompilableTemplate {
-                    path: origin.to_path_buf(),
-                    site: TemplateSite::ObservedAt,
-                    source: Box::new(source),
-                })?;
+        if let Some(source) = &temporal_source {
+            let location = TemplateLocation::new(Arc::from(origin), TemplateSite::ObservedAt);
+            let compiled = runner
+                .compile(source, &location)
+                .map_err(|source| MappingError::UncompilableTemplate { location, source })?;
+            self.observed_at_template = Some(compiled);
+        }
         self.temporal_source = temporal_source;
 
         Ok(())
@@ -513,8 +511,10 @@ mod tests {
 
         assert!(matches!(
             &error,
-            MappingError::UncompilableTemplate { path, site: TemplateSite::ObservedAt, source }
-                if path == Path::new("sensor.json5") && source.template == TemplateSource::new("{{ ts | upper ")
+            MappingError::UncompilableTemplate { location, source }
+                if *location.document == *Path::new("sensor.json5")
+                    && location.site == TemplateSite::ObservedAt
+                    && *source.template() == TemplateSource::new("{{ ts | upper ")
         ));
         assert!(error.to_string().contains("sensor.json5"));
         assert!(error.to_string().contains("observedAt"));
@@ -538,10 +538,7 @@ mod tests {
 
         assert!(matches!(
             result,
-            Err(MappingError::UncompilableTemplate {
-                site: TemplateSite::ObservedAt,
-                ..
-            })
+            Err(MappingError::UncompilableTemplate { location, .. }) if location.site == TemplateSite::ObservedAt
         ));
     }
 

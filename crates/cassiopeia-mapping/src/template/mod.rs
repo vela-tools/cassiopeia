@@ -1,17 +1,28 @@
+pub mod block_structure;
+pub(crate) mod compile_diagnosis;
 pub mod compile_error;
 pub mod contrib;
 pub(crate) mod direct_form;
+pub mod engine_report;
 pub mod error;
 pub mod field_path;
 pub mod filter;
 pub mod function;
+pub(crate) mod identifier;
+pub mod identifier_lint;
+pub mod lexer;
 pub mod numeric_value;
+pub mod registered_template;
+pub mod registrar;
+pub(crate) mod render_diagnosis;
 pub mod resolver;
 pub mod runner;
+pub mod source_position;
 pub mod template_name;
 pub mod value_expression;
+pub mod vocabulary;
 
-use crate::template::{field_path::FieldPath, template_name::TemplateName};
+use crate::template::{field_path::FieldPath, registered_template::RegisteredTemplate};
 use derive_more::Display;
 use serde::{Deserialize, Serialize};
 
@@ -58,14 +69,14 @@ pub enum CompiledTemplate {
     ///
     /// It resolves to the expression's value with its type intact, so an array or object a filter
     /// returns reaches the caller as that array or object rather than as its printed form; a guard
-    /// that suppresses the expression resolves to null. Holds the name the template is registered
-    /// under in the Tera engine.
-    Expression(TemplateName),
+    /// that suppresses the expression resolves to null. Holds the template as registered in the
+    /// Tera engine.
+    Expression(RegisteredTemplate),
 
     /// A template that renders text around or between its expressions, such as
     /// `{% if field %}{{ field }}{% else %}none{% endif %}`, and so always resolves to a string.
-    /// Holds the name the template is registered under in the Tera engine.
-    Complex(TemplateName),
+    /// Holds the template as registered in the Tera engine.
+    Complex(RegisteredTemplate),
 }
 
 /// One segment of a `CompiledTemplate::Composite`.

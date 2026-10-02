@@ -14,6 +14,8 @@ pub(crate) struct RecordedDiagnostic {
     pub(crate) code: DiagnosticCode,
     /// The headline it rendered.
     pub(crate) headline: String,
+    /// Its rendered cause chain, outermost first.
+    pub(crate) causes: Vec<String>,
     /// How many occurrences it stood for.
     pub(crate) occurrences: u64,
 }
@@ -53,6 +55,7 @@ impl DiagnosticSink for RecordingReporter {
         self.diagnostics.lock().unwrap_or_else(PoisonError::into_inner).push(RecordedDiagnostic {
             code: diagnostic.code(),
             headline: diagnostic.headline().to_string(),
+            causes: diagnostic.causes().iter().map(|cause| cause.as_str().to_string()).collect(),
             occurrences: diagnostic.occurrences().get(),
         });
     }

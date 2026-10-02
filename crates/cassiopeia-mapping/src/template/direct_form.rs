@@ -1,4 +1,4 @@
-use crate::template::{CompiledTemplate, TemplatePart, field_path::FieldPath};
+use crate::template::{CompiledTemplate, TemplatePart, field_path::FieldPath, identifier::is_identifier};
 use lazy_regex::regex;
 
 /// Head identifiers a bare reference may not start with, because Tera does not read them as a
@@ -55,9 +55,10 @@ pub(crate) fn compile(source: &str) -> Option<CompiledTemplate> {
 /// The grammar is the subset of Tera's expression syntax whose meaning a [`FieldPath`] reproduces
 /// exactly, surrounded by the ASCII whitespace Tera skips inside delimiters:
 ///
-/// - a dotted path of Tera identifiers, `name` or `properties.name`, each segment
-///   `[A-Za-z_][A-Za-z0-9_]*`, whose head is not one of [`ENGINE_HEADS`] and whose later segments
-///   are not one of [`BOOLEAN_SEGMENTS`];
+/// - a dotted path of identifiers (see [`identifier`](crate::template::identifier)), `name`,
+///   `properties.name`, or `ulica.številka`, whose head is not one of [`ENGINE_HEADS`] and whose
+///   later segments are not one of [`BOOLEAN_SEGMENTS`]. A path with a non-ASCII segment is read
+///   here because Tera cannot read it at all: its lexer accepts only ASCII identifiers;
 /// - `this['key']`, a single-quoted key with no `.` (a path would split it into segments where Tera
 ///   reads one key) and no `\` (Tera unescapes it);
 /// - `this[n]`, a decimal column index that Tera's lexer accepts as an integer, named by its value.
@@ -65,27 +66,24 @@ pub(crate) fn compile(source: &str) -> Option<CompiledTemplate> {
 /// A `-` whitespace-control marker, an operator, a filter, a call, or a literal makes the body
 /// something else, as does whitespace between the tokens of a path.
 fn field_reference(body: &str) -> Option<FieldPath> {
-    let reference = regex!(r"^[\t\n\x0C\r ]*(?:this\['([^'.\\]*)'\]|this\[([0-9]+)\]|([A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)*))[\t\n\x0C\r ]*$");
-    let captures = reference.captures(body)?;
+    let reference = body.trim_matches(|character: char| character.is_ascii_whitespace());
 
-    if let Some(key) = captures.get(1) {
-        return Some(FieldPath::new(key.as_str()));
-    }
-    if let Some(index) = captures.get(2) {
+    if let Some(captures) = regex!(r"^this\[(?:'([^'.\\]*)'|([0-9]+))\]$").captures(reference) {
+        if let Some(key) = captures.get(1) {
+            return Some(FieldPath::new(key.as_str()));
+        }
         // Tera reads the digits as an `i64`, so `this[007]` indexes column 7 and an index past the
         // `i64` range does not parse at all.
-        let index: i64 = index.as_str().parse().ok()?;
+        let index: i64 = captures.get(2)?.as_str().parse().ok()?;
         return Some(FieldPath::new(index.to_string()));
     }
 
-    let path = captures.get(3)?.as_str();
-    let mut segments = path.split('.');
+    let mut segments = reference.split('.');
     let head = segments.next()?;
-    if ENGINE_HEADS.contains(&head) || segments.any(|segment| BOOLEAN_SEGMENTS.contains(&segment)) {
-        return None;
-    }
+    let is_path =
+        is_identifier(head) && !ENGINE_HEADS.contains(&head) && segments.all(|segment| is_identifier(segment) && !BOOLEAN_SEGMENTS.contains(&segment));
 
-    Some(FieldPath::new(path))
+    is_path.then(|| FieldPath::new(reference))
 }
 
 #[cfg(test)]
@@ -250,10 +248,52 @@ mod tests {
             "42",
             "a ~ b",
             "station-id",
-            "čas",
             "",
         ] {
             assert_eq!(reference(body), None, "{body}");
         }
+    }
+
+    #[test]
+    fn a_lone_non_ascii_reference_is_a_direct_lookup() {
+        assert!(matches!(compile("{{ čas }}"), Some(CompiledTemplate::Simple(key)) if key.as_str() == "čas"));
+    }
+
+    #[test]
+    fn literal_text_around_a_non_ascii_reference_is_a_concatenation() {
+        let Some(CompiledTemplate::Composite(parts)) = compile("Ura-{{ čas }}") else {
+            panic!("expected a concatenation");
+        };
+
+        assert!(matches!(
+            parts.as_slice(),
+            [TemplatePart::Static(prefix), TemplatePart::Dynamic(key)] if prefix == "Ura-" && key.as_str() == "čas"
+        ));
+    }
+
+    #[test]
+    fn a_dotted_non_ascii_path_is_a_direct_lookup_of_both_segments() {
+        let Some(CompiledTemplate::Simple(path)) = compile("{{ ulica.številka }}") else {
+            panic!("expected a direct lookup");
+        };
+
+        assert_eq!(path.as_str(), "ulica.številka");
+        assert_eq!(path.read(&serde_json::json!({"ulica": {"številka": 12}})), serde_json::json!(12));
+    }
+
+    #[test]
+    fn unicode_identifiers_are_references() {
+        for body in ["Città", "naïve", "_x", "číslo_2", "a.naïve.ž"] {
+            assert_eq!(reference(body).as_deref(), Some(body), "{body}");
+        }
+    }
+
+    #[test]
+    fn non_ascii_text_that_is_not_an_identifier_is_not_a_reference() {
+        for body in ["č as", "č-a", "a²", "čas.", ".čas", "čas.true", "\u{a0}čas"] {
+            assert_eq!(reference(body), None, "{body}");
+        }
+        assert!(compile("{{ č as }}").is_none());
+        assert!(compile("{{ č-a }}").is_none());
     }
 }

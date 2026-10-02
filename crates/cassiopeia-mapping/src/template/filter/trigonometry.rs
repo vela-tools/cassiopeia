@@ -1,5 +1,8 @@
-use crate::template::numeric_value::{finite_or_none, number_from_value};
-use tera::{Kwargs, State, Tera, TeraResult, Value};
+use crate::template::{
+    numeric_value::{finite_or_none, number_from_value},
+    registrar::Registrar,
+};
+use tera::{Kwargs, State, TeraResult, Value};
 
 /// Registers the trigonometric filters and the radian/degree conversions on a Tera engine.
 ///
@@ -14,42 +17,43 @@ use tera::{Kwargs, State, Tera, TeraResult, Value};
 /// | `asin`, `acos`, `atan` | inverse circular functions, returning radians |
 /// | `radians` | degrees to radians |
 /// | `degrees` | radians to degrees |
-pub fn register(tera: &mut Tera) {
-    tera.register_filter("sin", |value: &Value, _kwargs: Kwargs, _state: &State| -> TeraResult<Value> {
+pub fn register(registrar: &mut Registrar) {
+    registrar.filter("sin", |value: &Value, _kwargs: Kwargs, _state: &State| -> TeraResult<Value> {
         Ok(finite_or_none(number_from_value(value, "sin")?.sin()))
     });
-    tera.register_filter("cos", |value: &Value, _kwargs: Kwargs, _state: &State| -> TeraResult<Value> {
+    registrar.filter("cos", |value: &Value, _kwargs: Kwargs, _state: &State| -> TeraResult<Value> {
         Ok(finite_or_none(number_from_value(value, "cos")?.cos()))
     });
-    tera.register_filter("tan", |value: &Value, _kwargs: Kwargs, _state: &State| -> TeraResult<Value> {
+    registrar.filter("tan", |value: &Value, _kwargs: Kwargs, _state: &State| -> TeraResult<Value> {
         Ok(finite_or_none(number_from_value(value, "tan")?.tan()))
     });
-    tera.register_filter("asin", |value: &Value, _kwargs: Kwargs, _state: &State| -> TeraResult<Value> {
+    registrar.filter("asin", |value: &Value, _kwargs: Kwargs, _state: &State| -> TeraResult<Value> {
         Ok(finite_or_none(number_from_value(value, "asin")?.asin()))
     });
-    tera.register_filter("acos", |value: &Value, _kwargs: Kwargs, _state: &State| -> TeraResult<Value> {
+    registrar.filter("acos", |value: &Value, _kwargs: Kwargs, _state: &State| -> TeraResult<Value> {
         Ok(finite_or_none(number_from_value(value, "acos")?.acos()))
     });
-    tera.register_filter("atan", |value: &Value, _kwargs: Kwargs, _state: &State| -> TeraResult<Value> {
+    registrar.filter("atan", |value: &Value, _kwargs: Kwargs, _state: &State| -> TeraResult<Value> {
         Ok(finite_or_none(number_from_value(value, "atan")?.atan()))
     });
-    tera.register_filter("radians", |value: &Value, _kwargs: Kwargs, _state: &State| -> TeraResult<Value> {
+    registrar.filter("radians", |value: &Value, _kwargs: Kwargs, _state: &State| -> TeraResult<Value> {
         Ok(finite_or_none(number_from_value(value, "radians")?.to_radians()))
     });
-    tera.register_filter("degrees", |value: &Value, _kwargs: Kwargs, _state: &State| -> TeraResult<Value> {
+    registrar.filter("degrees", |value: &Value, _kwargs: Kwargs, _state: &State| -> TeraResult<Value> {
         Ok(finite_or_none(number_from_value(value, "degrees")?.to_degrees()))
     });
 }
 
 #[cfg(test)]
 mod tests {
-    use crate::template::filter::trigonometry::register;
+    use crate::template::{filter::trigonometry::register, registrar::Registrar};
     use std::f64::consts::PI;
-    use tera::{Context, Tera, Value};
+    use tera::{Context, Value};
 
     fn apply(template: &str, value: Value) -> Result<String, tera::Error> {
-        let mut tera = Tera::default();
-        register(&mut tera);
+        let mut registrar = Registrar::with_engine_builtins();
+        register(&mut registrar);
+        let (mut tera, _) = registrar.finish();
         tera.add_raw_template("t", template).unwrap();
 
         let mut context = Context::new();

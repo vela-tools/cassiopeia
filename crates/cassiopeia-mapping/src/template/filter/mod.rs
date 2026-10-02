@@ -6,31 +6,34 @@ pub mod rounding;
 pub mod timestamp;
 pub mod trigonometry;
 
-use crate::template::filter::{clean::clean, get::get, timestamp::date_subtract_seconds};
-use tera::Tera;
+use crate::template::{
+    filter::{clean::clean, get::get, timestamp::date_subtract_seconds},
+    registrar::Registrar,
+};
 
 /// Registers every Cassiopeia-defined filter on a Tera engine.
 ///
 /// Kept in one place so a newly added filter is available to every engine the crate builds,
 /// rather than only to whichever construction path happened to be updated.
-pub fn register(tera: &mut Tera) {
-    tera.register_filter("clean", clean);
-    tera.register_filter("get", get);
-    tera.register_filter("date_subtract_seconds", date_subtract_seconds);
-    elementary::register(tera);
-    json_decode::register(tera);
-    rounding::register(tera);
-    trigonometry::register(tera);
+pub fn register(registrar: &mut Registrar) {
+    registrar.filter("clean", clean);
+    registrar.filter("get", get);
+    registrar.filter("date_subtract_seconds", date_subtract_seconds);
+    elementary::register(registrar);
+    json_decode::register(registrar);
+    rounding::register(registrar);
+    trigonometry::register(registrar);
 }
 
 #[cfg(test)]
 mod tests {
-    use crate::template::filter::register;
-    use tera::{Context, Tera};
+    use crate::template::{filter::register, registrar::Registrar};
+    use tera::Context;
 
     fn render(template: &str) -> String {
-        let mut tera = Tera::default();
-        register(&mut tera);
+        let mut registrar = Registrar::with_engine_builtins();
+        register(&mut registrar);
+        let (mut tera, _) = registrar.finish();
         tera.add_raw_template("t", template).unwrap();
 
         tera.render("t", &Context::new()).unwrap()

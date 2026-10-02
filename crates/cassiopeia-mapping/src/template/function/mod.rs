@@ -14,59 +14,62 @@ pub mod hypot;
 pub mod map_range;
 pub mod wind;
 
-use crate::template::function::{
-    atan2::atan2,
-    bearing::bearing,
-    clamp::clamp,
-    constant::{e, pi, tau},
-    dms_point::dms_point,
-    geo_area::geo_area,
-    geo_bbox::geo_bbox,
-    geo_centroid::geo_centroid,
-    geo_convert::geo_convert,
-    geo_length::geo_length,
-    geohash::geohash,
-    hypot::hypot,
-    map_range::map_range,
-    wind::{wind_direction, wind_speed},
+use crate::template::{
+    function::{
+        atan2::atan2,
+        bearing::bearing,
+        clamp::clamp,
+        constant::{e, pi, tau},
+        dms_point::dms_point,
+        geo_area::geo_area,
+        geo_bbox::geo_bbox,
+        geo_centroid::geo_centroid,
+        geo_convert::geo_convert,
+        geo_length::geo_length,
+        geohash::geohash,
+        hypot::hypot,
+        map_range::map_range,
+        wind::{wind_direction, wind_speed},
+    },
+    registrar::Registrar,
 };
-use tera::Tera;
 
 /// Registers every Cassiopeia-defined Tera function on an engine.
 ///
 /// Kept in one place, alongside the filter registrar, so a newly added function is available to
 /// every engine the crate builds rather than only to whichever construction path happened to be
 /// updated.
-pub fn register(tera: &mut Tera) {
-    tera.register_function("dms_point", dms_point);
-    tera.register_function("geohash", geohash);
-    tera.register_function("geo_convert", geo_convert);
-    tera.register_function("geo_centroid", geo_centroid);
-    tera.register_function("geo_bbox", geo_bbox);
-    tera.register_function("geo_area", geo_area);
-    tera.register_function("geo_length", geo_length);
-    tera.register_function("hypot", hypot);
-    tera.register_function("clamp", clamp);
-    tera.register_function("map_range", map_range);
-    tera.register_function("atan2", atan2);
-    tera.register_function("pi", pi);
-    tera.register_function("tau", tau);
-    tera.register_function("e", e);
-    tera.register_function("bearing", bearing);
-    tera.register_function("wind_speed", wind_speed);
-    tera.register_function("wind_direction", wind_direction);
+pub fn register(registrar: &mut Registrar) {
+    registrar.function("dms_point", dms_point);
+    registrar.function("geohash", geohash);
+    registrar.function("geo_convert", geo_convert);
+    registrar.function("geo_centroid", geo_centroid);
+    registrar.function("geo_bbox", geo_bbox);
+    registrar.function("geo_area", geo_area);
+    registrar.function("geo_length", geo_length);
+    registrar.function("hypot", hypot);
+    registrar.function("clamp", clamp);
+    registrar.function("map_range", map_range);
+    registrar.function("atan2", atan2);
+    registrar.function("pi", pi);
+    registrar.function("tau", tau);
+    registrar.function("e", e);
+    registrar.function("bearing", bearing);
+    registrar.function("wind_speed", wind_speed);
+    registrar.function("wind_direction", wind_direction);
 }
 
 #[cfg(test)]
 mod tests {
-    use crate::template::function::register;
+    use crate::template::{function::register, registrar::Registrar};
     use std::f64::consts::PI;
-    use tera::{Context, Tera};
+    use tera::Context;
 
     #[test]
     fn the_geohash_function_is_registered() {
-        let mut tera = Tera::default();
-        register(&mut tera);
+        let mut registrar = Registrar::with_engine_builtins();
+        register(&mut registrar);
+        let (mut tera, _) = registrar.finish();
         tera.add_raw_template("t", "{{ geohash(lat=35.3003, lon=-120.6623, precision=5) }}").unwrap();
 
         assert_eq!(tera.render("t", &Context::new()).unwrap(), "9q60y");
@@ -74,8 +77,9 @@ mod tests {
 
     #[test]
     fn the_dms_point_function_is_registered() {
-        let mut tera = Tera::default();
-        register(&mut tera);
+        let mut registrar = Registrar::with_engine_builtins();
+        register(&mut registrar);
+        let (mut tera, _) = registrar.finish();
         tera.add_raw_template("t", r#"{{ dms_point(value="27°59′17″N 86°55′30″E") }}"#).unwrap();
 
         let rendered = tera.render("t", &Context::new()).unwrap();
@@ -101,8 +105,9 @@ mod tests {
 
     /// Renders `template` with the two-surface `MultiPolygon` bound as `geometry`.
     fn with_geometry(template: &str) -> String {
-        let mut tera = Tera::default();
-        register(&mut tera);
+        let mut registrar = Registrar::with_engine_builtins();
+        register(&mut registrar);
+        let (mut tera, _) = registrar.finish();
         tera.add_raw_template("t", template).unwrap();
 
         let mut context = Context::new();
@@ -140,8 +145,9 @@ mod tests {
     }
 
     fn number(template: &str) -> f64 {
-        let mut tera = Tera::default();
-        register(&mut tera);
+        let mut registrar = Registrar::with_engine_builtins();
+        register(&mut registrar);
+        let (mut tera, _) = registrar.finish();
         tera.add_raw_template("t", template).unwrap();
 
         tera.render("t", &Context::new()).unwrap().parse().unwrap()
