@@ -1258,4 +1258,126 @@ mod tests {
             assert_eq!(outcome.warnings, 1, "{store:?}");
         }
     }
+
+    /// A zone whose `name` carries its `footprint` as a `GeoProperty` sub-attribute, with
+    /// `geometry_block` spliced into the sub-attribute's declaration.
+    fn zone_with_footprint(geometry_block: &str) -> &'static str {
+        Box::leak(
+            format!(
+                r#"{{
+                    version: "v4",
+                    dataModel: "Zone",
+                    identity: {{ entityName: "{{{{ id }}}}" }},
+                    attributes: {{
+                        name: {{
+                            source: "{{{{ id }}}}",
+                            properties: {{ footprint: {{ type: "GeoProperty", source: "{{{{ geometry }}}}"{geometry_block} }} }},
+                        }},
+                    }},
+                }}"#
+            )
+            .into_boxed_str(),
+        )
+    }
+
+    /// Runs one zone carrying `geometry` through a mapping declaring it as the `footprint`
+    /// sub-attribute of `name`, under `geometry_block`.
+    fn run_zone_footprint(store: StoreKind, geometry_block: &str, geometry: &Value) -> RunOutcome {
+        run_end_to_end(
+            store,
+            &[RunInput {
+                mapping: zone_with_footprint(geometry_block),
+                records: json!([{ "id": "square", "geometry": geometry }]),
+            }],
+            &["Zone"],
+            "",
+        )
+    }
+
+    #[test]
+    fn a_geo_property_sub_attribute_keeping_its_winding_publishes_the_ring_as_the_source_wound_it() {
+        for store in STORES {
+            let outcome = run_zone_footprint(store, r#", geometry: { winding: "keep" }"#, &clockwise_square());
+
+            assert_eq!(outcome.entities[0]["name"]["footprint"]["value"], clockwise_square(), "{store:?}");
+            assert_eq!(outcome.warnings, 0, "{store:?}");
+        }
+    }
+
+    #[test]
+    fn a_geo_property_sub_attribute_without_a_winding_policy_publishes_the_ring_rewound() {
+        for store in STORES {
+            let outcome = run_zone_footprint(store, "", &clockwise_square());
+
+            let footprint = &outcome.entities[0]["name"]["footprint"];
+            assert_eq!(footprint["type"], "GeoProperty", "{store:?}");
+            assert_ne!(footprint["value"], clockwise_square(), "{store:?}");
+            assert_eq!(outcome.warnings, 0, "{store:?}");
+        }
+    }
+
+    #[test]
+    fn a_geometry_collection_under_a_geo_property_sub_attribute_is_dropped_with_a_warning_and_the_parent_still_published() {
+        let collection = json!({ "type": "GeometryCollection", "geometries": [{ "type": "Point", "coordinates": [1.0, 2.0] }] });
+        for store in STORES {
+            let outcome = run_zone_footprint(store, "", &collection);
+
+            assert_eq!(entity_ids(&outcome), ["urn:ngsi-ld:Zone:square"], "{store:?}");
+            let name = &outcome.entities[0]["name"];
+            assert_eq!(name["value"], "square", "{store:?}");
+            assert!(name.get("footprint").is_none(), "{store:?}: {name:?}");
+            assert_eq!(outcome.warnings, 1, "{store:?}");
+        }
+    }
+
+    #[test]
+    fn a_geo_property_sub_attribute_over_text_that_is_no_geometry_or_over_null_is_absent_without_a_warning() {
+        for (store, geometry) in STORES
+            .into_iter()
+            .flat_map(|store| [(store, json!("somewhere near the river")), (store, Value::Null)])
+        {
+            let outcome = run_zone_footprint(store, "", &geometry);
+
+            let name = &outcome.entities[0]["name"];
+            assert_eq!(name["value"], "square", "{store:?} {geometry}");
+            assert!(name.get("footprint").is_none(), "{store:?} {geometry}: {name:?}");
+            assert_eq!(outcome.warnings, 0, "{store:?} {geometry}");
+        }
+    }
+
+    #[test]
+    fn a_refused_geometry_in_one_instance_of_a_multi_instance_geo_property_is_dropped_with_a_warning() {
+        let mapping = r#"{
+            version: "v4",
+            dataModel: "Zone",
+            identity: { entityName: "{{ id }}" },
+            attributes: {
+                location: {
+                    type: "GeoProperty",
+                    instances: [
+                        { source: "{{ surveyed }}", properties: { datasetId: { source: "urn:ngsi-ld:Dataset:surveyed" } } },
+                        { source: "{{ estimated }}", properties: { datasetId: { source: "urn:ngsi-ld:Dataset:estimated" } } },
+                    ],
+                },
+            },
+        }"#;
+        let collection = json!({ "type": "GeometryCollection", "geometries": [{ "type": "Point", "coordinates": [1.0, 2.0] }] });
+        for store in STORES {
+            let outcome = run_end_to_end(
+                store,
+                &[RunInput {
+                    mapping,
+                    records: json!([{ "id": "square", "surveyed": { "type": "Point", "coordinates": [1.0, 1.0] }, "estimated": collection }]),
+                }],
+                &["Zone"],
+                "",
+            );
+
+            let location = &outcome.entities[0]["location"];
+            assert_eq!(location.as_array().map(Vec::len), Some(1), "{store:?}: {location:?}");
+            assert_eq!(location[0]["type"], "GeoProperty", "{store:?}: {location:?}");
+            assert_eq!(location[0]["datasetId"], "urn:ngsi-ld:Dataset:surveyed", "{store:?}: {location:?}");
+            assert_eq!(outcome.warnings, 1, "{store:?}");
+        }
+    }
 }

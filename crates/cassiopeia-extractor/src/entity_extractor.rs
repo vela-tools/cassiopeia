@@ -120,6 +120,7 @@ mod tests {
         assembled_entity::AssembledEntity,
         entity::Entity,
         instance_index::InstanceIndex,
+        metadata::MetadataStorage,
         relationship_path::RelationshipPath,
         relationships::{InstanceObjects, InstanceRelationships, NestedRelationships, Relationships},
         sub_attribute::SubAttribute,
@@ -194,7 +195,7 @@ mod tests {
             .as_per_item()
             .unwrap()
             .iter()
-            .map(|item| item.get(&name("datasetId")).map(SubAttribute::value).cloned())
+            .map(|item| item.get(&name("datasetId")).map(|sub| JsonValue::from(sub.value().clone())))
             .collect()
     }
 
@@ -475,7 +476,7 @@ mod tests {
             .as_shared()
             .expect("shared metadata");
 
-        assert_eq!(shared.get(&name("unitCode")).map(SubAttribute::value), Some(&json!("CEL")));
+        assert_eq!(shared.get(&name("unitCode")).map(SubAttribute::value), Some(&Value::from(json!("CEL"))));
     }
 
     #[test]
@@ -505,7 +506,7 @@ mod tests {
         let level = shared.get(&name("level")).expect("level sub-attribute");
 
         assert_eq!(*level.kind(), NgsiLdAttributeKind::VocabProperty);
-        assert_eq!(level.value(), &json!("https://example.org/level/high"));
+        assert_eq!(level.value(), &Value::from(json!("https://example.org/level/high")));
     }
 
     #[test]
@@ -542,7 +543,7 @@ mod tests {
         let inner = level.metadata().get(&name("source")).expect("nested sub-attribute");
 
         assert_eq!(*level.kind(), NgsiLdAttributeKind::VocabProperty);
-        assert_eq!(inner.value(), &json!("measured"));
+        assert_eq!(inner.value(), &Value::from(json!("measured")));
     }
 
     #[test]
@@ -586,14 +587,14 @@ mod tests {
             .expect("per-item metadata");
         assert_eq!(per_item.len(), 2);
         // Each instance carries the shared unitCode plus its own datasetId.
-        assert_eq!(per_item[0].get(&name("unitCode")).map(SubAttribute::value), Some(&json!("CEL")));
+        assert_eq!(per_item[0].get(&name("unitCode")).map(SubAttribute::value), Some(&Value::from(json!("CEL"))));
         assert_eq!(
             per_item[0].get(&name("datasetId")).map(SubAttribute::value),
-            Some(&json!("urn:ngsi-ld:dataset:model:a"))
+            Some(&Value::from(json!("urn:ngsi-ld:dataset:model:a")))
         );
         assert_eq!(
             per_item[1].get(&name("datasetId")).map(SubAttribute::value),
-            Some(&json!("urn:ngsi-ld:dataset:model:b"))
+            Some(&Value::from(json!("urn:ngsi-ld:dataset:model:b")))
         );
     }
 
@@ -943,7 +944,7 @@ mod tests {
         let shared = result.metadata().as_ref().unwrap().get(&name("hasLeadActor")).unwrap().as_shared().unwrap();
         let plays = shared.get(&name("playsCharacter")).expect("nested relationship sub-attribute");
         assert_eq!(*plays.kind(), NgsiLdAttributeKind::Relationship);
-        assert_eq!(plays.value(), &json!("urn:ngsi-ld:Character:JackSparrow"));
+        assert_eq!(plays.value(), &Value::from(json!("urn:ngsi-ld:Character:JackSparrow")));
         assert_eq!(plays.object_type().as_ref().map(NameBuf::as_str), Some("Character"));
         // The sibling Property sub-attribute is resolved as before.
         assert!(shared.contains_key(&name("billingOrder")));
@@ -998,7 +999,7 @@ mod tests {
         let plays = shared.get(&name("playsCharacter")).expect("nested relationship");
         let located = plays.metadata().get(&name("locatedIn")).expect("doubly nested relationship");
         assert_eq!(*located.kind(), NgsiLdAttributeKind::Relationship);
-        assert_eq!(located.value(), &json!("urn:ngsi-ld:Place:Y"));
+        assert_eq!(located.value(), &Value::from(json!("urn:ngsi-ld:Place:Y")));
         assert_eq!(located.object_type().as_ref().map(NameBuf::as_str), Some("Place"));
     }
 
@@ -1045,7 +1046,7 @@ mod tests {
         let shared = result.metadata().as_ref().unwrap().get(&name("directedBy")).unwrap().as_shared().unwrap();
         let known = shared.get(&name("knownFor")).expect("nested list relationship");
         assert_eq!(*known.kind(), NgsiLdAttributeKind::ListRelationship);
-        assert_eq!(known.value(), &json!(["urn:ngsi-ld:Movie:10", "urn:ngsi-ld:Movie:20"]));
+        assert_eq!(known.value(), &Value::from(json!(["urn:ngsi-ld:Movie:10", "urn:ngsi-ld:Movie:20"])));
     }
 
     #[test]
@@ -1570,14 +1571,120 @@ mod tests {
         );
     }
 
+    /// A polygon whose exterior ring is wound clockwise, against RFC 7946 clause 3.1.6's right-hand
+    /// rule.
+    fn clockwise_square() -> JsonValue {
+        json!({"type": "Polygon", "coordinates": [[[0.0, 0.0], [0.0, 2.0], [2.0, 2.0], [2.0, 0.0], [0.0, 0.0]]]})
+    }
+
+    /// The `footprint` sub-attribute of `name` that the JSON5 `footprint` declaration builds over
+    /// one record, recording every attribute the extraction drops into `dropped`.
+    fn extract_footprint(footprint: &str, record: JsonValue, dropped: &DroppedAttributes) -> Option<SubAttribute> {
+        let (resolver, mapping) = prepare(&format!(
+            r#"{{
+                version: "v4",
+                dataModel: "Zone",
+                identity: {{ entityName: "Zone-1" }},
+                attributes: {{ name: {{ source: "{{{{ id }}}}", properties: {{ footprint: {footprint} }} }} }},
+            }}"#
+        ));
+        let extractor = EntityExtractor::new(resolver);
+
+        let mapped = AssembledEntity::from_single(entity("urn:ngsi-ld:Zone:1", record), mapping);
+        let (result, _) = extractor.extract(mapped, dropped).unwrap().into_parts();
+
+        result
+            .metadata()
+            .as_ref()
+            .and_then(|metadata| metadata.get(&name("name")))
+            .and_then(MetadataStorage::as_shared)
+            .and_then(|shared| shared.get(&name("footprint")))
+            .cloned()
+    }
+
     #[test]
-    fn a_geo_property_under_an_explicit_string_transformation_still_yields_the_compact_json_text_of_its_geometry() {
-        let value = extract_label(
-            r#"{ type: "GeoProperty", source: "{{ geometry }}", transformation: "string" }"#,
-            json!({"geometry": {"type": "Point", "coordinates": [14.5, 46.05]}}),
+    fn a_geo_property_sub_attribute_is_carried_as_the_geometry_its_own_geometry_block_produced() {
+        let dropped = DroppedAttributes::new();
+        let footprint = extract_footprint(
+            r#"{ type: "GeoProperty", source: "{{ geometry }}", geometry: { winding: "keep" } }"#,
+            json!({"id": "1", "geometry": clockwise_square()}),
+            &dropped,
+        )
+        .expect("footprint sub-attribute");
+
+        assert_eq!(*footprint.kind(), NgsiLdAttributeKind::GeoProperty);
+        let expected: NgsiLdGeometry = serde_json::from_value(clockwise_square()).unwrap();
+        assert_eq!(footprint.value(), &Value::Geospatial(Box::new(expected)));
+        assert!(dropped.geometries.is_empty());
+    }
+
+    #[test]
+    fn a_geometry_collection_under_a_geo_property_sub_attribute_is_refused_and_recorded_under_its_name() {
+        let dropped = DroppedAttributes::new();
+        let collection = json!({"type": "GeometryCollection", "geometries": [{"type": "Point", "coordinates": [1.0, 2.0]}]});
+
+        let footprint = extract_footprint(
+            r#"{ type: "GeoProperty", source: "{{ geometry }}" }"#,
+            json!({"id": "1", "geometry": collection}),
+            &dropped,
         );
 
-        assert_eq!(value, Some(Value::String(r#"{"type":"Point","coordinates":[14.5,46.05]}"#.into())));
+        assert!(footprint.is_none());
+        let entries = dropped.geometries.into_entries();
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].0.attribute, name("footprint"));
+    }
+
+    #[test]
+    fn a_geo_property_assembled_from_nested_mappings_is_converted_under_its_own_geometry_block() {
+        let dropped = DroppedAttributes::new();
+        let value = extract_label_recording(
+            r#"{
+                type: "GeoProperty",
+                geometry: { winding: "keep" },
+                mappings: {
+                    type: { source: "Polygon" },
+                    coordinates: { source: "{{ rings }}", transformation: "array" },
+                },
+            }"#,
+            json!({"rings": [[[0.0, 0.0], [0.0, 2.0], [2.0, 2.0], [2.0, 0.0], [0.0, 0.0]]]}),
+            &dropped,
+        );
+
+        let expected: NgsiLdGeometry = serde_json::from_value(clockwise_square()).unwrap();
+        assert_eq!(value, Some(Value::Geospatial(Box::new(expected))));
+        assert!(dropped.geometries.is_empty());
+    }
+
+    #[test]
+    fn a_geometry_collection_assembled_from_nested_mappings_under_a_geo_property_is_refused_and_recorded() {
+        let dropped = DroppedAttributes::new();
+        let value = extract_label_recording(
+            r#"{
+                type: "GeoProperty",
+                mappings: {
+                    type: { source: "GeometryCollection" },
+                    geometries: { source: "{{ members }}", transformation: "array" },
+                },
+            }"#,
+            json!({"members": [{"type": "Point", "coordinates": [1.0, 2.0]}]}),
+            &dropped,
+        );
+
+        assert_eq!(value, None);
+        let entries = dropped.geometries.into_entries();
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].0.attribute, name("label"));
+    }
+
+    #[test]
+    fn an_object_assembled_from_nested_mappings_under_a_conversion_reading_no_geometry_is_kept_as_assembled() {
+        let value = extract_label(
+            r#"{ transformation: "object", mappings: { street: { source: "{{ street }}" } } }"#,
+            json!({"street": "Trubarjeva"}),
+        );
+
+        assert_eq!(value, Some(Value::from(json!({"street": "Trubarjeva"}))));
     }
 
     #[test]
@@ -1622,7 +1729,7 @@ mod tests {
         let codes = shared.get(&name("codes")).expect("codes sub-attribute");
 
         assert_eq!(*codes.kind(), NgsiLdAttributeKind::ListProperty);
-        assert_eq!(codes.value(), &json!(["BS", "IN"]));
+        assert_eq!(codes.value(), &Value::from(json!(["BS", "IN"])));
     }
 
     #[test]

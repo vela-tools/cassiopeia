@@ -185,7 +185,7 @@ mod tests {
         let values = IndexMap::from_iter([(name("temperature"), Value::Number(Number::Float(20.0)))]);
         let shared = IndexMap::from_iter([(
             name("observedAt"),
-            SubAttribute::new(NgsiLdAttributeKind::Property, json!(observed_at), IndexMap::default()),
+            SubAttribute::new(NgsiLdAttributeKind::Property, Value::from(json!(observed_at)), IndexMap::default()),
         )]);
         let metadata = IndexMap::from_iter([(name("temperature"), MetadataStorage::shared(shared))]);
 

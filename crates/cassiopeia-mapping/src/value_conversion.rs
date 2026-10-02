@@ -24,8 +24,9 @@ impl ValueConversion {
     /// A `GeoProperty`'s value shall be a `GeoJSON` geometry (ETSI GS CIM 009 v1.9.1 clause 4.7.1, and
     /// Table 5.2.7-1 of clause 5.2.7 types its `value` as a JSON object "as mandated by clause 4.7"),
     /// so it converts through [`Transformation::Geometry`]: the geometry the source carries, as an
-    /// object or as its JSON text, is kept as read under the attribute's `geometry` policy.
-    /// [`Transformation::String`] would turn it into text the policy never reaches.
+    /// object or as its JSON text, is kept as read under the attribute's `geometry` policy. A
+    /// declared transformation that reads no geometry is refused for a `GeoProperty` when the
+    /// mapping loads, since it could never yield the geometry the value has to be.
     ///
     /// A `ListProperty`'s `valueList` is an ordered array (clause 4.5.21.2), so it collects its
     /// source values with [`Transformation::Array`]: an array read from the source becomes the list

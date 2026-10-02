@@ -1,4 +1,4 @@
-use crate::{template::compile_error::TemplateCompileError, template_location::TemplateLocation};
+use crate::{template::compile_error::TemplateCompileError, template_location::TemplateLocation, transformation::Transformation};
 use cassiopeia_common::error::io::IoError;
 use cassiopeia_geometry::error::GeometryError;
 use cassiopeia_ngsi_ld::entity::name::NameBuf;
@@ -57,6 +57,22 @@ pub enum MappingError {
     GeometryPolicyWithoutGeometry {
         /// The attribute whose `geometry` block could never apply.
         attribute: NameBuf,
+    },
+
+    /// A `GeoProperty` declares a `transformation` that produces no geometry.
+    ///
+    /// A `GeoProperty`'s value shall be a `GeoJSON` geometry (ETSI GS CIM 009 v1.9.1 clause 4.7.1),
+    /// so a conversion that yields text, a number, an object, or any other non-geometry value could
+    /// never produce one, on a top-level attribute, a sub-attribute, or a synthetic entity's
+    /// attribute alike.
+    #[error(
+        "Attribute `{attribute}` is a `GeoProperty`, but `transformation: \"{transformation}\"` does not produce a geometry; remove the transformation or name a geometry type"
+    )]
+    GeoPropertyWithoutGeometry {
+        /// The `GeoProperty` whose transformation produces no geometry.
+        attribute: NameBuf,
+        /// The transformation it declared.
+        transformation: Transformation,
     },
 }
 

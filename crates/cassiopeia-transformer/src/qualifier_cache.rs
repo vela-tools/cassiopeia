@@ -1,7 +1,7 @@
 use crate::{observed_at_cache::ObservedAtCache, unit_code_cache::UnitCodeCache};
+use cassiopeia_ngsi_ld::value::types::Value;
 use cefact_units::UnitCode;
 use chrono::{DateTime, Utc};
-use serde_json::Value as JsonValue;
 
 /// The already-parsed qualifier texts available while one entity's attributes are built.
 ///
@@ -25,7 +25,7 @@ impl<'a> QualifierCache<'a> {
     }
 
     /// The instant `value` denotes, parsed once per distinct text within this entity.
-    pub fn observed_at(&mut self, value: &JsonValue) -> Option<DateTime<Utc>> {
+    pub fn observed_at(&mut self, value: &Value) -> Option<DateTime<Utc>> {
         self.observed_at.observed_at(value)
     }
 
@@ -38,8 +38,8 @@ impl<'a> QualifierCache<'a> {
 #[cfg(test)]
 mod tests {
     use crate::{observed_at_cache::ObservedAtCache, qualifier_cache::QualifierCache, unit_code_cache::UnitCodeCache};
+    use cassiopeia_ngsi_ld::value::types::Value;
     use cefact_units::UnitCode;
-    use serde_json::json;
 
     #[test]
     fn both_qualifiers_resolve_through_one_borrowed_pair() {
@@ -47,7 +47,7 @@ mod tests {
         let mut unit_codes = UnitCodeCache::new();
         let mut cache = QualifierCache::new(&mut observed_at, &mut unit_codes);
 
-        assert!(cache.observed_at(&json!("2026-04-03T22:00:20Z")).is_some());
+        assert!(cache.observed_at(&Value::String("2026-04-03T22:00:20Z".into())).is_some());
         assert_eq!(cache.unit_code("KWH"), Some(UnitCode::Kwh));
     }
 
@@ -61,12 +61,12 @@ mod tests {
             let mut observed_at = ObservedAtCache::new();
             let mut cache = QualifierCache::new(&mut observed_at, &mut unit_codes);
             assert_eq!(cache.unit_code("CEL"), Some(UnitCode::Cel));
-            cache.observed_at(&json!("2026-04-03T22:00:20Z"))
+            cache.observed_at(&Value::String("2026-04-03T22:00:20Z".into()))
         };
 
         let mut observed_at = ObservedAtCache::new();
         let mut cache = QualifierCache::new(&mut observed_at, &mut unit_codes);
-        let second = cache.observed_at(&json!("2026-04-03T23:15:00Z"));
+        let second = cache.observed_at(&Value::String("2026-04-03T23:15:00Z".into()));
 
         assert!(first.is_some());
         assert!(second.is_some());

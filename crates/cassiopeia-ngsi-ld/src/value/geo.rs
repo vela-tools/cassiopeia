@@ -49,6 +49,19 @@ impl Value {
         }
     }
 
+    /// The geometry this value holds when it is one the pipeline already typed, and `None` for any
+    /// other value.
+    ///
+    /// Nothing is parsed or converted: a geometry is typed, under its declaration's `geometry`
+    /// policy, by the extraction stage that reads it, so a later stage only takes it as it is.
+    #[must_use]
+    pub fn into_geometry(self) -> Option<NgsiLdGeometry> {
+        match self {
+            Value::Geospatial(geometry) => Some(*geometry),
+            Value::Null | Value::Boolean(_) | Value::Number(_) | Value::String(_) | Value::Temporal(_) | Value::Array(_) | Value::Object(_) => None,
+        }
+    }
+
     /// Reads a `GeoJSON` geometry object the source carried as text or as a structured object.
     fn as_source_geometry(&self) -> Option<Geometry> {
         match self {
@@ -189,6 +202,18 @@ mod tests {
         let value = Value::String(r#"{"type":"Point","coordinates":[9.17,45.47]}"#.into());
 
         assert!(matches!(preserve(&value), Ok(Some(NgsiLdGeometry::Point { .. }))));
+    }
+
+    #[test]
+    fn only_an_already_typed_geometry_is_taken_as_one() {
+        let point = NgsiLdGeometry::Point {
+            coordinates: Position::from([1.0, 2.0]),
+        };
+
+        assert_eq!(Value::Geospatial(Box::new(point.clone())).into_geometry(), Some(point));
+        assert_eq!(Value::from(json!({"type": "Point", "coordinates": [1.0, 2.0]})).into_geometry(), None);
+        assert_eq!(Value::String(r#"{"type":"Point","coordinates":[1.0,2.0]}"#.into()).into_geometry(), None);
+        assert_eq!(Value::Null.into_geometry(), None);
     }
 
     #[test]

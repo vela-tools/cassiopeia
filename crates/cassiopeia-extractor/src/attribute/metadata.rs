@@ -5,8 +5,11 @@ use cassiopeia_ir::{
     sub_attribute::{SubAttribute, SubAttributes},
 };
 use cassiopeia_mapping::attribute::{Attribute, Attributes, instance::AttributeInstance};
-use cassiopeia_ngsi_ld::entity::{attribute::NgsiLdAttributeKind, name::NameBuf};
-use serde_json::Value as JsonValue;
+use cassiopeia_ngsi_ld::{
+    entity::{attribute::NgsiLdAttributeKind, name::NameBuf},
+    value::types::Value,
+};
+use compact_str::CompactString;
 
 /// Extracts an attribute's properties (such as `observedAt` or `unitCode`) into metadata storage.
 pub(crate) struct MetadataExtractor;
@@ -86,7 +89,9 @@ impl MetadataExtractor {
     ///
     /// Each sub-attribute keeps the NGSI-LD kind it declared and, recursively, its own
     /// sub-attributes, so a nested Property subclass survives to arbitrary depth (ETSI GS CIM 009
-    /// v1.9.1 clause 4.5.2.2). A nested Relationship or `ListRelationship` reads its pre-minted
+    /// v1.9.1 clause 4.5.2.2). Its value is resolved through its own declaration, so a `GeoProperty`
+    /// sub-attribute is converted under its own `geometry` policy, with a refusal recorded in the same
+    /// sink as a top-level one, and is stored exactly as resolved. A nested Relationship or `ListRelationship` reads its pre-minted
     /// object(s) by path rather than being resolved as a value (clause 4.5.3); one absent from the
     /// entity's nested relationships is dropped, in lockstep with the expander's minting.
     fn resolve_property_map(ctx: &ResolutionContext, path: &[NameBuf], properties: Option<&Attributes>) -> Result<SubAttributes> {
@@ -115,7 +120,7 @@ impl MetadataExtractor {
                 } else {
                     Self::resolve_property_map(&child, &[], property.properties().as_ref())?
                 };
-                metadata.insert(name.clone(), SubAttribute::new(*property.kind(), value.into_json_value(), nested));
+                metadata.insert(name.clone(), SubAttribute::new(*property.kind(), value, nested));
             }
         }
 
@@ -144,8 +149,10 @@ impl MetadataExtractor {
 
         let kind = *property.kind();
         let value = match kind {
-            NgsiLdAttributeKind::Relationship => JsonValue::String(objects[0].to_string()),
-            NgsiLdAttributeKind::ListRelationship => JsonValue::Array(objects.iter().map(|object| JsonValue::String(object.to_string())).collect()),
+            NgsiLdAttributeKind::Relationship => Value::String(CompactString::from(objects[0].to_string())),
+            NgsiLdAttributeKind::ListRelationship => {
+                Value::Array(objects.iter().map(|object| Value::String(CompactString::from(object.to_string()))).collect())
+            }
             NgsiLdAttributeKind::Property
             | NgsiLdAttributeKind::GeoProperty
             | NgsiLdAttributeKind::LanguageProperty

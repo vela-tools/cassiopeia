@@ -227,7 +227,7 @@ Templates support more than plain text. Cassiopeia's `get` reads a map entry, an
 
 ## Convert values
 
-The transformation determines the value Cassiopeia builds. If you omit it, the attribute's `type` picks the default. A `GeoProperty` defaults to `geometry`, so a GeoJSON geometry read from the source, as an object or as its JSON text, becomes the attribute's geometry (see [GeoProperty](#geoproperty)). A `ListProperty` defaults to `array`, so an array read from the source becomes the list itself. A `JsonProperty` keeps the value exactly as the source holds it, so an object stays an object and an array stays an array (see [ListProperty and JsonProperty](#listproperty-and-jsonproperty)). Every other type defaults to `string`: a number becomes its text, and an array or object becomes its compact JSON text, such as `["BS","IN"]`. A transformation you write is always applied as written, whatever the type. Write one when the target model expects another type, including `array` or `object` to keep a structured value as it is on a plain `Property`.
+The transformation determines the value Cassiopeia builds. If you omit it, the attribute's `type` picks the default. A `GeoProperty` defaults to `geometry`, so a GeoJSON geometry read from the source, as an object or as its JSON text, becomes the attribute's geometry (see [GeoProperty](#geoproperty)). A `ListProperty` defaults to `array`, so an array read from the source becomes the list itself. A `JsonProperty` keeps the value exactly as the source holds it, so an object stays an object and an array stays an array (see [ListProperty and JsonProperty](#listproperty-and-jsonproperty)). Every other type defaults to `string`: a number becomes its text, and an array or object becomes its compact JSON text, such as `["BS","IN"]`. A transformation you write is always applied as written, whatever the type, except that a `GeoProperty` accepts only a geometry transformation (see [GeoProperty](#geoproperty)). Write one when the target model expects another type, including `array` or `object` to keep a structured value as it is on a plain `Property`.
 
 | Transformation | Result |
 | --- | --- |
@@ -304,7 +304,7 @@ location: {
 }
 ~~~
 
-A value that carries no geometry at all, such as a missing or blank field or text that is not GeoJSON, produces no attribute and no warning. A transformation you write replaces the default: `string`, for instance, writes the geometry's compact JSON text, which Cassiopeia still reads back as the geometry when it builds the GeoProperty, but which no `geometry` block can reach.
+A value that carries no geometry at all, such as a missing or blank field or text that is not GeoJSON, produces no attribute and no warning. A transformation you write replaces the default, so on a GeoProperty it has to be one of the geometry transformations: a GeoProperty's value must be a GeoJSON geometry (ETSI GS CIM 009 v1.9.1 clause 4.7.1). A mapping that declares `string`, `integer`, `object`, or any other non-geometry transformation on a GeoProperty is rejected when it loads, naming the attribute. This holds for a top-level attribute, a sub-attribute, and an attribute of a synthetic entity alike. Remove the transformation, since the default `geometry` already reads a GeoJSON object or its JSON text, or name a geometry type such as `point`.
 
 A GeoProperty holds exactly six geometry types, the ones NGSI-LD admits (ETSI GS CIM 009 v1.9.1 clause 4.7): `Point`, `MultiPoint`, `LineString`, `MultiLineString`, `Polygon`, `MultiPolygon`. GeoJSON's seventh type, `GeometryCollection` (RFC 7946 clause 3.1.8), is not one of them. A source that carries one produces no GeoProperty unless the mapping asks for it to be folded, described below.
 
@@ -331,7 +331,7 @@ location: {
 }
 ~~~
 
-When a conversion is refused, the attribute is dropped, the entity is still written, and the run counts one warning per record and prints one message naming the attribute and the reason.
+When a conversion is refused, the attribute is dropped, the entity is still written, and the run counts one warning per record and prints one message naming the attribute and the reason. A GeoProperty declared as a sub-attribute under `properties`, one instance of a [multi-instance](#carry-several-instances-under-one-name) GeoProperty, and a GeoProperty assembled field by field from nested `mappings` follow the same rules under their own declaration's `geometry` block. A refused sub-attribute or instance is dropped on its own with the same warning, and the attribute that carries it is still written.
 
 The `geometry` block takes three keys:
 
@@ -388,7 +388,7 @@ The `geometry` block takes three keys:
 
 Conversions preserve a position's altitude wherever they can: the ones that select or regroup existing positions (`first`, `largest`, `first-vertex`, `exterior-ring`, `boundary`, `connect`, `ring`, `vertices`, `flatten`) carry it through, and the ones that compute new coordinates (`centroid`, `point-on-surface`, `bbox-center`, `convex-hull`, `envelope`) do not.
 
-A conversion that could never produce the declared type is rejected when the mapping loads, naming the attribute, rather than failing on every record. So is a `geometry` block on an attribute whose value is never converted to a geometry: any type other than `GeoProperty` without a geometry transformation, or a GeoProperty whose transformation is not a geometry one, such as `string`. The block could never apply there.
+A conversion that could never produce the declared type is rejected when the mapping loads, naming the attribute, rather than failing on every record. So is a `geometry` block on an attribute whose value is never converted to a geometry, which is any type other than `GeoProperty` without a geometry transformation. The block could never apply there.
 
 When a geometry has to be converted inside a template, for a value that a `transformation` cannot reach, use the [`geo_convert` function](templates.md#geometry-functions).
 
@@ -503,7 +503,7 @@ temperature: {
 }
 ~~~
 
-`observedAt`, `unitCode`, and `datasetId` are handled as NGSI-LD attribute qualifiers. Any other entry under `properties` becomes a nested sub-attribute with the declared `type`, or a `Property` when no type is specified. It can also be a `VocabProperty`, a `LanguageProperty`, or a `Relationship`. A sub-attribute is the serialization of a Property or any of its subclasses, and of a Relationship (ETSI GS CIM 009 v1.9.1 clause 4.5.2.2 with clause 4.5.3). As a result, `properties` can declare nested relationships as well as nested properties, recursively to any depth. [Example 30](https://github.com/vela-tools/cassiopeia-examples/blob/main/examples/30-csv-nested-relationship/example.md) hangs a `playsCharacter` relationship off a `hasLeadActor` relationship. A mapping can therefore represent both standard qualifiers and model-specific attribute metadata.
+`observedAt`, `unitCode`, and `datasetId` are handled as NGSI-LD attribute qualifiers. Any other entry under `properties` becomes a nested sub-attribute with the declared `type`, or a `Property` when no type is specified. It can also be a `VocabProperty`, a `LanguageProperty`, a `GeoProperty`, or a `Relationship`. A `GeoProperty` sub-attribute is converted under its own `geometry` block exactly like a top-level one, so `winding: "keep"` keeps its rings as the source wound them, and a geometry it refuses drops only that sub-attribute, with a warning naming it. A sub-attribute is the serialization of a Property or any of its subclasses, and of a Relationship (ETSI GS CIM 009 v1.9.1 clause 4.5.2.2 with clause 4.5.3). As a result, `properties` can declare nested relationships as well as nested properties, recursively to any depth. [Example 30](https://github.com/vela-tools/cassiopeia-examples/blob/main/examples/30-csv-nested-relationship/example.md) hangs a `playsCharacter` relationship off a `hasLeadActor` relationship. A mapping can therefore represent both standard qualifiers and model-specific attribute metadata.
 
 Cassiopeia resolves metadata from the same source record as its parent attribute. For a temporal mapping, put the timestamp on the attributes that represent observations. Cassiopeia can then keep successive observations associated with the same entity identity.
 

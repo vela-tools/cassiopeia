@@ -59,8 +59,10 @@ pub(crate) fn build_attribute(
             Some(build_property(value, transform_metadata(metadata, name, None, cache, unreadable)))
         }
         NgsiLdAttributeKind::GeoProperty => {
-            let value = values.swap_remove(key)?;
-            build_geo_property(value, transform_metadata(metadata, name, None, cache, unreadable))
+            // Extraction leaves a GeoProperty's value as the geometry it typed under the declaration's
+            // own `geometry` policy, or no value at all, so there is nothing to parse here.
+            let geometry = values.swap_remove(key)?.into_geometry()?;
+            Some(build_geo_property(geometry, transform_metadata(metadata, name, None, cache, unreadable)))
         }
         NgsiLdAttributeKind::VocabProperty => {
             let value = values.swap_remove(key)?;

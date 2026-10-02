@@ -285,11 +285,11 @@ mod tests {
     fn an_explicit_transformation_wins_over_the_kind_default() {
         let list = parse(r#"{"type": "ListProperty", "source": "{{ codes }}", "transformation": "string"}"#);
         let json = parse(r#"{"type": "JsonProperty", "source": "{{ payload }}", "transformation": "object"}"#);
-        let geo = parse(r#"{"type": "GeoProperty", "source": "{{ geometry }}", "transformation": "string"}"#);
+        let geo = parse(r#"{"type": "GeoProperty", "source": "{{ geometry }}", "transformation": "point"}"#);
 
         assert_eq!(list.conversion(), ValueConversion::Transform(Transformation::String));
         assert_eq!(json.conversion(), ValueConversion::Transform(Transformation::Object));
-        assert_eq!(geo.conversion(), ValueConversion::Transform(Transformation::String));
+        assert_eq!(geo.conversion(), ValueConversion::Transform(Transformation::Point));
     }
 
     #[test]

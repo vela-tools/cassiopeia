@@ -154,6 +154,8 @@ Cassiopeia checks every template in a mapping when it loads the mapping. A templ
   ╰─ `station-id` in `{{ station-id }}` is ambiguous: write `this['station-id']` to read the field, or `station - id` to subtract
 ~~~
 
+A geometry declaration that could never run is rejected at load time the same way, naming the attribute: a `GeoProperty` whose `transformation` produces no geometry, such as `string`, a `geometry` block on an attribute whose value is never converted to a geometry, and a `geometry` conversion that cannot produce the declared type. See [GeoProperty](mapping.md#geoproperty).
+
 Problems that depend on one record's data do not stop the run. Each is a warning, and the `Reasons` block counts it under one of these codes:
 
 | Code | What happened |
@@ -161,6 +163,7 @@ Problems that depend on one record's data do not stop the run. Each is a warning
 | `expander-urn-ungeneratable` | The record's identity resolved to nothing, or a template that names an entity failed to render, so Cassiopeia skipped the record. An identity resolves to nothing when a field it reads is missing, null, or empty, or when its text has no letter or digit, such as `-`. The templates that name an entity are `identity.entityName`, a `scope` template, a relationship's `source`, and a synthetic entity's identity. A scope or relationship target that resolves to nothing, rather than failing, is left out without a warning. |
 | `extractor-template-unresolvable` | An attribute's template failed to render for one entity. Cassiopeia dropped that attribute and kept the entity. The warning names the template, the mapping file, an entity that lost the attribute, and a hint. |
 | `extractor-timestamp-unreadable` | A value read with a `datetime`, `date`, or `time` transformation is text Cassiopeia cannot read as a date and time. The attribute is dropped, or, for an `observedAt`, the attribute is written without it. |
+| `geometry-*` | A source geometry could not become the geometry its `GeoProperty` declares, such as a `GeometryCollection` (`geometry-collection-inadmissible`) or a `MultiPolygon` of several surfaces asked for a `Polygon` (`geometry-ambiguous-multi-geometry`). Cassiopeia dropped that attribute, sub-attribute, or instance and kept the entity. The warning names the attribute and the reason. |
 | `transform-observed-at-unreadable` | An `observedAt` declared without a transformation could not be read as a date and time, so the attribute is written without it. |
 
 With `--verbose`, each of these also lists its causes, including Tera's own message when Tera reported one. For a template rejected at load time, that message gives the column where Tera stopped. The [templates reference](templates.md#when-a-template-fails) lists what fails at load time and how to guard a template against a missing field.

@@ -77,15 +77,18 @@ mod tests {
         metadata::MetadataStorage,
         sub_attribute::{SubAttribute, SubAttributes},
     };
-    use cassiopeia_ngsi_ld::entity::{attribute::NgsiLdAttributeKind, name::NameBuf};
+    use cassiopeia_ngsi_ld::{
+        entity::{attribute::NgsiLdAttributeKind, name::NameBuf},
+        value::types::Value,
+    };
     use indexmap::IndexMap;
-    use serde_json::{Value, json};
+    use serde_json::{Value as JsonValue, json};
 
-    fn entry(key: &str, value: Value) -> SubAttributes {
+    fn entry(key: &str, value: JsonValue) -> SubAttributes {
         let mut map = IndexMap::default();
         map.insert(
             NameBuf::new(key).expect("valid name"),
-            SubAttribute::new(NgsiLdAttributeKind::Property, value, IndexMap::default()),
+            SubAttribute::new(NgsiLdAttributeKind::Property, Value::from(value), IndexMap::default()),
         );
         map
     }

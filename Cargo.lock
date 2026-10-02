@@ -725,6 +725,7 @@ version = "1.1.0"
 dependencies = [
  "cassiopeia-common",
  "cassiopeia-data-profiler",
+ "cassiopeia-geometry",
  "cassiopeia-mapping",
  "cassiopeia-ngsi-ld",
  "derive_more",

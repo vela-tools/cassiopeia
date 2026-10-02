@@ -233,8 +233,12 @@ impl Transformer {
     /// A value that carries no geometry at all yields a null, so the attribute is simply omitted, the
     /// way an absent source field always has been. A value that carries a geometry which cannot
     /// legally become the declared type is refused instead, so the run can say what it dropped and
-    /// why.
-    fn coerce_geometry(value: &Value, target: GeometryTarget, policy: Option<&GeometryPolicy>) -> Result<Value, GeometryError> {
+    /// why. The resolver also calls this directly for a geometry it assembled from nested `mappings`,
+    /// which has no source parts left to merge.
+    ///
+    /// # Errors
+    /// Returns the [`GeometryError`] naming why the geometry cannot become the declared type.
+    pub(crate) fn coerce_geometry(value: &Value, target: GeometryTarget, policy: Option<&GeometryPolicy>) -> Result<Value, GeometryError> {
         let policy = policy.copied().unwrap_or_default();
         let geometry = value.to_geometry(target, &policy)?;
 

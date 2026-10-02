@@ -4,22 +4,24 @@ use crate::{
     mapping::Mapping,
 };
 use cassiopeia_geometry::lattice::check;
-use cassiopeia_ngsi_ld::entity::name::NameBuf;
+use cassiopeia_ngsi_ld::entity::{attribute::NgsiLdAttributeKind, name::NameBuf};
 
-/// Checks every attribute a mapping declares, at load time, for a `geometry` block that can never
-/// run.
+/// Checks every attribute a mapping declares, at load time, for a geometry declaration that can
+/// never run.
 ///
-/// The block is checked against the attribute's conversion exactly as the extraction stage resolves
-/// it ([`Attribute::conversion`]): the declared `transformation`, or the default of the attribute's
-/// type when none is declared. A block on a conversion that reads no geometry would be ignored on
-/// every record, and a conversion and a target that disagree (asking for the largest member of
-/// something with no extent to rank by, say) would refuse every record in turn once the run
-/// started. Refusing the document instead means the mistake is reported once, by name, before a
+/// Both checks read the attribute's conversion exactly as the extraction stage resolves it
+/// ([`Attribute::conversion`]): the declared `transformation`, or the default of the attribute's
+/// type when none is declared. A `GeoProperty` whose conversion reads no geometry could never carry
+/// the geometry its value has to be. A `geometry` block on a conversion that reads no geometry would
+/// be ignored on every record, and a conversion and a target that disagree (asking for the largest
+/// member of something with no extent to rank by, say) would refuse every record in turn once the
+/// run started. Refusing the document instead means the mistake is reported once, by name, before a
 /// single record is read.
 ///
 /// # Errors
-/// Returns [`MappingError::GeometryPolicyWithoutGeometry`] or [`MappingError::InvalidAttribute`]
-/// naming the first attribute whose declaration cannot run.
+/// Returns [`MappingError::GeoPropertyWithoutGeometry`],
+/// [`MappingError::GeometryPolicyWithoutGeometry`], or [`MappingError::InvalidAttribute`] naming the
+/// first attribute whose declaration cannot run.
 pub fn validate(mapping: &Mapping) -> Result<()> {
     validate_attributes(mapping.attributes())
 }
@@ -40,17 +42,8 @@ fn validate_attributes(attributes: &Attributes) -> Result<()> {
 /// `properties`, and a `syntheticEntity`'s own attributes. Instances are not walked: they share
 /// their parent's `type`, `transformation` and `geometry`, so they are already covered by it.
 fn validate_attribute(name: &NameBuf, attribute: &Attribute) -> Result<()> {
-    if let Some(policy) = attribute.geometry() {
-        let target = attribute
-            .conversion()
-            .geometry_target()
-            .ok_or_else(|| MappingError::GeometryPolicyWithoutGeometry { attribute: name.clone() })?;
-
-        check(target, *policy.convert()).map_err(|source| MappingError::InvalidAttribute {
-            attribute: name.clone(),
-            source,
-        })?;
-    }
+    validate_geo_property_conversion(name, attribute)?;
+    validate_geometry_policy(name, attribute)?;
 
     validate_attributes(attribute.mappings())?;
     for language_entry in attribute.language_map().values() {
@@ -64,6 +57,45 @@ fn validate_attribute(name: &NameBuf, attribute: &Attribute) -> Result<()> {
     }
 
     Ok(())
+}
+
+/// Refuses a `GeoProperty` whose declared transformation reads no geometry.
+///
+/// A `GeoProperty`'s value shall be a `GeoJSON` geometry (ETSI GS CIM 009 v1.9.1 clause 4.7.1), so a
+/// transformation producing anything else can never yield one. A `GeoProperty` declaring no
+/// transformation always passes: its default reads the geometry the source carries (see
+/// [`ValueConversion::default_for`](crate::value_conversion::ValueConversion::default_for)). This
+/// check runs before the `geometry` block's, because removing the block would not make such a
+/// declaration run.
+fn validate_geo_property_conversion(name: &NameBuf, attribute: &Attribute) -> Result<()> {
+    let (NgsiLdAttributeKind::GeoProperty, Some(transformation)) = (attribute.kind(), *attribute.transformation()) else {
+        return Ok(());
+    };
+    if attribute.conversion().geometry_target().is_some() {
+        return Ok(());
+    }
+
+    Err(MappingError::GeoPropertyWithoutGeometry {
+        attribute: name.clone(),
+        transformation,
+    })
+}
+
+/// Refuses a `geometry` block that can never apply, or whose conversion can never reach the type
+/// the attribute's conversion names.
+fn validate_geometry_policy(name: &NameBuf, attribute: &Attribute) -> Result<()> {
+    let Some(policy) = attribute.geometry() else {
+        return Ok(());
+    };
+    let target = attribute
+        .conversion()
+        .geometry_target()
+        .ok_or_else(|| MappingError::GeometryPolicyWithoutGeometry { attribute: name.clone() })?;
+
+    check(target, *policy.convert()).map_err(|source| MappingError::InvalidAttribute {
+        attribute: name.clone(),
+        source,
+    })
 }
 
 #[cfg(test)]
@@ -197,14 +229,119 @@ mod tests {
     }
 
     #[test]
-    fn a_geometry_block_on_a_geo_property_under_an_explicit_string_transformation_is_refused() {
-        assert_refused_as_policy_without_geometry(
+    fn a_geo_property_under_a_string_transformation_and_a_geometry_block_is_refused_for_its_transformation() {
+        assert_refused_as_geo_property_without_geometry(
             load(
                 r#"{
                     location: { type: "GeoProperty", transformation: "string", geometry: { altitude: "drop" }, source: "{{ geometry }}" },
                 }"#,
             ),
             "location",
+            "string",
+        );
+    }
+
+    /// Asserts the declaration was refused because it is a `GeoProperty` whose `transformation`
+    /// produces no geometry, naming `expected` as the attribute and quoting `transformation`.
+    fn assert_refused_as_geo_property_without_geometry(result: Result<Mapping, MappingError>, expected: &str, transformation: &str) {
+        let error = result.expect_err("the GeoProperty can never carry a geometry");
+
+        assert!(
+            matches!(&error, MappingError::GeoPropertyWithoutGeometry { attribute, transformation: declared } if attribute.as_str() == expected && declared.to_string() == transformation),
+            "{error:?}"
+        );
+        let message = error.to_string();
+        assert!(message.contains(&format!("`{expected}`")), "{message}");
+        assert!(message.contains(&format!(r#"transformation: "{transformation}""#)), "{message}");
+        assert!(message.contains("remove the transformation"), "{message}");
+    }
+
+    #[test]
+    fn a_geo_property_under_a_transformation_producing_no_geometry_is_refused_naming_the_attribute() {
+        for transformation in ["string", "integer", "object"] {
+            assert_refused_as_geo_property_without_geometry(
+                load(&format!(
+                    r#"{{
+                        location: {{ type: "GeoProperty", transformation: "{transformation}", source: "{{{{ geometry }}}}" }},
+                    }}"#
+                )),
+                "location",
+                transformation,
+            );
+        }
+    }
+
+    #[test]
+    fn a_geo_property_sub_attribute_under_a_transformation_producing_no_geometry_is_refused_naming_it() {
+        for transformation in ["string", "integer", "object"] {
+            assert_refused_as_geo_property_without_geometry(
+                load(&format!(
+                    r#"{{
+                        name: {{
+                            source: "{{{{ name }}}}",
+                            properties: {{ footprint: {{ type: "GeoProperty", transformation: "{transformation}", source: "{{{{ geometry }}}}" }} }},
+                        }},
+                    }}"#
+                )),
+                "footprint",
+                transformation,
+            );
+        }
+    }
+
+    #[test]
+    fn a_synthetic_entity_geo_property_under_a_transformation_producing_no_geometry_is_refused_naming_it() {
+        for transformation in ["string", "integer", "object"] {
+            assert_refused_as_geo_property_without_geometry(
+                load(&format!(
+                    r#"{{
+                        place: {{
+                            type: "Relationship",
+                            source: "{{{{ id }}}}",
+                            target: {{ entity: "Place" }},
+                            syntheticEntity: {{
+                                dataModel: "Place",
+                                identity: {{ entityName: "Place-{{{{ id }}}}" }},
+                                attributes: {{
+                                    pin: {{ type: "GeoProperty", transformation: "{transformation}", source: "{{{{ geometry }}}}" }},
+                                }},
+                            }},
+                        }},
+                    }}"#
+                )),
+                "pin",
+                transformation,
+            );
+        }
+    }
+
+    #[test]
+    fn a_geo_property_without_a_transformation_or_under_a_geometry_transformation_loads() {
+        for declaration in [
+            r#"type: "GeoProperty", source: "{{ geometry }}""#,
+            r#"type: "GeoProperty", transformation: "geometry", source: "{{ geometry }}""#,
+            r#"type: "GeoProperty", transformation: "point", source: ["{{ lon }}", "{{ lat }}"]"#,
+        ] {
+            let result = load(&format!(
+                r#"{{
+                    location: {{ {declaration} }},
+                    name: {{ source: "{{{{ name }}}}", properties: {{ footprint: {{ {declaration} }} }} }},
+                }}"#
+            ));
+
+            assert!(result.is_ok(), "{declaration}: {result:?}");
+        }
+    }
+
+    #[test]
+    fn a_property_under_a_transformation_producing_no_geometry_is_left_alone() {
+        assert!(
+            load(
+                r#"{
+                    label: { source: "{{ geometry }}", transformation: "string" },
+                }"#,
+            )
+            .is_ok()
         );
     }
 

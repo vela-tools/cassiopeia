@@ -4,11 +4,6 @@ use compact_str::CompactString;
 use serde_json::Value as JsonValue;
 
 impl Value {
-    #[must_use]
-    pub fn into_json_value(self) -> JsonValue {
-        JsonValue::from(self)
-    }
-
     /// Parses the value into an instant, returning `None` when it carries no parseable one.
     ///
     /// Text is read in any supported spelling and a number as a Unix epoch (see
@@ -25,23 +20,6 @@ impl Value {
             TemporalValue::DateTime(dt) | TemporalValue::Date(dt) | TemporalValue::Time(dt) => dt,
         })
     }
-}
-
-/// Parses an instant straight out of a JSON value, without building a [`Value`] first.
-///
-/// `JsonValue` carries no temporal variant, so only a string or a number can hold an instant: every
-/// other variant would allocate a `Value` only for [`Value::try_parse_datetime`] to reject it. The
-/// result is identical to converting first.
-#[must_use]
-pub fn parse_datetime(value: &JsonValue) -> Option<DateTime<Utc>> {
-    let parsed = match value {
-        JsonValue::String(text) => TemporalValue::try_parse(text),
-        JsonValue::Number(number) => json_number(number).and_then(|number| TemporalValue::from_number(&number)),
-        JsonValue::Null | JsonValue::Bool(_) | JsonValue::Array(_) | JsonValue::Object(_) => None,
-    };
-    parsed.map(|t| match t {
-        TemporalValue::DateTime(dt) | TemporalValue::Date(dt) | TemporalValue::Time(dt) => dt,
-    })
 }
 
 /// Reads a JSON number as a [`Number`]: an integer when it fits `i64`, otherwise a float.
@@ -114,44 +92,33 @@ impl From<Value> for JsonValue {
 
 #[cfg(test)]
 mod tests {
-    use crate::value::{
-        convert::parse_datetime,
-        types::{Number, Value},
-    };
+    use crate::value::types::{Number, Value};
     use serde_json::json;
 
     #[test]
-    fn parse_datetime_matches_converting_the_json_value_first() {
-        for value in [
-            json!("2026-04-03T22:00:20Z"),
-            json!("2026-04-03"),
-            json!("not a timestamp"),
-            json!(1_744_000_000),
-            json!(1_744_000_000_250_i64),
-            json!(1_744_000_000.5),
-            json!(2026),
-            json!(true),
-            json!(null),
-            json!(["2026-04-03T22:00:20Z"]),
-            json!({"at": "2026-04-03T22:00:20Z"}),
-        ] {
-            assert_eq!(parse_datetime(&value), Value::from(value.clone()).try_parse_datetime(), "mismatch for {value}");
+    fn an_rfc_3339_string_value_parses_to_an_instant() {
+        assert!(Value::from(json!("2026-04-03T22:00:20Z")).try_parse_datetime().is_some());
+        assert!(Value::from(json!("2026-04-03")).try_parse_datetime().is_some());
+        assert!(Value::from(json!("not a timestamp")).try_parse_datetime().is_none());
+    }
+
+    #[test]
+    fn an_epoch_number_value_parses_to_the_same_instant_as_its_text() {
+        assert_eq!(
+            Value::from(json!(1_775_253_620)).try_parse_datetime(),
+            Value::from(json!("1775253620")).try_parse_datetime()
+        );
+        assert_eq!(
+            Value::from(json!(1_775_253_620.5)).try_parse_datetime(),
+            Value::from(json!("1775253620.5")).try_parse_datetime()
+        );
+    }
+
+    #[test]
+    fn a_value_shaped_as_no_instant_parses_to_none() {
+        for value in [json!(true), json!(null), json!(["2026-04-03T22:00:20Z"]), json!({"at": "2026-04-03T22:00:20Z"})] {
+            assert!(Value::from(value.clone()).try_parse_datetime().is_none(), "{value}");
         }
-    }
-
-    #[test]
-    fn parse_datetime_reads_an_rfc_3339_string_as_an_instant() {
-        assert!(parse_datetime(&json!("2026-04-03T22:00:20Z")).is_some());
-        assert!(parse_datetime(&json!("2026-04-03")).is_some());
-        assert!(parse_datetime(&json!("not a timestamp")).is_none());
-    }
-
-    #[test]
-    fn parse_datetime_reads_an_epoch_number_as_the_same_instant_as_its_text() {
-        assert!(parse_datetime(&json!(1_775_253_620)).is_some());
-        assert_eq!(parse_datetime(&json!(1_775_253_620)), parse_datetime(&json!("1775253620")));
-        assert_eq!(parse_datetime(&json!(1_775_253_620.5)), parse_datetime(&json!("1775253620.5")));
-        assert!(parse_datetime(&json!(2026)).is_none());
     }
 
     #[test]

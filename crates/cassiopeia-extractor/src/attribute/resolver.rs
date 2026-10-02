@@ -17,6 +17,7 @@ use cassiopeia_ngsi_ld::{
 use compact_str::CompactString;
 use serde_json::Value as JsonValue;
 use smallvec::smallvec;
+use std::result;
 
 /// Resolves one attribute declaration into its NGSI-LD value.
 ///
@@ -108,6 +109,11 @@ fn resolve_language_property(ctx: &mut ResolutionContext, attr_name: &NameBuf, c
 }
 
 /// Resolves a declaration carrying nested `mappings` into a structured object value.
+///
+/// When the declaration's conversion reads a geometry (a `GeoProperty`, or a geometry
+/// `transformation`), the assembled object is a geometry spelled field by field, so it is converted
+/// under the declaration's own `geometry` policy and a refusal is recorded, exactly as for a geometry
+/// read whole from one source. Any other conversion leaves the object as assembled.
 fn resolve_object(ctx: &mut ResolutionContext, attr_name: &NameBuf, config: &Attribute) -> Result<Value> {
     let mut object = ValueObject::default();
     for (key, child_config) in config.mappings() {
@@ -120,10 +126,18 @@ fn resolve_object(ctx: &mut ResolutionContext, attr_name: &NameBuf, config: &Att
     record_metadata(ctx, attr_name, config)?;
 
     if object.is_empty() {
-        Ok(Value::Null)
-    } else {
-        Ok(Value::Object(Box::new(object)))
+        return Ok(Value::Null);
     }
+    let object = Value::Object(Box::new(object));
+
+    Ok(match config.conversion().geometry_target() {
+        Some(target) => bind_refusal(
+            ctx,
+            attr_name,
+            Transformer::coerce_geometry(&object, target, config.geometry().as_ref()).map_err(AttributeRefusal::Geometry),
+        ),
+        None => object,
+    })
 }
 
 /// Resolves a leaf declaration: reads its source values and applies its transformation.
@@ -136,15 +150,23 @@ fn resolve_leaf(ctx: &mut ResolutionContext, attr_name: &NameBuf, config: &Attri
 
 /// Transforms one declaration's source values, binding a refusal to the sink that gathers it.
 ///
-/// A refusal is not a record failure: the attribute drops, the entity is still emitted, and the run
-/// reports what was lost and why. The three paths that read source values (a leaf, one multi-attribute
-/// instance, and one language-map entry) all bind their outcome here, so none of them can forget to,
-/// and all of them convert through the declaration's [`Attribute::conversion`], so a declaration
-/// naming no transformation gets its kind's default on every path.
+/// The three paths that read source values (a leaf, one multi-attribute instance, and one
+/// language-map entry) all transform here, so all of them convert through the declaration's
+/// [`Attribute::conversion`], and a declaration naming no transformation gets its kind's default on
+/// every path.
 fn transform(ctx: &ResolutionContext, attr_name: &NameBuf, config: &Attribute, parts: SourceParts) -> Value {
     let geometry: Option<&GeometryPolicy> = config.geometry().as_ref();
 
-    match Transformer::apply(parts, config.conversion(), geometry) {
+    bind_refusal(ctx, attr_name, Transformer::apply(parts, config.conversion(), geometry))
+}
+
+/// Binds the outcome of converting one declaration's value to the sink that gathers its refusal.
+///
+/// A refusal is not a record failure: the attribute drops, the entity is still emitted, and the run
+/// reports what was lost and why. Every conversion the resolver runs binds its outcome here, so none
+/// of them can forget to.
+fn bind_refusal(ctx: &ResolutionContext, attr_name: &NameBuf, outcome: result::Result<Value, AttributeRefusal>) -> Value {
+    match outcome {
         Ok(value) => value,
         Err(AttributeRefusal::Geometry(refusal)) => {
             ctx.dropped_geometries.record(attr_name, refusal);

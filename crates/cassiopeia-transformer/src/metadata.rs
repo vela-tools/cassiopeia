@@ -10,7 +10,6 @@ use cassiopeia_ngsi_ld::{
 use cassiopeia_unreadable_timestamps::unreadable_timestamps::UnreadableTimestamps;
 use cefact_units::UnitCode;
 use chrono::{DateTime, Utc};
-use serde_json::Value as JsonValue;
 use urn_rs::Urn;
 
 /// The NGSI-LD metadata resolved for one attribute (or one relationship instance).
@@ -62,18 +61,20 @@ pub fn transform_metadata(
 /// qualifier was ever meant to be there: a temporal series built from it has no instant to fold on
 /// (ETSI GS CIM 009 v1.9.1 clause 4.5.2.2). A null or blank qualifier is one the record does not
 /// carry and is not recorded; text is quoted as written, and any other value (a number too small to
-/// be an epoch, a boolean, an object) as its JSON rendering, so a mapping mistake is named rather
-/// than lost.
-fn record_unreadable_observed_at(attribute: &NameBuf, value: &JsonValue, unreadable: &UnreadableTimestamps) {
+/// be an epoch, a boolean, an object) as its rendering, so a mapping mistake is named rather than
+/// lost.
+fn record_unreadable_observed_at(attribute: &NameBuf, value: &Value, unreadable: &UnreadableTimestamps) {
     match value {
-        JsonValue::Null => {}
-        JsonValue::String(text) => {
+        Value::Null => {}
+        Value::String(text) => {
             let text = text.trim();
             if !text.is_empty() {
                 unreadable.record(attribute, text);
             }
         }
-        JsonValue::Bool(_) | JsonValue::Number(_) | JsonValue::Array(_) | JsonValue::Object(_) => unreadable.record(attribute, &value.to_string()),
+        Value::Boolean(_) | Value::Number(_) | Value::Temporal(_) | Value::Geospatial(_) | Value::Array(_) | Value::Object(_) => {
+            unreadable.record(attribute, &value.to_string());
+        }
     }
 }
 
@@ -106,12 +107,12 @@ fn summary_from(props: &SubAttributes, attribute: &NameBuf, cache: &mut Qualifie
             None => record_unreadable_observed_at(attribute, observed_at, unreadable),
         }
     }
-    if let Some(unit_code) = props.get("unitCode").map(SubAttribute::value).and_then(JsonValue::as_str) {
+    if let Some(unit_code) = props.get("unitCode").map(SubAttribute::value).and_then(Value::as_str) {
         summary.unit_code = cache.unit_code(unit_code);
     }
     // An invalid `datasetId` is dropped rather than emitted malformed: the qualifier is optional
     // (NGSI-LD 4.5.5) and must be a URI.
-    if let Some(dataset_id) = props.get("datasetId").map(SubAttribute::value).and_then(JsonValue::as_str) {
+    if let Some(dataset_id) = props.get("datasetId").map(SubAttribute::value).and_then(Value::as_str) {
         summary.dataset_id = dataset_id.parse().ok();
     }
 
@@ -120,7 +121,9 @@ fn summary_from(props: &SubAttributes, attribute: &NameBuf, cache: &mut Qualifie
             continue;
         }
         let sub_meta = summary_from(sub.metadata(), attribute, cache, unreadable);
-        if let Some(wrapper) = build_sub_attribute(*sub.kind(), Value::from(sub.value().clone()), sub.object_type().clone(), sub_meta) {
+        // The metadata is borrowed rather than consumed because shared metadata answers for every
+        // instance of a multi-instance attribute, so each sub-attribute built from it takes a copy.
+        if let Some(wrapper) = build_sub_attribute(*sub.kind(), sub.value().clone(), sub.object_type().clone(), sub_meta) {
             summary.custom_attributes.insert(name.clone(), Box::new(wrapper));
         }
     }
@@ -136,21 +139,26 @@ mod tests {
         qualifier_cache::QualifierCache,
         unit_code_cache::UnitCodeCache,
     };
+    use cassiopeia_geometry::geometry::NgsiLdGeometry;
     use cassiopeia_ir::{metadata::MetadataStorage, sub_attribute::SubAttribute};
-    use cassiopeia_ngsi_ld::entity::{
-        attribute::{NgsiLdAttribute, NgsiLdAttributeKind, NgsiLdAttributeWrapper},
-        name::NameBuf,
+    use cassiopeia_ngsi_ld::{
+        entity::{
+            attribute::{NgsiLdAttribute, NgsiLdAttributeKind, NgsiLdAttributeWrapper},
+            name::NameBuf,
+        },
+        value::types::{TemporalValue, Value},
     };
     use cassiopeia_unreadable_timestamps::unreadable_timestamps::UnreadableTimestamps;
+    use chrono::{TimeZone, Utc};
     use indexmap::IndexMap;
-    use serde_json::{Value, json};
+    use serde_json::{Value as JsonValue, json};
 
     fn name(value: &str) -> NameBuf {
         NameBuf::new(value).unwrap()
     }
 
-    fn sub(kind: NgsiLdAttributeKind, value: Value) -> SubAttribute {
-        SubAttribute::new(kind, value, IndexMap::default())
+    fn sub(kind: NgsiLdAttributeKind, value: JsonValue) -> SubAttribute {
+        SubAttribute::new(kind, Value::from(value), IndexMap::default())
     }
 
     fn attribute(summary: &MetadataSummary, key: &str) -> NgsiLdAttribute {
@@ -202,7 +210,7 @@ mod tests {
     /// The summary for a `temperature` whose only qualifier is the `observedAt` `value`.
     fn summary_with_observed_at(value: Value, unreadable: &UnreadableTimestamps) -> MetadataSummary {
         let mut shared = IndexMap::default();
-        shared.insert(name("observedAt"), sub(NgsiLdAttributeKind::Property, value));
+        shared.insert(name("observedAt"), SubAttribute::new(NgsiLdAttributeKind::Property, value, IndexMap::default()));
         let mut metadata = IndexMap::default();
         metadata.insert(name("temperature"), MetadataStorage::shared(shared));
 
@@ -219,7 +227,7 @@ mod tests {
     fn a_numeric_epoch_observed_at_is_lifted_as_an_instant() {
         let unreadable = UnreadableTimestamps::new();
 
-        let summary = summary_with_observed_at(json!(1_775_253_620), &unreadable);
+        let summary = summary_with_observed_at(Value::from(1_775_253_620_i64), &unreadable);
 
         assert!(summary.observed_at.is_some());
         assert!(unreadable.is_empty());
@@ -229,7 +237,7 @@ mod tests {
     fn a_numeric_observed_at_that_is_no_epoch_is_recorded_rather_than_lost() {
         let unreadable = UnreadableTimestamps::new();
 
-        let summary = summary_with_observed_at(json!(2026), &unreadable);
+        let summary = summary_with_observed_at(Value::from(2026_i64), &unreadable);
 
         assert!(summary.observed_at.is_none());
         let entries = unreadable.into_entries();
@@ -239,10 +247,21 @@ mod tests {
     }
 
     #[test]
+    fn an_observed_at_extraction_already_read_as_an_instant_is_lifted_as_that_instant() {
+        let unreadable = UnreadableTimestamps::new();
+        let instant = Utc.with_ymd_and_hms(2026, 4, 3, 22, 0, 20).unwrap();
+
+        let summary = summary_with_observed_at(Value::Temporal(TemporalValue::DateTime(instant)), &unreadable);
+
+        assert_eq!(summary.observed_at, Some(instant));
+        assert!(unreadable.is_empty());
+    }
+
+    #[test]
     fn a_null_observed_at_is_absent_rather_than_unreadable() {
         let unreadable = UnreadableTimestamps::new();
 
-        let summary = summary_with_observed_at(json!(null), &unreadable);
+        let summary = summary_with_observed_at(Value::Null, &unreadable);
 
         assert!(summary.observed_at.is_none());
         assert!(unreadable.is_empty());
@@ -356,6 +375,45 @@ mod tests {
     }
 
     #[test]
+    fn a_geo_property_sub_attribute_is_built_around_the_geometry_extraction_typed() {
+        // A ring wound clockwise, as a `winding: keep` policy leaves it; building the sub-attribute
+        // must not rewind it.
+        let clockwise = NgsiLdGeometry::Polygon {
+            coordinates: vec![vec![
+                [0.0, 0.0].into(),
+                [0.0, 2.0].into(),
+                [2.0, 2.0].into(),
+                [2.0, 0.0].into(),
+                [0.0, 0.0].into(),
+            ]],
+        };
+        let mut shared = IndexMap::default();
+        shared.insert(
+            name("footprint"),
+            SubAttribute::new(
+                NgsiLdAttributeKind::GeoProperty,
+                Value::Geospatial(Box::new(clockwise.clone())),
+                IndexMap::default(),
+            ),
+        );
+        let mut metadata = IndexMap::default();
+        metadata.insert(name("name"), MetadataStorage::shared(shared));
+
+        let summary = transform_metadata(
+            Some(&metadata),
+            &name("name"),
+            None,
+            &mut QualifierCache::new(&mut ObservedAtCache::new(), &mut UnitCodeCache::new()),
+            &UnreadableTimestamps::new(),
+        );
+
+        let NgsiLdAttribute::GeoProperty(footprint) = attribute(&summary, "footprint") else {
+            panic!("expected a geo property sub-attribute");
+        };
+        assert_eq!(footprint.value, clockwise);
+    }
+
+    #[test]
     fn an_untyped_sub_attribute_stays_a_property() {
         let mut shared = IndexMap::default();
         shared.insert(name("accuracy"), sub(NgsiLdAttributeKind::Property, json!(0.5)));
@@ -379,7 +437,7 @@ mod tests {
         inner.insert(name("billingOrder"), sub(NgsiLdAttributeKind::Property, json!(0)));
         let relationship = SubAttribute::new_relationship(
             NgsiLdAttributeKind::Relationship,
-            json!("urn:ngsi-ld:Character:JackSparrow"),
+            Value::from(json!("urn:ngsi-ld:Character:JackSparrow")),
             Some(name("Character")),
             inner,
         );
@@ -411,7 +469,7 @@ mod tests {
         let mut shared = IndexMap::default();
         shared.insert(
             name("level"),
-            SubAttribute::new(NgsiLdAttributeKind::VocabProperty, json!("https://example.org/level/high"), inner),
+            SubAttribute::new(NgsiLdAttributeKind::VocabProperty, Value::from(json!("https://example.org/level/high")), inner),
         );
         let mut metadata = IndexMap::default();
         metadata.insert(name("sugars"), MetadataStorage::shared(shared));

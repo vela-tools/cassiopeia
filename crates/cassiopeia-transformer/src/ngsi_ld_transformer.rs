@@ -115,6 +115,7 @@ impl Transformer for NgsiLdTransformer {
 mod tests {
     use crate::{ngsi_ld_transformer::NgsiLdTransformer, transformer::Transformer};
     use cassiopeia_common::parallelism::Parallelism;
+    use cassiopeia_geometry::geometry::NgsiLdGeometry;
     use cassiopeia_ir::{
         entity::{AttributeValues, Entity},
         instance_index::InstanceIndex,
@@ -192,7 +193,7 @@ mod tests {
     }
 
     fn qualifier(value: serde_json::Value) -> SubAttribute {
-        SubAttribute::new(NgsiLdAttributeKind::Property, value, IndexMap::default())
+        SubAttribute::new(NgsiLdAttributeKind::Property, Value::from(value), IndexMap::default())
     }
 
     #[test]
@@ -712,13 +713,13 @@ mod tests {
         let mapping = mapping(
             r#"{ version: "v4", dataModel: "Sensor", identity: { entityName: "S-{{ id }}" }, attributes: { location: { type: "GeoProperty", instances: [ { source: "{{ a }}" }, { source: "{{ b }}" } ] } } }"#,
         );
-        let value_map = values(vec![(
-            "location",
-            Value::Array(vec![
-                Value::from(json!({"type": "Point", "coordinates": [1.0, 2.0]})),
-                Value::from(json!({"type": "Point", "coordinates": [3.0, 4.0]})),
-            ]),
-        )]);
+        // Extraction types every instance's geometry, so each arrives as one already.
+        let point = |coordinates: [f64; 2]| {
+            Value::Geospatial(Box::new(NgsiLdGeometry::Point {
+                coordinates: coordinates.into(),
+            }))
+        };
+        let value_map = values(vec![("location", Value::Array(vec![point([1.0, 2.0]), point([3.0, 4.0])]))]);
         let mut metadata = IndexMap::default();
         metadata.insert(
             name("location"),
@@ -848,7 +849,7 @@ mod tests {
             name("playsCharacter"),
             SubAttribute::new_relationship(
                 NgsiLdAttributeKind::Relationship,
-                json!("urn:ngsi-ld:Character:JackSparrow"),
+                Value::from(json!("urn:ngsi-ld:Character:JackSparrow")),
                 Some(name("Character")),
                 IndexMap::default(),
             ),

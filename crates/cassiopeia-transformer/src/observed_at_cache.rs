@@ -1,6 +1,5 @@
-use cassiopeia_ngsi_ld::value::convert::parse_datetime;
+use cassiopeia_ngsi_ld::value::types::Value;
 use chrono::{DateTime, Utc};
-use serde_json::Value as JsonValue;
 
 /// A memo of the `observedAt` parses that repeat across one entity's attributes.
 ///
@@ -27,16 +26,17 @@ impl ObservedAtCache {
 
     /// The instant `value` denotes, text parsed once per distinct text.
     ///
-    /// Only text goes through the cache. A number, read as a Unix epoch, is cheap to read directly,
-    /// and any other shape carries no instant, so neither is ever copied into it.
-    pub fn observed_at(&mut self, value: &JsonValue) -> Option<DateTime<Utc>> {
+    /// Only text goes through the cache. An instant the extraction stage already read is taken as it
+    /// is, a number, read as a Unix epoch, is cheap to read directly, and any other shape carries no
+    /// instant, so none of them is ever copied into it.
+    pub fn observed_at(&mut self, value: &Value) -> Option<DateTime<Utc>> {
         let Some(text) = value.as_str() else {
-            return parse_datetime(value);
+            return value.try_parse_datetime();
         };
         if let Some((_, parsed)) = self.parsed.iter().find(|(known, _)| known.as_ref() == text) {
             return *parsed;
         }
-        let parsed = parse_datetime(value);
+        let parsed = value.try_parse_datetime();
         self.parsed.push((Box::from(text), parsed));
         parsed
     }
@@ -45,11 +45,16 @@ impl ObservedAtCache {
 #[cfg(test)]
 mod tests {
     use crate::observed_at_cache::ObservedAtCache;
-    use serde_json::json;
+    use cassiopeia_ngsi_ld::value::types::Value;
+    use serde_json::{Value as JsonValue, json};
+
+    fn as_value(json: JsonValue) -> Value {
+        Value::from(json)
+    }
 
     #[test]
     fn a_repeated_observed_at_parses_to_the_same_instant_as_a_fresh_cache() {
-        let value = json!("2026-04-03T22:00:20Z");
+        let value = as_value(json!("2026-04-03T22:00:20Z"));
         let mut cache = ObservedAtCache::new();
 
         let first = cache.observed_at(&value);
@@ -63,8 +68,8 @@ mod tests {
 
     #[test]
     fn distinct_observed_at_texts_each_parse_to_their_own_instant() {
-        let earlier = json!("2026-04-03T22:00:20Z");
-        let later = json!("2026-04-03T23:15:00Z");
+        let earlier = as_value(json!("2026-04-03T22:00:20Z"));
+        let later = as_value(json!("2026-04-03T23:15:00Z"));
         let mut cache = ObservedAtCache::new();
 
         let first = cache.observed_at(&earlier);
@@ -79,20 +84,20 @@ mod tests {
     fn a_numeric_epoch_observed_at_reads_as_the_same_instant_as_its_text() {
         let mut cache = ObservedAtCache::new();
 
-        let number = cache.observed_at(&json!(1_744_000_000));
+        let number = cache.observed_at(&as_value(json!(1_744_000_000)));
 
         assert!(number.is_some());
-        assert_eq!(number, cache.observed_at(&json!("1744000000")));
+        assert_eq!(number, cache.observed_at(&as_value(json!("1744000000"))));
     }
 
     #[test]
     fn an_observed_at_that_is_neither_text_nor_an_epoch_yields_no_instant() {
         let mut cache = ObservedAtCache::new();
 
-        assert!(cache.observed_at(&json!(2026)).is_none());
-        assert!(cache.observed_at(&json!(true)).is_none());
-        assert!(cache.observed_at(&json!(null)).is_none());
-        assert!(cache.observed_at(&json!({"at": "2026-04-03T22:00:20Z"})).is_none());
-        assert!(cache.observed_at(&json!("not a timestamp")).is_none());
+        assert!(cache.observed_at(&as_value(json!(2026))).is_none());
+        assert!(cache.observed_at(&as_value(json!(true))).is_none());
+        assert!(cache.observed_at(&as_value(json!(null))).is_none());
+        assert!(cache.observed_at(&as_value(json!({"at": "2026-04-03T22:00:20Z"}))).is_none());
+        assert!(cache.observed_at(&as_value(json!("not a timestamp"))).is_none());
     }
 }

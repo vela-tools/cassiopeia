@@ -1,12 +1,15 @@
 use cassiopeia_geometry::{geometry::GeometryKind, target::GeometryTarget};
 use serde::{Deserialize, Serialize};
+use strum::Display;
 
 /// The conversion applied to an extracted source value before it becomes an NGSI-LD value.
 ///
 /// The geometry variants name `GeoJSON` geometry types (RFC 7946 clause 3.1) and produce values
-/// consumed by the corresponding NGSI-LD `GeoProperty` constructors.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+/// consumed by the corresponding NGSI-LD `GeoProperty` constructors. A transformation displays as
+/// the canonical token a mapping writes for it, so a load error can quote it back.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Display)]
 #[serde(rename_all = "lowercase")]
+#[strum(serialize_all = "lowercase")]
 pub enum Transformation {
     /// Parse as a boolean.
     #[serde(alias = "bool")]
@@ -126,6 +129,21 @@ mod tests {
     fn transformations_serialize_back_to_their_canonical_tokens() {
         assert_eq!(serde_json::to_string(&Transformation::Boolean).unwrap(), r#""boolean""#);
         assert_eq!(serde_json::to_string(&Transformation::LineString).unwrap(), r#""linestring""#);
+    }
+
+    #[test]
+    fn a_transformation_displays_as_the_canonical_token_it_serializes_to() {
+        for transformation in [
+            Transformation::Integer,
+            Transformation::MultiLineString,
+            Transformation::DateTime,
+            Transformation::Geometry,
+        ] {
+            assert_eq!(
+                serde_json::to_value(transformation).unwrap(),
+                serde_json::Value::String(transformation.to_string())
+            );
+        }
     }
 
     #[test]

@@ -1,5 +1,5 @@
 use crate::metadata::MetadataSummary;
-use cassiopeia_geometry::{policy::GeometryPolicy, target::GeometryTarget};
+use cassiopeia_geometry::geometry::NgsiLdGeometry;
 use cassiopeia_ngsi_ld::{
     entity::{
         attribute::{
@@ -62,32 +62,23 @@ pub fn build_relationship(object: Urn, object_type: Option<NameBuf>, meta: Metad
     builder.build().into_wrapper()
 }
 
-/// Builds a `GeoProperty` from a value carrying one of the six geometry types clause 4.7 admits.
+/// Builds a `GeoProperty` around one of the six geometry types ETSI GS CIM 009 v1.9.1 clause 4.7
+/// admits.
 ///
 /// A `GeoProperty` carries no nested attributes, so custom metadata is dropped.
 ///
-/// Under a geometry transformation, which is also the default of a `GeoProperty` declaring none, the
-/// extraction stage hands over an already-typed geometry, converted and normalised under the
-/// attribute's own `geometry` policy; it is taken exactly as it is, because normalising it again
-/// under the default policy would rewind the rings a `winding: keep` policy left alone. A
-/// sub-attribute's value arrives as a `GeoJSON` object, and an explicit `string` transformation leaves
-/// the `GeoJSON` text the source wrote; both are parsed here, preserving whatever type they carry. A
-/// value carrying no admissible geometry yields no attribute, so a `GeoProperty` is never emitted
-/// around something that is not a geometry.
+/// The geometry is the one the extraction stage typed, already converted and normalised under the
+/// declaration's own `geometry` policy, with any refusal already recorded there. It is taken exactly
+/// as it is: parsing or normalising it again here would rewind the rings a `winding: keep` policy
+/// left alone, and taking a typed geometry rather than a value means a `GeoProperty` can never be
+/// built around something that is not one.
 #[must_use]
-pub fn build_geo_property(value: Value, meta: MetadataSummary) -> Option<NgsiLdAttributeWrapper> {
-    let geometry = match value {
-        Value::Geospatial(geometry) => *geometry,
-        source @ (Value::Null | Value::Boolean(_) | Value::Number(_) | Value::String(_) | Value::Temporal(_) | Value::Array(_) | Value::Object(_)) => {
-            source.to_geometry(GeometryTarget::Preserve, &GeometryPolicy::default()).ok()??
-        }
-    };
-
+pub fn build_geo_property(geometry: NgsiLdGeometry, meta: MetadataSummary) -> NgsiLdAttributeWrapper {
     let mut geo = NgsiLdGeoProperty::new(geometry);
     geo.observed_at = meta.observed_at;
     geo.dataset_id = meta.dataset_id;
 
-    Some(geo.into_wrapper())
+    geo.into_wrapper()
 }
 
 /// Builds a `LanguageProperty` from a value that is an object of language tag to text.
@@ -182,12 +173,14 @@ pub fn build_list_relationship(objects: Vec<Urn>, object_type: Option<NameBuf>, 
 /// and keeps the kind it declared rather than being flattened. A builder that rejects its value (a
 /// non-IRI `VocabProperty`, a non-object `LanguageProperty`, a `Relationship` whose value is not a
 /// valid URN, an empty `ListRelationship`) yields `None`, dropping the sub-attribute rather than
-/// emitting it malformed. `object_type` is consulted only by the two relationship kinds.
+/// emitting it malformed. A `GeoProperty` is built only around a geometry the extraction stage
+/// already typed under its own `geometry` policy; nothing is parsed here. `object_type` is consulted
+/// only by the two relationship kinds.
 #[must_use]
 pub fn build_sub_attribute(kind: NgsiLdAttributeKind, value: Value, object_type: Option<NameBuf>, meta: MetadataSummary) -> Option<NgsiLdAttributeWrapper> {
     match kind {
         NgsiLdAttributeKind::Property => Some(build_property(value, meta)),
-        NgsiLdAttributeKind::GeoProperty => build_geo_property(value, meta),
+        NgsiLdAttributeKind::GeoProperty => value.into_geometry().map(|geometry| build_geo_property(geometry, meta)),
         NgsiLdAttributeKind::ListProperty => Some(build_list_property(value, meta)),
         NgsiLdAttributeKind::JsonProperty => Some(build_json_property(value, meta)),
         NgsiLdAttributeKind::VocabProperty => build_vocab_property(&value, meta),
@@ -217,6 +210,7 @@ mod tests {
         attribute_builder::{build_geo_property, build_language_property, build_list_property, build_sub_attribute, build_vocab_property},
         metadata::MetadataSummary,
     };
+    use cassiopeia_geometry::geometry::NgsiLdGeometry;
     use cassiopeia_ngsi_ld::{
         entity::{
             attribute::{NgsiLdAttribute, NgsiLdAttributeKind, NgsiLdAttributeWrapper, property::NgsiLdProperty},
@@ -225,6 +219,7 @@ mod tests {
         value::types::{Number, Value},
     };
     use indexmap::IndexMap;
+    use serde_json::json;
 
     fn empty_meta() -> MetadataSummary {
         MetadataSummary {
@@ -244,27 +239,64 @@ mod tests {
         assert!(build_language_property(Value::String("hello".into()), empty_meta()).is_none());
     }
 
-    #[test]
-    fn a_geo_property_rejects_a_value_that_carries_no_geometry() {
-        // A GeoProperty holds one of the six geometry types clause 4.7 admits, which has no null or
-        // empty form, so a value that is not a geometry yields no attribute at all rather than an
-        // attribute whose value is null.
-        assert!(build_geo_property(Value::String("not a geometry".into()), empty_meta()).is_none());
-        assert!(build_geo_property(Value::Null, empty_meta()).is_none());
+    /// A polygon whose exterior ring is wound clockwise, against RFC 7946 clause 3.1.6's right-hand
+    /// rule, as a `winding: keep` policy leaves it.
+    fn clockwise_square() -> NgsiLdGeometry {
+        NgsiLdGeometry::Polygon {
+            coordinates: vec![vec![
+                [0.0, 0.0].into(),
+                [0.0, 2.0].into(),
+                [2.0, 2.0].into(),
+                [2.0, 0.0].into(),
+                [0.0, 0.0].into(),
+            ]],
+        }
+    }
+
+    /// The geometry a built `GeoProperty` carries.
+    fn geometry_of(wrapper: NgsiLdAttributeWrapper) -> NgsiLdGeometry {
+        let NgsiLdAttributeWrapper::Single(attr) = wrapper else {
+            panic!("expected a single geo property");
+        };
+        let NgsiLdAttribute::GeoProperty(geo) = *attr else {
+            panic!("expected a geo property");
+        };
+        geo.value
     }
 
     #[test]
-    fn a_geo_property_reads_the_geojson_text_a_source_wrote() {
-        let value = Value::String(r#"{"type":"Point","coordinates":[1.5,2.5]}"#.into());
-
-        assert!(build_geo_property(value, empty_meta()).is_some());
+    fn a_geo_property_takes_its_typed_geometry_exactly_as_it_is() {
+        assert_eq!(geometry_of(build_geo_property(clockwise_square(), empty_meta())), clockwise_square());
     }
 
     #[test]
-    fn a_geo_property_sub_attribute_carrying_no_geometry_is_dropped() {
-        let dropped = build_sub_attribute(NgsiLdAttributeKind::GeoProperty, Value::String("not a geometry".into()), None, empty_meta());
+    fn a_geo_property_sub_attribute_keeps_the_geometry_extraction_typed_it_as() {
+        let wrapper = build_sub_attribute(
+            NgsiLdAttributeKind::GeoProperty,
+            Value::Geospatial(Box::new(clockwise_square())),
+            None,
+            empty_meta(),
+        )
+        .expect("geo property built");
 
-        assert!(dropped.is_none());
+        assert_eq!(geometry_of(wrapper), clockwise_square());
+    }
+
+    #[test]
+    fn a_geo_property_sub_attribute_whose_value_is_no_typed_geometry_is_dropped() {
+        // Extraction types every geometry a GeoProperty carries, so a value that reaches the builder
+        // untyped (GeoJSON text or a GeoJSON-shaped object included) is never parsed into one here.
+        for value in [
+            Value::String("not a geometry".into()),
+            Value::String(r#"{"type":"Point","coordinates":[1.5,2.5]}"#.into()),
+            Value::from(json!({"type": "Point", "coordinates": [1.5, 2.5]})),
+            Value::Null,
+        ] {
+            assert!(
+                build_sub_attribute(NgsiLdAttributeKind::GeoProperty, value.clone(), None, empty_meta()).is_none(),
+                "{value:?}"
+            );
+        }
     }
 
     #[test]
