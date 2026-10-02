@@ -54,9 +54,11 @@ pub struct Attribute {
     #[getset(get = "pub")]
     transformation: Option<Transformation>,
 
-    /// What may be lost bringing this attribute's geometry to the type `transformation` names.
+    /// What may be lost bringing this attribute's geometry to the type its conversion names: the
+    /// declared `transformation`, or, for a `GeoProperty` declaring none, the geometry as read.
     ///
-    /// Absent means lossless-only: identity, promotion to a multi-geometry, and unwrapping a
+    /// Only a conversion that reads a geometry can carry this policy; the mapping is refused at load
+    /// time otherwise. Absent means lossless-only: identity, promotion to a multi-geometry, and unwrapping a
     /// multi-geometry of exactly one member all pass, and any conversion that would discard
     /// coordinates is refused. An attribute's instances share this policy, exactly as they share
     /// its `type` and `transformation`.
@@ -273,12 +275,21 @@ mod tests {
     }
 
     #[test]
+    fn a_geo_property_without_a_transformation_converts_through_the_geometry_transformation() {
+        let attribute = parse(r#"{"type": "GeoProperty", "source": "{{ geometry }}"}"#);
+
+        assert_eq!(attribute.conversion(), ValueConversion::Transform(Transformation::Geometry));
+    }
+
+    #[test]
     fn an_explicit_transformation_wins_over_the_kind_default() {
         let list = parse(r#"{"type": "ListProperty", "source": "{{ codes }}", "transformation": "string"}"#);
         let json = parse(r#"{"type": "JsonProperty", "source": "{{ payload }}", "transformation": "object"}"#);
+        let geo = parse(r#"{"type": "GeoProperty", "source": "{{ geometry }}", "transformation": "string"}"#);
 
         assert_eq!(list.conversion(), ValueConversion::Transform(Transformation::String));
         assert_eq!(json.conversion(), ValueConversion::Transform(Transformation::Object));
+        assert_eq!(geo.conversion(), ValueConversion::Transform(Transformation::String));
     }
 
     #[test]

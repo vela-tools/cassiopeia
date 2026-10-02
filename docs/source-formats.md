@@ -156,13 +156,12 @@ Cassiopeia copies the feature ID to `id`, copies `properties` as an object, and 
 
 RFC 7946 lets a feature's geometry be a `GeometryCollection`, which NGSI-LD does not admit as a GeoProperty value. Such a feature produces no GeoProperty: the attribute is dropped and the run counts a warning, unless the mapping sets `geometry.convert` to `flatten` to fold the collection into one geometry.
 
-The source geometry is ready to use as an NGSI-LD `GeoProperty`:
+The source geometry is ready to use as an NGSI-LD `GeoProperty`, which keeps the geometry as read without a transformation:
 
 ~~~json5
 location: {
     type: "GeoProperty",
     source: "{{ geometry }}",
-    transformation: "geometry",
 }
 ~~~
 
@@ -413,7 +412,7 @@ Start by looking at one profiled record, not at the original file alone. Then bu
 1. Identify the record boundary: row, JSON object, GeoJSON feature, placemark, XML repeated child, Shapefile feature, or grid cell.
 2. Locate the values in the record shape, including containers such as `properties`, `geometry`, and XML `@` or `#` fields.
 3. Decide whether the source value already has the required JSON type or needs a transformation.
-4. For geometry, select `GeoProperty` and use a geometry transformation that matches the source shape.
+4. For geometry, select `GeoProperty`. A complete GeoJSON geometry needs no transformation; coordinates need the geometry transformation that matches the type to build.
 5. For KML folders or multi-layer Shapefiles, decide whether collection-specific mappings are needed.
 
 The [mapping guide](mapping.md) explains the mapping language in detail. The format page tells you what the source record looks like; it does not replace the mapping's responsibility to choose the target entity identity and attribute model.

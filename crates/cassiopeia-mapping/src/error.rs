@@ -35,7 +35,8 @@ pub enum MappingError {
     },
 
     /// An attribute declaration is internally inconsistent: its `geometry` conversion cannot
-    /// produce the type its `transformation` names, so no record could ever satisfy it.
+    /// produce the geometry type its `transformation`, or its type's default, names, so no record
+    /// could ever satisfy it.
     #[error("Attribute `{attribute}` declares a geometry conversion that cannot run")]
     InvalidAttribute {
         /// The attribute whose declaration is inconsistent.
@@ -43,6 +44,19 @@ pub enum MappingError {
         /// Why the declared conversion cannot produce the declared type.
         #[source]
         source: GeometryError,
+    },
+
+    /// An attribute declares a `geometry` block, but its conversion reads no geometry, so the block
+    /// could never apply to a single record.
+    ///
+    /// The conversion is the declared `transformation`, or the default of the attribute's type when
+    /// none is declared: only a `GeoProperty` defaults to reading a geometry.
+    #[error(
+        "Attribute `{attribute}` declares a `geometry` block, but its value is not converted to a geometry; name a geometry `transformation` or remove the block"
+    )]
+    GeometryPolicyWithoutGeometry {
+        /// The attribute whose `geometry` block could never apply.
+        attribute: NameBuf,
     },
 }
 

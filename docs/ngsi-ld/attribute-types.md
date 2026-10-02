@@ -114,7 +114,7 @@ Its value member is `value`, holding the geometry. From [example 14](https://git
 
 **When to use it.** Use a `GeoProperty` for geometry that consumers may query spatially, which is usually the right choice for a location. Use a `Property` only when the coordinates are data rather than a place. A location stored inside a `Property` cannot be found by a spatial query.
 
-Produce it with Cassiopeia: `type: "GeoProperty"` with `transformation: "geometry"` for an existing geometry, or a specific geometry transformation such as `point` to build one from coordinates. When the source's geometry type is not the one the model wants, a sibling `geometry` block names the conversion; see the [mapping guide](../mapping.md#geoproperty).
+Produce it with Cassiopeia: `type: "GeoProperty"` alone for an existing geometry, since a GeoProperty defaults to `transformation: "geometry"`, or a specific geometry transformation such as `point` to build one from coordinates. When the source's geometry type is not the one the model wants, a sibling `geometry` block names the conversion; see the [mapping guide](../mapping.md#geoproperty).
 
 ## LanguageProperty
 

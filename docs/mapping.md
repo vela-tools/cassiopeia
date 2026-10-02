@@ -227,7 +227,7 @@ Templates support more than plain text. Cassiopeia's `get` reads a map entry, an
 
 ## Convert values
 
-The transformation determines the value Cassiopeia builds. If you omit it, the attribute's `type` picks the default. A `ListProperty` defaults to `array`, so an array read from the source becomes the list itself. A `JsonProperty` keeps the value exactly as the source holds it, so an object stays an object and an array stays an array (see [ListProperty and JsonProperty](#listproperty-and-jsonproperty)). Every other type defaults to `string`: a number becomes its text, and an array or object becomes its compact JSON text, such as `["BS","IN"]`. A transformation you write is always applied as written, whatever the type. Write one when the target model expects another type, including `array` or `object` to keep a structured value as it is on a plain `Property`.
+The transformation determines the value Cassiopeia builds. If you omit it, the attribute's `type` picks the default. A `GeoProperty` defaults to `geometry`, so a GeoJSON geometry read from the source, as an object or as its JSON text, becomes the attribute's geometry (see [GeoProperty](#geoproperty)). A `ListProperty` defaults to `array`, so an array read from the source becomes the list itself. A `JsonProperty` keeps the value exactly as the source holds it, so an object stays an object and an array stays an array (see [ListProperty and JsonProperty](#listproperty-and-jsonproperty)). Every other type defaults to `string`: a number becomes its text, and an array or object becomes its compact JSON text, such as `["BS","IN"]`. A transformation you write is always applied as written, whatever the type. Write one when the target model expects another type, including `array` or `object` to keep a structured value as it is on a plain `Property`.
 
 | Transformation | Result |
 | --- | --- |
@@ -240,7 +240,7 @@ The transformation determines the value Cassiopeia builds. If you omit it, the a
 | `datetime` | A date and time value. |
 | `date` | A date value. |
 | `time` | A time value. |
-| `geometry` | An existing GeoJSON geometry, whichever of the six admissible types it is. A `GeometryCollection` yields no attribute. |
+| `geometry` | An existing GeoJSON geometry, as an object or as its JSON text, whichever of the six admissible types it is. The default for a `GeoProperty`. A `GeometryCollection` yields no attribute. |
 | `point` | A GeoJSON `Point`. |
 | `multipoint` | A GeoJSON `MultiPoint`. |
 | `linestring` | A GeoJSON `LineString`. |
@@ -250,13 +250,13 @@ The transformation determines the value Cassiopeia builds. If you omit it, the a
 
 `datetime`, `date`, and `time` read the spellings sources actually write. Supported values include RFC 3339 (`2026-03-01T11:04:35Z`, `2026-03-01T11:04:35+02:00`), the same instant with a space instead of the `T` and with or without a UTC offset (`2026-03-01 11:04:35`, `2026-03-01 11:04:35+00:00`, `2026-03-01 11:04:35+0000`), `Y-m-d` and `d/m/Y` dates with `:` or `.` between the time parts, a bare date, and a Unix epoch in seconds, milliseconds, or nanoseconds, written as a number or as text and with or without a fraction (`1775253620`, `1775253620.5`). A number too small to be an epoch, such as `2026`, is not read and is dropped with a warning. Fractional seconds are preserved, offsets are applied, and a space-separated value or a bare date without a zone is read as UTC. A bare year (`2026`), a year and month (`2026-03`), and a date-time with a `T` but no zone (`2026-03-01T11:04:35`) are not read. Unreadable text is not dropped quietly: Cassiopeia omits the attribute and warns with the attribute name and the text it could not read. An `observedAt` sub-property follows the same rules. If it cannot be read, the attribute is still published without that qualifier. An `observedAt` template of literal text and plain references that reads a missing field resolves to nothing, so the attribute is published without the qualifier and without a warning.
 
-The transformation and the NGSI-LD attribute type answer different questions. `transformation: "float"` says how to parse the value. `type: "Property"` says how to represent it in the entity. A geometry attribute therefore commonly uses both:
+The transformation and the NGSI-LD attribute type answer different questions. `transformation: "float"` says how to parse the value. `type: "Property"` says how to represent it in the entity. A geometry attribute built from coordinates therefore uses both:
 
 ~~~json5
 location: {
     type: "GeoProperty",
-    source: "{{ geometry }}",
-    transformation: "geometry",
+    source: ["{{ longitude }}", "{{ latitude }}"],
+    transformation: "point",
 }
 ~~~
 
@@ -295,15 +295,16 @@ A `source` that resolves to nothing gives no link, and the entity is still writt
 
 ### GeoProperty
 
-GeoProperties hold GeoJSON geometry. Use `geometry` when the source already contains a complete geometry object. Use one of the specific geometry transformations when the source contains coordinates that need to become a particular geometry type.
+GeoProperties hold GeoJSON geometry. When the source already contains a complete geometry, as an object or as its JSON text, the attribute needs no transformation: a GeoProperty defaults to `geometry`, which keeps whichever of the six admissible types the source carries. Use one of the specific geometry transformations when the source contains coordinates that need to become a particular geometry type, or when the attribute must hold one particular type.
 
 ~~~json5
 location: {
     type: "GeoProperty",
     source: "{{ geometry }}",
-    transformation: "geometry",
 }
 ~~~
+
+A value that carries no geometry at all, such as a missing or blank field or text that is not GeoJSON, produces no attribute and no warning. A transformation you write replaces the default: `string`, for instance, writes the geometry's compact JSON text, which Cassiopeia still reads back as the geometry when it builds the GeoProperty, but which no `geometry` block can reach.
 
 A GeoProperty holds exactly six geometry types, the ones NGSI-LD admits (ETSI GS CIM 009 v1.9.1 clause 4.7): `Point`, `MultiPoint`, `LineString`, `MultiLineString`, `Polygon`, `MultiPolygon`. GeoJSON's seventh type, `GeometryCollection` (RFC 7946 clause 3.1.8), is not one of them. A source that carries one produces no GeoProperty unless the mapping asks for it to be folded, described below.
 
@@ -311,7 +312,7 @@ Cassiopeia normalises every geometry it emits to RFC 7946's producer rules. It c
 
 #### Convert between geometry types
 
-The `transformation` names the geometry type the attribute should hold. When the source already carries that type, or a type that reaches it without discarding anything, the attribute is built and nothing needs to be declared. Three conversions are lossless and therefore automatic:
+The `transformation` names the geometry type the attribute should hold. A GeoProperty without one keeps whatever type the source carries, so a `geometry` block on it applies its conversion to that geometry and nothing more is reconciled. When the source already carries the declared type, or a type that reaches it without discarding anything, the attribute is built and nothing needs to be declared. Three conversions are lossless and therefore automatic:
 
 - **identity**: the source is already the declared type;
 - **promotion**: a `Point` becomes a `MultiPoint`, a `LineString` a `MultiLineString`, and a `Polygon` a `MultiPolygon`;
@@ -387,7 +388,7 @@ The `geometry` block takes three keys:
 
 Conversions preserve a position's altitude wherever they can: the ones that select or regroup existing positions (`first`, `largest`, `first-vertex`, `exterior-ring`, `boundary`, `connect`, `ring`, `vertices`, `flatten`) carry it through, and the ones that compute new coordinates (`centroid`, `point-on-surface`, `bbox-center`, `convex-hull`, `envelope`) do not.
 
-A conversion that could never produce the declared type is rejected when the mapping loads, naming the attribute, rather than failing on every record.
+A conversion that could never produce the declared type is rejected when the mapping loads, naming the attribute, rather than failing on every record. So is a `geometry` block on an attribute whose value is never converted to a geometry: any type other than `GeoProperty` without a geometry transformation, or a GeoProperty whose transformation is not a geometry one, such as `string`. The block could never apply there.
 
 When a geometry has to be converted inside a template, for a value that a `transformation` cannot reach, use the [`geo_convert` function](templates.md#geometry-functions).
 

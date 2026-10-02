@@ -115,6 +115,7 @@ mod tests {
     use crate::{dropped_attributes::DroppedAttributes, entity_extractor::EntityExtractor, extractor::Extractor};
     use cassiopeia_common::parallelism::Parallelism;
     use cassiopeia_expander::compiler::ExpanderCompiler;
+    use cassiopeia_geometry::geometry::NgsiLdGeometry;
     use cassiopeia_ir::{
         assembled_entity::AssembledEntity,
         entity::Entity,
@@ -1253,6 +1254,12 @@ mod tests {
     /// Extracts the `label` attribute that the JSON5 attribute `declaration` builds over one record.
     /// Extraction itself must succeed: the entity is produced.
     fn extract_label(declaration: &str, record: JsonValue) -> Option<Value> {
+        extract_label_recording(declaration, record, &DroppedAttributes::new())
+    }
+
+    /// Extracts the `label` attribute that the JSON5 attribute `declaration` builds over one record,
+    /// recording every attribute the extraction drops into `dropped`.
+    fn extract_label_recording(declaration: &str, record: JsonValue, dropped: &DroppedAttributes) -> Option<Value> {
         let (resolver, mapping) = prepare(&format!(
             r#"{{
                 version: "v4",
@@ -1264,7 +1271,7 @@ mod tests {
         let extractor = EntityExtractor::new(resolver);
 
         let mapped = AssembledEntity::from_single(entity("urn:ngsi-ld:Item:1", record), mapping);
-        let (result, _) = extractor.extract(mapped, &DroppedAttributes::new()).unwrap().into_parts();
+        let (result, _) = extractor.extract(mapped, dropped).unwrap().into_parts();
 
         result.values().as_ref().expect("values set").get(&name("label")).cloned()
     }
@@ -1449,6 +1456,128 @@ mod tests {
         let value = extract_label(r#"{ source: "{{ codes }}" }"#, json!({"codes": ["BS", "IN"]}));
 
         assert_eq!(value, Some(Value::String(r#"["BS","IN"]"#.into())));
+    }
+
+    /// The `Point` geometry at `coordinates`, as the extraction stage types it.
+    fn point(coordinates: [f64; 2]) -> Value {
+        Value::Geospatial(Box::new(NgsiLdGeometry::Point {
+            coordinates: coordinates.into(),
+        }))
+    }
+
+    #[test]
+    fn a_geo_property_without_a_transformation_keeps_a_geojson_point_field_as_its_geometry() {
+        let dropped = DroppedAttributes::new();
+        let value = extract_label_recording(
+            r#"{ type: "GeoProperty", source: "{{ geometry }}" }"#,
+            json!({"geometry": {"type": "Point", "coordinates": [14.5, 46.05]}}),
+            &dropped,
+        );
+
+        assert_eq!(value, Some(point([14.5, 46.05])));
+        assert!(dropped.geometries.is_empty());
+    }
+
+    #[test]
+    fn a_geo_property_without_a_transformation_reads_a_geojson_geometry_written_as_text() {
+        let value = extract_label(
+            r#"{ type: "GeoProperty", source: "{{ geometry }}" }"#,
+            json!({"geometry": r#"{"type":"Point","coordinates":[14.5,46.05]}"#}),
+        );
+
+        assert_eq!(value, Some(point([14.5, 46.05])));
+    }
+
+    #[test]
+    fn a_geo_property_over_text_that_is_no_geometry_is_absent_without_a_refusal_with_or_without_a_transformation() {
+        for declaration in [
+            r#"{ type: "GeoProperty", source: "{{ geometry }}" }"#,
+            r#"{ type: "GeoProperty", source: "{{ geometry }}", transformation: "geometry" }"#,
+        ] {
+            let dropped = DroppedAttributes::new();
+            let value = extract_label_recording(declaration, json!({"geometry": "somewhere near the river"}), &dropped);
+
+            assert_eq!(value, None, "{declaration}");
+            assert!(dropped.geometries.is_empty(), "{declaration}");
+        }
+    }
+
+    #[test]
+    fn a_geo_property_without_a_transformation_over_a_null_or_blank_field_is_absent() {
+        for geometry in [JsonValue::Null, json!(""), json!("  ")] {
+            let value = extract_label(r#"{ type: "GeoProperty", source: "{{ geometry }}" }"#, json!({"geometry": geometry}));
+
+            assert_eq!(value, None);
+        }
+    }
+
+    #[test]
+    fn a_geo_property_without_a_transformation_loads_and_applies_its_geometry_block() {
+        let dropped = DroppedAttributes::new();
+        let value = extract_label_recording(
+            r#"{ type: "GeoProperty", source: "{{ geometry }}", geometry: { convert: "centroid" } }"#,
+            json!({"geometry": {"type": "Polygon", "coordinates": [[[0.0, 0.0], [2.0, 0.0], [2.0, 2.0], [0.0, 2.0], [0.0, 0.0]]]}}),
+            &dropped,
+        );
+
+        assert_eq!(value, Some(point([1.0, 1.0])));
+        assert!(dropped.geometries.is_empty());
+    }
+
+    #[test]
+    fn a_geometry_collection_under_a_geo_property_without_a_transformation_is_refused_and_recorded() {
+        let dropped = DroppedAttributes::new();
+        let collection = json!({
+            "type": "GeometryCollection",
+            "geometries": [
+                {"type": "Point", "coordinates": [1.0, 2.0]},
+                {"type": "Point", "coordinates": [3.0, 4.0]},
+            ],
+        });
+
+        let value = extract_label_recording(
+            r#"{ type: "GeoProperty", source: "{{ geometry }}" }"#,
+            json!({"geometry": collection}),
+            &dropped,
+        );
+
+        assert_eq!(value, None);
+        let entries = dropped.geometries.into_entries();
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].0.attribute, name("label"));
+    }
+
+    #[test]
+    fn a_geometry_collection_under_a_geo_property_without_a_transformation_folds_when_the_geometry_block_says_so() {
+        let collection = json!({
+            "type": "GeometryCollection",
+            "geometries": [
+                {"type": "Point", "coordinates": [1.0, 2.0]},
+                {"type": "Point", "coordinates": [3.0, 4.0]},
+            ],
+        });
+
+        let value = extract_label(
+            r#"{ type: "GeoProperty", source: "{{ geometry }}", geometry: { convert: "flatten" } }"#,
+            json!({"geometry": collection}),
+        );
+
+        assert_eq!(
+            value,
+            Some(Value::Geospatial(Box::new(NgsiLdGeometry::MultiPoint {
+                coordinates: vec![[1.0, 2.0].into(), [3.0, 4.0].into()],
+            })))
+        );
+    }
+
+    #[test]
+    fn a_geo_property_under_an_explicit_string_transformation_still_yields_the_compact_json_text_of_its_geometry() {
+        let value = extract_label(
+            r#"{ type: "GeoProperty", source: "{{ geometry }}", transformation: "string" }"#,
+            json!({"geometry": {"type": "Point", "coordinates": [14.5, 46.05]}}),
+        );
+
+        assert_eq!(value, Some(Value::String(r#"{"type":"Point","coordinates":[14.5,46.05]}"#.into())));
     }
 
     #[test]

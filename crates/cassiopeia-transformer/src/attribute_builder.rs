@@ -66,11 +66,12 @@ pub fn build_relationship(object: Urn, object_type: Option<NameBuf>, meta: Metad
 ///
 /// A `GeoProperty` carries no nested attributes, so custom metadata is dropped.
 ///
-/// The geometry is resolved preserving whatever type the source carried, so a mapping that declares
-/// `type: "GeoProperty"` and no `transformation` still works: the value the extraction stage produced
-/// may be an already-typed geometry, or the `GeoJSON` text a source wrote and no transformation
-/// parsed. A value carrying no admissible geometry yields no attribute, so a `GeoProperty` is never
-/// emitted around something that is not a geometry.
+/// The geometry is resolved preserving whatever type the value carries. Under a geometry
+/// transformation, which is also the default of a `GeoProperty` declaring none, the extraction stage
+/// hands over an already-typed geometry; a sub-attribute's value arrives as a `GeoJSON` object; and an
+/// explicit `string` transformation leaves the `GeoJSON` text the source wrote, which is parsed here.
+/// A value carrying no admissible geometry yields no attribute, so a `GeoProperty` is never emitted
+/// around something that is not a geometry.
 #[must_use]
 pub fn build_geo_property(value: &Value, meta: MetadataSummary) -> Option<NgsiLdAttributeWrapper> {
     let geometry = value.to_geometry(GeometryTarget::Preserve, &GeometryPolicy::default()).ok()??;

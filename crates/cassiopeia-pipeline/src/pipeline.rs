@@ -1151,4 +1151,60 @@ mod tests {
             );
         }
     }
+
+    /// A `GeoProperty` declared with no `transformation`, whose `geometry` block asks for the
+    /// centroid of the geometry the source carries.
+    const ZONE_CENTROID: &str = r#"{
+        version: "v4",
+        dataModel: "Zone",
+        identity: { entityName: "{{ id }}" },
+        attributes: {
+            location: { type: "GeoProperty", source: "{{ geometry }}", geometry: { convert: "centroid" } },
+        },
+    }"#;
+
+    #[test]
+    fn a_geo_property_without_a_transformation_publishes_the_geometry_its_geometry_block_derives() {
+        let square = json!({ "type": "Polygon", "coordinates": [[[0.0, 0.0], [2.0, 0.0], [2.0, 2.0], [0.0, 2.0], [0.0, 0.0]]] });
+        for store in STORES {
+            let outcome = run_end_to_end(
+                store,
+                &[RunInput {
+                    mapping: ZONE_CENTROID,
+                    records: json!([{ "id": "square", "geometry": square }]),
+                }],
+                &["Zone"],
+                "",
+            );
+
+            assert_eq!(entity_ids(&outcome), ["urn:ngsi-ld:Zone:square"], "{store:?}");
+            assert_eq!(
+                outcome.entities[0]["location"],
+                json!({ "type": "GeoProperty", "value": { "type": "Point", "coordinates": [1.0, 1.0] } }),
+                "{store:?}"
+            );
+            assert_eq!(outcome.warnings, 0, "{store:?}");
+        }
+    }
+
+    #[test]
+    fn a_geometry_collection_under_a_geo_property_without_a_transformation_is_dropped_with_a_warning() {
+        let collection = json!({ "type": "GeometryCollection", "geometries": [{ "type": "Point", "coordinates": [1.0, 2.0] }] });
+        for store in STORES {
+            let outcome = run_end_to_end(
+                store,
+                &[RunInput {
+                    mapping: STATION_READINGS,
+                    records: json!([{ "id": "cell", "geometry": collection, "temperature": 20.5 }]),
+                }],
+                &["Station"],
+                "",
+            );
+
+            assert_eq!(entity_ids(&outcome), ["urn:ngsi-ld:Station:cell"], "{store:?}");
+            assert!(outcome.entities[0].get("location").is_none(), "{store:?}: {:?}", outcome.entities[0]);
+            assert!(outcome.entities[0].get("temperature").is_some(), "{store:?}");
+            assert_eq!(outcome.warnings, 1, "{store:?}");
+        }
+    }
 }

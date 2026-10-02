@@ -42,7 +42,9 @@ pub enum Transformation {
     ///
     /// Unlike the type-specific geometry transformations below, which build a geometry of a fixed
     /// type from raw coordinates, this keeps the geometry the source already carries (a `GeoJSON`
-    /// geometry object, RFC 7946 clause 3.1). NGSI-LD restrictions are enforced separately.
+    /// geometry object, RFC 7946 clause 3.1). NGSI-LD restrictions are enforced separately. This is
+    /// the conversion a `GeoProperty` declaring no transformation uses (see
+    /// [`ValueConversion::default_for`](crate::value_conversion::ValueConversion::default_for)).
     Geometry,
 
     /// Build a `GeoJSON` `Point`.

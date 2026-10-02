@@ -592,6 +592,76 @@ mod tests {
     }
 
     #[test]
+    fn a_geojson_object_under_the_geo_property_default_is_kept_as_its_geometry() {
+        let source = json!({"type": "Point", "coordinates": [14.5, 46.05]});
+        let value = Transformer::apply(smallvec![source], default_of(NgsiLdAttributeKind::GeoProperty), None).unwrap();
+
+        assert_eq!(
+            value,
+            Value::Geospatial(Box::new(NgsiLdGeometry::Point {
+                coordinates: [14.5, 46.05].into(),
+            }))
+        );
+    }
+
+    #[test]
+    fn geojson_text_under_the_geo_property_default_is_read_as_its_geometry() {
+        let source = json!(r#"{"type":"Point","coordinates":[14.5,46.05]}"#);
+        let value = Transformer::apply(smallvec![source], default_of(NgsiLdAttributeKind::GeoProperty), None).unwrap();
+
+        assert_eq!(
+            value,
+            Value::Geospatial(Box::new(NgsiLdGeometry::Point {
+                coordinates: [14.5, 46.05].into(),
+            }))
+        );
+    }
+
+    #[test]
+    fn a_value_carrying_no_geometry_under_the_geo_property_default_is_no_value_rather_than_a_refusal() {
+        for part in [json!("not a geometry"), json!(""), json!("  "), json!(null)] {
+            let value = Transformer::apply(smallvec![part], default_of(NgsiLdAttributeKind::GeoProperty), None).unwrap();
+
+            assert!(value.is_null(), "{value:?}");
+        }
+    }
+
+    #[test]
+    fn the_geo_property_default_applies_the_declared_geometry_policy() {
+        let source = json!({
+            "type": "Polygon",
+            "coordinates": [[[0.0, 0.0], [2.0, 0.0], [2.0, 2.0], [0.0, 2.0], [0.0, 0.0]]],
+        });
+        let policy = GeometryPolicy::builder().convert(Some(ConversionStrategy::Centroid)).build();
+        let value = Transformer::apply(smallvec![source], default_of(NgsiLdAttributeKind::GeoProperty), Some(&policy)).unwrap();
+
+        assert_eq!(
+            value,
+            Value::Geospatial(Box::new(NgsiLdGeometry::Point {
+                coordinates: [1.0, 1.0].into(),
+            }))
+        );
+    }
+
+    #[test]
+    fn a_source_geometry_collection_under_the_geo_property_default_is_refused() {
+        let source = json!({"type": "GeometryCollection", "geometries": []});
+
+        assert_eq!(
+            Transformer::apply(smallvec![source], default_of(NgsiLdAttributeKind::GeoProperty), None),
+            Err(AttributeRefusal::Geometry(GeometryError::GeometryCollection))
+        );
+    }
+
+    #[test]
+    fn an_explicit_string_transformation_still_turns_a_geometry_into_its_compact_json_text() {
+        let source = json!({"type": "Point", "coordinates": [14.5, 46.05]});
+        let value = Transformer::apply(smallvec![source], ValueConversion::Transform(Transformation::String), None).unwrap();
+
+        assert_eq!(value, Value::String(r#"{"type":"Point","coordinates":[14.5,46.05]}"#.into()));
+    }
+
+    #[test]
     fn a_point_source_promotes_to_a_declared_multipoint() {
         let source = json!({"type": "Point", "coordinates": [9.17, 45.47]});
         let value = Transformer::apply(smallvec![source], ValueConversion::Transform(Transformation::MultiPoint), None).unwrap();
