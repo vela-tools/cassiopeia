@@ -1,7 +1,7 @@
 use crate::{
     attribute::{resolution_context::ResolutionContext, resolver::resolve},
-    dropped_geometries::DroppedGeometries,
-    error::Result,
+    dropped_attributes::DroppedAttributes,
+    error::{ExtractionError, Result},
     extractor::Extractor,
 };
 use cassiopeia_common::parallelism::Parallelism;
@@ -14,7 +14,6 @@ use cassiopeia_ir::{
 };
 use cassiopeia_mapping::{mapping::Mapping, template::resolver::TemplateResolver};
 use cassiopeia_ngsi_ld::entity::{attribute::NgsiLdAttributeKind, name::NameBuf};
-use cassiopeia_unreadable_timestamps::unreadable_timestamps::UnreadableTimestamps;
 use indexmap::IndexMap;
 use rayon::prelude::*;
 use serde_json::Value as JsonValue;
@@ -110,7 +109,7 @@ impl EntityExtractor {
 }
 
 impl Extractor for EntityExtractor {
-    fn extract(&self, assembled: AssembledEntity, dropped: &DroppedGeometries, unreadable: &UnreadableTimestamps) -> Result<Mapped<Entity>> {
+    fn extract(&self, assembled: AssembledEntity, dropped: &DroppedAttributes) -> Result<Mapped<Entity>> {
         let (id, scope, mut relationships, nested_relationships, fragments) = assembled.into_parts();
         let mut values = AttributeValues::default();
         let mut metadata = EntityMetadata::default();
@@ -120,22 +119,39 @@ impl Extractor for EntityExtractor {
         // Each fragment resolves through its own mapping against its own record; disjoint attribute
         // names across mappings make the union a concatenation, last-writer-wins on the rare collision.
         for (data, mapping) in &fragments {
+            let mut unresolved = Vec::new();
             {
                 let mut context = ResolutionContext::new(
                     data,
                     &self.resolver,
                     &relationships,
                     nested_relationships.as_ref(),
-                    dropped,
-                    unreadable,
+                    &dropped.geometries,
+                    &dropped.timestamps,
                     Some(&mut metadata),
                 );
                 for (name, config) in mapping.attributes() {
-                    let value = resolve(&mut context, name, config)?;
-                    if !value.is_null() {
-                        values.insert(name.clone(), value);
+                    match resolve(&mut context, name, config) {
+                        Ok(value) if value.is_null() => {}
+                        Ok(value) => {
+                            values.insert(name.clone(), value);
+                        }
+                        // A template failure costs the attribute it belongs to, not the entity.
+                        // Resolution records an attribute's metadata only once the attribute has
+                        // resolved whole, so nothing of the failed attribute is left behind.
+                        Err(ExtractionError::Template { source }) => {
+                            dropped.templates.record(name, &id, source);
+                            unresolved.push(name);
+                        }
+                        Err(error @ ExtractionError::RecursionLimitExceeded { .. }) => return Err(error),
                     }
                 }
+            }
+            // A relationship's objects were minted upstream and travel on the entity, so a
+            // relationship whose properties failed to resolve is removed from them as well; otherwise
+            // it would be emitted stripped of the properties its mapping declared.
+            for name in unresolved {
+                relationships.shift_remove(name);
             }
             if let Some(grouped) = self.group_instance_relationships(data, mapping, &mut relationships)? {
                 for (name, groups) in grouped {
@@ -157,17 +173,17 @@ impl Extractor for EntityExtractor {
         Ok(Mapped::with_mappings(entity, mappings))
     }
 
-    fn extract_batch(&self, entities: Vec<AssembledEntity>, dropped: &DroppedGeometries, unreadable: &UnreadableTimestamps) -> Vec<Result<Mapped<Entity>>> {
+    fn extract_batch(&self, entities: Vec<AssembledEntity>, dropped: &DroppedAttributes) -> Vec<Result<Mapped<Entity>>> {
         match self.parallelism {
-            Parallelism::Parallel => entities.into_par_iter().map(|entity| self.extract(entity, dropped, unreadable)).collect(),
-            Parallelism::Sequential => entities.into_iter().map(|entity| self.extract(entity, dropped, unreadable)).collect(),
+            Parallelism::Parallel => entities.into_par_iter().map(|entity| self.extract(entity, dropped)).collect(),
+            Parallelism::Sequential => entities.into_iter().map(|entity| self.extract(entity, dropped)).collect(),
         }
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use crate::{dropped_geometries::DroppedGeometries, entity_extractor::EntityExtractor, extractor::Extractor};
+    use crate::{dropped_attributes::DroppedAttributes, entity_extractor::EntityExtractor, extractor::Extractor};
     use cassiopeia_common::parallelism::Parallelism;
     use cassiopeia_expander::compiler::ExpanderCompiler;
     use cassiopeia_ir::{
@@ -185,7 +201,6 @@ mod tests {
         entity::{attribute::NgsiLdAttributeKind, name::NameBuf},
         value::types::{Number, TemporalValue, Value},
     };
-    use cassiopeia_unreadable_timestamps::unreadable_timestamps::UnreadableTimestamps;
     use chrono::{TimeZone, Utc};
     use serde_json::{Value as JsonValue, json};
     use std::{path::Path, sync::Arc};
@@ -231,10 +246,7 @@ mod tests {
         let extractor = EntityExtractor::new(resolver);
         let mapped = AssembledEntity::from_single(entity("urn:ngsi-ld:Sensor:001", json!({"id": "001", "temperature": 25.5})), mapping);
 
-        let (result, _) = extractor
-            .extract(mapped, &DroppedGeometries::new(), &UnreadableTimestamps::new())
-            .unwrap()
-            .into_parts();
+        let (result, _) = extractor.extract(mapped, &DroppedAttributes::new()).unwrap().into_parts();
         let values = result.values().as_ref().expect("values set");
 
         assert_eq!(values.get(&name("temperature")), Some(&Value::Number(Number::Float(25.5))));
@@ -264,17 +276,17 @@ mod tests {
                 ],
             },
         });
-        let dropped = DroppedGeometries::new();
+        let dropped = DroppedAttributes::new();
 
         let mapped = AssembledEntity::from_single(entity("urn:ngsi-ld:Zone:001", record), mapping);
-        let (result, _) = extractor.extract(mapped, &dropped, &UnreadableTimestamps::new()).unwrap().into_parts();
+        let (result, _) = extractor.extract(mapped, &dropped).unwrap().into_parts();
         let values = result.values().as_ref().expect("values set");
 
         // The unconvertible attribute is gone, but every other attribute of the entity survives.
         assert!(!values.contains_key(&name("location")));
         assert!(values.contains_key(&name("reference")));
 
-        let entries = dropped.into_entries();
+        let entries = dropped.geometries.into_entries();
         assert_eq!(entries.len(), 1);
         assert_eq!(entries[0].0.attribute, name("location"));
         assert_eq!(entries[0].1, 1);
@@ -291,7 +303,7 @@ mod tests {
             }"#,
         );
         let extractor = EntityExtractor::new(resolver);
-        let unreadable = UnreadableTimestamps::new();
+        let dropped = DroppedAttributes::new();
 
         // Spellings a source may use for the same instant, including two with a UTC offset on a
         // space-separated (non-`T`) timestamp.
@@ -305,14 +317,14 @@ mod tests {
         ] {
             let record = json!({"id": "001", "ts": spelling});
             let mapped = AssembledEntity::from_single(entity("urn:ngsi-ld:Sensor:001", record), Arc::clone(&mapping));
-            let (result, _) = extractor.extract(mapped, &DroppedGeometries::new(), &unreadable).unwrap().into_parts();
+            let (result, _) = extractor.extract(mapped, &dropped).unwrap().into_parts();
             let values = result.values().as_ref().expect("values set").clone();
 
             let expected = TemporalValue::DateTime(Utc.with_ymd_and_hms(2026, 3, 1, 11, 4, 35).unwrap());
             assert_eq!(values.get(&name("reading")), Some(&Value::Temporal(expected)), "mismatch for {spelling:?}");
         }
 
-        assert!(unreadable.is_empty());
+        assert!(dropped.timestamps.is_empty());
     }
 
     #[test]
@@ -329,18 +341,18 @@ mod tests {
             }"#,
         );
         let extractor = EntityExtractor::new(resolver);
-        let unreadable = UnreadableTimestamps::new();
+        let dropped = DroppedAttributes::new();
         let record = json!({"id": "001", "ts": "the third of March"});
 
         let mapped = AssembledEntity::from_single(entity("urn:ngsi-ld:Sensor:001", record), mapping);
-        let (result, _) = extractor.extract(mapped, &DroppedGeometries::new(), &unreadable).unwrap().into_parts();
+        let (result, _) = extractor.extract(mapped, &dropped).unwrap().into_parts();
         let values = result.values().as_ref().expect("values set");
 
         // The unreadable attribute is gone, but every other attribute of the entity survives.
         assert!(!values.contains_key(&name("reading")));
         assert!(values.contains_key(&name("reference")));
 
-        let entries = unreadable.into_entries();
+        let entries = dropped.timestamps.into_entries();
         assert_eq!(entries.len(), 1);
         assert_eq!(entries[0].0, name("reading"));
         assert_eq!(entries[0].1.example.as_ref(), "the third of March");
@@ -358,13 +370,13 @@ mod tests {
             }"#,
         );
         let extractor = EntityExtractor::new(resolver);
-        let unreadable = UnreadableTimestamps::new();
+        let dropped = DroppedAttributes::new();
 
         let mapped = AssembledEntity::from_single(entity("urn:ngsi-ld:Sensor:001", json!({"id": "001", "ts": ""})), mapping);
-        let (result, _) = extractor.extract(mapped, &DroppedGeometries::new(), &unreadable).unwrap().into_parts();
+        let (result, _) = extractor.extract(mapped, &dropped).unwrap().into_parts();
 
         assert!(!result.values().as_ref().expect("values set").contains_key(&name("reading")));
-        assert!(unreadable.is_empty());
+        assert!(dropped.timestamps.is_empty());
     }
 
     #[test]
@@ -395,14 +407,14 @@ mod tests {
                 ],
             },
         });
-        let dropped = DroppedGeometries::new();
+        let dropped = DroppedAttributes::new();
 
         let mapped = AssembledEntity::from_single(entity("urn:ngsi-ld:Zone:001", record), mapping);
-        let (result, _) = extractor.extract(mapped, &dropped, &UnreadableTimestamps::new()).unwrap().into_parts();
+        let (result, _) = extractor.extract(mapped, &dropped).unwrap().into_parts();
         let values = result.values().as_ref().expect("values set");
 
         assert!(values.contains_key(&name("location")));
-        assert!(dropped.is_empty());
+        assert!(dropped.geometries.is_empty());
     }
 
     #[test]
@@ -418,10 +430,7 @@ mod tests {
         let extractor = EntityExtractor::new(resolver);
         let mapped = AssembledEntity::from_single(entity("urn:ngsi-ld:Sensor:001", json!({"id": "001"})), mapping);
 
-        let (result, _) = extractor
-            .extract(mapped, &DroppedGeometries::new(), &UnreadableTimestamps::new())
-            .unwrap()
-            .into_parts();
+        let (result, _) = extractor.extract(mapped, &DroppedAttributes::new()).unwrap().into_parts();
         let values = result.values().as_ref().expect("values set");
 
         assert!(!values.contains_key(&name("humidity")));
@@ -446,10 +455,7 @@ mod tests {
         let extractor = EntityExtractor::new(resolver);
         let mapped = AssembledEntity::from_single(entity("urn:ngsi-ld:Sensor:001", json!({"id": "001", "temperature": 20.0})), mapping);
 
-        let (result, _) = extractor
-            .extract(mapped, &DroppedGeometries::new(), &UnreadableTimestamps::new())
-            .unwrap()
-            .into_parts();
+        let (result, _) = extractor.extract(mapped, &DroppedAttributes::new()).unwrap().into_parts();
         let metadata = result.metadata().as_ref().expect("metadata set");
         let shared = metadata
             .get(&name("temperature"))
@@ -481,10 +487,7 @@ mod tests {
         let extractor = EntityExtractor::new(resolver);
         let mapped = AssembledEntity::from_single(entity("urn:ngsi-ld:Product:1", json!({"id": "1", "sugars": 12.0, "level": "high"})), mapping);
 
-        let (result, _) = extractor
-            .extract(mapped, &DroppedGeometries::new(), &UnreadableTimestamps::new())
-            .unwrap()
-            .into_parts();
+        let (result, _) = extractor.extract(mapped, &DroppedAttributes::new()).unwrap().into_parts();
         let metadata = result.metadata().as_ref().expect("metadata set");
         let shared = metadata.get(&name("sugars")).expect("sugars metadata").as_shared().expect("shared metadata");
         let level = shared.get(&name("level")).expect("level sub-attribute");
@@ -520,10 +523,7 @@ mod tests {
         let extractor = EntityExtractor::new(resolver);
         let mapped = AssembledEntity::from_single(entity("urn:ngsi-ld:Product:1", json!({"id": "1", "sugars": 12.0, "level": "high"})), mapping);
 
-        let (result, _) = extractor
-            .extract(mapped, &DroppedGeometries::new(), &UnreadableTimestamps::new())
-            .unwrap()
-            .into_parts();
+        let (result, _) = extractor.extract(mapped, &DroppedAttributes::new()).unwrap().into_parts();
         let metadata = result.metadata().as_ref().expect("metadata set");
         let shared = metadata.get(&name("sugars")).expect("sugars metadata").as_shared().expect("shared metadata");
         let level = shared.get(&name("level")).expect("level sub-attribute");
@@ -556,10 +556,7 @@ mod tests {
         let extractor = EntityExtractor::new(resolver);
         let mapped = AssembledEntity::from_single(entity("urn:ngsi-ld:WeatherForecast:1", json!({"id": "1", "a": 10.0, "b": 12.0})), mapping);
 
-        let (result, _) = extractor
-            .extract(mapped, &DroppedGeometries::new(), &UnreadableTimestamps::new())
-            .unwrap()
-            .into_parts();
+        let (result, _) = extractor.extract(mapped, &DroppedAttributes::new()).unwrap().into_parts();
         let values = result.values().as_ref().expect("values set");
         let metadata = result.metadata().as_ref().expect("metadata set");
 
@@ -620,11 +617,7 @@ mod tests {
         );
 
         let (result, _) = EntityExtractor::new(resolver)
-            .extract(
-                AssembledEntity::from_single(entity, mapping),
-                &DroppedGeometries::new(),
-                &UnreadableTimestamps::new(),
-            )
+            .extract(AssembledEntity::from_single(entity, mapping), &DroppedAttributes::new())
             .unwrap()
             .into_parts();
 
@@ -668,11 +661,7 @@ mod tests {
         let entity = Entity::new(urn("urn:ngsi-ld:Flight:1"), json!({"id": "1", "a": "1", "c": "3"}), None, relationships, None);
 
         let (result, _) = EntityExtractor::new(resolver)
-            .extract(
-                AssembledEntity::from_single(entity, mapping),
-                &DroppedGeometries::new(),
-                &UnreadableTimestamps::new(),
-            )
+            .extract(AssembledEntity::from_single(entity, mapping), &DroppedAttributes::new())
             .unwrap()
             .into_parts();
 
@@ -716,11 +705,7 @@ mod tests {
         let entity = Entity::new(urn("urn:ngsi-ld:Route:1"), json!({"id": "1", "a": "1 2", "b": "3"}), None, relationships, None);
 
         let (result, _) = EntityExtractor::new(resolver)
-            .extract(
-                AssembledEntity::from_single(entity, mapping),
-                &DroppedGeometries::new(),
-                &UnreadableTimestamps::new(),
-            )
+            .extract(AssembledEntity::from_single(entity, mapping), &DroppedAttributes::new())
             .unwrap()
             .into_parts();
 
@@ -772,11 +757,7 @@ mod tests {
         let entity = Entity::new(urn("urn:ngsi-ld:Route:1"), json!({"id": "1", "a": "1", "c": "3"}), None, relationships, None);
 
         let (result, _) = EntityExtractor::new(resolver)
-            .extract(
-                AssembledEntity::from_single(entity, mapping),
-                &DroppedGeometries::new(),
-                &UnreadableTimestamps::new(),
-            )
+            .extract(AssembledEntity::from_single(entity, mapping), &DroppedAttributes::new())
             .unwrap()
             .into_parts();
 
@@ -817,10 +798,7 @@ mod tests {
             mapping,
         );
 
-        let (result, _) = extractor
-            .extract(mapped, &DroppedGeometries::new(), &UnreadableTimestamps::new())
-            .unwrap()
-            .into_parts();
+        let (result, _) = extractor.extract(mapped, &DroppedAttributes::new()).unwrap().into_parts();
         let values = result.values().as_ref().expect("values set");
 
         match values.get(&name("address")) {
@@ -848,10 +826,7 @@ mod tests {
         let entity = Entity::new(urn("urn:ngsi-ld:Device:1"), json!({"id": "1"}), None, relationships, None);
         let mapped = AssembledEntity::from_single(entity, mapping);
 
-        let (result, _) = extractor
-            .extract(mapped, &DroppedGeometries::new(), &UnreadableTimestamps::new())
-            .unwrap()
-            .into_parts();
+        let (result, _) = extractor.extract(mapped, &DroppedAttributes::new()).unwrap().into_parts();
         let values = result.values().as_ref().expect("values set");
 
         assert!(!values.contains_key(&name("controlledAsset")));
@@ -886,11 +861,7 @@ mod tests {
         entity.set_nested_relationships(Some(nested));
 
         let (result, _) = EntityExtractor::new(resolver)
-            .extract(
-                AssembledEntity::from_single(entity, mapping),
-                &DroppedGeometries::new(),
-                &UnreadableTimestamps::new(),
-            )
+            .extract(AssembledEntity::from_single(entity, mapping), &DroppedAttributes::new())
             .unwrap()
             .into_parts();
 
@@ -939,11 +910,7 @@ mod tests {
         entity.set_nested_relationships(Some(nested));
 
         let (result, _) = EntityExtractor::new(resolver)
-            .extract(
-                AssembledEntity::from_single(entity, mapping),
-                &DroppedGeometries::new(),
-                &UnreadableTimestamps::new(),
-            )
+            .extract(AssembledEntity::from_single(entity, mapping), &DroppedAttributes::new())
             .unwrap()
             .into_parts();
 
@@ -986,11 +953,7 @@ mod tests {
         entity.set_nested_relationships(Some(nested));
 
         let (result, _) = EntityExtractor::new(resolver)
-            .extract(
-                AssembledEntity::from_single(entity, mapping),
-                &DroppedGeometries::new(),
-                &UnreadableTimestamps::new(),
-            )
+            .extract(AssembledEntity::from_single(entity, mapping), &DroppedAttributes::new())
             .unwrap()
             .into_parts();
 
@@ -1014,11 +977,7 @@ mod tests {
         entity.set_nested_relationships(Some(nested));
 
         let (result, _) = EntityExtractor::new(resolver)
-            .extract(
-                AssembledEntity::from_single(entity, mapping),
-                &DroppedGeometries::new(),
-                &UnreadableTimestamps::new(),
-            )
+            .extract(AssembledEntity::from_single(entity, mapping), &DroppedAttributes::new())
             .unwrap()
             .into_parts();
 
@@ -1050,11 +1009,7 @@ mod tests {
         entity.relationships_mut().extend(relationships);
 
         let (result, _) = EntityExtractor::new(resolver)
-            .extract(
-                AssembledEntity::from_single(entity, mapping),
-                &DroppedGeometries::new(),
-                &UnreadableTimestamps::new(),
-            )
+            .extract(AssembledEntity::from_single(entity, mapping), &DroppedAttributes::new())
             .unwrap()
             .into_parts();
 
@@ -1087,7 +1042,7 @@ mod tests {
             AssembledEntity::from_single(entity("urn:ngsi-ld:Sensor:2", json!({"id": "2"})), mapping),
         ];
 
-        let results = extractor.extract_batch(batch, &DroppedGeometries::new(), &UnreadableTimestamps::new());
+        let results = extractor.extract_batch(batch, &DroppedAttributes::new());
 
         assert_eq!(results.len(), 2);
         assert!(results.iter().all(Result::is_ok));
@@ -1109,9 +1064,169 @@ mod tests {
             AssembledEntity::from_single(entity("urn:ngsi-ld:Sensor:2", json!({"id": "2"})), mapping),
         ];
 
-        let results = extractor.extract_batch(batch, &DroppedGeometries::new(), &UnreadableTimestamps::new());
+        let results = extractor.extract_batch(batch, &DroppedAttributes::new());
 
         assert_eq!(results.len(), 2);
         assert!(results.iter().all(Result::is_ok));
+    }
+
+    /// A headerless country mapping whose `dafifCode` is built by `source` under `transformation`.
+    fn country_mapping(source: &str, transformation: &str) -> (TemplateResolver, Arc<Mapping>) {
+        prepare(&format!(
+            r#"{{
+                version: "v4",
+                dataModel: "Country",
+                identity: {{ entityName: "{{{{ this[0] }}}}" }},
+                attributes: {{ dafifCode: {{ source: {source:?}, type: "Property", transformation: "{transformation}" }} }},
+            }}"#
+        ))
+    }
+
+    /// Extracts one headerless country record and returns its `dafifCode` value, if any, with the
+    /// sinks the extraction recorded into. Extraction itself must succeed: the entity is produced.
+    fn extract_dafif_code(source: &str, transformation: &str, codes: &JsonValue) -> (Option<Value>, DroppedAttributes) {
+        let (resolver, mapping) = country_mapping(source, transformation);
+        let extractor = EntityExtractor::new(resolver);
+        let dropped = DroppedAttributes::new();
+        let record = json!({"0": "Bonaire", "1": "BQ", "2": codes});
+
+        let mapped = AssembledEntity::from_single(entity("urn:ngsi-ld:Country:Bonaire", record), mapping);
+        let (result, _) = extractor.extract(mapped, &dropped).unwrap().into_parts();
+        let value = result.values().as_ref().expect("values set").get(&name("dafifCode")).cloned();
+
+        (value, dropped)
+    }
+
+    const SPLIT: &str = r#"{{ this[2] | split(pat=" ") }}"#;
+    const GUARDED_SPLIT: &str = r#"{% if this[2] %}{{ this[2] | split(pat=" ") }}{% endif %}"#;
+
+    #[test]
+    fn a_split_text_column_becomes_an_array_of_its_tokens() {
+        let (value, _) = extract_dafif_code(SPLIT, "array", &json!("BS IN"));
+
+        assert_eq!(value, Some(Value::from(json!(["BS", "IN"]))));
+    }
+
+    #[test]
+    fn a_split_single_token_becomes_a_one_element_array() {
+        let (value, _) = extract_dafif_code(SPLIT, "array", &json!("UK"));
+
+        assert_eq!(value, Some(Value::from(json!(["UK"]))));
+    }
+
+    #[test]
+    fn a_json_decoded_text_column_becomes_the_array_it_encodes() {
+        let (value, _) = extract_dafif_code("{{ this[2] | json_decode }}", "array", &json!(r#"["BS","IN"]"#));
+
+        assert_eq!(value, Some(Value::from(json!(["BS", "IN"]))));
+    }
+
+    #[test]
+    fn a_guarded_split_over_a_null_column_yields_no_attribute_and_keeps_the_entity() {
+        let (value, dropped) = extract_dafif_code(GUARDED_SPLIT, "array", &JsonValue::Null);
+
+        assert_eq!(value, None);
+        assert!(dropped.templates.is_empty());
+    }
+
+    #[test]
+    fn a_guarded_split_over_an_empty_column_yields_no_attribute_and_keeps_the_entity() {
+        let (value, dropped) = extract_dafif_code(GUARDED_SPLIT, "array", &json!(""));
+
+        assert_eq!(value, None);
+        assert!(dropped.templates.is_empty());
+    }
+
+    #[test]
+    fn an_unguarded_split_over_a_null_column_drops_the_attribute_keeps_the_entity_and_records_both() {
+        let (value, dropped) = extract_dafif_code(SPLIT, "array", &JsonValue::Null);
+
+        assert_eq!(value, None);
+        let entries = dropped.templates.into_entries();
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].0, name("dafifCode"));
+        assert_eq!(entries[0].1.entity, urn("urn:ngsi-ld:Country:Bonaire"));
+        assert_eq!(entries[0].1.occurrences.get(), 1);
+    }
+
+    #[test]
+    fn a_json_decoded_object_column_becomes_the_object_it_encodes() {
+        let (value, _) = extract_dafif_code("{{ this[2] | json_decode }}", "object", &json!(r#"{"a":1}"#));
+
+        assert_eq!(value, Some(Value::from(json!({"a": 1}))));
+    }
+
+    #[test]
+    fn a_failed_relationship_property_drops_the_relationship_with_it() {
+        let (resolver, mapping) = prepare(
+            r#"{
+                version: "v4",
+                dataModel: "Vehicle",
+                identity: { entityName: "Vehicle-{{ id }}" },
+                attributes: {
+                    reference: { source: "{{ id }}" },
+                    owner: {
+                        type: "Relationship",
+                        source: "{{ owner }}",
+                        target: { entity: "Person" },
+                        properties: { since: { source: "{{ since | upper }}" } },
+                    },
+                },
+            }"#,
+        );
+        let extractor = EntityExtractor::new(resolver);
+        let dropped = DroppedAttributes::new();
+        let mut relationships = Relationships::default();
+        relationships.insert(name("owner"), vec![urn("urn:ngsi-ld:Person:7")]);
+        let source = Entity::new(urn("urn:ngsi-ld:Vehicle:1"), json!({"id": "1", "owner": "7"}), None, relationships, None);
+
+        let (result, _) = extractor.extract(AssembledEntity::from_single(source, mapping), &dropped).unwrap().into_parts();
+
+        assert!(!result.relationships().contains_key(&name("owner")));
+        assert!(result.values().as_ref().expect("values set").contains_key(&name("reference")));
+        assert_eq!(dropped.templates.into_entries()[0].0, name("owner"));
+    }
+
+    #[test]
+    fn a_field_array_source_is_kept_as_it_is_under_an_array_transformation() {
+        let (resolver, mapping) = prepare(
+            r#"{
+                version: "v4",
+                dataModel: "Product",
+                identity: { entityName: "Product-{{ id }}" },
+                attributes: { labels: { source: "{{ labels_tags }}", transformation: "array" } },
+            }"#,
+        );
+        let extractor = EntityExtractor::new(resolver);
+        let record = json!({"id": "1", "labels_tags": ["en:organic", "", "en:vegan"]});
+
+        let mapped = AssembledEntity::from_single(entity("urn:ngsi-ld:Product:1", record), mapping);
+        let (result, _) = extractor.extract(mapped, &DroppedAttributes::new()).unwrap().into_parts();
+
+        assert_eq!(
+            result.values().as_ref().expect("values set").get(&name("labels")),
+            Some(&Value::from(json!(["en:organic", "", "en:vegan"])))
+        );
+    }
+
+    #[test]
+    fn a_multi_part_source_collects_one_element_per_part_under_an_array_transformation() {
+        let (resolver, mapping) = prepare(
+            r#"{
+                version: "v4",
+                dataModel: "Product",
+                identity: { entityName: "Product-{{ id }}" },
+                attributes: { codes: { source: ["{{ a }}", "{{ b }}"], transformation: "array" } },
+            }"#,
+        );
+        let extractor = EntityExtractor::new(resolver);
+
+        let mapped = AssembledEntity::from_single(entity("urn:ngsi-ld:Product:1", json!({"id": "1", "a": "X", "b": 2})), mapping);
+        let (result, _) = extractor.extract(mapped, &DroppedAttributes::new()).unwrap().into_parts();
+
+        assert_eq!(
+            result.values().as_ref().expect("values set").get(&name("codes")),
+            Some(&Value::from(json!(["X", 2])))
+        );
     }
 }

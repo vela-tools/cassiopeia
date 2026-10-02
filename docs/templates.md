@@ -19,7 +19,9 @@ For a field name that is not a valid identifier, such as one with spaces, parent
 
 `{{ context }}` resolves to the whole current record as a value. Use it when a transformation needs the entire source object, such as when passing a structured geometry straight through.
 
-A reference to a field that the record does not have resolves to nothing. The attribute is dropped unless output settings keep nulls.
+A reference to a field that the record does not have resolves to nothing. The attribute is dropped unless output settings keep nulls. A filter applied to a missing or null field is different: most filters reject a null input, and the template fails. Guard such a field with a conditional, as in `{% if code %}{{ code | split(pat=' ') }}{% endif %}`.
+
+A template that fails to render costs only the attribute it belongs to. Cassiopeia omits that attribute, still writes the rest of the entity, and warns once per attribute, naming the attribute and the first entity that lost it.
 
 ## Control flow
 
@@ -106,7 +108,7 @@ A function takes named arguments: `{{ function(arg=..., ...) }}`. Every numeric 
 
 ### Geometry functions
 
-These reach the same conversion lattice as a GeoProperty's [`geometry` block](mapping.md#convert-between-geometry-types) for a geometry that must be produced inside a structure a `transformation` cannot reach. Each takes the source geometry as `value`, either as a GeoJSON geometry object or as its JSON text. If the source cannot satisfy the conversion, the function yields nothing and the surrounding attribute is dropped. A misconfigured call, such as an unknown type or conversion or a `value` that is not a geometry, fails the record.
+These reach the same conversion lattice as a GeoProperty's [`geometry` block](mapping.md#convert-between-geometry-types) for a geometry that must be produced inside a structure a `transformation` cannot reach. Each takes the source geometry as `value`, either as a GeoJSON geometry object or as its JSON text. If the source cannot satisfy the conversion, the function yields nothing and the surrounding attribute is dropped. A misconfigured call, such as an unknown type or conversion or a `value` that is not a geometry, fails the template: the attribute is dropped with a warning that names it.
 
 | Function | Result |
 | --- | --- |
@@ -147,7 +149,7 @@ The [Tera documentation](https://keats.github.io/tera/docs/) describes each of t
 
 A math filter or function whose result is not a finite number resolves to nothing, and Cassiopeia omits the attribute just as it would omit a missing field. The rest of the entity is unaffected. This covers the square root of a negative, the logarithm of zero, an inverse sine outside `[-1, 1]`, a `map_range` over a zero-width input span, and any other computation that produces `NaN` or infinity. A domain-invalid computation never fails the whole record.
 
-This is distinct from a misconfigured input. A math helper given a value that is not a number at all, such as a word where a number was expected, returns an error and fails the record rather than producing null. An out-of-domain number drops one attribute. A field that was never numeric is a mapping mistake worth stopping for.
+This is distinct from a misconfigured input. A math helper given a value that is not a number at all, such as a word where a number was expected, returns an error rather than producing null. The template fails, and the attribute is dropped with a warning that names the attribute and an entity that lost it. An out-of-domain number drops one attribute silently. A field that was never numeric is a mapping mistake, so it is reported.
 
 ## Next steps
 

@@ -8,6 +8,7 @@ use crate::{
         skipped_records::SkippedRecords,
         stage_env::StageEnv,
         unreadable_timestamp_report::{TimestampLoss, report_unreadable_timestamps},
+        unresolved_template_report::report_unresolved_templates,
     },
 };
 use cassiopeia_common::{
@@ -20,20 +21,26 @@ use cassiopeia_common::{
     telemetry::{channel_boundary::ChannelBoundary, run::RunTelemetry},
 };
 use cassiopeia_diagnostic::{code::diagnostic_code::DiagnosticCode, context_field::ContextField, diagnostic_builder::from_error, severity::Severity};
-use cassiopeia_extractor::{dropped_geometries::DroppedGeometries, entity_extractor::EntityExtractor, error::ExtractionError, extractor::Extractor};
+use cassiopeia_extractor::{
+    dropped_attributes::DroppedAttributes,
+    dropped_geometries::DroppedGeometries,
+    entity_extractor::EntityExtractor,
+    error::ExtractionError,
+    extractor::Extractor,
+};
 use cassiopeia_ir::{assembled_entity::AssembledEntity, entity::Entity, mapped::Mapped};
 use cassiopeia_mapping::template::resolver::TemplateResolver;
 use cassiopeia_reporter::{guard::StageGuard, reporter::Reporter};
-use cassiopeia_unreadable_timestamps::unreadable_timestamps::UnreadableTimestamps;
 use std::{num::NonZeroU64, ops::ControlFlow, sync::Arc};
 
 /// Resolves each assembled entity's attribute values from its source data.
 ///
 /// An entity that fails to extract is counted as a stage warning and skipped, so one extraction
-/// failure does not abort the run. An attribute whose value the declared transformation refuses is
-/// dropped rather than emitted: a geometry the mapping did not authorise converting, or text that
-/// reads as no date-time. The entity still goes downstream, the refusal is named once however many
-/// records it affected, and every affected attribute is counted as a warning.
+/// failure does not abort the run. An attribute that cannot be built from its record is dropped
+/// rather than emitted: a geometry the mapping did not authorise converting, text that reads as no
+/// date-time, or a template that fails to render. The entity still goes downstream, the loss is
+/// named once however many records it affected, and every affected attribute is counted as a
+/// warning.
 struct ExtractorProcessor {
     /// The extractor that resolves attribute values, configured for the run's parallelism.
     extractor: EntityExtractor,
@@ -80,11 +87,10 @@ impl PumpProcessor for ExtractorProcessor {
         // The service span covers the extraction only; the handoff downstream is output wait, and
         // timing them separately keeps the two columns from double-counting the same nanoseconds.
         let service = stage.service_span();
-        let dropped = DroppedGeometries::new();
-        let unreadable = UnreadableTimestamps::new();
+        let dropped = DroppedAttributes::new();
         let mut extracted = Batch::with_capacity(batch.len());
         let mut skipped = SkippedRecords::<_, ExtractionError>::new();
-        for result in self.extractor.extract_batch(Vec::from(batch), &dropped, &unreadable) {
+        for result in self.extractor.extract_batch(Vec::from(batch), &dropped) {
             match result {
                 Ok(entity) => extracted.push(entity),
                 Err(error) => skipped.record(error),
@@ -96,8 +102,15 @@ impl PumpProcessor for ExtractorProcessor {
         if !skipped.is_empty() {
             skipped.report(self.reporter, Severity::Warning);
         }
-        let warnings =
-            failed + self.report_dropped_geometries(dropped) + report_unreadable_timestamps(self.reporter, TimestampLoss::AttributeValue, unreadable);
+        let DroppedAttributes {
+            geometries,
+            timestamps,
+            templates,
+        } = dropped;
+        let warnings = failed
+            + self.report_dropped_geometries(geometries)
+            + report_unreadable_timestamps(self.reporter, TimestampLoss::AttributeValue, timestamps)
+            + report_unresolved_templates(self.reporter, templates);
         if warnings > 0 {
             stage.warn_inc_by(warnings);
             self.telemetry.add_warnings(warnings);
@@ -244,6 +257,24 @@ mod tests {
         (runner.resolver(), Arc::new(mapping))
     }
 
+    /// A headerless country mapping whose `dafifCode` splits the third column with no guard, so a
+    /// null column fails the template.
+    fn country_mapping() -> (TemplateResolver, Arc<Mapping>) {
+        let document = r#"{
+                version: "v4",
+                dataModel: "Country",
+                identity: { entityName: "{{ this[0] }}" },
+                attributes: {
+                    dafifCode: { source: "{{ this[2] | split(pat=\" \") }}", type: "Property", transformation: "array" },
+                },
+            }"#;
+        let mut runner = TemplateRunner::new();
+        let mut mapping = Mapping::from_json5(document, Path::new("test.json5"), &mut runner).unwrap();
+        ExpanderCompiler::compile(&mut mapping, &mut runner);
+
+        (runner.resolver(), Arc::new(mapping))
+    }
+
     /// Runs one batch of two Sensor entities carrying `ts` through the extractor stage.
     fn run_timestamp_batch(ts: &str, reporter: &'static dyn Reporter) -> (usize, u64) {
         let (resolver, mapping) = timestamp_mapping();
@@ -360,6 +391,26 @@ mod tests {
         assert_eq!(forwarded, 2);
         assert_eq!(warnings, 0);
         assert!(REPORTER.diagnostics().is_empty());
+    }
+
+    #[test]
+    fn a_failed_attribute_template_forwards_the_entity_and_names_the_attribute_and_the_entity() {
+        static REPORTER: RecordingReporter = RecordingReporter::new();
+        let (resolver, mapping) = country_mapping();
+        let records = vec![
+            ("urn:ngsi-ld:Country:Bonaire".to_string(), json!({"0": "Bonaire", "1": "BQ", "2": null})),
+            ("urn:ngsi-ld:Country:India".to_string(), json!({"0": "India", "1": "IN", "2": "BS IN"})),
+        ];
+
+        let (forwarded, warnings) = run_stage(resolver, &mapping, records, &REPORTER);
+
+        let reported = REPORTER.diagnostics();
+        assert_eq!(forwarded, 2);
+        assert_eq!(warnings, 1);
+        assert_eq!(reported.len(), 1);
+        assert_eq!(reported[0].code, DiagnosticCode::Extractor(ExtractorCode::TemplateUnresolvable));
+        assert!(reported[0].headline.contains("dafifCode"), "{}", reported[0].headline);
+        assert!(reported[0].headline.contains("urn:ngsi-ld:Country:Bonaire"), "{}", reported[0].headline);
     }
 
     #[test]

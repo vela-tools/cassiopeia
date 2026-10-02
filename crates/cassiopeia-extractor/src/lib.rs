@@ -11,11 +11,17 @@
 //! [`DroppedGeometries`](crate::dropped_geometries::DroppedGeometries), text that reads as no
 //! date-time in
 //! [`UnreadableTimestamps`](cassiopeia_unreadable_timestamps::unreadable_timestamps::UnreadableTimestamps).
+//! An attribute whose template fails to render against the record is dropped the same way, and
+//! recorded in [`UnresolvedTemplates`](crate::unresolved_templates::UnresolvedTemplates). All three
+//! sinks travel together as [`DroppedAttributes`](crate::dropped_attributes::DroppedAttributes).
 //! Either way the entity still reaches the writer and the run can report what it lost.
 
 pub mod attribute;
+pub mod dropped_attributes;
 pub mod dropped_geometries;
 pub mod dropped_geometry;
 pub mod entity_extractor;
 pub mod error;
 pub mod extractor;
+pub mod unresolved_template;
+pub mod unresolved_templates;
