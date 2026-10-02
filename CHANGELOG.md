@@ -8,6 +8,7 @@ All notable changes to this project will be documented in this file.
 - add cargo machete override
 
 ### 🐛 Bug Fixes
+- convert a geoproperty without a transformation as a geometry ⚠️ **BREAKING**
 - keep the structure of list and json properties declared without a transformation
 - map a constant identity to one entity and warn when merged records disagree ⚠️ **BREAKING**
 - read numeric unix epochs and report unreadable non-text timestamps
