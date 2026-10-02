@@ -1187,6 +1187,57 @@ mod tests {
         }
     }
 
+    /// A clockwise square: an exterior ring wound against the right-hand rule RFC 7946 clause 3.1.6
+    /// asks for.
+    fn clockwise_square() -> Value {
+        json!({ "type": "Polygon", "coordinates": [[[0.0, 0.0], [0.0, 2.0], [2.0, 2.0], [2.0, 0.0], [0.0, 0.0]]] })
+    }
+
+    /// Runs one zone through `mapping` and returns its published `location` value.
+    fn published_zone_location(store: StoreKind, mapping: &'static str) -> Value {
+        let mut outcome = run_end_to_end(
+            store,
+            &[RunInput {
+                mapping,
+                records: json!([{ "id": "square", "geometry": clockwise_square() }]),
+            }],
+            &["Zone"],
+            "",
+        );
+
+        outcome.entities[0]["location"]["value"].take()
+    }
+
+    #[test]
+    fn a_geo_property_keeping_its_winding_publishes_the_ring_as_the_source_wound_it() {
+        let keep = r#"{
+            version: "v4",
+            dataModel: "Zone",
+            identity: { entityName: "{{ id }}" },
+            attributes: {
+                location: { type: "GeoProperty", transformation: "polygon", source: "{{ geometry }}", geometry: { winding: "keep" } },
+            },
+        }"#;
+        for store in STORES {
+            assert_eq!(published_zone_location(store, keep), clockwise_square(), "{store:?}");
+        }
+    }
+
+    #[test]
+    fn a_geo_property_without_a_winding_policy_publishes_the_ring_rewound() {
+        let rewind = r#"{
+            version: "v4",
+            dataModel: "Zone",
+            identity: { entityName: "{{ id }}" },
+            attributes: {
+                location: { type: "GeoProperty", transformation: "polygon", source: "{{ geometry }}" },
+            },
+        }"#;
+        for store in STORES {
+            assert_ne!(published_zone_location(store, rewind), clockwise_square(), "{store:?}");
+        }
+    }
+
     #[test]
     fn a_geometry_collection_under_a_geo_property_without_a_transformation_is_dropped_with_a_warning() {
         let collection = json!({ "type": "GeometryCollection", "geometries": [{ "type": "Point", "coordinates": [1.0, 2.0] }] });

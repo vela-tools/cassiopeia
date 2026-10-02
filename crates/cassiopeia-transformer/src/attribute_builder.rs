@@ -66,15 +66,22 @@ pub fn build_relationship(object: Urn, object_type: Option<NameBuf>, meta: Metad
 ///
 /// A `GeoProperty` carries no nested attributes, so custom metadata is dropped.
 ///
-/// The geometry is resolved preserving whatever type the value carries. Under a geometry
-/// transformation, which is also the default of a `GeoProperty` declaring none, the extraction stage
-/// hands over an already-typed geometry; a sub-attribute's value arrives as a `GeoJSON` object; and an
-/// explicit `string` transformation leaves the `GeoJSON` text the source wrote, which is parsed here.
-/// A value carrying no admissible geometry yields no attribute, so a `GeoProperty` is never emitted
+/// Under a geometry transformation, which is also the default of a `GeoProperty` declaring none, the
+/// extraction stage hands over an already-typed geometry, converted and normalised under the
+/// attribute's own `geometry` policy; it is taken exactly as it is, because normalising it again
+/// under the default policy would rewind the rings a `winding: keep` policy left alone. A
+/// sub-attribute's value arrives as a `GeoJSON` object, and an explicit `string` transformation leaves
+/// the `GeoJSON` text the source wrote; both are parsed here, preserving whatever type they carry. A
+/// value carrying no admissible geometry yields no attribute, so a `GeoProperty` is never emitted
 /// around something that is not a geometry.
 #[must_use]
-pub fn build_geo_property(value: &Value, meta: MetadataSummary) -> Option<NgsiLdAttributeWrapper> {
-    let geometry = value.to_geometry(GeometryTarget::Preserve, &GeometryPolicy::default()).ok()??;
+pub fn build_geo_property(value: Value, meta: MetadataSummary) -> Option<NgsiLdAttributeWrapper> {
+    let geometry = match value {
+        Value::Geospatial(geometry) => *geometry,
+        source @ (Value::Null | Value::Boolean(_) | Value::Number(_) | Value::String(_) | Value::Temporal(_) | Value::Array(_) | Value::Object(_)) => {
+            source.to_geometry(GeometryTarget::Preserve, &GeometryPolicy::default()).ok()??
+        }
+    };
 
     let mut geo = NgsiLdGeoProperty::new(geometry);
     geo.observed_at = meta.observed_at;
@@ -180,7 +187,7 @@ pub fn build_list_relationship(objects: Vec<Urn>, object_type: Option<NameBuf>, 
 pub fn build_sub_attribute(kind: NgsiLdAttributeKind, value: Value, object_type: Option<NameBuf>, meta: MetadataSummary) -> Option<NgsiLdAttributeWrapper> {
     match kind {
         NgsiLdAttributeKind::Property => Some(build_property(value, meta)),
-        NgsiLdAttributeKind::GeoProperty => build_geo_property(&value, meta),
+        NgsiLdAttributeKind::GeoProperty => build_geo_property(value, meta),
         NgsiLdAttributeKind::ListProperty => Some(build_list_property(value, meta)),
         NgsiLdAttributeKind::JsonProperty => Some(build_json_property(value, meta)),
         NgsiLdAttributeKind::VocabProperty => build_vocab_property(&value, meta),
@@ -242,15 +249,15 @@ mod tests {
         // A GeoProperty holds one of the six geometry types clause 4.7 admits, which has no null or
         // empty form, so a value that is not a geometry yields no attribute at all rather than an
         // attribute whose value is null.
-        assert!(build_geo_property(&Value::String("not a geometry".into()), empty_meta()).is_none());
-        assert!(build_geo_property(&Value::Null, empty_meta()).is_none());
+        assert!(build_geo_property(Value::String("not a geometry".into()), empty_meta()).is_none());
+        assert!(build_geo_property(Value::Null, empty_meta()).is_none());
     }
 
     #[test]
     fn a_geo_property_reads_the_geojson_text_a_source_wrote() {
         let value = Value::String(r#"{"type":"Point","coordinates":[1.5,2.5]}"#.into());
 
-        assert!(build_geo_property(&value, empty_meta()).is_some());
+        assert!(build_geo_property(value, empty_meta()).is_some());
     }
 
     #[test]

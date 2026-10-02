@@ -60,7 +60,7 @@ pub(crate) fn build_attribute(
         }
         NgsiLdAttributeKind::GeoProperty => {
             let value = values.swap_remove(key)?;
-            build_geo_property(&value, transform_metadata(metadata, name, None, cache, unreadable))
+            build_geo_property(value, transform_metadata(metadata, name, None, cache, unreadable))
         }
         NgsiLdAttributeKind::VocabProperty => {
             let value = values.swap_remove(key)?;
