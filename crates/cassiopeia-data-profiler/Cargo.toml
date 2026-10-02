@@ -27,3 +27,6 @@ zip = { version = "8.6.0", default-features = false, features = ["bzip2", "defla
 
 [lints]
 workspace = true
+
+[package.metadata.cargo-machete]
+ignored = ["encoding_rs"]
