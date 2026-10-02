@@ -22,10 +22,20 @@ pub enum Transformation {
     /// Keep as text.
     String,
 
-    /// Parse as a JSON array.
+    /// Collect every source part into one JSON array.
+    ///
+    /// A part that is already an array contributes its elements and any other part contributes
+    /// itself; a null or blank part contributes nothing, and no parts left means no value. Text is
+    /// never parsed: an array reaches this transformation already structured, from a source field
+    /// that holds one or from a template whose one expression yields one, such as `split` or
+    /// `json_decode`.
     Array,
 
-    /// Parse as a JSON object.
+    /// Keep a JSON object.
+    ///
+    /// Text is never parsed: an object reaches this transformation already structured, from a source
+    /// field that holds one or from a template whose one expression yields one, such as
+    /// `json_decode`. Any value that is not an object, and an empty object, resolve to no value.
     Object,
 
     /// Accept an already-formed `GeoJSON` geometry, inferring the type from the value.

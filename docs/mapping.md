@@ -218,8 +218,8 @@ The transformation determines the value Cassiopeia builds. If you omit it, Cassi
 | `integer` | A signed integer. |
 | `float` | A floating-point number. Comma decimal separators are accepted. |
 | `string` | Text. Several source parts are concatenated. |
-| `array` | An array containing the source parts. Nested source arrays are flattened. |
-| `object` | A JSON object parsed from the source value. |
+| `array` | An array containing the source parts. A part that is already an array contributes its elements. A null or blank part contributes nothing, and no parts left means no attribute. Text is not parsed; build a list from text with a template such as `{{ codes \| split(pat=' ') }}` (see [Keep a value's type](templates.md#keep-a-values-type)). |
+| `object` | The source value when it is a non-empty JSON object, and no attribute otherwise. Text is not parsed; decode JSON text with `{{ payload \| json_decode }}`. |
 | `datetime` | A date and time value. |
 | `date` | A date value. |
 | `time` | A time value. |

@@ -62,7 +62,7 @@ impl Transformer {
             Transformation::Integer => Ok(Self::coerce_integer(&Self::merge_first(parts))),
             Transformation::Float => Ok(Self::coerce_float(&Self::merge_first(parts))),
             Transformation::String => Ok(Self::coerce_string(Self::merge_text(parts))),
-            Transformation::Object => Ok(Self::coerce_object(&Self::merge_text(parts))),
+            Transformation::Object => Ok(Self::coerce_object(Self::merge_text(parts))),
             Transformation::DateTime => Self::coerce_temporal(&Self::merge_text(parts), TemporalKind::DateTime),
             Transformation::Date => Self::coerce_temporal(&Self::merge_text(parts), TemporalKind::Date),
             Transformation::Time => Self::coerce_temporal(&Self::merge_text(parts), TemporalKind::Time),
@@ -76,15 +76,20 @@ impl Transformer {
         }
     }
 
-    /// Flattens the parts into one array, dropping nulls and splicing in any nested arrays.
+    /// Flattens the parts into one array, dropping absent parts and splicing in any nested arrays.
+    ///
+    /// A part is absent when it is null or blank text: CSV and spreadsheet sources spell an empty
+    /// field as an empty string, so a blank is a value the record does not carry, and keeping it would
+    /// emit `[""]` for an empty cell. Only whole parts are judged; the elements of an array part are
+    /// the source's own data and are spliced in as they are.
     fn aggregate(parts: SourceParts) -> Value {
         let mut result = Vec::new();
-        for part in parts.into_iter().filter(|part| !part.is_null()) {
+        for part in parts {
             match part {
                 JsonValue::Array(array) => result.extend(array),
-                JsonValue::Null | JsonValue::Bool(_) | JsonValue::Number(_) | JsonValue::String(_) | JsonValue::Object(_) => {
-                    result.push(part);
-                }
+                JsonValue::Null => {}
+                JsonValue::String(text) if text.trim().is_empty() => {}
+                JsonValue::Bool(_) | JsonValue::Number(_) | JsonValue::String(_) | JsonValue::Object(_) => result.push(part),
             }
         }
 
@@ -191,14 +196,19 @@ impl Transformer {
         }
     }
 
-    /// Coerces the merged value to a JSON object, treating an empty object as null.
-    fn coerce_object(value: &Value) -> Value {
-        if value.is_null() {
-            return Value::Null;
+    /// Keeps the merged value when it is a non-empty JSON object, and yields null for anything else.
+    fn coerce_object(value: Value) -> Value {
+        match value {
+            Value::Object(object) if !object.is_empty() => Value::Object(object),
+            Value::Null
+            | Value::Boolean(_)
+            | Value::Number(_)
+            | Value::String(_)
+            | Value::Temporal(_)
+            | Value::Geospatial(_)
+            | Value::Array(_)
+            | Value::Object(_) => Value::Null,
         }
-
-        let object = value.to_object();
-        if object.is_empty() { Value::Null } else { Value::Object(Box::new(object)) }
     }
 
     /// Reads the merged value as the geometry the transformation names, under the mapping's policy.
@@ -327,6 +337,48 @@ mod tests {
     #[test]
     fn an_empty_array_transformation_is_null() {
         let value = Transformer::apply(smallvec![json!(null)], Some(&Transformation::Array), None).unwrap();
+
+        assert!(value.is_null());
+    }
+
+    #[test]
+    fn an_array_transformation_drops_blank_and_null_parts() {
+        let value = Transformer::apply(smallvec![json!(""), json!(null), json!("A")], Some(&Transformation::Array), None).unwrap();
+
+        assert_eq!(value, Value::from(json!(["A"])));
+    }
+
+    #[test]
+    fn an_array_transformation_over_only_blank_and_null_parts_is_null() {
+        let value = Transformer::apply(smallvec![json!(""), json!(null)], Some(&Transformation::Array), None).unwrap();
+
+        assert!(value.is_null());
+    }
+
+    #[test]
+    fn an_array_transformation_keeps_blank_elements_of_an_array_part() {
+        let value = Transformer::apply(smallvec![json!(["a", ""])], Some(&Transformation::Array), None).unwrap();
+
+        assert_eq!(value, Value::from(json!(["a", ""])));
+    }
+
+    #[test]
+    fn an_object_transformation_keeps_an_object_part() {
+        let value = Transformer::apply(smallvec![json!({"a": 1})], Some(&Transformation::Object), None).unwrap();
+
+        assert_eq!(value, Value::from(json!({"a": 1})));
+    }
+
+    #[test]
+    fn an_object_transformation_does_not_parse_text() {
+        let value = Transformer::apply(smallvec![json!(r#"{"a":1}"#)], Some(&Transformation::Object), None).unwrap();
+
+        assert!(value.is_null());
+    }
+
+    #[test]
+    fn an_object_transformation_over_an_empty_object_is_null() {
+        let value = Transformer::apply(smallvec![json!({})], Some(&Transformation::Object), None).unwrap();
 
         assert!(value.is_null());
     }

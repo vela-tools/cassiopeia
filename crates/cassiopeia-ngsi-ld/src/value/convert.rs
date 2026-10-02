@@ -9,17 +9,6 @@ impl Value {
         JsonValue::from(self)
     }
 
-    /// Returns the value's object contents, or an empty map when it is not an object.
-    #[must_use]
-    pub fn to_object(&self) -> ValueObject {
-        match self {
-            Value::Object(map) => map.as_ref().clone(),
-            Value::Null | Value::Boolean(_) | Value::Number(_) | Value::String(_) | Value::Temporal(_) | Value::Geospatial(_) | Value::Array(_) => {
-                ValueObject::default()
-            }
-        }
-    }
-
     /// Parses the value into an instant, returning `None` when it carries no parseable one.
     #[must_use]
     pub fn try_parse_datetime(&self) -> Option<DateTime<Utc>> {
@@ -140,13 +129,6 @@ mod tests {
         assert!(parse_datetime(&json!("2026-04-03T22:00:20Z")).is_some());
         assert!(parse_datetime(&json!("2026-04-03")).is_some());
         assert!(parse_datetime(&json!("not a timestamp")).is_none());
-    }
-
-    #[test]
-    fn an_object_value_exposes_its_map_and_a_non_object_yields_an_empty_map() {
-        let object = Value::from(json!({"key": "value"}));
-        assert_eq!(object.to_object().get("key").and_then(Value::as_str), Some("value"));
-        assert!(Value::Null.to_object().is_empty());
     }
 
     #[test]
