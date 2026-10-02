@@ -84,8 +84,15 @@ impl Pipeline {
 
 #[cfg(test)]
 mod tests {
-    use cassiopeia_ir::{fragment::Fragment, mapped::Mapped};
+    use cassiopeia_expander::{compiler::ExpanderCompiler, expander::Expander, generic::GenericExpander, router::MappingRouter};
+    use cassiopeia_extractor::{dropped_attributes::DroppedAttributes, entity_extractor::EntityExtractor, extractor::Extractor};
+    use cassiopeia_ir::{fragment::Fragment, mapped::Mapped, record::Record};
     use cassiopeia_mapping::{mapping::Mapping, template::runner::TemplateRunner};
+    use cassiopeia_ngsi_ld::entity::{
+        NgsiLdEntity,
+        attribute::{NgsiLdAttribute, NgsiLdAttributeWrapper},
+        name::NameBuf,
+    };
     use cassiopeia_resolver::{
         entity_source::EntitySource,
         entity_store::dashmap_latest_store::DashMapLatestEntityStore,
@@ -93,8 +100,11 @@ mod tests {
         fragment_sink::FragmentSink,
         relationship_store::dashmap_store::DashMapRelationshipStore,
     };
-    use serde_json::json;
+    use cassiopeia_transformer::{ngsi_ld_transformer::NgsiLdTransformer, transformer::Transformer};
+    use cassiopeia_unreadable_timestamps::unreadable_timestamps::UnreadableTimestamps;
+    use serde_json::{Map, Value, json};
     use std::{ops::ControlFlow, path::Path, sync::Arc};
+    use urn_rs::Urn;
 
     #[test]
     fn phase1_sink_feeds_phase2_source_across_the_split_traits() {
@@ -126,5 +136,162 @@ mod tests {
         ids.sort();
 
         assert_eq!(ids, vec!["urn:ngsi-ld:Station:1".to_string(), "urn:ngsi-ld:Station:2".to_string()]);
+    }
+
+    /// A `Route` whose `servesAirports` `ListRelationship` declares one `datasetId`-tagged instance per
+    /// record field in `fields` (ETSI GS CIM 009 v1.9.1 clause 4.5.5, EXAMPLE 19).
+    fn route_mapping(fields: &[&str]) -> String {
+        let instances: Vec<String> = fields
+            .iter()
+            .map(|field| format!(r#"{{ source: "{{{{ {field} }}}}", properties: {{ datasetId: {{ source: "urn:ngsi-ld:dataset:role:{field}" }} }} }}"#))
+            .collect();
+        format!(
+            r#"{{
+                version: "v4",
+                dataModel: "Route",
+                identity: {{ entityName: "R-{{{{ id }}}}" }},
+                attributes: {{
+                    servesAirports: {{ type: "ListRelationship", target: {{ entity: "Airport" }}, instances: [{}] }},
+                }},
+            }}"#,
+            instances.join(", ")
+        )
+    }
+
+    /// Runs one record through every stage that shapes an entity's relationships: the expander mints
+    /// the objects, the resolver stores and assembles them, the extractor records the per-instance
+    /// metadata, and the transformer builds the NGSI-LD attribute.
+    fn route_through_the_stages(document: &str, record: Value) -> NgsiLdEntity {
+        let mut runner = TemplateRunner::new();
+        let mut mapping = Mapping::from_json5(document, Path::new("test.json5"), &mut runner).unwrap();
+        ExpanderCompiler::compile(&mut mapping, &mut runner);
+        let mapping = Arc::new(mapping);
+        let resolver = runner.resolver();
+        let Value::Object(data) = record else {
+            panic!("test record must be a JSON object");
+        };
+
+        let expander = GenericExpander::new(MappingRouter::Single(Arc::clone(&mapping)), resolver.clone(), Map::new());
+        let fragments = expander.expand(Record::new(None, data)).unwrap();
+        let fragment_resolver = FragmentResolver::new(
+            Box::new(DashMapLatestEntityStore::new()),
+            Box::new(DashMapRelationshipStore::new()),
+            resolver.clone(),
+        );
+        let id = fragments[0].inner().target_urn().clone();
+        for fragment in fragments {
+            fragment_resolver.resolve(fragment).unwrap();
+        }
+        let mut units = fragment_resolver.assemble(&id).unwrap();
+        assert_eq!(units.len(), 1);
+
+        let extracted = EntityExtractor::new(resolver).extract(units.remove(0), &DroppedAttributes::new()).unwrap();
+        NgsiLdTransformer::new().transform(extracted, &UnreadableTimestamps::new()).unwrap()
+    }
+
+    /// Every `ListRelationship` instance of `attribute`, as its object list and its `datasetId`.
+    fn list_relationship_instances(entity: &NgsiLdEntity, attribute: &str) -> Vec<(Vec<String>, Option<String>)> {
+        let Some(NgsiLdAttributeWrapper::Multi(instances)) = entity.attributes.get(&NameBuf::new(attribute).unwrap()) else {
+            panic!("expected a multi-instance attribute");
+        };
+        instances
+            .iter()
+            .map(|instance| {
+                let NgsiLdAttribute::ListRelationship(list) = instance else {
+                    panic!("expected a list relationship instance, got {instance:?}");
+                };
+                (
+                    list.object_list.iter().map(Urn::to_string).collect(),
+                    list.dataset_id.as_ref().map(Urn::to_string),
+                )
+            })
+            .collect()
+    }
+
+    #[test]
+    fn a_relationship_instance_whose_source_names_no_target_is_omitted_and_the_next_keeps_its_dataset_id() {
+        let document = r#"{
+            version: "v4",
+            dataModel: "Flight",
+            identity: { entityName: "F-{{ id }}" },
+            attributes: {
+                servesAirport: {
+                    type: "Relationship",
+                    target: { entity: "Airport" },
+                    instances: [
+                        { source: "{{ departure }}", properties: { datasetId: { source: "urn:ngsi-ld:dataset:role:departure" } } },
+                        { source: "{{ via }}", properties: { datasetId: { source: "urn:ngsi-ld:dataset:role:via" } } },
+                        { source: "{{ arrival }}", properties: { datasetId: { source: "urn:ngsi-ld:dataset:role:arrival" } } },
+                    ],
+                },
+            },
+        }"#;
+
+        // `•` is present text, yet it leaves no URN-safe character, so the via instance names no target.
+        let entity = route_through_the_stages(document, json!({"id": 1, "departure": "535", "via": "•", "arrival": "340"}));
+
+        let Some(NgsiLdAttributeWrapper::Multi(instances)) = entity.attributes.get(&NameBuf::new("servesAirport").unwrap()) else {
+            panic!("expected a multi-instance attribute");
+        };
+        let objects_and_dataset_ids: Vec<(String, Option<String>)> = instances
+            .iter()
+            .map(|instance| {
+                let NgsiLdAttribute::Relationship(relationship) = instance else {
+                    panic!("expected a relationship instance, got {instance:?}");
+                };
+                (relationship.object.to_string(), relationship.dataset_id.as_ref().map(Urn::to_string))
+            })
+            .collect();
+        assert_eq!(
+            objects_and_dataset_ids,
+            [
+                ("urn:ngsi-ld:Airport:535".to_string(), Some("urn:ngsi-ld:dataset:role:departure".to_string())),
+                ("urn:ngsi-ld:Airport:340".to_string(), Some("urn:ngsi-ld:dataset:role:arrival".to_string())),
+            ]
+        );
+    }
+
+    #[test]
+    fn an_unmintable_token_leaves_every_list_relationship_instance_with_its_own_objects_and_dataset_id() {
+        let entity = route_through_the_stages(
+            &route_mapping(&["departure", "arrival"]),
+            json!({"id": 1, "departure": "• 535", "arrival": "340 341"}),
+        );
+
+        assert_eq!(
+            list_relationship_instances(&entity, "servesAirports"),
+            [
+                (
+                    vec!["urn:ngsi-ld:Airport:535".to_string()],
+                    Some("urn:ngsi-ld:dataset:role:departure".to_string())
+                ),
+                (
+                    vec!["urn:ngsi-ld:Airport:340".to_string(), "urn:ngsi-ld:Airport:341".to_string()],
+                    Some("urn:ngsi-ld:dataset:role:arrival".to_string())
+                ),
+            ]
+        );
+    }
+
+    #[test]
+    fn a_list_relationship_instance_of_only_unmintable_tokens_is_omitted_and_the_next_keeps_its_dataset_id() {
+        let entity = route_through_the_stages(
+            &route_mapping(&["departure", "via", "arrival"]),
+            json!({"id": 1, "departure": "535", "via": "• ?", "arrival": "340"}),
+        );
+
+        assert_eq!(
+            list_relationship_instances(&entity, "servesAirports"),
+            [
+                (
+                    vec!["urn:ngsi-ld:Airport:535".to_string()],
+                    Some("urn:ngsi-ld:dataset:role:departure".to_string())
+                ),
+                (
+                    vec!["urn:ngsi-ld:Airport:340".to_string()],
+                    Some("urn:ngsi-ld:dataset:role:arrival".to_string())
+                ),
+            ]
+        );
     }
 }

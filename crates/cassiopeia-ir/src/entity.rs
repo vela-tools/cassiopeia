@@ -7,7 +7,7 @@ use cassiopeia_ngsi_ld::{
     value::types::Value as NgsiValue,
 };
 use foldhash::fast::RandomState;
-use getset::{Getters, MutGetters, Setters};
+use getset::{Getters, Setters};
 use indexmap::IndexMap;
 use serde::{Deserialize, Serialize};
 use serde_json::Value as JsonValue;
@@ -33,7 +33,7 @@ pub type EntityParts = (
 );
 
 /// The final intermediate representation of an entity, ready for NGSI-LD serialization once resolved.
-#[derive(Debug, Clone, Serialize, Deserialize, Getters, MutGetters, Setters)]
+#[derive(Debug, Clone, Serialize, Deserialize, Getters, Setters)]
 #[getset(get = "pub", set = "pub")]
 pub struct Entity {
     /// The unique URN of the entity.
@@ -43,20 +43,17 @@ pub struct Entity {
     /// The scope of the entity.
     scope: Option<NgsiLdScope>,
     /// Relationships mapped by their attribute name.
-    ///
-    /// Mutable access exists so the extractor can drain a list relationship's flat objects while
-    /// regrouping them into [`instance_relationships`](Self::instance_relationships).
-    #[getset(get = "pub", get_mut = "pub", set = "pub")]
     relationships: Relationships,
     /// High-level values mapped by their attribute name.
     values: Option<AttributeValues>,
     /// Metadata storage for attributes, keyed by attribute name.
     metadata: Option<EntityMetadata>,
-    /// Per-instance object lists for a `ListRelationship` that carries several `datasetId`-tagged
-    /// instances (ETSI GS CIM 009 v1.9.1 clause 4.5.5), keyed by attribute name.
+    /// Per-instance objects of a `Relationship` or `ListRelationship` that carries several
+    /// `datasetId`-tagged instances (ETSI GS CIM 009 v1.9.1 clause 4.5.5), keyed by attribute name.
     ///
-    /// One inner `Vec<Urn>` per surviving instance, in declaration order; `None` for the common case
-    /// of an entity with no instance list relationships, so a plain entity allocates no map.
+    /// Each attribute's objects are keyed by the declaration index of the instance that minted them,
+    /// the same index its per-instance metadata sits at; `None` for the common case of an entity with
+    /// no multi-attribute relationships, so a plain entity allocates no map.
     instance_relationships: Option<InstanceRelationships>,
     /// Objects of relationships declared as sub-attributes, keyed by the [`RelationshipPath`] from the
     /// entity to the relationship (a nested relationship, ETSI GS CIM 009 v1.9.1 clause 4.5.2.2 with

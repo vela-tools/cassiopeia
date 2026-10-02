@@ -150,7 +150,7 @@ impl UrnGenerator {
     /// Each instance of a multi-attribute Relationship (ETSI GS CIM 009 v1.9.1 clause 4.5.5) declares
     /// its own object-id source; every instance shares the attribute-level `target`. An instance
     /// whose source resolves to no identifier yields [`UrnError::GeneratedIdEmpty`], so the caller
-    /// drops it in lockstep with the per-instance metadata the extractor records.
+    /// records no object for it; the instance is then absent from the objects keyed by instance.
     ///
     /// # Errors
     ///
@@ -167,25 +167,27 @@ impl UrnGenerator {
     }
 
     /// Mints the target URNs for one instance of a multi-attribute `ListRelationship`, one per token
-    /// of that instance's `objectList` source.
+    /// of that instance's `objectList` source that names a target.
     ///
     /// The instance source is tokenized exactly as a plain list relationship's is
-    /// ([`resolve_tokens`](TemplateResolver::resolve_tokens)); an instance that tokenizes to nothing
-    /// yields an empty vector, so the caller drops it in lockstep with its metadata (ETSI GS CIM 009
-    /// v1.9.1 clause 4.5.5, EXAMPLE 19).
+    /// ([`resolve_tokens`](TemplateResolver::resolve_tokens)) and minted through the same
+    /// [`mint_targets`](Self::mint_targets), so a token that names no target is dropped here too. An
+    /// instance left with no token yields an empty vector; the caller records each object under its
+    /// instance, so an empty instance is simply absent (ETSI GS CIM 009 v1.9.1 clause 4.5.5, EXAMPLE
+    /// 19).
     ///
     /// # Errors
     ///
-    /// Returns [`UrnError`] when the relationship declares no target, or a built URN is malformed.
+    /// Returns [`UrnError`] when the relationship declares no target, a source template fails to
+    /// resolve, or a built URN is malformed.
     pub fn generate_instance_child_ids(&self, instance: &AttributeInstance, attribute: &Attribute, data: &Value) -> Result<Vec<Urn>> {
         let target = attribute.target().as_ref().ok_or(UrnError::NoRelationshipTarget)?;
-        let entity_type = target.entity().entity_type();
         let tokens = match instance.compiled_source() {
             Some(templates) => self.resolver.resolve_tokens(templates, data)?,
             None => Vec::new(),
         };
 
-        tokens.iter().map(|token| Self::generate_target_id(entity_type, token)).collect()
+        Self::mint_targets(target.entity().entity_type(), &tokens)
     }
 
     /// Generates the URNs of every entity a list-relationship attribute points at.
@@ -193,17 +195,32 @@ impl UrnGenerator {
     /// Unlike a single relationship, the source is read as a collection of identifiers: an array
     /// contributes one identifier per element, and a string contributes one per whitespace- or
     /// comma-separated token, so a single field holding several ids (a route's space-separated
-    /// equipment codes, say) fans out into one relationship object each. Empty tokens are dropped.
+    /// equipment codes, say) fans out into one relationship object each. A token that names no target
+    /// is dropped (see [`mint_targets`](Self::mint_targets)).
     ///
     /// # Errors
-    /// Returns [`UrnError`] when the relationship declares no target, or a built URN is malformed.
+    /// Returns [`UrnError`] when the relationship declares no target, a source template fails to
+    /// resolve, or a built URN is malformed.
     pub fn generate_child_ids(&self, attribute: &Attribute, data: &Value) -> Result<Vec<Urn>> {
         let target = attribute.target().as_ref().ok_or(UrnError::NoRelationshipTarget)?;
-        let entity_type = target.entity().entity_type();
 
-        self.source_identifiers(attribute, data)?
+        Self::mint_targets(target.entity().entity_type(), &self.source_identifiers(attribute, data)?)
+    }
+
+    /// Mints one target URN per identifier, dropping each identifier that names no target.
+    ///
+    /// An identifier that cleans to nothing (only characters with no URN-safe form, such as `•` or
+    /// `?`) names no entity, exactly as an absent single-relationship foreign key does: that one object
+    /// is left out and the rest of the list, and the entity carrying it, are still produced. Every
+    /// other failure is a real fault and propagates.
+    fn mint_targets(entity_type: &NameBuf, identifiers: &[String]) -> Result<Vec<Urn>> {
+        identifiers
             .iter()
-            .map(|identifier| Self::generate_target_id(entity_type, identifier))
+            .filter_map(|identifier| match Self::generate_target_id(entity_type, identifier) {
+                Ok(urn) => Some(Ok(urn)),
+                Err(UrnError::GeneratedIdEmpty { .. }) => None,
+                Err(other) => Some(Err(other)),
+            })
             .collect()
     }
 
@@ -211,7 +228,8 @@ impl UrnGenerator {
     ///
     /// The tokenisation matches [`generate_child_ids`](Self::generate_child_ids): an array yields one
     /// identifier per element and a string one per whitespace- or comma-separated token, empty tokens
-    /// dropped. A caller that fans an attribute out into one entity per identifier (a list
+    /// dropped. A token that is present but names no target is returned; the caller decides how to
+    /// skip it. A caller that fans an attribute out into one entity per identifier (a list
     /// relationship that also materialises each target as a synthetic entity) shares this splitting
     /// so the link and the emitted entity are keyed on the very same tokens.
     ///

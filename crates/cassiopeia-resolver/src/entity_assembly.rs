@@ -13,8 +13,10 @@ use crate::{
 };
 use cassiopeia_ir::{
     assembled_entity::{AssembledEntity, AssembledFragments},
+    entity_relationships::EntityRelationships,
+    relationship_key::RelationshipKey,
     relationship_path::RelationshipPath,
-    relationships::{NestedRelationships, Relationships},
+    relationships::{InstanceRelationships, NestedRelationships, Relationships},
 };
 use cassiopeia_mapping::mapping::Mapping;
 use rayon::prelude::*;
@@ -27,9 +29,6 @@ use std::{
 };
 use tracing::trace;
 use urn_rs::Urn;
-
-/// One base id's relationships split into its flat (top-level) map and its nested-relationship map.
-type SplitRelationships = (Relationships, Option<NestedRelationships>);
 
 /// Every distinct mapping one base id's stored fragments were produced by, paired with its id.
 ///
@@ -50,23 +49,34 @@ pub struct AssemblyTiming {
 }
 
 impl FragmentResolver {
-    /// Splits the stored relationship edges of one base id into its flat and nested maps.
-    fn split_relationships(&self, base_id: &Urn) -> Result<SplitRelationships> {
+    /// Splits the stored relationship edges of one base id by the key each was minted under: top-level
+    /// objects by attribute name, nested objects by path, and the objects of a multi-attribute
+    /// relationship by the instance that minted them (ETSI GS CIM 009 v1.9.1 clause 4.5.5).
+    fn split_relationships(&self, base_id: &Urn) -> Result<EntityRelationships> {
         let stored_relationships = self.relationship_store.get_all_relationships(base_id)?;
         let mut relationships = Relationships::default();
         let mut nested_relationships = NestedRelationships::default();
+        let mut instance_relationships = InstanceRelationships::default();
         for (key, targets) in stored_relationships {
-            match key.parse::<RelationshipPath>()? {
-                RelationshipPath::Flat(name) => {
+            match key.parse::<RelationshipKey>()? {
+                RelationshipKey::Path(RelationshipPath::Flat(name)) => {
                     relationships.insert(name, targets);
                 }
-                nested @ RelationshipPath::Nested(_) => {
+                RelationshipKey::Path(nested @ RelationshipPath::Nested(_)) => {
                     nested_relationships.insert(nested, targets);
+                }
+                RelationshipKey::Instance { attribute, index } => {
+                    instance_relationships.entry(attribute).or_default().insert(index, targets);
                 }
             }
         }
         let nested = if nested_relationships.is_empty() { None } else { Some(nested_relationships) };
-        Ok((relationships, nested))
+        let instances = if instance_relationships.is_empty() {
+            None
+        } else {
+            Some(instance_relationships)
+        };
+        Ok(EntityRelationships::new(relationships, nested, instances))
     }
 
     /// Resolves each distinct mapping id across one base id's stored units into its mapping.
@@ -114,9 +124,9 @@ impl EntitySource for FragmentResolver {
 
         // Assembly drains the store: `drive_assembly` visits each base id exactly once and destroys
         // the stores immediately afterwards, so nothing needs the id's fragments again. Each stored
-        // relationship key is a path validated as an NGSI-LD name when stored, so re-validating on
-        // the way back surfaces a corrupt key as an error.
-        let (mut relationships, mut nested_relationships) = self.split_relationships(base_id)?;
+        // relationship key was built from names validated as NGSI-LD names, so re-validating on the
+        // way back surfaces a corrupt key as an error.
+        let mut relationships = self.split_relationships(base_id)?;
         let mut scope = scope;
 
         // Resolved once per distinct mapping id rather than once per fragment: every observation of a
@@ -141,13 +151,13 @@ impl EntitySource for FragmentResolver {
             // observation units of a temporal mapping ignore it. The last unit moves them rather than
             // cloning; earlier ones clone.
             let is_last = index + 1 == unit_count;
-            let (unit_relationships, unit_nested, unit_scope) = if is_last {
-                (mem::take(&mut relationships), nested_relationships.take(), scope.take())
+            let (unit_relationships, unit_scope) = if is_last {
+                (mem::take(&mut relationships), scope.take())
             } else {
-                (relationships.clone(), nested_relationships.clone(), scope.clone())
+                (relationships.clone(), scope.clone())
             };
 
-            entities.push(AssembledEntity::new(base_id.clone(), unit_scope, unit_relationships, unit_nested, fragments));
+            entities.push(AssembledEntity::new(base_id.clone(), unit_scope, unit_relationships, fragments));
         }
 
         trace!("Assembled entity {} into {} unit(s)", base_id, entities.len());
@@ -233,9 +243,13 @@ mod tests {
     use cassiopeia_ir::{
         assembled_entity::AssembledEntity,
         fragment::Fragment,
+        instance_index::InstanceIndex,
         mapped::Mapped,
         parent_context::{ParentContext, ParentContextType},
+        relationship_key::RelationshipKey,
+        relationship_key_error::RelationshipKeyError,
         relationship_path::RelationshipPath,
+        relationships::InstanceObjects,
     };
     use cassiopeia_mapping::{mapping::Mapping, template::runner::TemplateRunner};
     use cassiopeia_ngsi_ld::entity::name::NameBuf;
@@ -427,14 +441,18 @@ mod tests {
         let (resolver, mappings) = resolver_with(Box::new(DashMapLatestEntityStore::new()), &[SIMPLE]);
         let station = urn("urn:ngsi-ld:Station:1");
         let road = urn("urn:ngsi-ld:Road:9");
-        let context = ParentContext::new(ParentContextType::Child(road.clone()), RelationshipPath::flat(name("refRoad")));
+        let context = ParentContext::new(
+            ParentContextType::Child(road.clone()),
+            RelationshipKey::Path(RelationshipPath::flat(name("refRoad"))),
+        );
         let fragment = Fragment::new(json!({"t": 1}), station.clone(), None, Some(vec![context]));
 
         resolver.resolve(Mapped::new(fragment, Arc::clone(&mappings[0]))).unwrap();
 
         let unit = only_unit(&resolver, &station);
-        assert_eq!(unit.relationships().get(&name("refRoad")).map(Vec::as_slice), Some(&[road][..]));
-        assert!(unit.nested_relationships().is_none());
+        assert_eq!(unit.relationships().top_level().get(&name("refRoad")).map(Vec::as_slice), Some(&[road][..]));
+        assert!(unit.relationships().nested().is_none());
+        assert!(unit.relationships().instances().is_none());
     }
 
     #[test]
@@ -443,17 +461,72 @@ mod tests {
         let movie = urn("urn:ngsi-ld:Movie:1");
         let character = urn("urn:ngsi-ld:Character:JackSparrow");
         let path = RelationshipPath::flat(name("hasLeadActor")).push(name("playsCharacter"));
-        let context = ParentContext::new(ParentContextType::Child(character.clone()), path.clone());
+        let context = ParentContext::new(ParentContextType::Child(character.clone()), RelationshipKey::Path(path.clone()));
         let fragment = Fragment::new(json!({"t": 1}), movie.clone(), None, Some(vec![context]));
 
         resolver.resolve(Mapped::new(fragment, Arc::clone(&mappings[0]))).unwrap();
 
         let unit = only_unit(&resolver, &movie);
-        assert!(unit.relationships().is_empty());
+        assert!(unit.relationships().top_level().is_empty());
         assert_eq!(
-            unit.nested_relationships().as_ref().and_then(|map| map.get(&path)).map(Vec::as_slice),
+            unit.relationships().nested().as_ref().and_then(|map| map.get(&path)).map(Vec::as_slice),
             Some(&[character][..])
         );
+    }
+
+    #[test]
+    fn instance_child_contexts_become_per_instance_objects_keyed_by_their_index() {
+        let (resolver, mappings) = resolver_with(Box::new(DashMapLatestEntityStore::new()), &[SIMPLE]);
+        let route = urn("urn:ngsi-ld:Route:1");
+        let instance = |index: usize| RelationshipKey::Instance {
+            attribute: name("servesAirports"),
+            index: InstanceIndex::from(index),
+        };
+        // The first instance minted nothing, so only the second and third carry objects.
+        let contexts = vec![
+            ParentContext::new(ParentContextType::Child(urn("urn:ngsi-ld:Airport:2")), instance(1)),
+            ParentContext::new(ParentContextType::Child(urn("urn:ngsi-ld:Airport:3")), instance(2)),
+            ParentContext::new(ParentContextType::Child(urn("urn:ngsi-ld:Airport:4")), instance(2)),
+        ];
+        let fragment = Fragment::new(json!({"t": 1}), route.clone(), None, Some(contexts));
+
+        resolver.resolve(Mapped::new(fragment, Arc::clone(&mappings[0]))).unwrap();
+
+        let unit = only_unit(&resolver, &route);
+        assert!(unit.relationships().top_level().is_empty());
+        let per_instance = unit
+            .relationships()
+            .instances()
+            .as_ref()
+            .and_then(|map| map.get(&name("servesAirports")))
+            .unwrap();
+        assert_eq!(
+            per_instance,
+            &InstanceObjects::from([
+                (InstanceIndex::from(1), vec![urn("urn:ngsi-ld:Airport:2")]),
+                (InstanceIndex::from(2), vec![urn("urn:ngsi-ld:Airport:3"), urn("urn:ngsi-ld:Airport:4")]),
+            ])
+        );
+    }
+
+    #[test]
+    fn a_corrupt_stored_relationship_key_fails_assembly() {
+        let (resolver, mappings) = resolver_with(Box::new(DashMapLatestEntityStore::new()), &[SIMPLE]);
+        let station = urn("urn:ngsi-ld:Station:1");
+        resolver
+            .resolve(Mapped::new(
+                Fragment::new(json!({"t": 1}), station.clone(), None, None),
+                Arc::clone(&mappings[0]),
+            ))
+            .unwrap();
+        resolver
+            .relationship_store
+            .add_child(&station, "servesAirports#first", &urn("urn:ngsi-ld:Airport:1"))
+            .unwrap();
+
+        let error = resolver.assemble(&station).unwrap_err();
+
+        assert!(matches!(error, ResolverError::RelationshipKey(RelationshipKeyError::InstanceIndex { .. })));
     }
 
     #[test]

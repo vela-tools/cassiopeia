@@ -96,9 +96,8 @@ impl TemplateResolver {
     ///
     /// A resolved array contributes one token per element and a string one per whitespace- or
     /// comma-separated token, empty tokens dropped so they cannot mint an empty URN. The expander
-    /// (minting one relationship object per token) and the extractor (grouping a list relationship's
-    /// instances) tokenize through this, so a list relationship's objects and its per-instance
-    /// metadata split on the very same tokens.
+    /// tokenizes a list relationship's source through this to mint one relationship object per
+    /// token.
     ///
     /// # Errors
     /// Returns the errors of [`resolve`](Self::resolve).

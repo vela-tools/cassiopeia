@@ -7,9 +7,11 @@ use crate::{
 use cassiopeia_common::parallelism::Parallelism;
 use cassiopeia_ir::{
     fragment::Fragment,
+    instance_index::InstanceIndex,
     mapped::Mapped,
     parent_context::{ParentContext, ParentContextType},
     record::Record,
+    relationship_key::RelationshipKey,
     relationship_path::RelationshipPath,
 };
 use cassiopeia_mapping::{attribute::Attribute, mapping::Mapping, template::resolver::TemplateResolver};
@@ -79,39 +81,20 @@ impl GenericExpander {
         for (attribute_name, attribute) in mapping.attributes() {
             if let Some(synthetic) = attribute.synthetic_entity() {
                 if attribute.target().is_some() && matches!(attribute.kind(), NgsiLdAttributeKind::ListRelationship) {
-                    // A list relationship that also declares a synthetic entity materialises one target
-                    // per identifier: the field is split into its tokens, and each token both links the
-                    // main entity to a target and is emitted as that target's own entity. Each token is
-                    // bound as a single-column positional record, so the synthetic mapping reads it with
-                    // the same `this[0]` accessor a headerless source uses. Minting the id once and
-                    // reusing it for the link keeps the relationship and the emitted entity in step.
-                    for token in self.urn_generator.source_identifiers(attribute, &data)? {
-                        let mut token_data = json!({ "0": token });
-                        if let Value::Object(object) = &mut token_data {
-                            self.inject_vars(object);
-                        }
-                        let synthetic_urn = self.urn_generator.generate_id(synthetic, &token_data)?;
-                        let synthetic_scope = self.urn_generator.generate_scope(synthetic, &token_data)?;
-
-                        child_contexts.push(ParentContext::new(
-                            ParentContextType::Child(synthetic_urn.clone()),
-                            RelationshipPath::flat(attribute_name.clone()),
-                        ));
-                        let fragment = Fragment::new(token_data, synthetic_urn, synthetic_scope, None);
-                        fragments.push(Mapped::new(fragment, Arc::new(synthetic.clone())));
-                    }
+                    self.expand_synthetic_targets(attribute_name, attribute, synthetic, &data, &mut fragments, &mut child_contexts)?;
                 } else if let Some(fragment) = self.expand_synthetic_entity(attribute_name, attribute, synthetic, &main_urn, &data)? {
                     fragments.push(fragment);
                 }
             } else if matches!(attribute.kind(), NgsiLdAttributeKind::ListRelationship) && attribute.target().is_some() && attribute.instances().is_some() {
                 // A list relationship carrying instances (ETSI GS CIM 009 v1.9.1 clause 4.5.5, EXAMPLE
-                // 19) fans each instance's own source into flat child edges, emitted in
-                // instance-then-token order so the extractor can re-slice them per instance.
-                for instance in attribute.instances().iter().flatten() {
+                // 19) fans each instance's own source into child edges, each recorded under the
+                // instance that minted it, so the instance boundaries reach the transformer intact
+                // however many tokens an instance dropped.
+                for (index, instance) in attribute.instances().iter().flatten().enumerate() {
                     for child_urn in self.urn_generator.generate_instance_child_ids(instance, attribute, &data)? {
                         child_contexts.push(ParentContext::new(
                             ParentContextType::Child(child_urn),
-                            RelationshipPath::flat(attribute_name.clone()),
+                            Self::instance_key(attribute_name, index),
                         ));
                     }
                 }
@@ -119,22 +102,19 @@ impl GenericExpander {
                 // A list relationship fans its source out into one object per identifier, so a field
                 // holding several ids links to each of them.
                 for child_urn in self.urn_generator.generate_child_ids(attribute, &data)? {
-                    child_contexts.push(ParentContext::new(
-                        ParentContextType::Child(child_urn),
-                        RelationshipPath::flat(attribute_name.clone()),
-                    ));
+                    child_contexts.push(ParentContext::new(ParentContextType::Child(child_urn), Self::top_level_key(attribute_name)));
                 }
             } else if Self::is_relationship(attribute) && attribute.target().is_some() {
                 if let Some(instances) = attribute.instances() {
-                    // A multi-attribute Relationship (clause 4.5.5) mints one object per instance; an
-                    // instance whose foreign key is absent contributes no link, dropped in lockstep
-                    // with the per-instance metadata the extractor records.
-                    for instance in instances {
+                    // A multi-attribute Relationship (clause 4.5.5) mints one object per instance,
+                    // recorded under that instance; an instance whose foreign key is absent
+                    // contributes no link and so has no object under its index.
+                    for (index, instance) in instances.iter().enumerate() {
                         match self.urn_generator.generate_instance_child_id(instance, attribute, &data) {
                             Ok(child_urn) => {
                                 child_contexts.push(ParentContext::new(
                                     ParentContextType::Child(child_urn),
-                                    RelationshipPath::flat(attribute_name.clone()),
+                                    Self::instance_key(attribute_name, index),
                                 ));
                             }
                             Err(UrnError::GeneratedIdEmpty { .. }) => {}
@@ -144,10 +124,7 @@ impl GenericExpander {
                 } else {
                     match self.urn_generator.generate_child_id(attribute, &data) {
                         Ok(child_urn) => {
-                            child_contexts.push(ParentContext::new(
-                                ParentContextType::Child(child_urn),
-                                RelationshipPath::flat(attribute_name.clone()),
-                            ));
+                            child_contexts.push(ParentContext::new(ParentContextType::Child(child_urn), Self::top_level_key(attribute_name)));
                         }
                         // A relationship whose foreign key is absent in this record contributes no
                         // link; the entity is still produced without it, rather than dropped over one
@@ -174,6 +151,49 @@ impl GenericExpander {
         fragments.push(Mapped::new(main_fragment, Arc::clone(mapping)));
 
         Ok(fragments)
+    }
+
+    /// Materialises one target per identifier of a list relationship that also declares a synthetic
+    /// entity, linking the main entity to each.
+    ///
+    /// The field is split into its tokens, and each token both links the main entity to a target and
+    /// is emitted as that target's own entity. Each token is bound as a single-column positional
+    /// record, so the synthetic mapping reads it with the same `this[0]` accessor a headerless source
+    /// uses. Minting the id once and reusing it for the link keeps the relationship and the emitted
+    /// entity in step, so a token whose synthetic identity names no target contributes neither: the
+    /// rest of the list, and the main entity, are still produced.
+    fn expand_synthetic_targets(
+        &self,
+        attribute_name: &NameBuf,
+        attribute: &Attribute,
+        synthetic: &Mapping,
+        data: &Value,
+        fragments: &mut Vec<Mapped<Fragment>>,
+        child_contexts: &mut Vec<ParentContext>,
+    ) -> Result<(), ExpanderError> {
+        for token in self.urn_generator.source_identifiers(attribute, data)? {
+            let mut token_data = json!({ "0": token });
+            if let Value::Object(object) = &mut token_data {
+                self.inject_vars(object);
+            }
+            let synthetic_urn = match self.urn_generator.generate_id(synthetic, &token_data) {
+                Ok(urn) => urn,
+                Err(UrnError::GeneratedIdEmpty { .. }) => continue,
+                Err(other) => return Err(other.into()),
+            };
+            let synthetic_scope = self.urn_generator.generate_scope(synthetic, &token_data)?;
+
+            child_contexts.push(ParentContext::new(
+                ParentContextType::Child(synthetic_urn.clone()),
+                Self::top_level_key(attribute_name),
+            ));
+            let fragment = Fragment::new(token_data, synthetic_urn, synthetic_scope, None);
+            // The fragment owns its mapping behind an `Arc`, and the synthetic mapping is only
+            // borrowed from the parent attribute here.
+            fragments.push(Mapped::new(fragment, Arc::new(synthetic.clone())));
+        }
+
+        Ok(())
     }
 
     /// Expands the one synthetic entity a non-list attribute materialises, linked back to the main
@@ -210,7 +230,7 @@ impl GenericExpander {
         let synthetic_scope = self.urn_generator.generate_scope(synthetic, data)?;
 
         // The parent context owns its URN and path, while the main entity keeps its own for its fragment.
-        let parent = ParentContext::new(ParentContextType::Parent(main_urn.clone()), RelationshipPath::flat(attribute_name.clone()));
+        let parent = ParentContext::new(ParentContextType::Parent(main_urn.clone()), Self::top_level_key(attribute_name));
         // Each synthetic fragment carries its own copy of the source data; the main fragment consumes
         // the record once every attribute has been expanded.
         let fragment = Fragment::new(data.clone(), synthetic_urn, synthetic_scope, Some(vec![parent]));
@@ -244,7 +264,10 @@ impl GenericExpander {
             if property.target().is_some() {
                 match property.kind() {
                     NgsiLdAttributeKind::Relationship => match self.urn_generator.generate_child_id(property, data) {
-                        Ok(child_urn) => child_contexts.push(ParentContext::new(ParentContextType::Child(child_urn), child_path.clone())),
+                        Ok(child_urn) => child_contexts.push(ParentContext::new(
+                            ParentContextType::Child(child_urn),
+                            RelationshipKey::Path(child_path.clone()),
+                        )),
                         // A nested relationship whose foreign key is absent contributes no link, exactly
                         // as an absent top-level relationship does.
                         Err(UrnError::GeneratedIdEmpty { .. }) => {}
@@ -252,7 +275,10 @@ impl GenericExpander {
                     },
                     NgsiLdAttributeKind::ListRelationship => {
                         for child_urn in self.urn_generator.generate_child_ids(property, data)? {
-                            child_contexts.push(ParentContext::new(ParentContextType::Child(child_urn), child_path.clone()));
+                            child_contexts.push(ParentContext::new(
+                                ParentContextType::Child(child_urn),
+                                RelationshipKey::Path(child_path.clone()),
+                            ));
                         }
                     }
                     NgsiLdAttributeKind::Property
@@ -267,6 +293,20 @@ impl GenericExpander {
         }
 
         Ok(())
+    }
+
+    /// The key a top-level relationship records its objects under: its one-segment path.
+    fn top_level_key(attribute_name: &NameBuf) -> RelationshipKey {
+        RelationshipKey::Path(RelationshipPath::flat(attribute_name.clone()))
+    }
+
+    /// The key one instance of a multi-attribute relationship records its objects under: the
+    /// attribute and the instance's declaration index (ETSI GS CIM 009 v1.9.1 clause 4.5.5).
+    fn instance_key(attribute_name: &NameBuf, index: usize) -> RelationshipKey {
+        RelationshipKey::Instance {
+            attribute: attribute_name.clone(),
+            index: InstanceIndex::from(index),
+        }
     }
 
     /// Whether an attribute produces a relationship (single or list).
@@ -299,6 +339,7 @@ mod tests {
         expander::Expander,
         generic::GenericExpander,
         router::{CollectionRoutes, MappingRouter},
+        urn::error::UrnError,
     };
     use cassiopeia_common::collection::CollectionName;
     use cassiopeia_ir::{fragment::Fragment, mapped::Mapped, parent_context::ParentContextType, record::Record};
@@ -588,7 +629,7 @@ mod tests {
         assert_eq!(fragments.len(), 1);
         let contexts = fragments[0].inner().parent_context().as_ref().unwrap();
         assert_eq!(contexts.len(), 1);
-        assert_eq!(contexts[0].property().to_string(), "refRoad");
+        assert_eq!(contexts[0].key().to_string(), "refRoad");
         match contexts[0].urn() {
             ParentContextType::Child(child) => assert_eq!(child.to_string(), "urn:ngsi-ld:Road:99"),
             ParentContextType::Parent(_) => panic!("relationship must produce a child context"),
@@ -764,7 +805,7 @@ mod tests {
         assert!(main.inner().parent_context().is_none());
         let contexts = aircraft_type.inner().parent_context().as_ref().unwrap();
         assert_eq!(contexts.len(), 1);
-        assert_eq!(contexts[0].property().to_string(), "belongsToAircraftType");
+        assert_eq!(contexts[0].key().to_string(), "belongsToAircraftType");
         match contexts[0].urn() {
             ParentContextType::Parent(parent) => assert_eq!(parent.to_string(), "urn:ngsi-ld:AircraftModel:E75L"),
             ParentContextType::Child(_) => panic!("a synthetic entity must link back to its parent"),
@@ -808,13 +849,18 @@ mod tests {
         let fragments = expander.expand(record(json!({"id": 1, "dep": 535, "arr": 340}))).unwrap();
 
         assert_eq!(fragments.len(), 1);
-        let contexts = fragments[0].inner().parent_context().as_ref().unwrap();
-        assert!(contexts.iter().all(|context| context.property().to_string() == "servesAirport"));
-        assert_eq!(child_urns(&fragments[0]), ["urn:ngsi-ld:Airport:535", "urn:ngsi-ld:Airport:340"]);
+        // Each object is recorded under the instance that minted it.
+        assert_eq!(
+            edges(&fragments[0]),
+            [
+                ("servesAirport#0".to_string(), "urn:ngsi-ld:Airport:535".to_string()),
+                ("servesAirport#1".to_string(), "urn:ngsi-ld:Airport:340".to_string()),
+            ]
+        );
     }
 
     #[test]
-    fn a_relationship_instance_with_an_empty_source_is_dropped_keeping_order() {
+    fn a_relationship_instance_with_an_empty_source_mints_nothing_and_the_others_keep_their_index() {
         let expander = expander(
             r#"{
                 version: "v4",
@@ -837,11 +883,17 @@ mod tests {
         // The middle instance's foreign key `b` is absent in this record, so it mints no object.
         let fragments = expander.expand(record(json!({"id": 1, "a": 1, "c": 3}))).unwrap();
 
-        assert_eq!(child_urns(&fragments[0]), ["urn:ngsi-ld:Airport:1", "urn:ngsi-ld:Airport:3"]);
+        assert_eq!(
+            edges(&fragments[0]),
+            [
+                ("servesAirport#0".to_string(), "urn:ngsi-ld:Airport:1".to_string()),
+                ("servesAirport#2".to_string(), "urn:ngsi-ld:Airport:3".to_string()),
+            ]
+        );
     }
 
     #[test]
-    fn a_list_relationship_with_instances_mints_flat_edges_in_instance_then_token_order() {
+    fn a_list_relationship_with_instances_records_each_token_under_its_own_instance() {
         let expander = expander(
             r#"{
                 version: "v4",
@@ -863,11 +915,182 @@ mod tests {
         let fragments = expander.expand(record(json!({"id": 1, "a": "1 2", "b": "3"}))).unwrap();
 
         assert_eq!(fragments.len(), 1);
-        // Instance-then-token order: the first instance's two tokens, then the second instance's one.
         assert_eq!(
-            child_urns(&fragments[0]),
-            ["urn:ngsi-ld:Airport:1", "urn:ngsi-ld:Airport:2", "urn:ngsi-ld:Airport:3"]
+            edges(&fragments[0]),
+            [
+                ("servesAirports#0".to_string(), "urn:ngsi-ld:Airport:1".to_string()),
+                ("servesAirports#0".to_string(), "urn:ngsi-ld:Airport:2".to_string()),
+                ("servesAirports#1".to_string(), "urn:ngsi-ld:Airport:3".to_string()),
+            ]
         );
+    }
+
+    /// A `Route` whose `servesAirports` `ListRelationship` declares a departure instance read from `a`
+    /// and an arrival instance read from `b` (ETSI GS CIM 009 v1.9.1 clause 4.5.5, EXAMPLE 19).
+    fn route_instances_expander(source_a: &str) -> GenericExpander {
+        let document = r#"{
+            version: "v4",
+            dataModel: "Route",
+            identity: { entityName: "R-{{ id }}" },
+            attributes: {
+                servesAirports: {
+                    type: "ListRelationship",
+                    target: { entity: "Airport" },
+                    instances: [
+                        { source: "SOURCE_A", properties: { datasetId: { source: "urn:ngsi-ld:dataset:role:departure" } } },
+                        { source: "{{ b }}", properties: { datasetId: { source: "urn:ngsi-ld:dataset:role:arrival" } } },
+                    ],
+                },
+            },
+        }"#;
+        expander(&document.replace("SOURCE_A", source_a))
+    }
+
+    #[test]
+    fn a_list_relationship_instance_drops_an_unmintable_token_and_the_next_instance_keeps_its_index() {
+        let expander = route_instances_expander("{{ a }}");
+
+        let fragments = expander.expand(record(json!({"id": 1, "a": "• 2", "b": "3 4"}))).unwrap();
+
+        assert_eq!(
+            edges(&fragments[0]),
+            [
+                ("servesAirports#0".to_string(), "urn:ngsi-ld:Airport:2".to_string()),
+                ("servesAirports#1".to_string(), "urn:ngsi-ld:Airport:3".to_string()),
+                ("servesAirports#1".to_string(), "urn:ngsi-ld:Airport:4".to_string()),
+            ]
+        );
+    }
+
+    #[test]
+    fn a_list_relationship_instance_of_only_unmintable_tokens_mints_nothing_under_its_index() {
+        let expander = route_instances_expander("{{ a }}");
+
+        let fragments = expander.expand(record(json!({"id": 1, "a": "• ?", "b": "3"}))).unwrap();
+
+        assert_eq!(edges(&fragments[0]), [("servesAirports#1".to_string(), "urn:ngsi-ld:Airport:3".to_string())]);
+    }
+
+    /// An unguarded `split` over a null field is a template failure, not an absent identifier.
+    const FAILING_SPLIT: &str = r"{{ a | split(pat=' ') }}";
+
+    #[test]
+    fn a_failing_list_relationship_instance_template_still_fails_expansion() {
+        let expander = route_instances_expander(FAILING_SPLIT);
+
+        let error = expander.expand(record(json!({"id": 1, "a": null, "b": "3"}))).unwrap_err();
+
+        assert!(matches!(error, ExpanderError::Urn(UrnError::Template(_))), "{error:?}");
+    }
+
+    #[test]
+    fn a_failing_list_relationship_template_still_fails_expansion() {
+        let expander = expander(&format!(
+            r#"{{
+                version: "v4",
+                dataModel: "Route",
+                identity: {{ entityName: "R-{{{{ id }}}}" }},
+                attributes: {{ usesEquipment: {{ type: "ListRelationship", source: "{FAILING_SPLIT}", target: {{ entity: "Equipment" }} }} }},
+            }}"#
+        ));
+
+        let error = expander.expand(record(json!({"id": 1, "a": null}))).unwrap_err();
+
+        assert!(matches!(error, ExpanderError::Urn(UrnError::Template(_))), "{error:?}");
+    }
+
+    #[test]
+    fn a_failing_per_token_synthetic_identity_template_still_fails_expansion() {
+        let expander = expander(
+            r#"{
+                version: "v4",
+                dataModel: "Mountain",
+                identity: { entityName: "M-{{ id }}" },
+                attributes: {
+                    hasCountry: {
+                        type: "ListRelationship",
+                        source: "{{ countries }}",
+                        target: { entity: "Country" },
+                        syntheticEntity: {
+                            dataModel: "Country",
+                            identity: { entityName: "{{ missing | split(pat=' ') }}" },
+                            attributes: { name: { source: "{{ this[0] }}" } },
+                        },
+                    },
+                },
+            }"#,
+        );
+
+        let error = expander.expand(record(json!({"id": 1, "countries": "Nepal"}))).unwrap_err();
+
+        assert!(matches!(error, ExpanderError::Urn(UrnError::Template(_))), "{error:?}");
+    }
+
+    /// A `Route` mapping whose `usesEquipment` `ListRelationship` reads its targets from `equipment`.
+    fn route_equipment_expander() -> GenericExpander {
+        expander(
+            r#"{
+                version: "v4",
+                dataModel: "Route",
+                identity: { entityName: "R-{{ id }}" },
+                attributes: {
+                    usesEquipment: { type: "ListRelationship", source: "{{ equipment }}", target: { entity: "Equipment" } },
+                },
+            }"#,
+        )
+    }
+
+    #[test]
+    fn a_list_relationship_drops_an_unmintable_token_of_delimited_text_and_links_the_rest() {
+        let expander = route_equipment_expander();
+
+        // `•` transliterates to `*`, which leaves no URN-safe character, so it names no target.
+        let fragments = expander.expand(record(json!({"id": 1, "equipment": "744 • 777"}))).unwrap();
+
+        assert_eq!(fragments.len(), 1);
+        assert_eq!(urn(&fragments[0]), "urn:ngsi-ld:Route:R-1");
+        assert_eq!(child_urns(&fragments[0]), ["urn:ngsi-ld:Equipment:744", "urn:ngsi-ld:Equipment:777"]);
+    }
+
+    #[test]
+    fn a_list_relationship_drops_an_unmintable_array_element_and_links_the_rest() {
+        let expander = route_equipment_expander();
+
+        let fragments = expander.expand(record(json!({"id": 1, "equipment": ["744", "?", "777"]}))).unwrap();
+
+        assert_eq!(fragments.len(), 1);
+        assert_eq!(urn(&fragments[0]), "urn:ngsi-ld:Route:R-1");
+        assert_eq!(child_urns(&fragments[0]), ["urn:ngsi-ld:Equipment:744", "urn:ngsi-ld:Equipment:777"]);
+    }
+
+    #[test]
+    fn a_list_relationship_with_a_synthetic_entity_skips_the_target_and_link_of_an_unmintable_token() {
+        let expander = expander(
+            r#"{
+                version: "v4",
+                dataModel: "Mountain",
+                identity: { entityName: "M-{{ id }}" },
+                attributes: {
+                    hasCountry: {
+                        type: "ListRelationship",
+                        source: "{{ countries }}",
+                        target: { entity: "Country" },
+                        syntheticEntity: {
+                            dataModel: "Country",
+                            identity: { entityName: "{{ this[0] }}" },
+                            attributes: { name: { source: "{{ this[0] }}" } },
+                        },
+                    },
+                },
+            }"#,
+        );
+
+        let fragments = expander.expand(record(json!({"id": 1, "countries": "Nepal, •, China"}))).unwrap();
+
+        let urns: Vec<String> = fragments.iter().map(urn).collect();
+        assert_eq!(urns, ["urn:ngsi-ld:Country:Nepal", "urn:ngsi-ld:Country:China", "urn:ngsi-ld:Mountain:M-1"]);
+        let mountain = fragments.iter().find(|fragment| urn(fragment) == "urn:ngsi-ld:Mountain:M-1").unwrap();
+        assert_eq!(child_urns(mountain), ["urn:ngsi-ld:Country:Nepal", "urn:ngsi-ld:Country:China"]);
     }
 
     #[test]
@@ -994,7 +1217,7 @@ mod tests {
                 contexts
                     .iter()
                     .filter_map(|context| match context.urn() {
-                        ParentContextType::Child(child) => Some((context.property().to_string(), child.to_string())),
+                        ParentContextType::Child(child) => Some((context.key().to_string(), child.to_string())),
                         ParentContextType::Parent(_) => None,
                     })
                     .collect()

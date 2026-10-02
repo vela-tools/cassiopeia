@@ -35,7 +35,6 @@ impl CodedError for ExtractionError {
 
     fn code(&self) -> ExtractorCode {
         match self {
-            ExtractionError::Template { .. } => ExtractorCode::TemplateUnresolvable,
             ExtractionError::RecursionLimitExceeded { .. } => ExtractorCode::RecursionLimitExceeded,
         }
     }

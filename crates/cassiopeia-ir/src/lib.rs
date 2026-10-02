@@ -7,14 +7,18 @@
 
 pub mod assembled_entity;
 pub mod entity;
+pub mod entity_relationships;
 pub mod error;
 pub mod fragment;
+pub mod instance_index;
 pub mod mapped;
 pub mod metadata;
 pub mod parent_context;
 pub mod payload;
 pub mod payload_origin;
 pub mod record;
+pub mod relationship_key;
+pub mod relationship_key_error;
 pub mod relationship_path;
 pub mod relationships;
 pub mod sub_attribute;

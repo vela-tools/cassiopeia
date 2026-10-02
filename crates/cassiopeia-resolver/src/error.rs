@@ -1,5 +1,5 @@
 use crate::{entity_store::error::EntityStoreError, relationship_store::error::RelationshipStoreError, store_batch_failure::StoreBatchFailure};
-use cassiopeia_ngsi_ld::entity::error::NgsiLdError;
+use cassiopeia_ir::relationship_key_error::RelationshipKeyError;
 use std::{result, sync::Arc};
 use thiserror::Error;
 use urn_rs::Urn;
@@ -38,9 +38,9 @@ pub enum ResolverError {
         source: Arc<StoreBatchFailure>,
     },
 
-    /// A stored relationship key was not a legal NGSI-LD attribute name.
-    #[error("Invalid relationship attribute name")]
-    RelationshipName(#[from] NgsiLdError),
+    /// A stored relationship key could not be read back as a relationship key.
+    #[error("Invalid stored relationship key")]
+    RelationshipKey(#[from] RelationshipKeyError),
 }
 
 /// The result type used throughout resolution.

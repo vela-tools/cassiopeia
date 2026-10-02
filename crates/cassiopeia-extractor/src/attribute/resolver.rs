@@ -1,11 +1,9 @@
-use crate::{
-    attribute::{
-        metadata::MetadataExtractor,
-        refusal::AttributeRefusal,
-        resolution_context::ResolutionContext,
-        transformer::{SourceParts, Transformer},
-    },
-    error::{ExtractionError, Result},
+use crate::attribute::{
+    metadata::MetadataExtractor,
+    refusal::AttributeRefusal,
+    resolution_context::ResolutionContext,
+    resolution_error::{ResolutionError, Result},
+    transformer::{SourceParts, Transformer},
 };
 use cassiopeia_geometry::policy::GeometryPolicy;
 use cassiopeia_mapping::{
@@ -29,7 +27,7 @@ use smallvec::smallvec;
 /// transforms source values.
 pub(crate) fn resolve(ctx: &mut ResolutionContext, attr_name: &NameBuf, config: &Attribute) -> Result<Value> {
     if ctx.recursion_limit_exceeded() {
-        return Err(ExtractionError::RecursionLimitExceeded { depth: ctx.depth });
+        return Err(ResolutionError::RecursionLimitExceeded { depth: ctx.depth });
     }
 
     let kind = config.kind();
@@ -74,12 +72,11 @@ fn resolve_instances(ctx: &mut ResolutionContext, attr_name: &NameBuf, config: &
 
 /// Resolves a relationship attribute.
 ///
-/// The relationship's targets were minted by the resolve stage and travel on the entity; the value
-/// itself is materialised later, so this only records the attribute's own properties as metadata and
-/// contributes no entry to the value map.
+/// The relationship's targets were minted by the expander and travel on the entity, directly or
+/// grouped per instance; the value itself is materialised later, so this only records the
+/// attribute's own properties as metadata and contributes no entry to the value map.
 fn resolve_relationship(ctx: &mut ResolutionContext, attr_name: &NameBuf, config: &Attribute) -> Result<Value> {
-    let has_targets = ctx.relationships.get(attr_name).is_some_and(|targets| !targets.is_empty());
-    if !has_targets {
+    if !ctx.relationships.has_objects(attr_name) {
         return Ok(Value::Null);
     }
 

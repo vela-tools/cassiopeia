@@ -50,6 +50,7 @@ mod tests {
     use crate::{
         fragment::Fragment,
         parent_context::{ParentContext, ParentContextType},
+        relationship_key::RelationshipKey,
         relationship_path::RelationshipPath,
     };
     use cassiopeia_ngsi_ld::entity::name::NameBuf;
@@ -64,7 +65,7 @@ mod tests {
     fn accessors_expose_the_constructor_inputs() {
         let context = ParentContext::new(
             ParentContextType::Child(urn("urn:ngsi-ld:Road:1")),
-            RelationshipPath::flat(NameBuf::new("refRoad").expect("valid")),
+            RelationshipKey::Path(RelationshipPath::flat(NameBuf::new("refRoad").expect("valid"))),
         );
         let fragment = Fragment::new(json!({"t": 1}), urn("urn:ngsi-ld:Station:1"), None, Some(vec![context.clone()]));
         assert_eq!(fragment.source_data(), &json!({"t": 1}));

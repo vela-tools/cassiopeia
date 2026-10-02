@@ -1,5 +1,5 @@
 use crate::{
-    attribute::{resolution_context::ResolutionContext, resolver::resolve},
+    attribute::{resolution_context::ResolutionContext, resolution_error::ResolutionError, resolver::resolve},
     dropped_attributes::DroppedAttributes,
     error::{ExtractionError, Result},
     extractor::Extractor,
@@ -10,15 +10,11 @@ use cassiopeia_ir::{
     entity::{AttributeValues, Entity},
     mapped::{Mapped, Mappings},
     metadata::EntityMetadata,
-    relationships::{InstanceRelationships, Relationships},
 };
-use cassiopeia_mapping::{mapping::Mapping, template::resolver::TemplateResolver};
-use cassiopeia_ngsi_ld::entity::{attribute::NgsiLdAttributeKind, name::NameBuf};
-use indexmap::IndexMap;
+use cassiopeia_mapping::template::resolver::TemplateResolver;
 use rayon::prelude::*;
 use serde_json::Value as JsonValue;
 use std::sync::Arc;
-use urn_rs::Urn;
 
 /// The standard [`Extractor`]: resolves each mapping attribute against the source record.
 ///
@@ -45,75 +41,13 @@ impl EntityExtractor {
         self.parallelism = parallelism;
         self
     }
-
-    /// Reconstructs the per-instance object lists of every `ListRelationship` that carries instances.
-    ///
-    /// The expander emitted each such attribute's objects as flat child edges in instance-then-token
-    /// order (ETSI GS CIM 009 v1.9.1 clause 4.5.5, EXAMPLE 19); assembly collected them into one flat
-    /// `relationships[name]`. Here each instance's own token count re-derives its slice, so the flat
-    /// list is regrouped into one `objectList` per instance without the relationship store ever
-    /// recording instance boundaries. An instance that tokenizes to nothing was already dropped by the
-    /// expander and contributes no slice, so the groups stay in lockstep with the per-instance
-    /// metadata. Returns `None`, allocating no map, when the entity carries no instance list
-    /// relationship.
-    fn group_instance_relationships(&self, data: &JsonValue, mapping: &Mapping, relationships: &mut Relationships) -> Result<Option<InstanceRelationships>> {
-        // First read each surviving instance's token count under an immutable borrow of the source
-        // record, so the flat objects can then be drained under a mutable borrow without overlap.
-        let mut counts_by_attribute: IndexMap<NameBuf, Vec<usize>> = IndexMap::default();
-        for (name, config) in mapping.attributes() {
-            if !matches!(config.kind(), NgsiLdAttributeKind::ListRelationship) {
-                continue;
-            }
-            let Some(instances) = config.instances() else {
-                continue;
-            };
-
-            let mut counts = Vec::new();
-            for instance in instances {
-                let count = match instance.compiled_source() {
-                    Some(templates) => self.resolver.resolve_tokens(templates, data)?.len(),
-                    None => 0,
-                };
-                if count > 0 {
-                    counts.push(count);
-                }
-            }
-            if !counts.is_empty() {
-                counts_by_attribute.insert(name.clone(), counts);
-            }
-        }
-
-        if counts_by_attribute.is_empty() {
-            return Ok(None);
-        }
-
-        let mut grouped = InstanceRelationships::default();
-        for (name, counts) in counts_by_attribute {
-            // Draining removes the flat entry so the transformer reads the grouped form instead; the
-            // objects are moved into their slices, never cloned.
-            let mut objects = relationships.swap_remove(&name).unwrap_or_default().into_iter();
-            let mut per_instance = Vec::with_capacity(counts.len());
-            for count in counts {
-                let group: Vec<Urn> = objects.by_ref().take(count).collect();
-                if !group.is_empty() {
-                    per_instance.push(group);
-                }
-            }
-            if !per_instance.is_empty() {
-                grouped.insert(name, per_instance);
-            }
-        }
-
-        if grouped.is_empty() { Ok(None) } else { Ok(Some(grouped)) }
-    }
 }
 
 impl Extractor for EntityExtractor {
     fn extract(&self, assembled: AssembledEntity, dropped: &DroppedAttributes) -> Result<Mapped<Entity>> {
-        let (id, scope, mut relationships, nested_relationships, fragments) = assembled.into_parts();
+        let (id, scope, mut relationships, fragments) = assembled.into_parts();
         let mut values = AttributeValues::default();
         let mut metadata = EntityMetadata::default();
-        let mut instance_relationships = InstanceRelationships::default();
         let mappings: Mappings = fragments.iter().map(|(_, mapping)| Arc::clone(mapping)).collect();
 
         // Each fragment resolves through its own mapping against its own record; disjoint attribute
@@ -125,7 +59,6 @@ impl Extractor for EntityExtractor {
                     data,
                     &self.resolver,
                     &relationships,
-                    nested_relationships.as_ref(),
                     &dropped.geometries,
                     &dropped.timestamps,
                     Some(&mut metadata),
@@ -139,11 +72,11 @@ impl Extractor for EntityExtractor {
                         // A template failure costs the attribute it belongs to, not the entity.
                         // Resolution records an attribute's metadata only once the attribute has
                         // resolved whole, so nothing of the failed attribute is left behind.
-                        Err(ExtractionError::Template { source }) => {
+                        Err(ResolutionError::Template { source }) => {
                             dropped.templates.record(name, &id, source);
                             unresolved.push(name);
                         }
-                        Err(error @ ExtractionError::RecursionLimitExceeded { .. }) => return Err(error),
+                        Err(ResolutionError::RecursionLimitExceeded { depth }) => return Err(ExtractionError::RecursionLimitExceeded { depth }),
                     }
                 }
             }
@@ -151,24 +84,20 @@ impl Extractor for EntityExtractor {
             // relationship whose properties failed to resolve is removed from them as well; otherwise
             // it would be emitted stripped of the properties its mapping declared.
             for name in unresolved {
-                relationships.shift_remove(name);
-            }
-            if let Some(grouped) = self.group_instance_relationships(data, mapping, &mut relationships)? {
-                for (name, groups) in grouped {
-                    instance_relationships.insert(name, groups);
-                }
+                relationships.remove_attribute(name);
             }
         }
 
         // The data is spent once every fragment is resolved; the transformer reads only the resolved
-        // maps and the carried mappings, so the entity's own record is no longer needed.
+        // maps and the carried mappings, so the entity's own record is no longer needed. Nested
+        // objects were folded into the metadata as sub-attributes, so only the top-level and the
+        // per-instance objects travel on.
+        let (relationships, _nested, instance_relationships) = relationships.into_parts();
         let mut entity = Entity::new(id, JsonValue::Null, scope, relationships, Some(values));
         if !metadata.is_empty() {
             entity.set_metadata(Some(metadata));
         }
-        if !instance_relationships.is_empty() {
-            entity.set_instance_relationships(Some(instance_relationships));
-        }
+        entity.set_instance_relationships(instance_relationships.filter(|instances| !instances.is_empty()));
 
         Ok(Mapped::with_mappings(entity, mappings))
     }
@@ -189,8 +118,9 @@ mod tests {
     use cassiopeia_ir::{
         assembled_entity::AssembledEntity,
         entity::Entity,
+        instance_index::InstanceIndex,
         relationship_path::RelationshipPath,
-        relationships::{NestedRelationships, Relationships},
+        relationships::{InstanceObjects, InstanceRelationships, NestedRelationships, Relationships},
         sub_attribute::SubAttribute,
     };
     use cassiopeia_mapping::{
@@ -231,6 +161,39 @@ mod tests {
 
     fn nested_path(segments: &[&str]) -> RelationshipPath {
         RelationshipPath::from_segments(segments.iter().map(|segment| name(segment)).collect())
+    }
+
+    /// The objects each listed instance of one multi-attribute relationship minted, by declaration
+    /// index.
+    fn instance_objects(instances: &[(usize, &[&str])]) -> InstanceObjects {
+        instances
+            .iter()
+            .map(|(index, objects)| (InstanceIndex::from(*index), objects.iter().map(|object| urn(object)).collect()))
+            .collect()
+    }
+
+    /// An entity over `data` whose attribute `attribute` carries the given per-instance objects.
+    fn entity_with_instances(id: &str, data: JsonValue, attribute: &str, objects: InstanceObjects) -> Entity {
+        let mut instances = InstanceRelationships::default();
+        instances.insert(name(attribute), objects);
+        let mut entity = entity(id, data);
+        entity.set_instance_relationships(Some(instances));
+        entity
+    }
+
+    /// Every per-instance `datasetId` recorded for `attribute`, in declaration order.
+    fn per_item_dataset_ids(result: &Entity, attribute: &str) -> Vec<Option<JsonValue>> {
+        result
+            .metadata()
+            .as_ref()
+            .unwrap()
+            .get(&name(attribute))
+            .unwrap()
+            .as_per_item()
+            .unwrap()
+            .iter()
+            .map(|item| item.get(&name("datasetId")).map(SubAttribute::value).cloned())
+            .collect()
     }
 
     #[test]
@@ -604,16 +567,13 @@ mod tests {
                 },
             }"#,
         );
-        // The resolve stage already minted one object per instance; the extractor records the
-        // per-instance metadata that aligns with them.
-        let mut relationships = Relationships::default();
-        relationships.insert(name("servesAirport"), vec![urn("urn:ngsi-ld:Airport:535"), urn("urn:ngsi-ld:Airport:340")]);
-        let entity = Entity::new(
-            urn("urn:ngsi-ld:Flight:1"),
+        // The expander already minted one object per instance, each under its own instance; the
+        // extractor records the per-instance metadata at the same indices.
+        let entity = entity_with_instances(
+            "urn:ngsi-ld:Flight:1",
             json!({"id": "1", "dep": "535", "arr": "340"}),
-            None,
-            relationships,
-            None,
+            "servesAirport",
+            instance_objects(&[(0, &["urn:ngsi-ld:Airport:535"]), (1, &["urn:ngsi-ld:Airport:340"])]),
         );
 
         let (result, _) = EntityExtractor::new(resolver)
@@ -622,20 +582,17 @@ mod tests {
             .into_parts();
 
         assert!(!result.values().as_ref().unwrap().contains_key(&name("servesAirport")));
-        let per_item = result.metadata().as_ref().unwrap().get(&name("servesAirport")).unwrap().as_per_item().unwrap();
-        assert_eq!(per_item.len(), 2);
         assert_eq!(
-            per_item[0].get(&name("datasetId")).map(SubAttribute::value),
-            Some(&json!("urn:ngsi-ld:dataset:role:departure"))
-        );
-        assert_eq!(
-            per_item[1].get(&name("datasetId")).map(SubAttribute::value),
-            Some(&json!("urn:ngsi-ld:dataset:role:arrival"))
+            per_item_dataset_ids(&result, "servesAirport"),
+            [
+                Some(json!("urn:ngsi-ld:dataset:role:departure")),
+                Some(json!("urn:ngsi-ld:dataset:role:arrival"))
+            ]
         );
     }
 
     #[test]
-    fn a_dropped_relationship_instance_keeps_metadata_aligned() {
+    fn a_relationship_instance_with_no_object_keeps_every_instance_on_its_own_metadata_index() {
         let (resolver, mapping) = prepare(
             r#"{
                 version: "v4",
@@ -654,31 +611,36 @@ mod tests {
                 },
             }"#,
         );
-        // The middle instance's key `b` is absent, so the expander dropped it: only two objects, and
-        // the extractor drops its metadata in lockstep.
-        let mut relationships = Relationships::default();
-        relationships.insert(name("servesAirport"), vec![urn("urn:ngsi-ld:Airport:1"), urn("urn:ngsi-ld:Airport:3")]);
-        let entity = Entity::new(urn("urn:ngsi-ld:Flight:1"), json!({"id": "1", "a": "1", "c": "3"}), None, relationships, None);
+        // The middle instance's key `b` is absent, so the expander minted nothing under index 1. Its
+        // metadata entry stays, so the arrival instance's objects still meet the arrival metadata.
+        let entity = entity_with_instances(
+            "urn:ngsi-ld:Flight:1",
+            json!({"id": "1", "a": "1", "c": "3"}),
+            "servesAirport",
+            instance_objects(&[(0, &["urn:ngsi-ld:Airport:1"]), (2, &["urn:ngsi-ld:Airport:3"])]),
+        );
 
         let (result, _) = EntityExtractor::new(resolver)
             .extract(AssembledEntity::from_single(entity, mapping), &DroppedAttributes::new())
             .unwrap()
             .into_parts();
 
-        let per_item = result.metadata().as_ref().unwrap().get(&name("servesAirport")).unwrap().as_per_item().unwrap();
-        assert_eq!(per_item.len(), 2);
         assert_eq!(
-            per_item[0].get(&name("datasetId")).map(SubAttribute::value),
-            Some(&json!("urn:ngsi-ld:dataset:role:departure"))
+            per_item_dataset_ids(&result, "servesAirport"),
+            [
+                Some(json!("urn:ngsi-ld:dataset:role:departure")),
+                Some(json!("urn:ngsi-ld:dataset:role:via")),
+                Some(json!("urn:ngsi-ld:dataset:role:arrival")),
+            ]
         );
         assert_eq!(
-            per_item[1].get(&name("datasetId")).map(SubAttribute::value),
-            Some(&json!("urn:ngsi-ld:dataset:role:arrival"))
+            result.instance_relationships().as_ref().unwrap().get(&name("servesAirport")),
+            Some(&instance_objects(&[(0, &["urn:ngsi-ld:Airport:1"]), (2, &["urn:ngsi-ld:Airport:3"])]))
         );
     }
 
     #[test]
-    fn list_relationship_instances_regroup_objects_and_compact_dataset_ids() {
+    fn list_relationship_instance_objects_travel_on_beside_their_per_instance_metadata() {
         let (resolver, mapping) = prepare(
             r#"{
                 version: "v4",
@@ -696,43 +658,34 @@ mod tests {
                 },
             }"#,
         );
-        // Flat objects in instance-then-token order: first instance's two tokens, then the second's one.
-        let mut relationships = Relationships::default();
-        relationships.insert(
-            name("servesAirports"),
-            vec![urn("urn:ngsi-ld:Airport:1"), urn("urn:ngsi-ld:Airport:2"), urn("urn:ngsi-ld:Airport:3")],
+        // The record's text is deliberately unrelated to the objects: the extractor never re-reads an
+        // instance's source, it carries the objects the expander minted under each instance.
+        let objects = instance_objects(&[(0, &["urn:ngsi-ld:Airport:1", "urn:ngsi-ld:Airport:2"]), (1, &["urn:ngsi-ld:Airport:3"])]);
+        let entity = entity_with_instances(
+            "urn:ngsi-ld:Route:1",
+            json!({"id": "1", "a": "• 9 8 7", "b": ""}),
+            "servesAirports",
+            objects.clone(),
         );
-        let entity = Entity::new(urn("urn:ngsi-ld:Route:1"), json!({"id": "1", "a": "1 2", "b": "3"}), None, relationships, None);
 
         let (result, _) = EntityExtractor::new(resolver)
             .extract(AssembledEntity::from_single(entity, mapping), &DroppedAttributes::new())
             .unwrap()
             .into_parts();
 
-        let groups = result.instance_relationships().as_ref().unwrap().get(&name("servesAirports")).unwrap();
-        assert_eq!(
-            groups,
-            &vec![
-                vec![urn("urn:ngsi-ld:Airport:1"), urn("urn:ngsi-ld:Airport:2")],
-                vec![urn("urn:ngsi-ld:Airport:3")],
-            ]
-        );
-        // The flat entry is drained so the transformer reads the grouped form.
+        assert_eq!(result.instance_relationships().as_ref().unwrap().get(&name("servesAirports")), Some(&objects));
         assert!(!result.relationships().contains_key(&name("servesAirports")));
-        let per_item = result.metadata().as_ref().unwrap().get(&name("servesAirports")).unwrap().as_per_item().unwrap();
-        assert_eq!(per_item.len(), 2);
         assert_eq!(
-            per_item[0].get(&name("datasetId")).map(SubAttribute::value),
-            Some(&json!("urn:ngsi-ld:dataset:role:departure"))
-        );
-        assert_eq!(
-            per_item[1].get(&name("datasetId")).map(SubAttribute::value),
-            Some(&json!("urn:ngsi-ld:dataset:role:arrival"))
+            per_item_dataset_ids(&result, "servesAirports"),
+            [
+                Some(json!("urn:ngsi-ld:dataset:role:departure")),
+                Some(json!("urn:ngsi-ld:dataset:role:arrival"))
+            ]
         );
     }
 
     #[test]
-    fn a_dropped_list_relationship_instance_keeps_groups_and_metadata_aligned() {
+    fn a_list_relationship_instance_with_no_objects_keeps_every_instance_on_its_own_metadata_index() {
         let (resolver, mapping) = prepare(
             r#"{
                 version: "v4",
@@ -751,28 +704,96 @@ mod tests {
                 },
             }"#,
         );
-        // The middle instance tokenizes to nothing (`b` absent); its group and metadata both drop.
-        let mut relationships = Relationships::default();
-        relationships.insert(name("servesAirports"), vec![urn("urn:ngsi-ld:Airport:1"), urn("urn:ngsi-ld:Airport:3")]);
-        let entity = Entity::new(urn("urn:ngsi-ld:Route:1"), json!({"id": "1", "a": "1", "c": "3"}), None, relationships, None);
+        // The middle instance minted no object (its tokens named no target), so index 1 has none; the
+        // arrival objects stay under index 2, beside the arrival metadata.
+        let objects = instance_objects(&[(0, &["urn:ngsi-ld:Airport:1"]), (2, &["urn:ngsi-ld:Airport:3"])]);
+        let entity = entity_with_instances(
+            "urn:ngsi-ld:Route:1",
+            json!({"id": "1", "a": "1", "b": "• ?", "c": "3"}),
+            "servesAirports",
+            objects.clone(),
+        );
 
         let (result, _) = EntityExtractor::new(resolver)
             .extract(AssembledEntity::from_single(entity, mapping), &DroppedAttributes::new())
             .unwrap()
             .into_parts();
 
-        let groups = result.instance_relationships().as_ref().unwrap().get(&name("servesAirports")).unwrap();
-        assert_eq!(groups, &vec![vec![urn("urn:ngsi-ld:Airport:1")], vec![urn("urn:ngsi-ld:Airport:3")]]);
-        let per_item = result.metadata().as_ref().unwrap().get(&name("servesAirports")).unwrap().as_per_item().unwrap();
-        assert_eq!(per_item.len(), 2);
+        assert_eq!(result.instance_relationships().as_ref().unwrap().get(&name("servesAirports")), Some(&objects));
         assert_eq!(
-            per_item[0].get(&name("datasetId")).map(SubAttribute::value),
-            Some(&json!("urn:ngsi-ld:dataset:role:departure"))
+            per_item_dataset_ids(&result, "servesAirports"),
+            [
+                Some(json!("urn:ngsi-ld:dataset:role:departure")),
+                Some(json!("urn:ngsi-ld:dataset:role:via")),
+                Some(json!("urn:ngsi-ld:dataset:role:arrival")),
+            ]
         );
-        assert_eq!(
-            per_item[1].get(&name("datasetId")).map(SubAttribute::value),
-            Some(&json!("urn:ngsi-ld:dataset:role:arrival"))
+    }
+
+    #[test]
+    fn a_relationship_instance_attribute_with_no_objects_records_no_metadata() {
+        let (resolver, mapping) = prepare(
+            r#"{
+                version: "v4",
+                dataModel: "Route",
+                identity: { entityName: "R-{{ id }}" },
+                attributes: {
+                    servesAirports: {
+                        type: "ListRelationship",
+                        target: { entity: "Airport" },
+                        instances: [
+                            { source: "{{ a }}", properties: { datasetId: { source: "urn:ngsi-ld:dataset:role:departure" } } },
+                        ],
+                    },
+                },
+            }"#,
         );
+
+        let (result, _) = EntityExtractor::new(resolver)
+            .extract(
+                AssembledEntity::from_single(entity("urn:ngsi-ld:Route:1", json!({"id": "1", "a": "•"})), mapping),
+                &DroppedAttributes::new(),
+            )
+            .unwrap()
+            .into_parts();
+
+        assert!(result.metadata().is_none());
+        assert!(result.instance_relationships().is_none());
+    }
+
+    #[test]
+    fn a_failed_relationship_instance_property_drops_the_instance_objects_with_it() {
+        let (resolver, mapping) = prepare(
+            r#"{
+                version: "v4",
+                dataModel: "Route",
+                identity: { entityName: "R-{{ id }}" },
+                attributes: {
+                    servesAirports: {
+                        type: "ListRelationship",
+                        target: { entity: "Airport" },
+                        instances: [
+                            { source: "{{ a }}", properties: { datasetId: { source: "urn:ngsi-ld:dataset:role:departure" }, since: { source: "{{ since | upper }}" } } },
+                        ],
+                    },
+                },
+            }"#,
+        );
+        let dropped = DroppedAttributes::new();
+        let entity = entity_with_instances(
+            "urn:ngsi-ld:Route:1",
+            json!({"id": "1", "a": "1", "since": 2020}),
+            "servesAirports",
+            instance_objects(&[(0, &["urn:ngsi-ld:Airport:1"])]),
+        );
+
+        let (result, _) = EntityExtractor::new(resolver)
+            .extract(AssembledEntity::from_single(entity, mapping), &dropped)
+            .unwrap()
+            .into_parts();
+
+        assert!(result.instance_relationships().is_none());
+        assert_eq!(dropped.templates.into_entries()[0].0, name("servesAirports"));
     }
 
     #[test]
@@ -856,8 +877,13 @@ mod tests {
         relationships.insert(name("hasLeadActor"), vec![urn("urn:ngsi-ld:Person:31")]);
         let mut nested = NestedRelationships::default();
         nested.insert(nested_path(&["hasLeadActor", "playsCharacter"]), vec![urn("urn:ngsi-ld:Character:JackSparrow")]);
-        let mut entity = entity("urn:ngsi-ld:Movie:1", json!({"id": "1", "actor": "31", "character": "JackSparrow", "order": 0}));
-        entity.relationships_mut().extend(relationships);
+        let mut entity = Entity::new(
+            urn("urn:ngsi-ld:Movie:1"),
+            json!({"id": "1", "actor": "31", "character": "JackSparrow", "order": 0}),
+            None,
+            relationships,
+            None,
+        );
         entity.set_nested_relationships(Some(nested));
 
         let (result, _) = EntityExtractor::new(resolver)
@@ -905,8 +931,13 @@ mod tests {
         let mut nested = NestedRelationships::default();
         nested.insert(nested_path(&["hasLeadActor", "playsCharacter"]), vec![urn("urn:ngsi-ld:Character:X")]);
         nested.insert(nested_path(&["hasLeadActor", "playsCharacter", "locatedIn"]), vec![urn("urn:ngsi-ld:Place:Y")]);
-        let mut entity = entity("urn:ngsi-ld:Movie:1", json!({"id": "1", "actor": "31", "character": "X", "place": "Y"}));
-        entity.relationships_mut().extend(relationships);
+        let mut entity = Entity::new(
+            urn("urn:ngsi-ld:Movie:1"),
+            json!({"id": "1", "actor": "31", "character": "X", "place": "Y"}),
+            None,
+            relationships,
+            None,
+        );
         entity.set_nested_relationships(Some(nested));
 
         let (result, _) = EntityExtractor::new(resolver)
@@ -948,8 +979,13 @@ mod tests {
             nested_path(&["directedBy", "knownFor"]),
             vec![urn("urn:ngsi-ld:Movie:10"), urn("urn:ngsi-ld:Movie:20")],
         );
-        let mut entity = entity("urn:ngsi-ld:Movie:1", json!({"id": "1", "director": "5", "films": "10 20"}));
-        entity.relationships_mut().extend(relationships);
+        let mut entity = Entity::new(
+            urn("urn:ngsi-ld:Movie:1"),
+            json!({"id": "1", "director": "5", "films": "10 20"}),
+            None,
+            relationships,
+            None,
+        );
         entity.set_nested_relationships(Some(nested));
 
         let (result, _) = EntityExtractor::new(resolver)
@@ -972,8 +1008,13 @@ mod tests {
         // the sibling Property survives.
         let mut nested = NestedRelationships::default();
         nested.insert(nested_path(&["hasLeadActor", "somethingElse"]), vec![urn("urn:ngsi-ld:Other:9")]);
-        let mut entity = entity("urn:ngsi-ld:Movie:1", json!({"id": "1", "actor": "31", "order": 0}));
-        entity.relationships_mut().extend(relationships);
+        let mut entity = Entity::new(
+            urn("urn:ngsi-ld:Movie:1"),
+            json!({"id": "1", "actor": "31", "order": 0}),
+            None,
+            relationships,
+            None,
+        );
         entity.set_nested_relationships(Some(nested));
 
         let (result, _) = EntityExtractor::new(resolver)
@@ -1005,8 +1046,13 @@ mod tests {
         );
         let mut relationships = Relationships::default();
         relationships.insert(name("hasCast"), vec![urn("urn:ngsi-ld:Person:1"), urn("urn:ngsi-ld:Person:2")]);
-        let mut entity = entity("urn:ngsi-ld:Movie:1", json!({"id": "1", "cast": "1 2", "size": 2}));
-        entity.relationships_mut().extend(relationships);
+        let entity = Entity::new(
+            urn("urn:ngsi-ld:Movie:1"),
+            json!({"id": "1", "cast": "1 2", "size": 2}),
+            None,
+            relationships,
+            None,
+        );
 
         let (result, _) = EntityExtractor::new(resolver)
             .extract(AssembledEntity::from_single(entity, mapping), &DroppedAttributes::new())

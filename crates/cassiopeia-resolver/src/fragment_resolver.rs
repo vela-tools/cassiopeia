@@ -102,9 +102,10 @@ impl FragmentResolver {
 
         let mut edges = Vec::with_capacity(parent_contexts.len());
         for parent_context in parent_contexts {
-            // The store key is the relationship path's dotted form: a bare name for a top-level
-            // relationship, dotted segments for a nested one.
-            let property = parent_context.property().to_string();
+            // The store key is the relationship key's text form: a bare name for a top-level
+            // relationship, dotted segments for a nested one, and `name#index` for one instance of a
+            // multi-attribute relationship, so the store groups each instance's objects apart.
+            let property = parent_context.key().to_string();
             let (parent_urn, child_urn) = match parent_context.urn() {
                 ParentContextType::Parent(parent) => (parent.clone(), base_urn.clone()),
                 ParentContextType::Child(child) => (base_urn.clone(), child.clone()),
@@ -400,6 +401,7 @@ mod tests {
         fragment::Fragment,
         mapped::Mapped,
         parent_context::{ParentContext, ParentContextType},
+        relationship_key::RelationshipKey,
         relationship_path::RelationshipPath,
     };
     use cassiopeia_mapping::{mapping::Mapping, template::runner::TemplateRunner};
@@ -464,7 +466,10 @@ mod tests {
         let site = urn("urn:ngsi-ld:Site:9");
 
         for timestamp in ["2026-04-03T22:00:20Z", "2026-04-03T22:05:20Z", "2026-04-03T22:10:20Z"] {
-            let context = ParentContext::new(ParentContextType::Child(site.clone()), RelationshipPath::flat(name("hasSite")));
+            let context = ParentContext::new(
+                ParentContextType::Child(site.clone()),
+                RelationshipKey::Path(RelationshipPath::flat(name("hasSite"))),
+            );
             resolver
                 .resolve(Mapped::new(
                     Fragment::new(json!({"temperature": 20, "timestamp": timestamp}), station.clone(), None, Some(vec![context])),
@@ -475,7 +480,10 @@ mod tests {
 
         let mut units = resolver.assemble(&station).unwrap();
         assert_eq!(units.len(), 1);
-        assert_eq!(units.remove(0).relationships().get(&name("hasSite")).map(Vec::as_slice), Some(&[site][..]));
+        assert_eq!(
+            units.remove(0).relationships().top_level().get(&name("hasSite")).map(Vec::as_slice),
+            Some(&[site][..])
+        );
     }
 
     #[test]

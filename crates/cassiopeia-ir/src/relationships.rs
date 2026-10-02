@@ -1,7 +1,8 @@
-use crate::relationship_path::RelationshipPath;
+use crate::{instance_index::InstanceIndex, relationship_path::RelationshipPath};
 use cassiopeia_ngsi_ld::entity::name::NameBuf;
 use foldhash::fast::RandomState;
 use indexmap::IndexMap;
+use std::collections::BTreeMap;
 use urn_rs::Urn;
 
 /// An entity's top-level relationship targets, keyed by attribute name in declaration order.
@@ -19,8 +20,13 @@ pub type Relationships = IndexMap<NameBuf, Vec<Urn>, RandomState>;
 /// attribute names the mapping declared.
 pub type NestedRelationships = IndexMap<RelationshipPath, Vec<Urn>, RandomState>;
 
-/// The per-instance object lists of every `ListRelationship` carrying several `datasetId`-tagged
-/// instances (ETSI GS CIM 009 v1.9.1 clause 4.5.5), keyed by attribute name.
+/// The objects each instance of one multi-attribute relationship minted, keyed by the instance's
+/// declaration index (ETSI GS CIM 009 v1.9.1 clause 4.5.5).
 ///
-/// One inner `Vec<Urn>` per surviving instance, in declaration order. Hashed like [`Relationships`].
-pub type InstanceRelationships = IndexMap<NameBuf, Vec<Vec<Urn>>, RandomState>;
+/// Ordered by index, so the instances come out in declaration order. An instance that minted no
+/// object has no entry, so it is omitted without moving any other instance off its own index.
+pub type InstanceObjects = BTreeMap<InstanceIndex, Vec<Urn>>;
+
+/// The per-instance objects of every multi-attribute `Relationship` or `ListRelationship` (ETSI GS
+/// CIM 009 v1.9.1 clause 4.5.5, EXAMPLE 19), keyed by attribute name. Hashed like [`Relationships`].
+pub type InstanceRelationships = IndexMap<NameBuf, InstanceObjects, RandomState>;

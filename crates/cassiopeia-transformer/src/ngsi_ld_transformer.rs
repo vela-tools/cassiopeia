@@ -158,9 +158,8 @@ fn build_attribute(
     let metadata = *metadata;
     let key = name.as_str();
     // Multi-attribute instances (ETSI GS CIM 009 v1.9.1 clause 4.5.5) are valid on every reified
-    // attribute kind; each family reads its instances from the store the resolve stage populated for
-    // it: values for a Property, flat objects for a Relationship, regrouped object lists for a
-    // `ListRelationship`.
+    // attribute kind; each family reads its instances from the store populated for it: values for a
+    // Property, per-instance objects for a Relationship or a `ListRelationship`.
     if config.instances().is_some() {
         return match config.kind() {
             NgsiLdAttributeKind::Property
@@ -169,7 +168,7 @@ fn build_attribute(
             | NgsiLdAttributeKind::VocabProperty
             | NgsiLdAttributeKind::ListProperty
             | NgsiLdAttributeKind::JsonProperty => build_multi_instance_attribute(name, config, values, metadata, cache, unreadable),
-            NgsiLdAttributeKind::Relationship => build_multi_instance_relationship(name, config, relationships, metadata, cache, unreadable),
+            NgsiLdAttributeKind::Relationship => build_multi_instance_relationship(name, config, instance_relationships, metadata, cache, unreadable),
             NgsiLdAttributeKind::ListRelationship => build_multi_instance_list_relationship(name, config, instance_relationships, metadata, cache, unreadable),
         };
     }
@@ -310,78 +309,66 @@ fn build_list_relationship_attribute(
     ))
 }
 
-/// Builds one `Relationship` per object URN, each carrying the per-index metadata recorded for it.
-///
-/// Shared by the per-item `ListRelationship` (one `Relationship` per target so its qualifiers travel
-/// with it) and the multi-attribute `Relationship` (one `Relationship` per `datasetId`-tagged
-/// instance, ETSI GS CIM 009 v1.9.1 clause 4.5.5): both are a sequence of single-object relationships
-/// aligned with per-index metadata, so both mint their instances here.
-fn build_relationship_instances(
-    objects: Vec<Urn>,
-    object_type: Option<&NameBuf>,
-    name: &NameBuf,
-    metadata: Option<&EntityMetadata>,
-    cache: &mut QualifierCache<'_>,
-    unreadable: &UnreadableTimestamps,
-) -> Vec<NgsiLdAttribute> {
-    objects
-        .into_iter()
-        .enumerate()
-        .map(|(index, object)| {
-            let meta = transform_metadata(metadata, name, Some(index), cache, unreadable);
-            let mut builder = RelationshipBuilder::new(object);
-            if let Some(object_type) = object_type {
-                builder = builder.object_type(object_type.clone());
-            }
-            if let Some(observed_at) = meta.observed_at {
-                builder = builder.observed_at(observed_at);
-            }
-            if let Some(dataset_id) = meta.dataset_id {
-                builder = builder.dataset_id(dataset_id);
-            }
-            for (name, wrapper) in meta.custom_attributes {
-                builder = builder.attribute(name, *wrapper);
-            }
-            NgsiLdAttribute::Relationship(builder.build())
-        })
-        .collect()
+/// Builds one `Relationship` instance of a multi-attribute Relationship from its object and the
+/// metadata recorded for its instance.
+fn build_relationship_instance(object: Urn, object_type: Option<&NameBuf>, meta: MetadataSummary) -> NgsiLdAttribute {
+    let mut builder = RelationshipBuilder::new(object);
+    if let Some(object_type) = object_type {
+        builder = builder.object_type(object_type.clone());
+    }
+    if let Some(observed_at) = meta.observed_at {
+        builder = builder.observed_at(observed_at);
+    }
+    if let Some(dataset_id) = meta.dataset_id {
+        builder = builder.dataset_id(dataset_id);
+    }
+    for (name, wrapper) in meta.custom_attributes {
+        builder = builder.attribute(name, *wrapper);
+    }
+    NgsiLdAttribute::Relationship(builder.build())
 }
 
 /// Builds a multi-attribute Relationship: one `Relationship` instance per `datasetId`, each with its
 /// own object (ETSI GS CIM 009 v1.9.1 clause 4.5.5).
 ///
-/// The resolve stage minted one object per surviving instance and the extractor recorded one metadata
-/// entry per surviving instance, dropped in lockstep, so object `i` and metadata `i` describe the
-/// same instance. When no instance survived, the attribute is omitted.
+/// Each instance's object was minted under the instance's declaration index, and the extractor
+/// recorded the instance's metadata at that same index, so an instance whose source named no target
+/// is simply absent and every other instance still meets its own `datasetId`. A Relationship has a
+/// single object, so an instance carrying several keeps the first, as a plain Relationship does.
+/// When no instance minted an object, the attribute is omitted.
 fn build_multi_instance_relationship(
     name: &NameBuf,
     config: &Attribute,
-    relationships: &mut Relationships,
+    instance_relationships: &mut InstanceRelationships,
     metadata: Option<&EntityMetadata>,
     cache: &mut QualifierCache<'_>,
     unreadable: &UnreadableTimestamps,
 ) -> Option<NgsiLdAttributeWrapper> {
-    let objects = relationships.swap_remove(name.as_str())?;
-    if objects.is_empty() {
-        return None;
-    }
+    let per_instance = instance_relationships.swap_remove(name.as_str())?;
+    let object_type = object_type(config);
+    let instances = per_instance
+        .into_iter()
+        .filter_map(|(index, objects)| {
+            let object = objects.into_iter().next()?;
+            let meta = transform_metadata(metadata, name, Some(usize::from(index)), cache, unreadable);
+            Some(build_relationship_instance(object, object_type.as_ref(), meta))
+        })
+        .collect::<Vec<NgsiLdAttribute>>();
 
-    Some(NgsiLdAttributeWrapper::Multi(build_relationship_instances(
-        objects,
-        object_type(config).as_ref(),
-        name,
-        metadata,
-        cache,
-        unreadable,
-    )))
+    if instances.is_empty() {
+        None
+    } else {
+        Some(NgsiLdAttributeWrapper::Multi(instances))
+    }
 }
 
 /// Builds a multi-attribute `ListRelationship`: one `ListRelationship` instance per `datasetId`, each
 /// with its own `objectList` (ETSI GS CIM 009 v1.9.1 clause 4.5.5, EXAMPLE 19).
 ///
-/// The extractor regrouped the flat objects into one list per surviving instance and recorded one
-/// metadata entry per surviving instance, dropped in lockstep, so group `i` and metadata `i` describe
-/// the same instance. When no instance survived, the attribute is omitted.
+/// Each instance's objects were minted under the instance's declaration index, and the extractor
+/// recorded the instance's metadata at that same index, so an instance that minted no object is
+/// simply absent and every other instance still meets its own `datasetId`. When no instance minted
+/// an object, the attribute is omitted.
 fn build_multi_instance_list_relationship(
     name: &NameBuf,
     config: &Attribute,
@@ -390,17 +377,13 @@ fn build_multi_instance_list_relationship(
     cache: &mut QualifierCache<'_>,
     unreadable: &UnreadableTimestamps,
 ) -> Option<NgsiLdAttributeWrapper> {
-    let groups = instance_relationships.swap_remove(name.as_str())?;
-    if groups.is_empty() {
-        return None;
-    }
-
+    let per_instance = instance_relationships.swap_remove(name.as_str())?;
     let object_type = object_type(config);
-    let instances = groups
+    let instances = per_instance
         .into_iter()
-        .enumerate()
+        .filter(|(_, object_list)| !object_list.is_empty())
         .map(|(index, object_list)| {
-            let meta = transform_metadata(metadata, name, Some(index), cache, unreadable);
+            let meta = transform_metadata(metadata, name, Some(usize::from(index)), cache, unreadable);
             // The shared object type is cloned per instance; a struct literal keeps this an
             // initialization rather than a re-assignment over the `None` the constructor would set.
             NgsiLdAttribute::ListRelationship(NgsiLdListRelationship {
@@ -413,7 +396,11 @@ fn build_multi_instance_list_relationship(
         })
         .collect::<Vec<NgsiLdAttribute>>();
 
-    Some(NgsiLdAttributeWrapper::Multi(instances))
+    if instances.is_empty() {
+        None
+    } else {
+        Some(NgsiLdAttributeWrapper::Multi(instances))
+    }
 }
 
 #[cfg(test)]
@@ -422,8 +409,10 @@ mod tests {
     use cassiopeia_common::parallelism::Parallelism;
     use cassiopeia_ir::{
         entity::{AttributeValues, Entity},
+        instance_index::InstanceIndex,
         mapped::Mapped,
         metadata::MetadataStorage,
+        relationships::{InstanceObjects, InstanceRelationships},
         sub_attribute::{SubAttribute, SubAttributes},
     };
     use cassiopeia_mapping::{mapping::Mapping, template::runner::TemplateRunner};
@@ -449,6 +438,15 @@ mod tests {
     use serde_json::json;
     use std::{path::Path, sync::Arc};
     use urn_rs::Urn;
+
+    /// The per-instance objects of one multi-attribute relationship `attribute`, by declaration index.
+    fn instance_relationships(attribute: &str, instances: &[(usize, &[&str])]) -> InstanceRelationships {
+        let objects: InstanceObjects = instances
+            .iter()
+            .map(|(index, objects)| (InstanceIndex::from(*index), objects.iter().map(|object| urn(object)).collect()))
+            .collect();
+        InstanceRelationships::from_iter([(name(attribute), objects)])
+    }
 
     /// A per-instance metadata entry carrying only a `datasetId`.
     fn dataset_entry(dataset_id: &str) -> SubAttributes {
@@ -794,8 +792,6 @@ mod tests {
                 },
             }"#,
         );
-        let mut relationships = IndexMap::default();
-        relationships.insert(name("servesAirport"), vec![urn("urn:ngsi-ld:Airport:535"), urn("urn:ngsi-ld:Airport:340")]);
         let mut metadata = IndexMap::default();
         metadata.insert(
             name("servesAirport"),
@@ -804,8 +800,12 @@ mod tests {
                 dataset_entry("urn:ngsi-ld:dataset:role:arrival"),
             ]),
         );
-        let mut entity = Entity::new(urn("urn:ngsi-ld:Flight:1"), json!({}), None, relationships, None);
+        let mut entity = Entity::new(urn("urn:ngsi-ld:Flight:1"), json!({}), None, IndexMap::default(), None);
         entity.set_metadata(Some(metadata));
+        entity.set_instance_relationships(Some(instance_relationships(
+            "servesAirport",
+            &[(0, &["urn:ngsi-ld:Airport:535"]), (1, &["urn:ngsi-ld:Airport:340"])],
+        )));
 
         let result = NgsiLdTransformer::new()
             .transform(Mapped::new(entity, mapping), &UnreadableTimestamps::new())
@@ -827,9 +827,9 @@ mod tests {
     }
 
     #[test]
-    fn a_dropped_relationship_instance_leaves_survivors_aligned_with_their_dataset_ids() {
-        // Three instances were declared, but the resolve/extract stages compacted the middle one out,
-        // so the transformer sees two objects and two metadata entries and zips them in order.
+    fn a_relationship_instance_without_an_object_leaves_the_others_on_their_own_dataset_ids() {
+        // Three instances were declared and each has its metadata entry, but the middle one minted no
+        // object, so it has no objects under its index and the arrival object keeps index 2.
         let mapping = mapping(
             r#"{
                 version: "v4",
@@ -848,18 +848,21 @@ mod tests {
                 },
             }"#,
         );
-        let mut relationships = IndexMap::default();
-        relationships.insert(name("servesAirport"), vec![urn("urn:ngsi-ld:Airport:1"), urn("urn:ngsi-ld:Airport:3")]);
         let mut metadata = IndexMap::default();
         metadata.insert(
             name("servesAirport"),
             MetadataStorage::per_item(vec![
                 dataset_entry("urn:ngsi-ld:dataset:role:departure"),
+                dataset_entry("urn:ngsi-ld:dataset:role:via"),
                 dataset_entry("urn:ngsi-ld:dataset:role:arrival"),
             ]),
         );
-        let mut entity = Entity::new(urn("urn:ngsi-ld:Flight:1"), json!({}), None, relationships, None);
+        let mut entity = Entity::new(urn("urn:ngsi-ld:Flight:1"), json!({}), None, IndexMap::default(), None);
         entity.set_metadata(Some(metadata));
+        entity.set_instance_relationships(Some(instance_relationships(
+            "servesAirport",
+            &[(0, &["urn:ngsi-ld:Airport:1"]), (2, &["urn:ngsi-ld:Airport:3"])],
+        )));
 
         let result = NgsiLdTransformer::new()
             .transform(Mapped::new(entity, mapping), &UnreadableTimestamps::new())
@@ -893,14 +896,6 @@ mod tests {
                 },
             }"#,
         );
-        let mut instance_relationships = IndexMap::default();
-        instance_relationships.insert(
-            name("servesAirports"),
-            vec![
-                vec![urn("urn:ngsi-ld:Airport:1"), urn("urn:ngsi-ld:Airport:2")],
-                vec![urn("urn:ngsi-ld:Airport:3")],
-            ],
-        );
         let mut metadata = IndexMap::default();
         metadata.insert(
             name("servesAirports"),
@@ -911,7 +906,10 @@ mod tests {
         );
         let mut entity = Entity::new(urn("urn:ngsi-ld:Route:1"), json!({}), None, IndexMap::default(), None);
         entity.set_metadata(Some(metadata));
-        entity.set_instance_relationships(Some(instance_relationships));
+        entity.set_instance_relationships(Some(instance_relationships(
+            "servesAirports",
+            &[(0, &["urn:ngsi-ld:Airport:1", "urn:ngsi-ld:Airport:2"]), (1, &["urn:ngsi-ld:Airport:3"])],
+        )));
 
         let result = NgsiLdTransformer::new()
             .transform(Mapped::new(entity, mapping), &UnreadableTimestamps::new())
@@ -935,6 +933,70 @@ mod tests {
         assert_eq!(lists[0].dataset_id, Some(urn("urn:ngsi-ld:dataset:role:departure")));
         assert_eq!(lists[1].object_list, vec![urn("urn:ngsi-ld:Airport:3")]);
         assert_eq!(lists[1].dataset_id, Some(urn("urn:ngsi-ld:dataset:role:arrival")));
+    }
+
+    #[test]
+    fn a_list_relationship_instance_without_objects_leaves_the_others_on_their_own_dataset_ids() {
+        let mapping = mapping(
+            r#"{
+                version: "v4",
+                dataModel: "Route",
+                identity: { entityName: "R-{{ id }}" },
+                attributes: {
+                    servesAirports: {
+                        type: "ListRelationship",
+                        target: { entity: "Airport" },
+                        instances: [
+                            { source: "{{ a }}", properties: { datasetId: { source: "urn:ngsi-ld:dataset:role:departure" } } },
+                            { source: "{{ b }}", properties: { datasetId: { source: "urn:ngsi-ld:dataset:role:via" } } },
+                            { source: "{{ c }}", properties: { datasetId: { source: "urn:ngsi-ld:dataset:role:arrival" } } },
+                        ],
+                    },
+                },
+            }"#,
+        );
+        let mut metadata = IndexMap::default();
+        metadata.insert(
+            name("servesAirports"),
+            MetadataStorage::per_item(vec![
+                dataset_entry("urn:ngsi-ld:dataset:role:departure"),
+                dataset_entry("urn:ngsi-ld:dataset:role:via"),
+                dataset_entry("urn:ngsi-ld:dataset:role:arrival"),
+            ]),
+        );
+        let mut entity = Entity::new(urn("urn:ngsi-ld:Route:1"), json!({}), None, IndexMap::default(), None);
+        entity.set_metadata(Some(metadata));
+        entity.set_instance_relationships(Some(instance_relationships(
+            "servesAirports",
+            &[(0, &["urn:ngsi-ld:Airport:1"]), (2, &["urn:ngsi-ld:Airport:3", "urn:ngsi-ld:Airport:4"])],
+        )));
+
+        let result = NgsiLdTransformer::new()
+            .transform(Mapped::new(entity, mapping), &UnreadableTimestamps::new())
+            .unwrap();
+
+        let Some(NgsiLdAttributeWrapper::Multi(instances)) = result.attributes.get(&name("servesAirports")) else {
+            panic!("expected a multi-instance list relationship");
+        };
+        let lists: Vec<(&[Urn], Option<&Urn>)> = instances
+            .iter()
+            .map(|attr| {
+                let NgsiLdAttribute::ListRelationship(list) = attr else {
+                    panic!("expected a list relationship instance, got {attr:?}");
+                };
+                (list.object_list.as_slice(), list.dataset_id.as_ref())
+            })
+            .collect();
+        assert_eq!(
+            lists,
+            [
+                (&[urn("urn:ngsi-ld:Airport:1")][..], Some(&urn("urn:ngsi-ld:dataset:role:departure"))),
+                (
+                    &[urn("urn:ngsi-ld:Airport:3"), urn("urn:ngsi-ld:Airport:4")][..],
+                    Some(&urn("urn:ngsi-ld:dataset:role:arrival"))
+                ),
+            ]
+        );
     }
 
     #[test]

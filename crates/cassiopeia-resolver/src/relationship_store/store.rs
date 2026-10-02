@@ -4,12 +4,14 @@ use indexmap::IndexMap;
 use std::fmt::Debug;
 use urn_rs::Urn;
 
-/// One parent's relationships, grouped by the property path they were stored under.
+/// One parent's relationships, grouped by the relationship key they were stored under.
 ///
-/// The keys are attribute names a mapping declared, so the grouping hashes with `foldhash` rather
-/// than the standard library's `SipHash`: nothing untrusted reaches these keys, and the map is rebuilt
-/// for every assembled entity. It stays an [`IndexMap`] because assembly relies on the properties
-/// coming back in insertion order.
+/// Each key is the text form of a
+/// [`RelationshipKey`](cassiopeia_ir::relationship_key::RelationshipKey): a relationship path, or an
+/// attribute name and an instance index. The keys are built from attribute names a mapping declared,
+/// so the grouping hashes with `foldhash` rather than the standard library's `SipHash`: nothing
+/// untrusted reaches these keys, and the map is rebuilt for every assembled entity. It stays an
+/// [`IndexMap`] because assembly relies on the keys coming back in insertion order.
 pub type StoredRelationships = IndexMap<String, Vec<Urn>, RandomState>;
 
 /// Stores parent-child relationships discovered during resolution.

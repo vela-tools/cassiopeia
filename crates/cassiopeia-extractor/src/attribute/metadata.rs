@@ -1,7 +1,4 @@
-use crate::{
-    attribute::{resolution_context::ResolutionContext, resolver::resolve},
-    error::Result,
-};
+use crate::attribute::{resolution_context::ResolutionContext, resolution_error::Result, resolver::resolve};
 use cassiopeia_ir::{
     metadata::MetadataStorage,
     relationship_path::RelationshipPath,
@@ -44,7 +41,7 @@ impl MetadataExtractor {
     /// The path to an attribute, used as the base for looking up its nested relationships. Empty when
     /// the entity has no nested relationships, so the common case allocates nothing.
     fn base_path(ctx: &ResolutionContext, attr_name: &NameBuf) -> Vec<NameBuf> {
-        if ctx.nested_relationships.is_some() {
+        if ctx.relationships.nested().is_some() {
             vec![attr_name.clone()]
         } else {
             Vec::new()
@@ -55,22 +52,17 @@ impl MetadataExtractor {
     ///
     /// Each instance's metadata is the attribute's shared properties (such as `unitCode` or
     /// `observedAt`) overlaid with the instance's own (notably its `datasetId`), so an instance's key
-    /// of the same name wins. Entry `i` of the result aligns with instance `i`'s resolved value (ETSI
-    /// GS CIM 009 v1.9.1 clause 4.5.5).
+    /// of the same name wins. Entry `i` of the result belongs to declared instance `i`, whatever that
+    /// instance resolves to: a Property-family instance's value sits at the same index in its value
+    /// array, and a relationship instance's objects were minted under the same
+    /// [`InstanceIndex`](cassiopeia_ir::instance_index::InstanceIndex), so an instance that resolved
+    /// to nothing cannot move another onto the wrong metadata (ETSI GS CIM 009 v1.9.1 clause 4.5.5).
     fn extract_instances(ctx: &ResolutionContext, attr_name: &NameBuf, config: &Attribute, instances: &[AttributeInstance]) -> Result<Option<MetadataStorage>> {
         let base = Self::base_path(ctx, attr_name);
         let shared = Self::resolve_property_map(ctx, &base, config.properties().as_ref())?;
-        let kind = *config.kind();
 
         let mut per_item = Vec::with_capacity(instances.len());
         for instance in instances {
-            // A relationship instance whose source resolves to no object was dropped by the expander
-            // when it minted the objects, so its metadata is dropped too and the per-index metadata
-            // stays in lockstep with the objects. A Property-family instance keeps its entry even when
-            // absent: its value side pads the hole with a null the transformer drops (clause 4.5.5).
-            if Self::relationship_instance_is_empty(ctx, kind, instance)? {
-                continue;
-            }
             // Each instance owns its merged metadata, so the shared base is cloned per instance.
             let mut metadata = shared.clone();
             let own = Self::resolve_property_map(ctx, &base, instance.properties().as_ref())?;
@@ -82,29 +74,6 @@ impl MetadataExtractor {
             Ok(None)
         } else {
             Ok(Some(MetadataStorage::per_item(per_item)))
-        }
-    }
-
-    /// Whether a relationship instance contributes no object, so it and its metadata are dropped.
-    ///
-    /// Mirrors the expander's drop decision exactly: a `Relationship` instance is empty when its
-    /// source resolves to an empty identifier, and a `ListRelationship` instance when it tokenizes to
-    /// nothing. A Property-family instance is never dropped here (it is null-padded on the value
-    /// side), so it always reports non-empty.
-    fn relationship_instance_is_empty(ctx: &ResolutionContext, kind: NgsiLdAttributeKind, instance: &AttributeInstance) -> Result<bool> {
-        let Some(templates) = instance.compiled_source().as_ref() else {
-            return Ok(matches!(kind, NgsiLdAttributeKind::Relationship | NgsiLdAttributeKind::ListRelationship));
-        };
-
-        match kind {
-            NgsiLdAttributeKind::Relationship => Ok(ctx.resolver.resolve_joined(templates, ctx.data)?.is_empty()),
-            NgsiLdAttributeKind::ListRelationship => Ok(ctx.resolver.resolve_tokens(templates, ctx.data)?.is_empty()),
-            NgsiLdAttributeKind::Property
-            | NgsiLdAttributeKind::GeoProperty
-            | NgsiLdAttributeKind::LanguageProperty
-            | NgsiLdAttributeKind::VocabProperty
-            | NgsiLdAttributeKind::ListProperty
-            | NgsiLdAttributeKind::JsonProperty => Ok(false),
         }
     }
 
@@ -127,7 +96,7 @@ impl MetadataExtractor {
         };
 
         for (name, property) in properties {
-            if ctx.nested_relationships.is_some() && matches!(property.kind(), NgsiLdAttributeKind::Relationship | NgsiLdAttributeKind::ListRelationship) {
+            if ctx.relationships.nested().is_some() && matches!(property.kind(), NgsiLdAttributeKind::Relationship | NgsiLdAttributeKind::ListRelationship) {
                 if let Some(sub) = Self::resolve_nested_relationship(ctx, path, name, property)? {
                     metadata.insert(name.clone(), sub);
                 }
@@ -139,7 +108,7 @@ impl MetadataExtractor {
             if !value.is_null() {
                 // Grow the path only when nested relationships exist, so a deeper one under this
                 // Property sub-attribute can still be keyed; otherwise recurse with an empty path.
-                let nested = if ctx.nested_relationships.is_some() {
+                let nested = if ctx.relationships.nested().is_some() {
                     let mut deeper = path.to_vec();
                     deeper.push(name.clone());
                     Self::resolve_property_map(&child, &deeper, property.properties().as_ref())?
@@ -161,7 +130,7 @@ impl MetadataExtractor {
     /// record) yields `None`, dropping the sub-attribute exactly as the expander minted no object for
     /// it. The relationship's own sub-attributes recurse under its full path.
     fn resolve_nested_relationship(ctx: &ResolutionContext, path: &[NameBuf], name: &NameBuf, property: &Attribute) -> Result<Option<SubAttribute>> {
-        let Some(nested_map) = ctx.nested_relationships else {
+        let Some(nested_map) = ctx.relationships.nested() else {
             return Ok(None);
         };
 

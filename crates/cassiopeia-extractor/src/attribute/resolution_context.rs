@@ -1,8 +1,5 @@
 use crate::dropped_geometries::DroppedGeometries;
-use cassiopeia_ir::{
-    metadata::EntityMetadata,
-    relationships::{NestedRelationships, Relationships},
-};
+use cassiopeia_ir::{entity_relationships::EntityRelationships, metadata::EntityMetadata};
 use cassiopeia_mapping::template::resolver::TemplateResolver;
 use cassiopeia_unreadable_timestamps::unreadable_timestamps::UnreadableTimestamps;
 use serde_json::Value as JsonValue;
@@ -14,7 +11,8 @@ const RECURSION_LIMIT: usize = 50;
 /// The state threaded through one entity's attribute resolution.
 ///
 /// A context borrows the source record, the shared template resolver, and the entity's
-/// already-resolved relationships (both top-level and nested). It optionally borrows a metadata sink;
+/// already-minted relationship objects (top-level, nested, and per instance). It optionally borrows a
+/// metadata sink;
 /// child contexts, spawned for nested declarations, never collect metadata of their own.
 ///
 /// The two refusal sinks are borrowed shared rather than mutably, and every child context carries
@@ -25,12 +23,10 @@ pub(crate) struct ResolutionContext<'a> {
     pub(crate) data: &'a JsonValue,
     /// The compiled-template resolver shared across the extraction stage.
     pub(crate) resolver: &'a TemplateResolver,
-    /// Relationship targets already resolved for this entity, keyed by attribute name.
-    pub(crate) relationships: &'a Relationships,
-    /// Objects of nested relationships, keyed by their [`RelationshipPath`] from the entity; `None`
-    /// when the entity has none, so the nested-relationship lookup is skipped entirely (ETSI GS CIM
-    /// 009 v1.9.1 clause 4.5.2.2 with 4.5.3).
-    pub(crate) nested_relationships: Option<&'a NestedRelationships>,
+    /// Relationship objects already minted for this entity. Its nested objects are `None` when the
+    /// entity has none, so the nested-relationship lookup is skipped entirely (ETSI GS CIM 009 v1.9.1
+    /// clause 4.5.2.2 with 4.5.3).
+    pub(crate) relationships: &'a EntityRelationships,
     /// Where a refused geometry conversion is recorded, shared by every context of the batch.
     pub(crate) dropped_geometries: &'a DroppedGeometries,
     /// Where an attribute value that reads as no date-time is recorded, shared by every context of
@@ -47,8 +43,7 @@ impl<'a> ResolutionContext<'a> {
     pub(crate) const fn new(
         data: &'a JsonValue,
         resolver: &'a TemplateResolver,
-        relationships: &'a Relationships,
-        nested_relationships: Option<&'a NestedRelationships>,
+        relationships: &'a EntityRelationships,
         dropped_geometries: &'a DroppedGeometries,
         unreadable_timestamps: &'a UnreadableTimestamps,
         metadata: Option<&'a mut EntityMetadata>,
@@ -57,7 +52,6 @@ impl<'a> ResolutionContext<'a> {
             data,
             resolver,
             relationships,
-            nested_relationships,
             dropped_geometries,
             unreadable_timestamps,
             depth: 0,
@@ -71,7 +65,6 @@ impl<'a> ResolutionContext<'a> {
             data,
             resolver: self.resolver,
             relationships: self.relationships,
-            nested_relationships: self.nested_relationships,
             dropped_geometries: self.dropped_geometries,
             unreadable_timestamps: self.unreadable_timestamps,
             depth: self.depth + 1,

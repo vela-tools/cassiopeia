@@ -15,9 +15,8 @@ pub trait Extractor: Send + Sync {
     ///
     /// # Errors
     ///
-    /// Returns [`ExtractionError`](crate::error::ExtractionError) when a list relationship's
-    /// instance template fails to evaluate while its objects are regrouped, or when nested attribute
-    /// declarations recurse past the guard depth.
+    /// Returns [`ExtractionError`](crate::error::ExtractionError) when nested attribute declarations
+    /// recurse past the guard depth.
     fn extract(&self, assembled: AssembledEntity, dropped: &DroppedAttributes) -> Result<Mapped<Entity>>;
 
     /// Extracts a batch of assembled entities, sharing one set of sinks across them.

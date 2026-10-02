@@ -16,7 +16,8 @@ pub(crate) struct AttributeStore<'a> {
     pub(crate) values: &'a mut AttributeValues,
     /// Relationship objects, keyed by attribute name.
     pub(crate) relationships: &'a mut Relationships,
-    /// Regrouped `ListRelationship` object lists, keyed by attribute name.
+    /// Per-instance objects of every multi-attribute `Relationship` or `ListRelationship`, keyed by
+    /// attribute name.
     pub(crate) instance_relationships: &'a mut InstanceRelationships,
     /// The attribute-level properties the extractor recorded, if the entity carries any.
     pub(crate) metadata: Option<&'a EntityMetadata>,
