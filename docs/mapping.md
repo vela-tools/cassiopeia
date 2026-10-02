@@ -272,7 +272,7 @@ controlledAsset: {
 }
 ~~~
 
-For a record whose `building_id` is `B-12`, this relationship targets the corresponding `Building` entity. To give one relationship name several targets that differ by role, declare `instances` instead of a single `source`. See [multiple instances](#carry-several-instances-under-one-name) and [example 29](examples/29-csv-multi-attribute-relationship/example.md). A relationship can also carry its own `properties`, including a nested relationship. See [attribute metadata](#add-attribute-metadata) and [example 30](examples/30-csv-nested-relationship/example.md).
+For a record whose `building_id` is `B-12`, this relationship targets the corresponding `Building` entity. To give one relationship name several targets that differ by role, declare `instances` instead of a single `source`. See [multiple instances](#carry-several-instances-under-one-name) and [example 29](https://github.com/vela-tools/cassiopeia-examples/blob/main/examples/29-csv-multi-attribute-relationship/example.md). A relationship can also carry its own `properties`, including a nested relationship. See [attribute metadata](#add-attribute-metadata) and [example 30](https://github.com/vela-tools/cassiopeia-examples/blob/main/examples/30-csv-nested-relationship/example.md).
 
 ### GeoProperty
 
@@ -403,7 +403,7 @@ vehicleType: {
 }
 ~~~
 
-The resolved source must be a well-formed IRI. A value that is not an IRI produces no attribute. [Example 26](examples/26-csv-vocab-property/example.md) builds the IRI by interpolating an OpenStreetMap amenity term into its canonical tag-page URL.
+The resolved source must be a well-formed IRI. A value that is not an IRI produces no attribute. [Example 26](https://github.com/vela-tools/cassiopeia-examples/blob/main/examples/26-csv-vocab-property/example.md) builds the IRI by interpolating an OpenStreetMap amenity term into its canonical tag-page URL.
 
 ### ListProperty and JsonProperty
 
@@ -422,7 +422,7 @@ metadata: {
 }
 ~~~
 
-The source shape and transformation must match the data the source provides. A string containing JSON is not automatically an object. The mapping must ask Cassiopeia to parse it as one. A bare field reference such as `{{ modes }}` resolves to the record's actual value, so an array field stays an array and an object field stays an object. [Example 24](examples/24-json-list-property/example.md) carries an ordered array as a `ListProperty`, while [example 25](examples/25-geojson-json-property/example.md) keeps a variable object whole as a `JsonProperty`.
+The source shape and transformation must match the data the source provides. A string containing JSON is not automatically an object. The mapping must ask Cassiopeia to parse it as one. A bare field reference such as `{{ modes }}` resolves to the record's actual value, so an array field stays an array and an object field stays an object. [Example 24](https://github.com/vela-tools/cassiopeia-examples/blob/main/examples/24-json-list-property/example.md) carries an ordered array as a `ListProperty`, while [example 25](https://github.com/vela-tools/cassiopeia-examples/blob/main/examples/25-geojson-json-property/example.md) keeps a variable object whole as a `JsonProperty`.
 
 ### ListRelationship
 
@@ -438,7 +438,7 @@ hasAircraftModel: {
 }
 ~~~
 
-The source is read as a collection of identifiers with no `split`. An array contributes one target per element, while a string contributes one target per whitespace- or comma-separated token. For example, `"744 777"` links to both `AircraftModel:744` and `AircraftModel:777`. Like a Relationship, a ListRelationship may appear as several `datasetId`-tagged instances under one attribute name. See [multiple instances](#carry-several-instances-under-one-name). It may also carry its own `properties` as sub-attributes that qualify the whole list, as [example 30](examples/30-csv-nested-relationship/example.md) does with a `castSize` property. [Example 12](examples/12-csv-list-relationship/example.md) shows a complete case, including the tradeoff against a published model that predates the type.
+The source is read as a collection of identifiers with no `split`. An array contributes one target per element, while a string contributes one target per whitespace- or comma-separated token. For example, `"744 777"` links to both `AircraftModel:744` and `AircraftModel:777`. Like a Relationship, a ListRelationship may appear as several `datasetId`-tagged instances under one attribute name. See [multiple instances](#carry-several-instances-under-one-name). It may also carry its own `properties` as sub-attributes that qualify the whole list, as [example 30](https://github.com/vela-tools/cassiopeia-examples/blob/main/examples/30-csv-nested-relationship/example.md) does with a `castSize` property. [Example 12](https://github.com/vela-tools/cassiopeia-examples/blob/main/examples/12-csv-list-relationship/example.md) shows a complete case, including the tradeoff against a published model that predates the type.
 
 ## Build nested values
 
@@ -483,7 +483,7 @@ temperature: {
 }
 ~~~
 
-`observedAt`, `unitCode`, and `datasetId` are handled as NGSI-LD attribute qualifiers. Any other entry under `properties` becomes a nested sub-attribute with the declared `type`, or a `Property` when no type is specified. It can also be a `VocabProperty`, a `LanguageProperty`, or a `Relationship`. A sub-attribute is the serialization of a Property or any of its subclasses, and of a Relationship (ETSI GS CIM 009 v1.9.1 clause 4.5.2.2 with clause 4.5.3). As a result, `properties` can declare nested relationships as well as nested properties, recursively to any depth. [Example 30](examples/30-csv-nested-relationship/example.md) hangs a `playsCharacter` relationship off a `hasLeadActor` relationship. A mapping can therefore represent both standard qualifiers and model-specific attribute metadata.
+`observedAt`, `unitCode`, and `datasetId` are handled as NGSI-LD attribute qualifiers. Any other entry under `properties` becomes a nested sub-attribute with the declared `type`, or a `Property` when no type is specified. It can also be a `VocabProperty`, a `LanguageProperty`, or a `Relationship`. A sub-attribute is the serialization of a Property or any of its subclasses, and of a Relationship (ETSI GS CIM 009 v1.9.1 clause 4.5.2.2 with clause 4.5.3). As a result, `properties` can declare nested relationships as well as nested properties, recursively to any depth. [Example 30](https://github.com/vela-tools/cassiopeia-examples/blob/main/examples/30-csv-nested-relationship/example.md) hangs a `playsCharacter` relationship off a `hasLeadActor` relationship. A mapping can therefore represent both standard qualifiers and model-specific attribute metadata.
 
 Cassiopeia resolves metadata from the same source record as its parent attribute. For a temporal mapping, put the timestamp on the attributes that represent observations. Cassiopeia can then keep successive observations associated with the same entity identity.
 
@@ -525,8 +525,8 @@ The result is serialized as a JSON array of attribute objects, one per instance.
 
 `instances` works on every reified attribute kind. Each instance's `source` provides the value that kind reads from a single source:
 
-- On a **Property** or any of its subtypes (`GeoProperty`, `LanguageProperty`, `VocabProperty`, `ListProperty`, `JsonProperty`), the `source` is a value. An instance with no value contributes nothing, so a model that reports no value for a record produces no instance. [Example 21](examples/21-json-dataset-id/example.md) carries several numerical-model forecasts under one Property name.
-- On a **Relationship**, the `source` is the target object's ID, and every instance shares the attribute-level `target`. [Example 29](examples/29-csv-multi-attribute-relationship/example.md) gives a flight one `servesAirport` name with departure and arrival instances.
+- On a **Property** or any of its subtypes (`GeoProperty`, `LanguageProperty`, `VocabProperty`, `ListProperty`, `JsonProperty`), the `source` is a value. An instance with no value contributes nothing, so a model that reports no value for a record produces no instance. [Example 21](https://github.com/vela-tools/cassiopeia-examples/blob/main/examples/21-json-dataset-id/example.md) carries several numerical-model forecasts under one Property name.
+- On a **Relationship**, the `source` is the target object's ID, and every instance shares the attribute-level `target`. [Example 29](https://github.com/vela-tools/cassiopeia-examples/blob/main/examples/29-csv-multi-attribute-relationship/example.md) gives a flight one `servesAirport` name with departure and arrival instances.
 - On a **ListRelationship**, the `source` is an object-ID list, tokenized as it is for a plain list relationship. Each instance becomes its own `objectList` under its own `datasetId`.
 
 `observedAt` and `unitCode` are qualifiers themselves, so clause 4.5.5 does not allow them to be multi-attributes. They may appear only inside an instance's shared or per-instance `properties`.

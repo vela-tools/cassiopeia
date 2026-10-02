@@ -113,11 +113,11 @@ Cassiopeia detects the input format from the file, so `--type` is not needed. It
 
 The command also warns that the entities were not validated. That is expected here: `--context none` skips the JSON-LD context, and no Smart Data Model or custom data model schema was given. This keeps the first run entirely offline. [Validation](docs/validation.md) and [Output](docs/output.md) explain how to turn both on.
 
-The [worked examples](docs/examples/index.md) continue with 31 datasets. Each adds one idea, such as composite identities, geometry, conditionals, relationships, synthetic entities, or scheduling. Every mapping is in this repository, so you can run the examples in place:
+The [worked examples](https://github.com/vela-tools/cassiopeia-examples) continue with 31 datasets. Each adds one idea, such as composite identities, geometry, conditionals, relationships, synthetic entities, or scheduling. They live in their own repository, where every example runs in place:
 
 ```bash
-git clone https://github.com/vela-tools/cassiopeia.git
-cd cassiopeia/docs/examples/01-json-field-mapping
+git clone https://github.com/vela-tools/cassiopeia-examples.git
+cd cassiopeia-examples/examples/01-json-field-mapping
 ```
 
 The prebuilt binaries do not include ecCodes. They decode GRIB2 with the bundled pure-Rust reader, but they do not support GRIB1. To build from source with GRIB1 support, see [Getting started](docs/getting-started.md).

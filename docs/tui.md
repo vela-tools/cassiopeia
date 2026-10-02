@@ -101,4 +101,4 @@ The final step previews the mapping and writes it out. The output file is named 
 
 ![Wizard save step: a save preview above the output file name ending in dot json5](assets/cassiopeia-wizard-5.png)
 
-The saved `.json5` is an ordinary mapping. Run it against a source with `cassiopeia map`, just like a hand-written mapping. See the [mapping guide](mapping.md) for the document shape and the [examples](examples/index.md) for complete runs.
+The saved `.json5` is an ordinary mapping. Run it against a source with `cassiopeia map`, just like a hand-written mapping. See the [mapping guide](mapping.md) for the document shape and the [examples](https://github.com/vela-tools/cassiopeia-examples#the-examples) for complete runs.

@@ -188,9 +188,9 @@ retry: {
 
 ## Examples in the tree
 
-- [Example 9](examples/09-csv-manifest/example.md) pairs two CSV sources with two mappings in one file-output run.
-- [Example 23](examples/23-json-scheduling/example.md) polls a live JSON feed every five minutes and upserts to a broker, using `schedule`, `retry`, and `onFailure`.
-- [Example 17](examples/17-kml-folder-collections/example.md) routes one KML source's folders to four mappings with `mappings`.
+- [Example 9](https://github.com/vela-tools/cassiopeia-examples/blob/main/examples/09-csv-manifest/example.md) pairs two CSV sources with two mappings in one file-output run.
+- [Example 23](https://github.com/vela-tools/cassiopeia-examples/blob/main/examples/23-json-scheduling/example.md) polls a live JSON feed every five minutes and upserts to a broker, using `schedule`, `retry`, and `onFailure`.
+- [Example 17](https://github.com/vela-tools/cassiopeia-examples/blob/main/examples/17-kml-folder-collections/example.md) routes one KML source's folders to four mappings with `mappings`.
 
 ## What makes a manifest invalid
 

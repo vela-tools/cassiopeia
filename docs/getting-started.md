@@ -76,9 +76,9 @@ Add `--signer-workflow vela-tools/cassiopeia/.github/workflows/release.yaml` to 
 
 The release binaries are built with `--no-default-features`, so they do **not** link ecCodes. They can decode GRIB2 with the pure-Rust reader, but report GRIB1 input as unsupported. If you need GRIB1, install ecCodes and build from source with the default features using one of the options below.
 
-### 2. Clone and install onto your PATH (recommended for the examples)
+### 2. Clone and install onto your PATH
 
-Clone the repository if you want to work through the examples. Each example includes a dataset and a mapping that you can run from the clone. From the project root, install the binary into your Cargo bin directory, which is usually `~/.cargo/bin` and already on your PATH:
+Clone the repository if you want a local checkout of the source. The worked examples live in the separate [examples repository](https://github.com/vela-tools/cassiopeia-examples), and any install method on this page runs them. From the project root, install the binary into your Cargo bin directory, which is usually `~/.cargo/bin` and already on your PATH:
 
 ```bash
 git clone https://github.com/vela-tools/cassiopeia.git
@@ -90,7 +90,7 @@ The `cassiopeia` command is then available from any directory. When you pull a n
 
 ### 3. Install directly from git
 
-If you do not need a local clone of the examples, Cargo can build and install the binary directly from the repository:
+If you do not need a local checkout, Cargo can build and install the binary directly from the repository:
 
 ```bash
 cargo install --git https://github.com/vela-tools/cassiopeia.git

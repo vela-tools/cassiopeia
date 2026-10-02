@@ -387,7 +387,7 @@ windDirection: {
 }
 ~~~
 
-Parameters measured at different vertical levels go into separate records because the level helps identify a grid slice. Two-metre temperature and ten-metre wind are therefore distinct records. Mapping them to the same entity identity, such as a code derived from the shared cell coordinates, merges their attributes into one observation. The [GRIB1 example](examples/18-grib1-derived-values/example.md) works through this process from beginning to end.
+Parameters measured at different vertical levels go into separate records because the level helps identify a grid slice. Two-metre temperature and ten-metre wind are therefore distinct records. Mapping them to the same entity identity, such as a code derived from the shared cell coordinates, merges their attributes into one observation. The [GRIB1 example](https://github.com/vela-tools/cassiopeia-examples/blob/main/examples/18-grib1-derived-values/example.md) works through this process from beginning to end.
 
 ### Backends and features
 
@@ -398,7 +398,7 @@ Two compile-time features select the backend for each edition. Both link the nat
 
 Both backends use the same canonical vocabulary and level normalization, so changing the backend does not require a different mapping. A build made with `--no-default-features` supports only regular-grid GRIB2 through grib-rs and rejects GRIB1. Add `--features grib1` or `--features grib2-full` to re-enable either ecCodes path.
 
-With the default build, ecCodes can decode projected GRIB2 grids, such as the Lambert conformal or polar stereographic grids used by regional models like HRRR. It handles these alongside global regular-grid products such as GFS and the ICON global model. Only the pure-Rust fallback, built with `grib2-full` off, is limited to regular latitude/longitude grids. With that fallback, a projected file fails to ingest instead of producing records. The two worked examples cover both editions: [GRIB1 regional](examples/18-grib1-derived-values/example.md) and [GRIB2 global](examples/19-grib2-byte-range/example.md).
+With the default build, ecCodes can decode projected GRIB2 grids, such as the Lambert conformal or polar stereographic grids used by regional models like HRRR. It handles these alongside global regular-grid products such as GFS and the ICON global model. Only the pure-Rust fallback, built with `grib2-full` off, is limited to regular latitude/longitude grids. With that fallback, a projected file fails to ingest instead of producing records. The two worked examples cover both editions: [GRIB1 regional](https://github.com/vela-tools/cassiopeia-examples/blob/main/examples/18-grib1-derived-values/example.md) and [GRIB2 global](https://github.com/vela-tools/cassiopeia-examples/blob/main/examples/19-grib2-byte-range/example.md).
 
 ## Choosing a format for a mapping
 

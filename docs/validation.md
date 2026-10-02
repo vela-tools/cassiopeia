@@ -66,7 +66,7 @@ The representation used for validation is separate from the representation Cassi
 | `--validation-representation` | `output.validation.representation` | `normalized`, `concise`, `simplified` | The representation entities are validated in. |
 | `--validation-skip-null` | `output.validation.skipNull` | `skip`, `include` | Whether null-valued attributes are present when the entity is checked. |
 
-A command-line flag overrides the manifest, which overrides the simplified default. Change the representation only when the target schema describes another form, such as a schema that constrains the full normalized Property wrapper with its `type` and `value` members. [Example 28](examples/28-json-advanced-schema/example.md) validates that form with `representation: "normalized"`. The [representation guide](representation.md) explains how the writing and validation settings stay independent.
+A command-line flag overrides the manifest, which overrides the simplified default. Change the representation only when the target schema describes another form, such as a schema that constrains the full normalized Property wrapper with its `type` and `value` members. [Example 28](https://github.com/vela-tools/cassiopeia-examples/blob/main/examples/28-json-advanced-schema/example.md) validates that form with `representation: "normalized"`. The [representation guide](representation.md) explains how the writing and validation settings stay independent.
 
 ## Where schemas come from
 
@@ -150,7 +150,7 @@ A custom source is one you expect to exist. Unlike the convention, whose missing
 
 ## In an example
 
-[Example 3](examples/03-geojson-smart-data-model/example.md) runs a strict check:
+[Example 3](https://github.com/vela-tools/cassiopeia-examples/blob/main/examples/03-geojson-smart-data-model/example.md) runs a strict check:
 
 ~~~bash
 cassiopeia map \
@@ -163,9 +163,9 @@ cassiopeia map \
     --validation-representation simplified
 ~~~
 
-`--validation-mode fail` aborts the run if any entity does not match the `OffStreetParking` schema, so a clean run proves that every entity conforms. `--validation-representation simplified` checks the key-values form described by the schema. [Example 14](examples/14-xml-unit-code/example.md) instead uses the default `fail-when-schema` in its manifest, so its `WeatherObserved` entity is enforced while any schemaless type passes through.
+`--validation-mode fail` aborts the run if any entity does not match the `OffStreetParking` schema, so a clean run proves that every entity conforms. `--validation-representation simplified` checks the key-values form described by the schema. [Example 14](https://github.com/vela-tools/cassiopeia-examples/blob/main/examples/14-xml-unit-code/example.md) instead uses the default `fail-when-schema` in its manifest, so its `WeatherObserved` entity is enforced while any schemaless type passes through.
 
-[Example 27](examples/27-csv-custom-schema/example.md) takes the other route: an invented `ExoPlanet` model with no catalog schema, validated against a hand-authored schema named by `--validation-schema`. It shows the custom-schema entry point in a complete run. [Example 28](examples/28-json-advanced-schema/example.md) goes further by validating the full **normalized** shape, including `unitCode`, `observedAt`, `datasetId`, sub-properties, and the less common NGSI-LD kinds, against a hand-authored schema named by a per-input `schema` in a manifest.
+[Example 27](https://github.com/vela-tools/cassiopeia-examples/blob/main/examples/27-csv-custom-schema/example.md) takes the other route: an invented `ExoPlanet` model with no catalog schema, validated against a hand-authored schema named by `--validation-schema`. It shows the custom-schema entry point in a complete run. [Example 28](https://github.com/vela-tools/cassiopeia-examples/blob/main/examples/28-json-advanced-schema/example.md) goes further by validating the full **normalized** shape, including `unitCode`, `observedAt`, `datasetId`, sub-properties, and the less common NGSI-LD kinds, against a hand-authored schema named by a per-input `schema` in a manifest.
 
 ## Next steps
 

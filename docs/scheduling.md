@@ -1,6 +1,6 @@
 # Scheduling
 
-A schedule makes a run repeat instead of exiting after one pass. It turns a one-off transformation into a poller that fetches a live feed, maps it, writes the entities, waits, and repeats. This keeps a file or context broker current as new data arrives. [Example 23](examples/23-json-scheduling/example.md) shows a complete air-quality poller. This page explains trigger behavior, including the timezone rules that are easiest to get wrong.
+A schedule makes a run repeat instead of exiting after one pass. It turns a one-off transformation into a poller that fetches a live feed, maps it, writes the entities, waits, and repeats. This keeps a file or context broker current as new data arrives. [Example 23](https://github.com/vela-tools/cassiopeia-examples/blob/main/examples/23-json-scheduling/example.md) shows a complete air-quality poller. This page explains trigger behavior, including the timezone rules that are easiest to get wrong.
 
 Every scheduling setting has two equivalent forms: a field inside a manifest's `schedule` block and a command-line flag on `cassiopeia map`. This page gives both forms. The manifest field table is in the [manifest guide](manifest.md#schedule).
 
@@ -95,7 +95,7 @@ On the command line, the same policy is `--retry 3 --retry-backoff 15s`. `--retr
 
 ## A worked example
 
-This is the schedule from [Example 23](examples/23-json-scheduling/example.md). It polls a live air-quality feed every five minutes and upserts each reading to a broker. Retries handle dropped connections, and a bad poll does not stop the schedule.
+This is the schedule from [Example 23](https://github.com/vela-tools/cassiopeia-examples/blob/main/examples/23-json-scheduling/example.md). It polls a live air-quality feed every five minutes and upserts each reading to a broker. Retries handle dropped connections, and a bad poll does not stop the schedule.
 
 ~~~json5
 {
@@ -157,7 +157,7 @@ The first poll runs at once. Every five minutes, plus up to 20 seconds of jitter
 
 ## Next steps
 
-- [Examples](examples/index.md): apply each idea in these guides to a real dataset.
+- [Examples](https://github.com/vela-tools/cassiopeia-examples#the-examples): apply each idea in these guides to a real dataset.
 - [Manifests](manifest.md#schedule): see the `schedule` field table.
 - [Running Cassiopeia](running.md): use the full command-line guide for schedule flags.
-- [Example 23](examples/23-json-scheduling/example.md): follow a live feed polled on a schedule from beginning to end.
+- [Example 23](https://github.com/vela-tools/cassiopeia-examples/blob/main/examples/23-json-scheduling/example.md): follow a live feed polled on a schedule from beginning to end.

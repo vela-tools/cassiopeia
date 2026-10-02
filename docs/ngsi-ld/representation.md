@@ -6,7 +6,7 @@ The examples use the member names from ETSI GS CIM 009 v1.9.1: `vocab` for `Voca
 
 ## One entity, three shapes
 
-The entity below comes from [example 14](../examples/14-xml-unit-code/example.md). It contains one station reading. The `temperature` attribute includes both `unitCode` and `observedAt`, so the three representations show a useful difference in how much information they keep.
+The entity below comes from [example 14](https://github.com/vela-tools/cassiopeia-examples/blob/main/examples/14-xml-unit-code/example.md). It contains one station reading. The `temperature` attribute includes both `unitCode` and `observedAt`, so the three representations show a useful difference in how much information they keep.
 
 ### Normalized
 
@@ -180,7 +180,7 @@ That is different from a `ListRelationship`. A normalized ListRelationship uses 
 
 A bare array of normalized Relationship objects is not a substitute for a single Relationship object. It represents multiple instances of the same attribute, so each instance needs its own identity through `datasetId`, except that one instance may be the default and omit it. Do not copy a simplified relationship array directly into normalized output.
 
-Cassiopeia's mapping must therefore choose the construct that matches the source. Use a `ListRelationship` for one ordered collection of links. Use multiple Relationship or ListRelationship instances with `datasetId` when the source contains separate datasets, views, or roles. [Example 21](../examples/21-json-dataset-id/example.md) shows dataset-specific Property instances, [example 29](../examples/29-csv-multi-attribute-relationship/example.md) shows a multi-attribute Relationship carrying a flight's departure and arrival airports as two `datasetId`-tagged instances, and [example 12](../examples/12-csv-list-relationship/example.md) shows a ListRelationship.
+Cassiopeia's mapping must therefore choose the construct that matches the source. Use a `ListRelationship` for one ordered collection of links. Use multiple Relationship or ListRelationship instances with `datasetId` when the source contains separate datasets, views, or roles. [Example 21](https://github.com/vela-tools/cassiopeia-examples/blob/main/examples/21-json-dataset-id/example.md) shows dataset-specific Property instances, [example 29](https://github.com/vela-tools/cassiopeia-examples/blob/main/examples/29-csv-multi-attribute-relationship/example.md) shows a multi-attribute Relationship carrying a flight's departure and arrival airports as two `datasetId`-tagged instances, and [example 12](https://github.com/vela-tools/cassiopeia-examples/blob/main/examples/12-csv-list-relationship/example.md) shows a ListRelationship.
 
 ## Why validation uses simplified
 

@@ -4,7 +4,7 @@ Cassiopeia turns data from common formats into [NGSI-LD](https://ngsi-ld.org/) e
 
 ## How to read these docs
 
-The guides below form a suggested path. Each one builds on the last: install the binary, learn what Cassiopeia produces, inspect your source, write a mapping, shape and check the output, then run and automate it. Read them in order the first time, or jump straight to the page you need. The [worked examples](examples/index.md) apply these ideas to real datasets, while the [reference pages](#reference) cover individual subjects in more depth.
+The guides below form a suggested path. Each one builds on the last: install the binary, learn what Cassiopeia produces, inspect your source, write a mapping, shape and check the output, then run and automate it. Read them in order the first time, or jump straight to the page you need. The [worked examples](https://github.com/vela-tools/cassiopeia-examples#the-examples) apply these ideas to real datasets, while the [reference pages](#reference) cover individual subjects in more depth.
 
 ## The guides
 
@@ -20,7 +20,7 @@ The guides below form a suggested path. Each one builds on the last: install the
 10. [Running Cassiopeia](running.md): use the `cassiopeia map` command line to choose a source, destination, representation, validation policy, context, failure policy, and engine profile. The guide also covers the sibling commands.
 11. [Manifests](manifest.md): learn how a manifest packages inputs, output, and scheduling into a reusable run, field by field.
 12. [Scheduling](scheduling.md): learn how to make a run repeat, including the cron format and the UTC-versus-local timezone rules.
-13. [Examples](examples/index.md): work through real datasets end to end, with each example introducing a new mapping idea. Start with [JSON basics](examples/01-json-field-mapping/example.md).
+13. [Examples](https://github.com/vela-tools/cassiopeia-examples#the-examples): work through real datasets end to end, with each example introducing a new mapping idea. Start with [JSON basics](https://github.com/vela-tools/cassiopeia-examples/blob/main/examples/01-json-field-mapping/example.md).
 
 ## Reference
 

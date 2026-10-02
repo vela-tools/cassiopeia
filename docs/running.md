@@ -187,4 +187,4 @@ Repeated problems are collapsed whether or not the flag is given: an identical f
 - [Manifests](manifest.md): package a run's inputs, output, and schedule into a reusable file.
 - [Scheduling](scheduling.md): make a run repeat.
 - [Command-line reference](cli.md): see every flag and subcommand with its default.
-- [Examples](examples/index.md): follow complete runs you can reproduce.
+- [Examples](https://github.com/vela-tools/cassiopeia-examples#the-examples): follow complete runs you can reproduce.
