@@ -10,13 +10,19 @@ use crate::urn::cleaner::Cleaner;
 pub(crate) struct IdSegment(String);
 
 impl IdSegment {
-    /// Cleans a raw identifier into a segment, or yields `None` when nothing URN-safe survives.
+    /// Cleans a raw identifier into a segment, or yields `None` when no letter or digit survives.
     ///
     /// Raw text made only of characters the [`Cleaner`] drops (`"!!"`, say) is as absent as empty
-    /// text: both would leave the identifier segment empty.
+    /// text: both would leave the identifier segment empty. So is text that cleans to separators
+    /// alone: a placeholder such as `-` or `—` (transliterated to `--`) names no record, and minting
+    /// it would merge every record carrying that placeholder into one `urn:ngsi-ld:<Type>:--`.
     pub(crate) fn clean(raw_id: &str) -> Option<IdSegment> {
         let cleaned = Cleaner::clean(raw_id);
-        if cleaned.is_empty() { None } else { Some(IdSegment(cleaned)) }
+        if cleaned.chars().any(char::is_alphanumeric) {
+            Some(IdSegment(cleaned))
+        } else {
+            None
+        }
     }
 
     /// Appends a deduplication counter, joined by a single `-` unless the segment already ends in one.
@@ -58,6 +64,26 @@ mod tests {
     fn text_made_only_of_disallowed_characters_yields_no_segment() {
         assert_eq!(IdSegment::clean("\"\""), None);
         assert_eq!(IdSegment::clean(" !? "), None);
+    }
+
+    #[test]
+    fn text_that_cleans_to_separators_alone_yields_no_segment() {
+        assert_eq!(IdSegment::clean("-"), None);
+        assert_eq!(IdSegment::clean("_"), None);
+        assert_eq!(IdSegment::clean("- _ -"), None);
+    }
+
+    #[test]
+    fn a_dash_placeholder_transliterated_to_separators_yields_no_segment() {
+        assert_eq!(IdSegment::clean("—"), None);
+        assert_eq!(IdSegment::clean("–"), None);
+    }
+
+    #[test]
+    fn separators_beside_a_letter_or_digit_are_kept_in_the_segment() {
+        assert_eq!(IdSegment::clean("-a").unwrap().as_str(), "-a");
+        assert_eq!(IdSegment::clean("_7_").unwrap().as_str(), "_7_");
+        assert_eq!(IdSegment::clean("A—B").unwrap().as_str(), "A--B");
     }
 
     #[test]
