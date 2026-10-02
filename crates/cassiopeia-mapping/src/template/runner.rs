@@ -1,6 +1,8 @@
 use crate::{
+    source_reads::SourceReads,
     template::{
         CompiledTemplate,
+        TemplatePart,
         TemplateSource,
         compile_diagnosis::diagnose,
         compile_error::TemplateCompileError,
@@ -117,11 +119,42 @@ impl TemplateRunner {
             Err(engine) => Err(Box::new(diagnose(source, engine, &self.vocabulary))),
         }
     }
+
+    /// The top-level source keys a template this runner compiled reads (see [`SourceReads`]).
+    ///
+    /// A direct form reads the first segment of each field it references; a template the engine
+    /// renders reads what the engine reports for it. A template the engine does not hold, which only a
+    /// template compiled by another runner can be, is taken to read everything, since nothing narrower
+    /// can be shown.
+    #[must_use]
+    pub fn source_reads(&self, template: &CompiledTemplate) -> SourceReads {
+        match template {
+            CompiledTemplate::Static(_) => SourceReads::nothing(),
+            CompiledTemplate::Simple(path) => SourceReads::of_field(path),
+            CompiledTemplate::Composite(parts) => {
+                let mut reads = SourceReads::nothing();
+                for part in parts {
+                    match part {
+                        TemplatePart::Static(_) => {}
+                        TemplatePart::Dynamic(path) => reads.absorb(SourceReads::of_field(path)),
+                    }
+                }
+                reads
+            }
+            CompiledTemplate::Expression(registered) | CompiledTemplate::Complex(registered) => self
+                .tera
+                .get_template_variables(registered.name.as_str())
+                .map_or(SourceReads::Everything, |variables| {
+                    SourceReads::of_engine_template(variables, registered.source.as_str())
+                }),
+        }
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use crate::{
+        source_reads::{SourceKey, SourceReads},
         template::{CompiledTemplate, TemplatePart, TemplateSource, compile_error::TemplateCompileError, runner::TemplateRunner},
         template_location::TemplateLocation,
         template_site::TemplateSite,
@@ -745,5 +778,83 @@ mod tests {
         };
         assert_eq!(template.source, TemplateSource::new("{{ name | upper }}"));
         assert_eq!(template.location, location());
+    }
+
+    /// The top-level keys the template `source` reads, once compiled.
+    fn reads(source: &str) -> SourceReads {
+        let (runner, compiled) = compile(source);
+
+        runner.source_reads(&compiled)
+    }
+
+    fn keys(names: &[&str]) -> SourceReads {
+        SourceReads::Keys(names.iter().map(|name| SourceKey::new(name)).collect())
+    }
+
+    #[test]
+    fn a_literal_reads_nothing() {
+        assert_eq!(reads("Station"), SourceReads::nothing());
+    }
+
+    #[test]
+    fn a_lone_reference_reads_its_top_level_key() {
+        assert_eq!(reads("{{ properties.name }}"), keys(&["properties"]));
+    }
+
+    #[test]
+    fn a_concatenation_reads_every_key_it_references() {
+        assert_eq!(
+            reads("{{ country }}-{{ name }}-{{ properties.code }}"),
+            keys(&["country", "name", "properties"])
+        );
+    }
+
+    #[test]
+    fn a_quoted_key_and_a_column_index_read_that_key_and_that_column() {
+        assert_eq!(reads("{{ this['CO(GT)'] }}"), keys(&["CO(GT)"]));
+        assert_eq!(reads("{{ this[3] }}"), keys(&["3"]));
+    }
+
+    #[test]
+    fn the_whole_record_reference_reads_everything() {
+        assert_eq!(reads("{{ context }}"), SourceReads::Everything);
+    }
+
+    #[test]
+    fn a_filtered_expression_reads_its_variable_and_every_filter_or_function_argument() {
+        assert_eq!(reads("{{ name | upper }}"), keys(&["name"]));
+        assert_eq!(reads("{{ geohash(lat=latitude, lon=longitude) }}"), keys(&["latitude", "longitude"]));
+        assert_eq!(reads("{{ value | default(value=fallback) }}"), keys(&["fallback", "value"]));
+    }
+
+    #[test]
+    fn a_conditional_reads_every_branch() {
+        assert_eq!(
+            reads("{% if a %}{{ b }}{% elif c %}{{ d }}{% else %}{{ e }}{% endif %}"),
+            keys(&["a", "b", "c", "d", "e"])
+        );
+    }
+
+    #[test]
+    fn a_loop_reads_what_it_iterates_and_not_its_own_variable() {
+        assert_eq!(reads("{% for item in items %}{{ item }}{{ suffix }}{% endfor %}"), keys(&["items", "suffix"]));
+    }
+
+    #[test]
+    fn a_name_a_template_assigns_counts_as_read_since_a_skipped_assignment_falls_back_to_the_field() {
+        assert_eq!(reads("{% if flag %}{% set level = 2 %}{% endif %}{{ level }}"), keys(&["flag", "level"]));
+        assert_eq!(reads("{% set doubled = value * 2 %}{{ doubled }}"), keys(&["doubled", "value"]));
+    }
+
+    #[test]
+    fn an_engine_template_reading_the_record_or_the_engine_context_reads_everything() {
+        assert_eq!(reads("{{ this['CO(GT)'] | float }}"), SourceReads::Everything);
+        assert_eq!(reads("{% for key, value in this %}{{ key }}{% endfor %}"), SourceReads::Everything);
+        assert_eq!(reads("{{ __tera_context }}"), SourceReads::Everything);
+    }
+
+    #[test]
+    fn a_run_variable_reads_the_vars_key() {
+        assert_eq!(reads("{{ vars.region }}-{{ id }}"), keys(&["id", "vars"]));
     }
 }

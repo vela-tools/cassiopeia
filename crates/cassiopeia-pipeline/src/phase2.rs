@@ -98,6 +98,7 @@ mod tests {
         entity_store::dashmap_latest_store::DashMapLatestEntityStore,
         fragment_resolver::FragmentResolver,
         fragment_sink::FragmentSink,
+        merged_records::MergedRecords,
         relationship_store::dashmap_store::DashMapRelationshipStore,
     };
     use cassiopeia_transformer::{ngsi_ld_transformer::NgsiLdTransformer, transformer::Transformer};
@@ -128,7 +129,7 @@ mod tests {
 
         let mut ids: Vec<String> = Vec::new();
         source
-            .drive_assembly(8, &mut |result| {
+            .drive_assembly(8, &mut MergedRecords::new(), &mut |result| {
                 ids.push(result.unwrap().id().to_string());
                 ControlFlow::Continue(())
             })
@@ -182,7 +183,7 @@ mod tests {
         for fragment in fragments {
             fragment_resolver.resolve(fragment).unwrap();
         }
-        let mut units = fragment_resolver.assemble(&id).unwrap();
+        let mut units = fragment_resolver.assemble(&id).unwrap().units;
         assert_eq!(units.len(), 1);
 
         let extracted = EntityExtractor::new(resolver).extract(units.remove(0), &DroppedAttributes::new()).unwrap();

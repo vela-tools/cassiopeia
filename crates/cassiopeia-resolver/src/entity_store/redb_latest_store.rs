@@ -9,16 +9,17 @@ use crate::{
         stored_fragment::StoredFragment,
         supersession::supersedes,
     },
+    field_path::FieldPath,
     mapping_id::MappingId,
     store_action::StoreAction,
     store_write_strategy::StoreWriteStrategy,
 };
 use ahash::AHashMap;
-use cassiopeia_mapping::observed_at::ObservedAt;
+use cassiopeia_mapping::{observed_at::ObservedAt, source_reads::SourceReads};
 use redb::{Durability, ReadableDatabase, ReadableTable, TableDefinition};
 use serde_json::Value;
 use smallvec::SmallVec;
-use std::collections::hash_map::Entry;
+use std::{collections::hash_map::Entry, num::NonZeroU64};
 use urn_rs::Urn;
 
 const DATA_TABLE: TableDefinition<&[u8], &[u8]> = TableDefinition::new("data");
@@ -58,8 +59,19 @@ impl RedbLatestEntityStore {
 /// Coalesced in-memory state for one `(base id, mapping)` key within a batch.
 struct LatestEntry {
     mapping_id: MappingId,
-    data: Option<Value>,
+    /// What the key holds so far, seeded from disk; `None` until a record has landed on it.
+    retained: Option<RetainedRecord>,
+}
+
+/// The record a current-state key retains, and how many records it has absorbed.
+struct RetainedRecord {
+    data: Value,
     observed_at: Option<String>,
+    /// How many of the mapping's records resolved to the id, across every batch.
+    records: NonZeroU64,
+    /// The earliest field on which a merged record disagreed with the retained one, across every
+    /// batch.
+    conflict: Option<FieldPath>,
 }
 
 impl EntityStore for RedbLatestEntityStore {
@@ -67,11 +79,11 @@ impl EntityStore for RedbLatestEntityStore {
         StoreWriteStrategy::TransactionalBatch
     }
 
-    fn store_fragment(&self, write: FragmentWrite) -> Result<()> {
+    fn store_fragment(&self, write: FragmentWrite<'_>) -> Result<()> {
         self.store_fragment_batch(vec![write])
     }
 
-    fn store_fragment_batch(&self, fragments: Vec<FragmentWrite>) -> Result<()> {
+    fn store_fragment_batch(&self, fragments: Vec<FragmentWrite<'_>>) -> Result<()> {
         if fragments.is_empty() {
             return Ok(());
         }
@@ -100,6 +112,7 @@ impl EntityStore for RedbLatestEntityStore {
                     temporal,
                     observed_at,
                     scope,
+                    reads,
                 } = write;
                 let key = Self::make_key(&base_id, mapping_id);
                 let entry = match grouped.entry(key) {
@@ -107,29 +120,36 @@ impl EntityStore for RedbLatestEntityStore {
                     Entry::Vacant(vacant) => {
                         // Seed the accumulator from disk once per key.
                         let existing = data_table.get(vacant.key().as_slice()).map_err(|e| self.db.err(e.into(), StoreAction::Read))?;
-                        let (data, observed_at) = match existing {
+                        let retained = match existing {
                             Some(guard) => {
                                 let stored: StoredFragment = rmp_serde::from_slice(guard.value())?;
-                                (Some(stored.data), stored.observed_at)
+                                Some(RetainedRecord {
+                                    data: stored.data,
+                                    observed_at: stored.observed_at,
+                                    records: stored.records,
+                                    conflict: stored.conflict,
+                                })
                             }
-                            None => (None, None),
+                            None => None,
                         };
-                        vacant.insert(LatestEntry { mapping_id, data, observed_at })
+                        vacant.insert(LatestEntry { mapping_id, retained })
                     }
                 };
 
-                apply_write(entry, source_data, temporal, observed_at);
+                apply_write(entry, source_data, temporal, observed_at, reads);
                 if let Some(scope) = scope {
                     pending_scopes.add(&base_id, scope);
                 }
             }
 
             for (key, entry) in grouped {
-                if let Some(data) = entry.data {
+                if let Some(retained) = entry.retained {
                     let stored = StoredFragment {
                         mapping_id: entry.mapping_id,
-                        data,
-                        observed_at: entry.observed_at,
+                        data: retained.data,
+                        observed_at: retained.observed_at,
+                        records: retained.records,
+                        conflict: retained.conflict,
                     };
                     let bytes = rmp_serde::to_vec(&stored)?;
                     data_table
@@ -175,6 +195,8 @@ impl EntityStore for RedbLatestEntityStore {
             unit.push(AssembledFragment {
                 mapping_id: stored.mapping_id,
                 data: stored.data,
+                records: stored.records,
+                conflict: stored.conflict,
             });
         }
 
@@ -236,21 +258,31 @@ impl Drop for RedbLatestEntityStore {
     }
 }
 
-/// Applies one write to its coalesced accumulator under the current-state rule.
-fn apply_write(entry: &mut LatestEntry, source_data: Value, temporal: bool, observed_at: Option<ObservedAt>) {
+/// Applies one write to its coalesced accumulator under the current-state rule, counting it among the
+/// records the mapping resolved to the id.
+fn apply_write(entry: &mut LatestEntry, source_data: Value, temporal: bool, observed_at: Option<ObservedAt>, reads: &SourceReads) {
+    let Some(retained) = &mut entry.retained else {
+        entry.retained = Some(RetainedRecord {
+            data: source_data,
+            observed_at: observed_at.map(String::from),
+            records: NonZeroU64::MIN,
+            conflict: None,
+        });
+        return;
+    };
+
+    retained.records = retained.records.saturating_add(1);
     if temporal {
         // A temporal mapping's records are observations of one id: keep the latest.
         let new = observed_at.as_ref().map(ObservedAt::as_str);
-        if entry.data.is_none() || supersedes(new, entry.observed_at.as_deref()) {
-            entry.data = Some(source_data);
-            entry.observed_at = observed_at.map(String::from);
+        if supersedes(new, retained.observed_at.as_deref()) {
+            retained.data = source_data;
+            retained.observed_at = observed_at.map(String::from);
         }
     } else {
-        // A static mapping's records refine one entity: merge them.
-        match &mut entry.data {
-            Some(accumulator) => deep_merge(accumulator, &source_data),
-            slot @ None => *slot = Some(source_data),
-        }
+        // A static mapping's records refine one entity: merge them, remembering where they disagreed.
+        let conflict = deep_merge(&mut retained.data, &source_data, reads);
+        retained.conflict = FieldPath::earliest(retained.conflict.take(), conflict);
     }
 }
 
@@ -259,7 +291,11 @@ mod tests {
     use crate::{
         entity_store::{
             redb_latest_store::RedbLatestEntityStore,
-            store::{EntityStore, FragmentWrite, tests::assert_merges_scopes_per_id},
+            store::{
+                EntityStore,
+                FragmentWrite,
+                tests::{READS_EVERYTHING, assert_merges_scopes_per_id},
+            },
         },
         mapping_id::MappingId,
     };
@@ -276,7 +312,7 @@ mod tests {
         assert_merges_scopes_per_id(&RedbLatestEntityStore::new().unwrap());
     }
 
-    fn write(base_id: &Urn, data: serde_json::Value, mapping: u32, temporal: bool, observed_at: Option<&str>) -> FragmentWrite {
+    fn write(base_id: &Urn, data: serde_json::Value, mapping: u32, temporal: bool, observed_at: Option<&str>) -> FragmentWrite<'static> {
         FragmentWrite {
             base_id: base_id.clone(),
             source_data: data,
@@ -284,6 +320,7 @@ mod tests {
             temporal,
             observed_at: observed_at.map(ObservedAt::new),
             scope: None,
+            reads: &READS_EVERYTHING,
         }
     }
 
@@ -320,6 +357,49 @@ mod tests {
         let assembled = store.assemble_entity(&id).unwrap();
         assert_eq!(assembled.units[0].len(), 1);
         assert_eq!(assembled.units[0][0].data, late);
+    }
+
+    #[test]
+    fn each_mapping_slot_counts_every_record_across_and_within_batches() {
+        let store = RedbLatestEntityStore::new().unwrap();
+        let id = urn("urn:ngsi-ld:Camera:1");
+
+        store.store_fragment(write(&id, json!({"a": 1}), 1, false, None)).unwrap();
+        store
+            .store_fragment_batch(vec![
+                write(&id, json!({"b": 2}), 1, false, None),
+                write(&id, json!({"c": 3}), 1, false, None),
+                write(&id, json!({"on": true}), 2, true, Some("2026-04-03T22:00:20Z")),
+            ])
+            .unwrap();
+        store
+            .store_fragment(write(&id, json!({"on": false}), 2, true, Some("2026-04-03T21:00:20Z")))
+            .unwrap();
+
+        let unit = &store.assemble_entity(&id).unwrap().units[0];
+        let counts: Vec<u64> = unit.iter().map(|fragment| fragment.records.get()).collect();
+        assert_eq!(counts, [3, 2]);
+        assert_eq!(unit[0].data, json!({"a": 1, "b": 2, "c": 3}));
+        assert_eq!(unit[1].data, json!({"on": true}));
+    }
+
+    #[test]
+    fn a_slot_remembers_the_earliest_field_its_records_disagreed_on_across_batches() {
+        let store = RedbLatestEntityStore::new().unwrap();
+        let id = urn("urn:ngsi-ld:Camera:1");
+
+        store.store_fragment(write(&id, json!({"a": 1, "z": 1}), 1, false, None)).unwrap();
+        store.store_fragment(write(&id, json!({"z": 2}), 1, false, None)).unwrap();
+        store
+            .store_fragment_batch(vec![write(&id, json!({"b": 2}), 1, false, None), write(&id, json!({"a": 3}), 1, false, None)])
+            .unwrap();
+        store.store_fragment(write(&id, json!({"c": 1}), 2, false, None)).unwrap();
+        store.store_fragment(write(&id, json!({"c": 1}), 2, false, None)).unwrap();
+
+        let unit = &store.assemble_entity(&id).unwrap().units[0];
+        let conflicts: Vec<Option<String>> = unit.iter().map(|fragment| fragment.conflict.as_ref().map(ToString::to_string)).collect();
+        assert_eq!(conflicts, [Some("a".to_string()), None]);
+        assert_eq!(unit[0].data, json!({"a": 1, "z": 1, "b": 2}));
     }
 
     #[test]

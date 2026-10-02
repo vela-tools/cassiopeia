@@ -1,4 +1,4 @@
-use crate::{entity_assembly::AssemblyTiming, error::Result};
+use crate::{entity_assembly::AssemblyTiming, error::Result, id_assembly::IdAssembly, merged_records::MergedRecords};
 use cassiopeia_ir::assembled_entity::AssembledEntity;
 use std::ops::ControlFlow;
 use urn_rs::Urn;
@@ -13,13 +13,14 @@ use urn_rs::Urn;
 /// Implementations must be thread-safe (`Send + Sync`): entities may be assembled concurrently from
 /// many threads.
 pub trait EntitySource: Send + Sync {
-    /// Assembles a base id's stored fragments and relationships into its emit-units.
+    /// Assembles a base id's stored fragments and relationships into its emit-units, and finds the
+    /// records of one mapping that resolved to it and disagreed.
     ///
     /// # Errors
     ///
     /// Returns [`ResolverError`](crate::error::ResolverError) when the store lookup fails, the id has
     /// no recorded mapping, or a stored relationship key is not a legal NGSI-LD name.
-    fn assemble(&self, base_id: &Urn) -> Result<Vec<AssembledEntity>>;
+    fn assemble(&self, base_id: &Urn) -> Result<IdAssembly>;
 
     /// Returns the base URNs of all stored entities.
     ///
@@ -67,13 +68,21 @@ pub trait EntitySource: Send + Sync {
     /// one chunk yields roughly that many units, which is what keeps an id carrying many units from
     /// materialising the whole store before anything is emitted.
     ///
+    /// Every id whose stored contributions reveal a [`RecordMerge`](crate::record_merge::RecordMerge)
+    /// is recorded into `merged`, on the calling thread, for the caller to report once the scan ends.
+    ///
     /// Returns the [`AssemblyTiming`] the scan accumulated, so the caller (which owns the stage this
     /// work is measured as) can attribute it without timing the scan from outside.
     ///
     /// # Errors
     ///
     /// Returns [`ResolverError`](crate::error::ResolverError) when the entity store scan fails.
-    fn drive_assembly(&self, batch_size: usize, emit: &mut dyn FnMut(Result<AssembledEntity>) -> ControlFlow<()>) -> Result<AssemblyTiming>;
+    fn drive_assembly(
+        &self,
+        batch_size: usize,
+        merged: &mut MergedRecords,
+        emit: &mut dyn FnMut(Result<AssembledEntity>) -> ControlFlow<()>,
+    ) -> Result<AssemblyTiming>;
 
     /// Releases all resources held by the source.
     fn destroy(&self);

@@ -3,6 +3,7 @@ use cassiopeia_mapping::{
     error::{MappingError, Result},
     mapping::Mapping,
     scope::{CompiledScope, Scope},
+    source_reads::SourceReads,
     template::{CompiledTemplate, TemplateSource, runner::TemplateRunner},
     template_location::TemplateLocation,
     template_site::TemplateSite,
@@ -17,7 +18,8 @@ use std::{path::Path, sync::Arc};
 /// expansion loop runs, every one of them (the identity name, the scope, and each attribute's
 /// source, recursively through nested mappings, language maps, properties, and synthetic entities)
 /// is compiled once and cached back onto the mapping so per-record expansion never re-parses a
-/// template.
+/// template. The top-level source keys those templates read are recorded on the mapping at the same
+/// time (see [`SourceReads`]); a synthetic entity's are recorded on its own mapping only.
 ///
 /// Compilation must finish before a [`TemplateResolver`](cassiopeia_mapping::template::resolver::TemplateResolver)
 /// is taken from the runner: a resolver only sees the templates registered before it was handed out.
@@ -37,16 +39,17 @@ impl ExpanderCompiler {
     /// Compiles every template in `mapping`, a synthetic entity's included, against the one shared
     /// `document` path.
     fn compile_mapping(mapping: &mut Mapping, document: &Arc<Path>, runner: &mut TemplateRunner) -> Result<()> {
-        let compiled_name = Self::compile_template(mapping.identity().entity_name(), document, runner, TemplateSite::EntityName)?;
+        let mut reads = SourceReads::nothing();
+        let compiled_name = Self::compile_template(mapping.identity().entity_name(), document, runner, TemplateSite::EntityName, &mut reads)?;
         mapping.identity_mut().set_compiled_entity_name(Some(compiled_name));
 
         if let Some(scope) = mapping.scope() {
             let compiled_scope = match scope {
-                Scope::Single(source) => CompiledScope::Single(Self::compile_template(source, document, runner, TemplateSite::Scope)?),
+                Scope::Single(source) => CompiledScope::Single(Self::compile_template(source, document, runner, TemplateSite::Scope, &mut reads)?),
                 Scope::Multiple(sources) => CompiledScope::Multiple(
                     sources
                         .iter()
-                        .map(|source| Self::compile_template(source, document, runner, TemplateSite::Scope))
+                        .map(|source| Self::compile_template(source, document, runner, TemplateSite::Scope, &mut reads))
                         .collect::<Result<_>>()?,
                 ),
             };
@@ -54,8 +57,9 @@ impl ExpanderCompiler {
         }
 
         for (name, attribute) in mapping.attributes_mut() {
-            Self::compile_attribute(name, attribute, document, runner)?;
+            Self::compile_attribute(name, attribute, document, runner, &mut reads)?;
         }
+        mapping.set_source_reads(reads);
 
         Ok(())
     }
@@ -64,24 +68,24 @@ impl ExpanderCompiler {
     ///
     /// A failure is reported under `name`, the key the attribute is declared under; a per-language
     /// entry or an instance has no key of its own and is reported under its parent's.
-    fn compile_attribute(name: &NameBuf, attribute: &mut Attribute, document: &Arc<Path>, runner: &mut TemplateRunner) -> Result<()> {
-        let compiled = Self::compile_source_templates(attribute.source().as_ref(), name, document, runner)?;
+    fn compile_attribute(name: &NameBuf, attribute: &mut Attribute, document: &Arc<Path>, runner: &mut TemplateRunner, reads: &mut SourceReads) -> Result<()> {
+        let compiled = Self::compile_source_templates(attribute.source().as_ref(), name, document, runner, reads)?;
         attribute.set_compiled_source(compiled);
 
         for (nested_name, nested) in attribute.mappings_mut() {
-            Self::compile_attribute(nested_name, nested, document, runner)?;
+            Self::compile_attribute(nested_name, nested, document, runner, reads)?;
         }
         for language in attribute.language_map_mut().values_mut() {
-            Self::compile_attribute(name, language, document, runner)?;
+            Self::compile_attribute(name, language, document, runner, reads)?;
         }
         if let Some(properties) = attribute.properties_mut() {
             for (property_name, property) in properties {
-                Self::compile_attribute(property_name, property, document, runner)?;
+                Self::compile_attribute(property_name, property, document, runner, reads)?;
             }
         }
         if let Some(instances) = attribute.instances_mut() {
             for instance in instances {
-                Self::compile_instance(name, instance, document, runner)?;
+                Self::compile_instance(name, instance, document, runner, reads)?;
             }
         }
         if let Some(synthetic) = attribute.synthetic_entity_mut() {
@@ -93,13 +97,19 @@ impl ExpanderCompiler {
 
     /// Compiles one multi-instance instance's source and its own properties, reporting a failure in
     /// its source under `name`, the attribute declaring the instance.
-    fn compile_instance(name: &NameBuf, instance: &mut AttributeInstance, document: &Arc<Path>, runner: &mut TemplateRunner) -> Result<()> {
-        let compiled = Self::compile_source_templates(instance.source().as_ref(), name, document, runner)?;
+    fn compile_instance(
+        name: &NameBuf,
+        instance: &mut AttributeInstance,
+        document: &Arc<Path>,
+        runner: &mut TemplateRunner,
+        reads: &mut SourceReads,
+    ) -> Result<()> {
+        let compiled = Self::compile_source_templates(instance.source().as_ref(), name, document, runner, reads)?;
         instance.set_compiled_source(compiled);
 
         if let Some(properties) = instance.properties_mut() {
             for (property_name, property) in properties {
-                Self::compile_attribute(property_name, property, document, runner)?;
+                Self::compile_attribute(property_name, property, document, runner, reads)?;
             }
         }
 
@@ -113,6 +123,7 @@ impl ExpanderCompiler {
         name: &NameBuf,
         document: &Arc<Path>,
         runner: &mut TemplateRunner,
+        reads: &mut SourceReads,
     ) -> Result<Option<Vec<CompiledTemplate>>> {
         let mut compiled = Vec::new();
         // Each compiled template keeps the site it is declared at, so the attribute name is copied
@@ -121,11 +132,11 @@ impl ExpanderCompiler {
 
         if let Some(source) = source {
             match source {
-                Value::String(text) => compiled.push(Self::compile_template(&TemplateSource::new(text), document, runner, site())?),
+                Value::String(text) => compiled.push(Self::compile_template(&TemplateSource::new(text), document, runner, site(), reads)?),
                 Value::Array(items) => {
                     for item in items {
                         match item {
-                            Value::String(text) => compiled.push(Self::compile_template(&TemplateSource::new(text), document, runner, site())?),
+                            Value::String(text) => compiled.push(Self::compile_template(&TemplateSource::new(text), document, runner, site(), reads)?),
                             Value::Null | Value::Bool(_) | Value::Number(_) | Value::Array(_) | Value::Object(_) => {
                                 compiled.push(CompiledTemplate::Static(item.to_string()));
                             }
@@ -142,13 +153,22 @@ impl ExpanderCompiler {
     }
 
     /// Compiles one template declared at `site` in the mapping document at `document`, attributing a
-    /// failure, at load or on any record, to that declaration.
-    fn compile_template(source: &TemplateSource, document: &Arc<Path>, runner: &mut TemplateRunner, site: TemplateSite) -> Result<CompiledTemplate> {
+    /// failure, at load or on any record, to that declaration, and adds the source keys it reads to
+    /// `reads`.
+    fn compile_template(
+        source: &TemplateSource,
+        document: &Arc<Path>,
+        runner: &mut TemplateRunner,
+        site: TemplateSite,
+        reads: &mut SourceReads,
+    ) -> Result<CompiledTemplate> {
         let location = TemplateLocation::new(Arc::clone(document), site);
 
-        runner
+        let compiled = runner
             .compile(source, &location)
-            .map_err(|source| MappingError::UncompilableTemplate { location, source })
+            .map_err(|source| MappingError::UncompilableTemplate { location, source })?;
+        reads.absorb(runner.source_reads(&compiled));
+        Ok(compiled)
     }
 }
 
@@ -158,6 +178,7 @@ mod tests {
     use cassiopeia_mapping::{
         error::MappingError,
         mapping::Mapping,
+        source_reads::{SourceKey, SourceReads},
         template::{CompiledTemplate, TemplateSource, runner::TemplateRunner},
         template_site::TemplateSite,
     };
@@ -390,5 +411,98 @@ mod tests {
         };
         assert_eq!(*template.location.document, *Path::new(ORIGIN));
         assert_eq!(template.location.site, attribute("temperature"));
+    }
+
+    fn keys(names: &[&str]) -> SourceReads {
+        SourceReads::Keys(names.iter().map(|name| SourceKey::new(name)).collect())
+    }
+
+    #[test]
+    fn a_mapping_not_yet_compiled_is_taken_to_read_everything() {
+        let mut runner = TemplateRunner::new();
+        let mapping = Mapping::from_json5(&document("{{ id }}", "", "{}"), Path::new(ORIGIN), &mut runner).unwrap();
+
+        assert_eq!(mapping.source_reads(), &SourceReads::Everything);
+    }
+
+    #[test]
+    fn the_identity_scope_and_attribute_sources_are_all_read() {
+        let mapping = compile(&document(
+            "{{ id }}",
+            r#"scope: "/{{ region }}","#,
+            r#"{ t: { source: "{{ temperature }}" }, location: { type: "GeoProperty", source: ["{{ lon }}", "{{ lat }}"], transformation: "point" } }"#,
+        ))
+        .unwrap();
+
+        assert_eq!(mapping.source_reads(), &keys(&["id", "lat", "lon", "region", "temperature"]));
+    }
+
+    #[test]
+    fn properties_observed_at_and_nested_mappings_are_read() {
+        let mapping = compile(&document(
+            "{{ id }}",
+            "",
+            r#"{
+                t: { source: "{{ temperature }}", properties: { observedAt: { source: "{{ ts }}" }, unitCode: { source: "CEL" } } },
+                address: { type: "Property", mappings: { city: { source: "{{ town }}" } } },
+            }"#,
+        ))
+        .unwrap();
+
+        assert_eq!(mapping.source_reads(), &keys(&["id", "temperature", "town", "ts"]));
+    }
+
+    #[test]
+    fn relationship_sources_and_every_instance_source_are_read() {
+        let mapping = compile(&document(
+            "{{ id }}",
+            "",
+            r#"{
+                owner: { type: "Relationship", source: "{{ owner_id }}", target: { entity: "Organization" } },
+                servesAirport: {
+                    type: "Relationship",
+                    target: { entity: "Airport" },
+                    instances: [
+                        { source: "{{ departure }}", properties: { datasetId: { source: "urn:ngsi-ld:dataset:{{ leg }}" } } },
+                        { source: "{{ arrival }}" },
+                    ],
+                },
+            }"#,
+        ))
+        .unwrap();
+
+        assert_eq!(mapping.source_reads(), &keys(&["arrival", "departure", "id", "leg", "owner_id"]));
+    }
+
+    #[test]
+    fn a_synthetic_entity_s_reads_are_its_own_and_not_its_parent_s() {
+        let mapping = compile(&document(
+            "{{ id }}",
+            "",
+            r#"{
+                owner: {
+                    type: "Relationship",
+                    source: "{{ owner_id }}",
+                    target: { entity: "Organization" },
+                    syntheticEntity: { dataModel: "Organization", identity: { entityName: "{{ owner_id }}" }, attributes: { name: { source: "{{ owner_name }}" } } },
+                },
+            }"#,
+        ))
+        .unwrap();
+        let synthetic = mapping
+            .attributes()
+            .values()
+            .find_map(|attribute| attribute.synthetic_entity().as_ref())
+            .unwrap();
+
+        assert_eq!(mapping.source_reads(), &keys(&["id", "owner_id"]));
+        assert_eq!(synthetic.source_reads(), &keys(&["owner_id", "owner_name"]));
+    }
+
+    #[test]
+    fn one_template_reading_the_whole_record_makes_the_mapping_read_everything() {
+        let mapping = compile(&document("{{ id }}", "", r#"{ raw: { type: "JsonProperty", source: "{{ context }}" } }"#)).unwrap();
+
+        assert_eq!(mapping.source_reads(), &SourceReads::Everything);
     }
 }

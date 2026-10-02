@@ -19,9 +19,6 @@ use compact_str::CompactString;
 use serde_json::Value as JsonValue;
 use smallvec::smallvec;
 
-/// The field reference a lone source template reads to receive the whole record as its value.
-const WHOLE_RECORD: &str = "context";
-
 /// Resolves one attribute declaration into its NGSI-LD value.
 ///
 /// The declaration's [`NgsiLdAttributeKind`] and shape select the resolution path: a relationship
@@ -176,9 +173,7 @@ fn resolve_child(ctx: &ResolutionContext, key: &NameBuf, config: &Attribute) -> 
 fn collect_source_parts(ctx: &ResolutionContext, source: Option<&JsonValue>, compiled: Option<&Vec<CompiledTemplate>>) -> Result<SourceParts> {
     // The compiled form, not the source text, decides: `{{context}}` and `{{ context }}` are the
     // same reference however they are spaced.
-    if matches!(source, Some(JsonValue::String(_)))
-        && matches!(compiled.map(Vec::as_slice), Some([CompiledTemplate::Simple(path)]) if path.as_str() == WHOLE_RECORD)
-    {
+    if matches!(source, Some(JsonValue::String(_))) && matches!(compiled.map(Vec::as_slice), Some([CompiledTemplate::Simple(path)]) if path.is_whole_record()) {
         return Ok(smallvec![ctx.data.clone()]);
     }
 

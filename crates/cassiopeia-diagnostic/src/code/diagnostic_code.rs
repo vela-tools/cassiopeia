@@ -6,6 +6,7 @@ use crate::code::{
     extractor_code::ExtractorCode,
     geometry_code::GeometryCode,
     ingest_code::IngestCode,
+    resolver_code::ResolverCode,
     run_code::RunCode,
     schema_code::SchemaCode,
     transform_code::TransformCode,
@@ -42,6 +43,9 @@ pub enum DiagnosticCode {
     /// Bringing a source into the pipeline as records.
     #[display("ingest-{_0}")]
     Ingest(IngestCode),
+    /// Merging records into entities.
+    #[display("resolver-{_0}")]
+    Resolver(ResolverCode),
     /// The run or one of its scheduled cycles.
     #[display("run-{_0}")]
     Run(RunCode),
@@ -61,6 +65,7 @@ pub const DIAGNOSTIC_CODE_COUNT: usize = BrokerCode::COUNT
     + ExtractorCode::COUNT
     + GeometryCode::COUNT
     + IngestCode::COUNT
+    + ResolverCode::COUNT
     + RunCode::COUNT
     + SchemaCode::COUNT
     + TransformCode::COUNT;
@@ -76,6 +81,7 @@ impl DiagnosticCode {
             .chain(ExtractorCode::iter().map(DiagnosticCode::Extractor))
             .chain(GeometryCode::iter().map(DiagnosticCode::Geometry))
             .chain(IngestCode::iter().map(DiagnosticCode::Ingest))
+            .chain(ResolverCode::iter().map(DiagnosticCode::Resolver))
             .chain(RunCode::iter().map(DiagnosticCode::Run))
             .chain(SchemaCode::iter().map(DiagnosticCode::Schema))
             .chain(TransformCode::iter().map(DiagnosticCode::Transform))

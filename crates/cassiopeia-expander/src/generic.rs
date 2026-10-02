@@ -45,7 +45,7 @@ impl GenericExpander {
     /// `vars` is this lane's effective run-level variables (manifest-global overlaid by CLI `--var`
     /// and this input's own `vars`), injected into each record under the reserved `vars` key.
     #[must_use]
-    pub fn new(router: MappingRouter, resolver: TemplateResolver, vars: Map<String, Value>) -> GenericExpander {
+    pub const fn new(router: MappingRouter, resolver: TemplateResolver, vars: Map<String, Value>) -> GenericExpander {
         GenericExpander {
             router,
             urn_generator: UrnGenerator::new(resolver),
@@ -1222,7 +1222,7 @@ mod tests {
     }
 
     #[test]
-    fn a_static_identity_with_varying_attributes_increments_the_urn_per_record() {
+    fn a_static_identity_with_varying_attributes_mints_the_identity_as_written_for_every_record() {
         let expander = expander(
             r#"{
                 version: "v4",
@@ -1235,8 +1235,8 @@ mod tests {
         let first = expander.expand(record(json!({"temperature": 20}))).unwrap();
         let second = expander.expand(record(json!({"temperature": 21}))).unwrap();
 
-        assert_eq!(urn(&first[0]), "urn:ngsi-ld:Sensor:Sensor-1");
-        assert_eq!(urn(&second[0]), "urn:ngsi-ld:Sensor:Sensor-2");
+        assert_eq!(urn(&first[0]), "urn:ngsi-ld:Sensor:Sensor");
+        assert_eq!(urn(&second[0]), "urn:ngsi-ld:Sensor:Sensor");
     }
 
     fn collections_expander() -> GenericExpander {

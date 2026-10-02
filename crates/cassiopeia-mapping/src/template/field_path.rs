@@ -1,6 +1,9 @@
 use derive_more::Display;
 use serde_json::Value as JsonValue;
 
+/// The field reference whose lone use as an attribute source takes the whole record as the value.
+const WHOLE_RECORD: &str = "context";
+
 /// A dot-separated path naming a source field, such as `properties.tipo`.
 ///
 /// A newtype rather than a bare `String` so a field reference cannot be confused with literal
@@ -21,6 +24,19 @@ impl FieldPath {
     #[must_use]
     pub fn as_str(&self) -> &str {
         &self.0
+    }
+
+    /// The top-level key the path starts at.
+    #[must_use]
+    pub fn head(&self) -> &str {
+        self.0.split_once('.').map_or(self.0.as_str(), |(head, _rest)| head)
+    }
+
+    /// Whether this is the reference an attribute source writes, alone, to take the whole record as
+    /// its value rather than one field of it.
+    #[must_use]
+    pub fn is_whole_record(&self) -> bool {
+        self.0 == WHOLE_RECORD
     }
 
     /// Reads the value this path names out of a source record.
@@ -70,6 +86,18 @@ mod tests {
         let data = json!({"address": {"city": "Ljubljana"}});
 
         assert_eq!(FieldPath::new("address").read(&data), json!({"city": "Ljubljana"}));
+    }
+
+    #[test]
+    fn the_head_is_the_first_segment_and_a_single_key_is_its_own_head() {
+        assert_eq!(FieldPath::new("properties.tipo").head(), "properties");
+        assert_eq!(FieldPath::new("id").head(), "id");
+    }
+
+    #[test]
+    fn only_the_context_reference_is_the_whole_record() {
+        assert!(FieldPath::new("context").is_whole_record());
+        assert!(!FieldPath::new("context.id").is_whole_record());
     }
 
     #[test]

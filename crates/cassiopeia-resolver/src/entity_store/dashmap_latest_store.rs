@@ -6,14 +6,15 @@ use crate::{
         store::{AssembledFragment, AssembledFragments, EntityStore, FragmentWrite, StoredUnit},
         supersession::supersedes,
     },
+    field_path::FieldPath,
     mapping_id::MappingId,
     store_write_strategy::StoreWriteStrategy,
 };
 use ahash::{AHashMap, RandomState};
-use cassiopeia_mapping::observed_at::ObservedAt;
+use cassiopeia_mapping::{observed_at::ObservedAt, source_reads::SourceReads};
 use dashmap::DashMap;
 use serde_json::Value;
-use std::sync::Arc;
+use std::{num::NonZeroU64, sync::Arc};
 use urn_rs::Urn;
 
 /// One mapping's retained fragment for a base id under the current-state model.
@@ -23,6 +24,11 @@ struct LatestFragment {
     data: Value,
     /// The record-level `observedAt` of the retained record, for ranking a temporal mapping's records.
     observed_at: Option<ObservedAt>,
+    /// How many of the mapping's records resolved to the id, whether merged in, superseding, or
+    /// discarded as stale.
+    records: NonZeroU64,
+    /// The earliest field on which a merged record disagreed with the retained one.
+    conflict: Option<FieldPath>,
 }
 
 /// In-memory current-state entity store using [`DashMap`] for lock-free concurrent access.
@@ -51,7 +57,7 @@ impl EntityStore for DashMapLatestEntityStore {
         StoreWriteStrategy::Concurrent
     }
 
-    fn store_fragment(&self, write: FragmentWrite) -> Result<()> {
+    fn store_fragment(&self, write: FragmentWrite<'_>) -> Result<()> {
         let FragmentWrite {
             base_id,
             source_data,
@@ -59,25 +65,28 @@ impl EntityStore for DashMapLatestEntityStore {
             temporal,
             observed_at,
             scope,
+            reads,
         } = write;
 
         // A repeated id is the common case: every later record of a mapping lands on a key that is
         // already present, so `get_mut` serves it without cloning a URN the map would discard, and
         // only the first record of an id pays for an owned key.
         let unplaced = match self.data.get_mut(&base_id) {
-            Some(mut per_mapping) => merge_fragment(&mut per_mapping, mapping_id, source_data, temporal, observed_at),
+            Some(mut per_mapping) => merge_fragment(&mut per_mapping, mapping_id, source_data, temporal, observed_at, reads),
             None => Some((source_data, observed_at)),
         };
         if let Some((source_data, observed_at)) = unplaced {
             let mut per_mapping = self.data.entry(base_id.clone()).or_default();
             // A concurrent writer may have created the id between the miss and this insert, so the
             // merge rule is re-applied rather than assuming the mapping slot is still vacant.
-            if let Some((source_data, observed_at)) = merge_fragment(&mut per_mapping, mapping_id, source_data, temporal, observed_at) {
+            if let Some((source_data, observed_at)) = merge_fragment(&mut per_mapping, mapping_id, source_data, temporal, observed_at, reads) {
                 per_mapping.insert(
                     mapping_id,
                     LatestFragment {
                         data: source_data,
                         observed_at,
+                        records: NonZeroU64::MIN,
+                        conflict: None,
                     },
                 );
             }
@@ -103,6 +112,8 @@ impl EntityStore for DashMapLatestEntityStore {
                     .map(|(mapping_id, fragment)| AssembledFragment {
                         mapping_id,
                         data: fragment.data,
+                        records: fragment.records,
+                        conflict: fragment.conflict,
                     })
                     .collect();
                 // A stable join order keeps the assembled entity deterministic across runs.
@@ -139,7 +150,8 @@ impl EntityStore for DashMapLatestEntityStore {
     }
 }
 
-/// Folds one record into an id's retained fragment for its mapping under the current-state rule.
+/// Folds one record into an id's retained fragment for its mapping under the current-state rule,
+/// counting it among the records the mapping resolved to the id.
 ///
 /// Returns `None` once the record has been absorbed: merged, superseding, or deliberately discarded
 /// as stale. Returns the record back when the mapping has no slot yet, so the caller can insert it
@@ -151,11 +163,13 @@ fn merge_fragment(
     source_data: Value,
     temporal: bool,
     observed_at: Option<ObservedAt>,
+    reads: &SourceReads,
 ) -> Option<(Value, Option<ObservedAt>)> {
     let Some(existing) = per_mapping.get_mut(&mapping_id) else {
         return Some((source_data, observed_at));
     };
 
+    existing.records = existing.records.saturating_add(1);
     if temporal {
         // A temporal mapping's records are observations of one id: keep the latest.
         let new = observed_at.as_ref().map(ObservedAt::as_str);
@@ -164,8 +178,9 @@ fn merge_fragment(
             existing.observed_at = observed_at;
         }
     } else {
-        // A static mapping's records refine one entity: merge them.
-        deep_merge(&mut existing.data, &source_data);
+        // A static mapping's records refine one entity: merge them, remembering where they disagreed.
+        let conflict = deep_merge(&mut existing.data, &source_data, reads);
+        existing.conflict = FieldPath::earliest(existing.conflict.take(), conflict);
     }
     None
 }
@@ -175,7 +190,11 @@ mod tests {
     use crate::{
         entity_store::{
             dashmap_latest_store::DashMapLatestEntityStore,
-            store::{EntityStore, FragmentWrite, tests::assert_merges_scopes_per_id},
+            store::{
+                EntityStore,
+                FragmentWrite,
+                tests::{READS_EVERYTHING, assert_merges_scopes_per_id},
+            },
         },
         mapping_id::MappingId,
     };
@@ -192,7 +211,7 @@ mod tests {
         assert_merges_scopes_per_id(&DashMapLatestEntityStore::new());
     }
 
-    fn write(base_id: &Urn, data: serde_json::Value, mapping: u32, temporal: bool, observed_at: Option<&str>) -> FragmentWrite {
+    fn write(base_id: &Urn, data: serde_json::Value, mapping: u32, temporal: bool, observed_at: Option<&str>) -> FragmentWrite<'static> {
         FragmentWrite {
             base_id: base_id.clone(),
             source_data: data,
@@ -200,6 +219,7 @@ mod tests {
             temporal,
             observed_at: observed_at.map(ObservedAt::new),
             scope: None,
+            reads: &READS_EVERYTHING,
         }
     }
 
@@ -269,6 +289,44 @@ mod tests {
 
         let assembled = store.assemble_entity(&id).unwrap();
         assert_eq!(assembled.units[0][0].data, json!({"a": 1, "b": 2}));
+    }
+
+    #[test]
+    fn each_mapping_slot_counts_every_record_it_absorbed() {
+        let store = DashMapLatestEntityStore::new();
+        let id = urn("urn:ngsi-ld:Camera:1");
+
+        store.store_fragment(write(&id, json!({"a": 1}), 1, false, None)).unwrap();
+        store.store_fragment(write(&id, json!({"b": 2}), 1, false, None)).unwrap();
+        store
+            .store_fragment(write(&id, json!({"on": true}), 2, true, Some("2026-04-03T22:00:20Z")))
+            .unwrap();
+        store
+            .store_fragment(write(&id, json!({"on": false}), 2, true, Some("2026-04-03T21:00:20Z")))
+            .unwrap();
+        store.store_fragment(write(&id, json!({"c": 3}), 3, false, None)).unwrap();
+
+        let unit = &store.assemble_entity(&id).unwrap().units[0];
+        let counts: Vec<u64> = unit.iter().map(|fragment| fragment.records.get()).collect();
+        // A stale observation is discarded yet still counted: it resolved to the id all the same.
+        assert_eq!(counts, [2, 2, 1]);
+    }
+
+    #[test]
+    fn a_slot_remembers_the_earliest_field_its_records_disagreed_on() {
+        let store = DashMapLatestEntityStore::new();
+        let id = urn("urn:ngsi-ld:Camera:1");
+
+        store.store_fragment(write(&id, json!({"a": 1, "z": 1}), 1, false, None)).unwrap();
+        store.store_fragment(write(&id, json!({"z": 2, "b": 2}), 1, false, None)).unwrap();
+        store.store_fragment(write(&id, json!({"a": 3}), 1, false, None)).unwrap();
+        store.store_fragment(write(&id, json!({"c": 1}), 2, false, None)).unwrap();
+        store.store_fragment(write(&id, json!({"c": 1, "d": 4}), 2, false, None)).unwrap();
+
+        let unit = &store.assemble_entity(&id).unwrap().units[0];
+        let conflicts: Vec<Option<String>> = unit.iter().map(|fragment| fragment.conflict.as_ref().map(ToString::to_string)).collect();
+        assert_eq!(conflicts, [Some("a".to_string()), None]);
+        assert_eq!(unit[0].data, json!({"a": 1, "z": 1, "b": 2}));
     }
 
     #[test]

@@ -12,9 +12,12 @@ use crate::{
 };
 use redb::{Durability, ReadableDatabase, ReadableTableMetadata, TableDefinition};
 use smallvec::smallvec;
-use std::sync::{
-    Arc,
-    atomic::{AtomicU64, Ordering},
+use std::{
+    num::NonZeroU64,
+    sync::{
+        Arc,
+        atomic::{AtomicU64, Ordering},
+    },
 };
 use urn_rs::Urn;
 
@@ -63,11 +66,11 @@ impl EntityStore for RedbSeriesEntityStore {
         StoreWriteStrategy::TransactionalBatch
     }
 
-    fn store_fragment(&self, write: FragmentWrite) -> Result<()> {
+    fn store_fragment(&self, write: FragmentWrite<'_>) -> Result<()> {
         self.store_fragment_batch(vec![write])
     }
 
-    fn store_fragment_batch(&self, fragments: Vec<FragmentWrite>) -> Result<()> {
+    fn store_fragment_batch(&self, fragments: Vec<FragmentWrite<'_>>) -> Result<()> {
         if fragments.is_empty() {
             return Ok(());
         }
@@ -99,10 +102,13 @@ impl EntityStore for RedbSeriesEntityStore {
                 // Append-only: a fresh sequence number gives a new key, so no read of prior state.
                 let seq = self.next_seq.fetch_add(1, Ordering::Relaxed);
                 let key = Self::make_key(&base_id, seq);
+                // Every observation is kept on its own, so each stored fragment stands for one record.
                 let stored = StoredFragment {
                     mapping_id,
                     data: source_data,
                     observed_at: observed_at.map(String::from),
+                    records: NonZeroU64::MIN,
+                    conflict: None,
                 };
                 let bytes = rmp_serde::to_vec(&stored)?;
                 data_table
@@ -151,6 +157,8 @@ impl EntityStore for RedbSeriesEntityStore {
             units.push(smallvec![AssembledFragment {
                 mapping_id: stored.mapping_id,
                 data: stored.data,
+                records: stored.records,
+                conflict: stored.conflict,
             }]);
         }
 
@@ -219,7 +227,11 @@ mod tests {
     use crate::{
         entity_store::{
             redb_series_store::RedbSeriesEntityStore,
-            store::{EntityStore, FragmentWrite, tests::assert_merges_scopes_per_id},
+            store::{
+                EntityStore,
+                FragmentWrite,
+                tests::{READS_EVERYTHING, assert_merges_scopes_per_id},
+            },
         },
         mapping_id::MappingId,
     };
@@ -236,7 +248,7 @@ mod tests {
         assert_merges_scopes_per_id(&RedbSeriesEntityStore::new().unwrap());
     }
 
-    fn write(base_id: &Urn, data: serde_json::Value, observed_at: &str) -> FragmentWrite {
+    fn write(base_id: &Urn, data: serde_json::Value, observed_at: &str) -> FragmentWrite<'static> {
         FragmentWrite {
             base_id: base_id.clone(),
             source_data: data,
@@ -244,6 +256,7 @@ mod tests {
             temporal: true,
             observed_at: Some(ObservedAt::new(observed_at)),
             scope: None,
+            reads: &READS_EVERYTHING,
         }
     }
 
@@ -264,6 +277,24 @@ mod tests {
         assert_eq!(assembled.units[0][0].data, first);
         assert_eq!(assembled.units[1][0].data, second);
         assert_eq!(assembled.units[2][0].data, third);
+    }
+
+    #[test]
+    fn every_stored_observation_stands_for_exactly_one_record_and_has_nothing_to_disagree_with() {
+        let store = RedbSeriesEntityStore::new().unwrap();
+        let id = urn("urn:ngsi-ld:Camera:1");
+
+        store.store_fragment(write(&id, json!({"on": true}), "2026-04-03T22:00:20Z")).unwrap();
+        store.store_fragment(write(&id, json!({"on": false}), "2026-04-03T22:05:20Z")).unwrap();
+
+        let assembled = store.assemble_entity(&id).unwrap();
+        assert!(
+            assembled
+                .units
+                .iter()
+                .flatten()
+                .all(|fragment| fragment.records.get() == 1 && fragment.conflict.is_none())
+        );
     }
 
     #[test]

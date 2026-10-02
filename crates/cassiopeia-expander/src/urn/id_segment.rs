@@ -25,16 +25,6 @@ impl IdSegment {
         }
     }
 
-    /// Appends a deduplication counter, joined by a single `-` unless the segment already ends in one.
-    pub(crate) fn with_suffix(self, count: usize) -> IdSegment {
-        let IdSegment(mut segment) = self;
-        if !segment.ends_with('-') {
-            segment.push('-');
-        }
-        segment.push_str(&count.to_string());
-        IdSegment(segment)
-    }
-
     /// The segment's text.
     pub(crate) fn as_str(&self) -> &str {
         &self.0
@@ -84,15 +74,5 @@ mod tests {
         assert_eq!(IdSegment::clean("-a").unwrap().as_str(), "-a");
         assert_eq!(IdSegment::clean("_7_").unwrap().as_str(), "_7_");
         assert_eq!(IdSegment::clean("A—B").unwrap().as_str(), "A--B");
-    }
-
-    #[test]
-    fn a_suffix_is_joined_with_a_dash() {
-        assert_eq!(IdSegment::clean("Sensor").unwrap().with_suffix(2).as_str(), "Sensor-2");
-    }
-
-    #[test]
-    fn a_suffix_reuses_a_trailing_dash() {
-        assert_eq!(IdSegment::clean("Sensor-").unwrap().with_suffix(3).as_str(), "Sensor-3");
     }
 }

@@ -3,8 +3,10 @@ use crate::{
     error::{MappingError, Result},
     geometry_validation::validate,
     identity::Identity,
+    mapping_role::MappingRole,
     observed_at::ObservedAt,
     scope::{CompiledScope, Scope},
+    source_reads::SourceReads,
     template::{CompiledTemplate, TemplateSource, resolver::TemplateResolver, runner::TemplateRunner},
     template_location::TemplateLocation,
     template_site::TemplateSite,
@@ -12,7 +14,7 @@ use crate::{
 };
 use cassiopeia_common::error::io::{IoAction, IoError};
 use cassiopeia_ngsi_ld::data_model::DataModel;
-use getset::{Getters, MutGetters, Setters};
+use getset::{CopyGetters, Getters, MutGetters, Setters};
 use serde::{Deserialize, Serialize};
 use serde_json::Value as JsonValue;
 use std::{fs::read_to_string, path::Path, sync::Arc};
@@ -22,7 +24,7 @@ use std::{fs::read_to_string, path::Path, sync::Arc};
 /// `deny_unknown_fields` makes a misplaced or misspelled key a load error: a key the document does
 /// not recognise would otherwise be dropped without a trace, and whatever it declared (a scope, for
 /// one) would silently vanish from every entity the mapping produces.
-#[derive(Debug, Clone, Serialize, Deserialize, Getters, MutGetters, Setters)]
+#[derive(Debug, Clone, Serialize, Deserialize, CopyGetters, Getters, MutGetters, Setters)]
 #[serde(deny_unknown_fields)]
 pub struct Mapping {
     /// The document format version.
@@ -75,6 +77,20 @@ pub struct Mapping {
     /// check (ETSI GS CIM 009 v1.9.1 clause 4.5.2.2 with 4.5.3).
     #[serde(skip)]
     has_nested_relationships: bool,
+
+    /// Where the mapping is declared: bound to an input, or lifted out of an attribute's
+    /// `syntheticEntity`. Every document deserializes as a [`MappingRole::Document`]; only the
+    /// synthetic-entity deserializer marks its mapping otherwise.
+    #[serde(skip)]
+    #[getset(get_copy = "pub")]
+    role: MappingRole,
+
+    /// The top-level source keys the mapping's own templates read, filled in by the expansion stage
+    /// once it has compiled them. A synthetic entity's templates are its own mapping's, not counted
+    /// here. Until then, nothing narrower than [`SourceReads::Everything`] is known.
+    #[serde(skip)]
+    #[getset(get = "pub", set = "pub")]
+    source_reads: SourceReads,
 }
 
 impl Mapping {
@@ -103,6 +119,8 @@ impl Mapping {
             temporal_source: None,
             observed_at_template: None,
             has_nested_relationships: false,
+            role: MappingRole::Document,
+            source_reads: SourceReads::Everything,
         };
         mapping.compile_temporal_fields(origin, runner)?;
         mapping.has_nested_relationships = mapping.detect_nested_relationships();
@@ -180,6 +198,12 @@ impl Mapping {
             JsonValue::Number(value) => Some(ObservedAt::new(value.to_string())),
             JsonValue::String(_) | JsonValue::Null | JsonValue::Bool(_) | JsonValue::Array(_) | JsonValue::Object(_) => None,
         }
+    }
+
+    /// Marks this mapping as a `syntheticEntity` declaration rather than a document bound to an input.
+    pub(crate) const fn into_synthetic(mut self) -> Mapping {
+        self.role = MappingRole::Synthetic;
+        self
     }
 
     /// Whether any top-level attribute declares a nested relationship in its `properties` subtree.

@@ -1,9 +1,9 @@
-use crate::{entity_store::error::Result, mapping_id::MappingId, store_write_strategy::StoreWriteStrategy};
-use cassiopeia_mapping::observed_at::ObservedAt;
+use crate::{entity_store::error::Result, field_path::FieldPath, mapping_id::MappingId, store_write_strategy::StoreWriteStrategy};
+use cassiopeia_mapping::{observed_at::ObservedAt, source_reads::SourceReads};
 use cassiopeia_ngsi_ld::entity::scope::NgsiLdScope;
 use serde_json::Value;
 use smallvec::SmallVec;
-use std::fmt::Debug;
+use std::{fmt::Debug, num::NonZeroU64};
 use urn_rs::Urn;
 
 /// The inputs for storing one fragment under its base entity id.
@@ -13,10 +13,11 @@ use urn_rs::Urn;
 /// and `observed_at` let a current-state store rank a temporal mapping's records by their record-level
 /// `observedAt`; a series store ignores them and keeps every observation.
 ///
-/// The write owns everything it carries. The resolver already owns the fragment it is storing and
+/// The write owns the record it carries. The resolver already owns the fragment it is storing and
 /// has no use for it afterwards, so handing ownership over lets an in-memory store move the record
-/// into place instead of deep-copying a whole `serde_json` document per fragment.
-pub struct FragmentWrite {
+/// into place instead of deep-copying a whole `serde_json` document per fragment. The mapping's read
+/// set is only borrowed: the mapping outlives the write.
+pub struct FragmentWrite<'a> {
     /// The entity id this fragment contributes to, with no temporal qualifier.
     pub base_id: Urn,
     /// The source record the fragment was expanded from.
@@ -30,18 +31,29 @@ pub struct FragmentWrite {
     pub observed_at: Option<ObservedAt>,
     /// The entity's scope, when one was resolved.
     pub scope: Option<NgsiLdScope>,
+    /// The top-level source keys the producing mapping reads: a current-state store counts a
+    /// disagreement between merged records only beneath one of them.
+    pub reads: &'a SourceReads,
 }
 
 /// One fragment's rendering inputs, read back at assembly.
 ///
-/// The extractor resolves the record through the mapping the id resolves to, so only the record and
-/// its mapping id survive round-tripping through the store.
+/// The extractor resolves the record through the mapping the id resolves to, so only the record, its
+/// mapping id, how many records it stands for, and where those records disagreed survive
+/// round-tripping through the store.
 #[derive(Debug, Clone)]
 pub struct AssembledFragment {
     /// The interned id of the mapping that produced the fragment.
     pub mapping_id: MappingId,
     /// The source record the fragment was expanded from.
     pub data: Value,
+    /// How many records the store folded into this fragment: always one for a series observation,
+    /// and every record its mapping resolved to the id for a current-state slot.
+    pub records: NonZeroU64,
+    /// The earliest field on which the records folded into this fragment disagreed, so merging them
+    /// discarded a value (see [`deep_merge`](crate::entity_store::merge::deep_merge)). Always `None`
+    /// for a series observation, which is never merged in the store.
+    pub conflict: Option<FieldPath>,
 }
 
 /// The fragments contributing to one emit-unit.
@@ -83,7 +95,7 @@ pub trait EntityStore: Debug + Send + Sync + 'static {
     ///
     /// Returns [`EntityStoreError`](crate::entity_store::error::EntityStoreError) when the store
     /// write fails.
-    fn store_fragment(&self, write: FragmentWrite) -> Result<()>;
+    fn store_fragment(&self, write: FragmentWrite<'_>) -> Result<()>;
 
     /// Stores a batch of fragments in a single call.
     ///
@@ -95,7 +107,7 @@ pub trait EntityStore: Debug + Send + Sync + 'static {
     ///
     /// Returns [`EntityStoreError`](crate::entity_store::error::EntityStoreError) when the store
     /// write fails.
-    fn store_fragment_batch(&self, fragments: Vec<FragmentWrite>) -> Result<()> {
+    fn store_fragment_batch(&self, fragments: Vec<FragmentWrite<'_>>) -> Result<()> {
         for write in fragments {
             self.store_fragment(write)?;
         }
@@ -185,11 +197,16 @@ pub(crate) mod tests {
         entity_store::store::{EntityStore, FragmentWrite},
         mapping_id::MappingId,
     };
+    use cassiopeia_mapping::source_reads::SourceReads;
     use cassiopeia_ngsi_ld::entity::scope::{NgsiLdScope, ScopeBuf};
     use serde_json::json;
     use urn_rs::Urn;
 
-    fn write(base_id: &Urn, mapping: u32, scopes: &[&str]) -> FragmentWrite {
+    /// The read set of a mapping that reads every key, so every disagreement a store test merges
+    /// counts.
+    pub(crate) static READS_EVERYTHING: SourceReads = SourceReads::Everything;
+
+    fn write(base_id: &Urn, mapping: u32, scopes: &[&str]) -> FragmentWrite<'static> {
         FragmentWrite {
             base_id: base_id.clone(),
             source_data: json!({ "mapping": mapping }),
@@ -197,6 +214,7 @@ pub(crate) mod tests {
             temporal: false,
             observed_at: None,
             scope: NgsiLdScope::from_scopes(scopes.iter().map(|scope| ScopeBuf::new(*scope).unwrap())),
+            reads: &READS_EVERYTHING,
         }
     }
 

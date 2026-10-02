@@ -1,10 +1,8 @@
 use crate::urn::{
-    analysis::Analysis,
     builder::UrnBuilder,
     error::{Result, UrnError},
     id_segment::IdSegment,
 };
-use ahash::RandomState;
 use cassiopeia_mapping::{
     attribute::{Attribute, instance::AttributeInstance},
     mapping::Mapping,
@@ -18,32 +16,17 @@ use cassiopeia_ngsi_ld::entity::{
     name::NameBuf,
     scope::{NgsiLdScope, ScopeBuf},
 };
-use dashmap::DashMap;
 use serde_json::Value;
 use std::slice;
 use urn_rs::Urn;
 
-/// How a resolved identifier is turned into a unique URN.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum DeduplicationStrategy {
-    /// Use the resolved ID exactly, with no suffix.
-    Direct,
-    /// Append a per-value numeric suffix so repeated static IDs stay distinct.
-    Increment,
-}
-
 /// Mints NGSI-LD URNs and scopes for expanded entities.
 ///
-/// The generator is cloneable and thread-safe: the deduplication counter is a [`DashMap`] and the
-/// resolver shares its templating engine through an `Arc`, so every pipeline worker can hold its own
-/// clone without contending on a lock.
+/// The generator is stateless apart from the resolver, which shares its templating engine through an
+/// `Arc`, so every pipeline worker can hold its own clone without contending on a lock, and a record
+/// mints the same URN whichever worker expands it and in whichever order.
 #[derive(Clone)]
 pub struct UrnGenerator {
-    /// Per-identifier counter backing the [`DeduplicationStrategy::Increment`] strategy.
-    ///
-    /// The keys are raw identifiers read out of the source data, so the map hashes with `ahash`:
-    /// it resists a hostile key distribution without paying `SipHash` on every record.
-    counter: DashMap<String, usize, RandomState>,
     /// The shared resolver used to evaluate identity, scope, and relationship templates.
     resolver: TemplateResolver,
 }
@@ -51,19 +34,15 @@ pub struct UrnGenerator {
 impl UrnGenerator {
     /// Creates a generator over a shared template resolver.
     #[must_use]
-    pub fn new(resolver: TemplateResolver) -> UrnGenerator {
-        UrnGenerator {
-            counter: DashMap::with_hasher(RandomState::new()),
-            resolver,
-        }
+    pub const fn new(resolver: TemplateResolver) -> UrnGenerator {
+        UrnGenerator { resolver }
     }
 
     /// Generates the entity URN for one record under `mapping`.
     ///
-    /// The deduplication strategy is chosen from the mapping's temporality and the staticness of its
-    /// identity and attributes: temporal entities and dynamic identities are used directly, while a
-    /// static identity paired with varying attributes is incremented so each record gets a distinct
-    /// URN.
+    /// The identity is used exactly as it resolves for the record: a constant identity names one
+    /// entity, so every record it maps contributes to that one entity. Records that resolve to the
+    /// same URN are merged by the resolver, which reports the merge.
     ///
     /// # Errors
     ///
@@ -77,10 +56,7 @@ impl UrnGenerator {
         // a relationship object does, so an identity over an absent field names no entity.
         let raw_id = self.resolve_identifier(slice::from_ref(template), entity_type, data)?;
 
-        match Self::determine_strategy(mapping) {
-            DeduplicationStrategy::Direct => Self::generate_target_id(entity_type, &raw_id),
-            DeduplicationStrategy::Increment => self.build_incrementing_urn(entity_type, &raw_id),
-        }
+        Self::generate_target_id(entity_type, &raw_id)
     }
 
     /// Generates the scope, or scopes, for an entity from its mapping's `scope` declaration.
@@ -307,41 +283,6 @@ impl UrnGenerator {
             }),
         }
     }
-
-    /// Chooses the deduplication strategy for `mapping`.
-    fn determine_strategy(mapping: &Mapping) -> DeduplicationStrategy {
-        // A temporal entity (one carrying `observedAt`) represents the same entity at successive
-        // points in time, not distinct instances, so it must never receive a numeric suffix.
-        if mapping.is_temporal() {
-            return DeduplicationStrategy::Direct;
-        }
-
-        let identity_is_static = Analysis::is_identity_static(mapping.identity());
-        let attributes_are_static = Analysis::is_attributes_static(mapping.attributes());
-
-        match (identity_is_static, attributes_are_static) {
-            // A constant identity with varying attributes needs a suffix to stay unique per record.
-            (true, false) => DeduplicationStrategy::Increment,
-            // A singleton (constant identity and attributes) or a dynamic identity (unique by
-            // construction) is used directly.
-            (true, true) | (false, true | false) => DeduplicationStrategy::Direct,
-        }
-    }
-
-    /// Builds a URN with a per-identifier numeric suffix.
-    ///
-    /// The identifier is cleaned before the counter advances, so an empty identity fails without
-    /// minting `<Type>:-1` and without consuming a count.
-    fn build_incrementing_urn(&self, entity_type: &NameBuf, raw_id: &str) -> Result<Urn> {
-        let segment = Self::segment(entity_type, raw_id)?;
-        let count = {
-            let mut count = self.counter.entry(raw_id.to_string()).or_insert(0);
-            *count += 1;
-            *count
-        };
-
-        UrnBuilder::build(entity_type.as_str(), &segment.with_suffix(count))
-    }
 }
 
 #[cfg(test)]
@@ -354,8 +295,9 @@ mod tests {
     use serde_json::{Value, json};
     use std::path::Path;
 
-    /// Mints the identity of an `AircraftType` named by `identity` for one record.
-    fn generate_aircraft_type_id(identity: &str, data: &Value) -> Result<String, UrnError> {
+    /// A generator and an `AircraftType` mapping whose identity is `identity` and whose `codeIATA`
+    /// attribute reads a different value from every record.
+    fn aircraft_type_generator(identity: &str) -> (UrnGenerator, Mapping) {
         let document = r#"{
             version: "v4",
             dataModel: "AircraftType",
@@ -366,7 +308,13 @@ mod tests {
         let mut runner = TemplateRunner::new();
         let mut mapping = Mapping::from_json5(&document, Path::new("test.json5"), &mut runner).unwrap();
         ExpanderCompiler::compile(&mut mapping, Path::new("test.json5"), &mut runner).unwrap();
-        let generator = UrnGenerator::new(runner.resolver());
+
+        (UrnGenerator::new(runner.resolver()), mapping)
+    }
+
+    /// Mints the identity of an `AircraftType` named by `identity` for one record.
+    fn generate_aircraft_type_id(identity: &str, data: &Value) -> Result<String, UrnError> {
+        let (generator, mapping) = aircraft_type_generator(identity);
 
         generator.generate_id(&mapping, data).map(|urn| urn.to_string())
     }
@@ -427,10 +375,29 @@ mod tests {
     }
 
     #[test]
-    fn a_static_identity_cleaning_to_nothing_is_empty_rather_than_a_bare_counter() {
+    fn a_literal_identity_cleaning_to_nothing_is_empty() {
         let result = generate_aircraft_type_id("!?", &json!({"code": "E7W"}));
 
         assert!(is_generated_id_empty(&result), "{result:?}");
+    }
+
+    #[test]
+    fn a_literal_identity_in_a_one_record_feed_mints_the_identity_as_written() {
+        let result = generate_aircraft_type_id("AircraftType", &json!({"code": "E7W"}));
+
+        assert_eq!(result.unwrap(), "urn:ngsi-ld:AircraftType:AircraftType");
+    }
+
+    #[test]
+    fn a_literal_identity_mints_the_same_urn_for_every_record_whatever_its_attributes_read() {
+        let (generator, mapping) = aircraft_type_generator("AircraftType");
+
+        let urns: Vec<String> = ["E7W", "320", "77W"]
+            .into_iter()
+            .map(|code| generator.generate_id(&mapping, &json!({ "code": code })).unwrap().to_string())
+            .collect();
+
+        assert_eq!(urns, ["urn:ngsi-ld:AircraftType:AircraftType"; 3]);
     }
 
     #[test]

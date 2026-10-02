@@ -13,7 +13,6 @@ cassiopeia-common.workspace = true
 cassiopeia-ir.workspace = true
 cassiopeia-mapping.workspace = true
 cassiopeia-ngsi-ld.workspace = true
-dashmap = "6.2.1"
 deunicode = "1.6.2"
 rayon = "1.12.0"
 serde_json = { version = "1.0.151", features = ["preserve_order"] }

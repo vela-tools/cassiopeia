@@ -239,9 +239,10 @@ impl Pipeline {
 mod tests {
     use crate::{
         error::PipelineError,
-        observer::{NoopObserver, RunObserver},
+        observer::{NoopObserver, PipelineResult, RunObserver},
         pipeline::{Pipeline, ValidationOverrides},
         pipeline_config::{ExtractionParallelism, PipelineConfig},
+        test_reporter::{RecordedDiagnostic, RecordingReporter},
     };
     use cassiopeia_common::{
         channel::ChannelPolicy,
@@ -265,12 +266,15 @@ mod tests {
         version::Version,
     };
     use cassiopeia_reporter::{backend::noop::NoopReporter, reporter::Reporter};
+    use serde_json::{Value, json};
     use std::{
+        fs,
         num::NonZeroUsize,
-        path::PathBuf,
+        path::{Path, PathBuf},
         str::FromStr,
-        sync::{Arc, atomic::AtomicBool},
+        sync::{Arc, Mutex, PoisonError, atomic::AtomicBool},
     };
+    use temp_dir::TempDir;
 
     static NOOP: NoopReporter = NoopReporter::new();
     static SHUTDOWN: AtomicBool = AtomicBool::new(false);
@@ -662,5 +666,489 @@ mod tests {
         );
 
         assert_eq!(resolved.get("valid_from"), Some(&serde_json::json!("input")));
+    }
+
+    /// The code a record-merge warning is published under, compared as its rendered token.
+    const RECORDS_MERGED: &str = "resolver-records-merged";
+
+    /// One input of an end-to-end run: its mapping document and the JSON records it reads.
+    struct RunInput {
+        mapping: &'static str,
+        records: Value,
+    }
+
+    /// What one end-to-end run left behind.
+    struct RunOutcome {
+        /// The record-merge warnings the run reported.
+        merges: Vec<RecordedDiagnostic>,
+        /// The warning total of the run's one completed cycle.
+        warnings: u64,
+        /// Every entity the run wrote, across all of its output files.
+        entities: Vec<Value>,
+    }
+
+    /// An observer that keeps the warning total of every completed cycle.
+    #[derive(Default)]
+    struct WarningTotals(Mutex<Vec<u64>>);
+
+    impl RunObserver for WarningTotals {
+        fn on_complete(&self, result: &PipelineResult) {
+            self.0.lock().unwrap_or_else(PoisonError::into_inner).push(result.warnings);
+        }
+    }
+
+    /// Writes an accept-anything schema for each entity type into `folder`, so the run validates every
+    /// entity and the only warnings left are the ones under test.
+    fn write_permissive_schemas(folder: &Path, entity_types: &[&str]) {
+        fs::create_dir_all(folder).unwrap();
+        for entity_type in entity_types {
+            fs::write(folder.join(format!("{entity_type}.json")), r#"{"type": "object"}"#).unwrap();
+        }
+    }
+
+    /// Runs a one-shot pipeline over `inputs`, writing files, on `store`, with `output_extra` spliced
+    /// into the manifest's `output` object, and collects what it reported and wrote.
+    fn run_end_to_end(store: StoreKind, inputs: &[RunInput], entity_types: &[&str], output_extra: &str) -> RunOutcome {
+        let directory = TempDir::new().unwrap();
+        let root = directory.path();
+        let schemas = root.join("schemas");
+        write_permissive_schemas(&schemas, entity_types);
+        let output = root.join("out");
+
+        let declared: Vec<String> = inputs
+            .iter()
+            .enumerate()
+            .map(|(index, input)| {
+                let data = root.join(format!("data-{index}.json"));
+                let mapping = root.join(format!("mapping-{index}.json5"));
+                fs::write(&data, input.records.to_string()).unwrap();
+                fs::write(&mapping, input.mapping).unwrap();
+                format!(r#"{{ source: "{}", mapping: "{}", format: "json" }}"#, data.display(), mapping.display())
+            })
+            .collect();
+        let document = format!(
+            r#"{{ version: "v1", inputs: [{}], output: {{ target: "file", directory: "{}", context: "none"{output_extra} }} }}"#,
+            declared.join(", "),
+            output.display()
+        );
+        let manifest = Manifest::from_json5(&document, Path::new("manifest.json5")).unwrap();
+
+        let reporter: &'static RecordingReporter = Box::leak(Box::new(RecordingReporter::new()));
+        let totals = Arc::new(WarningTotals::default());
+        let observer: Arc<dyn RunObserver> = Arc::clone(&totals) as Arc<dyn RunObserver>;
+        let mut engine = config();
+        engine.entity_store = store;
+        engine.relationship_store = store;
+        engine.context_mode = AtContextMode::None;
+        engine.schemas_folder = schemas;
+        let mut pipeline = Pipeline::from_manifest(
+            &manifest,
+            ValidationOverrides {
+                report_path: None,
+                mode: None,
+                schema: None,
+                representation: None,
+                skip_null: None,
+            },
+            serde_json::Map::new(),
+            engine,
+            reporter as &'static dyn Reporter,
+            &SHUTDOWN,
+            observer,
+        )
+        .unwrap();
+        pipeline.run().unwrap();
+
+        let mut entities = Vec::new();
+        for file in fs::read_dir(&output).unwrap() {
+            let written: Value = serde_json::from_str(&fs::read_to_string(file.unwrap().path()).unwrap()).unwrap();
+            let Value::Array(written) = written else {
+                panic!("an entity file must hold a JSON array");
+            };
+            entities.extend(written);
+        }
+        let warnings = totals.0.lock().unwrap_or_else(PoisonError::into_inner).iter().sum();
+        let merges = reporter
+            .diagnostics()
+            .into_iter()
+            .filter(|diagnostic| diagnostic.code.to_string() == RECORDS_MERGED)
+            .collect();
+
+        RunOutcome { merges, warnings, entities }
+    }
+
+    /// The ids of every written entity, sorted.
+    fn entity_ids(outcome: &RunOutcome) -> Vec<String> {
+        let mut ids: Vec<String> = outcome
+            .entities
+            .iter()
+            .filter_map(|entity| entity.get("id").and_then(Value::as_str).map(str::to_string))
+            .collect();
+        ids.sort();
+        ids
+    }
+
+    /// Both entity-store backends a run can select.
+    const STORES: [StoreKind; 2] = [StoreKind::DashMap, StoreKind::Redb];
+
+    const CONSTANT_WEATHER_STATION: &str = r#"{
+        version: "v4",
+        dataModel: "WeatherStation",
+        identity: { entityName: "WeatherStation" },
+        attributes: { temperature: { source: "{{ temperature }}" } },
+    }"#;
+
+    const STATION_TEMPERATURE: &str = r#"{
+        version: "v4",
+        dataModel: "Station",
+        identity: { entityName: "{{ id }}" },
+        attributes: { temperature: { source: "{{ temperature }}" } },
+    }"#;
+
+    const STATION_NAME: &str = r#"{
+        version: "v4",
+        dataModel: "Station",
+        identity: { entityName: "{{ id }}" },
+        attributes: { name: { source: "{{ name }}" } },
+    }"#;
+
+    const MOUNTAIN_WITH_SYNTHETIC_COUNTRY: &str = r#"{
+        version: "v4",
+        dataModel: "Mountain",
+        identity: { entityName: "{{ name }}" },
+        attributes: {
+            height: { source: "{{ height }}" },
+            hasCountry: {
+                source: "{{ country }}",
+                type: "Relationship",
+                target: { entity: "Country" },
+                syntheticEntity: {
+                    dataModel: "Country",
+                    identity: { entityName: "{{ country }}" },
+                    attributes: { name: { source: "{{ country }}" } },
+                },
+            },
+        },
+    }"#;
+
+    const CONSTANT_GOLD_PRICE: &str = r#"{
+        version: "v4",
+        dataModel: "GoldPriceObserved",
+        identity: { entityName: "gold" },
+        attributes: {
+            price: {
+                source: "{{ price }}",
+                properties: { observedAt: { source: "{{ date }}" } },
+            },
+        },
+    }"#;
+
+    #[test]
+    fn two_differing_readings_under_one_constant_identity_become_one_entity_and_exactly_one_merge_warning() {
+        for store in STORES {
+            let outcome = run_end_to_end(
+                store,
+                &[RunInput {
+                    mapping: CONSTANT_WEATHER_STATION,
+                    records: json!([{ "temperature": 20 }, { "temperature": 21 }]),
+                }],
+                &["WeatherStation"],
+                "",
+            );
+
+            assert_eq!(entity_ids(&outcome), ["urn:ngsi-ld:WeatherStation:WeatherStation"], "{store:?}");
+            assert_eq!(outcome.merges.len(), 1, "{store:?}");
+            assert_eq!(
+                outcome.merges[0].headline,
+                "2 records resolved to `urn:ngsi-ld:WeatherStation:WeatherStation` and disagreed on `temperature`; one value of each disagreeing field was kept and the others were discarded",
+                "{store:?}"
+            );
+            assert_eq!(outcome.merges[0].occurrences, 1, "{store:?}");
+            assert_eq!(outcome.warnings, 1, "{store:?}");
+        }
+    }
+
+    #[test]
+    fn records_disagreeing_on_one_id_warn_once_for_that_id_and_never_for_an_id_seen_once() {
+        for store in STORES {
+            let outcome = run_end_to_end(
+                store,
+                &[RunInput {
+                    mapping: STATION_TEMPERATURE,
+                    records: json!([
+                        { "id": "a", "temperature": 20 },
+                        { "id": "a", "temperature": 21 },
+                        { "id": "b", "temperature": 22 },
+                    ]),
+                }],
+                &["Station"],
+                "",
+            );
+
+            assert_eq!(entity_ids(&outcome), ["urn:ngsi-ld:Station:a", "urn:ngsi-ld:Station:b"], "{store:?}");
+            assert_eq!(outcome.merges.len(), 1, "{store:?}");
+            assert_eq!(
+                outcome.merges[0].headline,
+                "2 records resolved to `urn:ngsi-ld:Station:a` and disagreed on `temperature`; one value of each disagreeing field was kept and the others were discarded",
+                "{store:?}"
+            );
+            assert_eq!(outcome.warnings, 1, "{store:?}");
+        }
+    }
+
+    const STATION_READINGS: &str = r#"{
+        version: "v4",
+        dataModel: "Station",
+        identity: { entityName: "{{ id }}" },
+        attributes: {
+            temperature: { source: "{% if temperature is defined %}{{ temperature }}{% endif %}" },
+            windSpeed: { source: "{% if wind is defined %}{{ wind }}{% endif %}" },
+            location: { source: "{{ geometry }}", type: "GeoProperty" },
+        },
+    }"#;
+
+    #[test]
+    fn identical_records_repeating_one_id_do_not_warn() {
+        for store in STORES {
+            let outcome = run_end_to_end(
+                store,
+                &[RunInput {
+                    mapping: STATION_TEMPERATURE,
+                    records: json!([{ "id": "a", "temperature": 20 }, { "id": "a", "temperature": 20 }]),
+                }],
+                &["Station"],
+                "",
+            );
+
+            assert_eq!(entity_ids(&outcome), ["urn:ngsi-ld:Station:a"], "{store:?}");
+            assert!(outcome.merges.is_empty(), "{store:?}: {:?}", outcome.merges);
+            assert_eq!(outcome.warnings, 0, "{store:?}");
+        }
+    }
+
+    #[test]
+    fn records_that_each_add_their_own_reading_to_one_id_do_not_warn() {
+        let geometry = json!({ "type": "Point", "coordinates": [14.5, 46.05] });
+        for store in STORES {
+            let outcome = run_end_to_end(
+                store,
+                &[RunInput {
+                    mapping: STATION_READINGS,
+                    records: json!([
+                        { "id": "cell", "geometry": geometry, "temperature": 20.5 },
+                        { "id": "cell", "geometry": geometry, "wind": 3.5 },
+                    ]),
+                }],
+                &["Station"],
+                "",
+            );
+
+            assert_eq!(entity_ids(&outcome), ["urn:ngsi-ld:Station:cell"], "{store:?}");
+            assert!(
+                outcome.entities[0].get("temperature").is_some() && outcome.entities[0].get("windSpeed").is_some(),
+                "{store:?}"
+            );
+            assert!(outcome.merges.is_empty(), "{store:?}: {:?}", outcome.merges);
+            assert_eq!(outcome.warnings, 0, "{store:?}");
+        }
+    }
+
+    const STATION_READINGS_AND_LEVEL: &str = r#"{
+        version: "v4",
+        dataModel: "Station",
+        identity: { entityName: "{{ id }}" },
+        attributes: {
+            temperature: { source: "{% if temperature is defined %}{{ temperature }}{% endif %}" },
+            windSpeed: { source: "{% if wind is defined %}{{ wind }}{% endif %}" },
+            height: { source: "{{ level }}" },
+        },
+    }"#;
+
+    /// Two per-level slices of one grid cell, the way a GRIB source pivots its parameters: each
+    /// carries its own reading and its own vertical level.
+    fn grid_cell_slices() -> Value {
+        json!([
+            { "id": "cell", "level_type": "height_above_ground", "level": 2, "temperature": 280.1 },
+            { "id": "cell", "level_type": "height_above_ground", "level": 10, "wind": 3.5 },
+        ])
+    }
+
+    #[test]
+    fn per_level_slices_of_one_cell_disagreeing_only_on_a_level_the_mapping_never_reads_do_not_warn() {
+        for store in STORES {
+            let outcome = run_end_to_end(
+                store,
+                &[RunInput {
+                    mapping: STATION_READINGS,
+                    records: grid_cell_slices(),
+                }],
+                &["Station"],
+                "",
+            );
+
+            assert_eq!(entity_ids(&outcome), ["urn:ngsi-ld:Station:cell"], "{store:?}");
+            assert!(outcome.merges.is_empty(), "{store:?}: {:?}", outcome.merges);
+            assert_eq!(outcome.warnings, 0, "{store:?}");
+        }
+    }
+
+    #[test]
+    fn per_level_slices_of_one_cell_warn_naming_the_level_once_the_mapping_reads_it() {
+        for store in STORES {
+            let outcome = run_end_to_end(
+                store,
+                &[RunInput {
+                    mapping: STATION_READINGS_AND_LEVEL,
+                    records: grid_cell_slices(),
+                }],
+                &["Station"],
+                "",
+            );
+
+            assert_eq!(outcome.merges.len(), 1, "{store:?}");
+            assert_eq!(
+                outcome.merges[0].headline,
+                "2 records resolved to `urn:ngsi-ld:Station:cell` and disagreed on `level`; one value of each disagreeing field was kept and the others were discarded",
+                "{store:?}"
+            );
+            assert_eq!(outcome.warnings, 1, "{store:?}");
+        }
+    }
+
+    #[test]
+    fn records_placing_one_id_at_different_coordinates_warn_naming_the_coordinates() {
+        for store in STORES {
+            let outcome = run_end_to_end(
+                store,
+                &[RunInput {
+                    mapping: STATION_READINGS,
+                    records: json!([
+                        { "id": "shop", "geometry": { "type": "Point", "coordinates": [-73.98, 40.78] } },
+                        { "id": "shop", "geometry": { "type": "Point", "coordinates": [-74.0, 40.71] } },
+                    ]),
+                }],
+                &["Station"],
+                "",
+            );
+
+            assert_eq!(outcome.merges.len(), 1, "{store:?}");
+            assert_eq!(
+                outcome.merges[0].headline,
+                "2 records resolved to `urn:ngsi-ld:Station:shop` and disagreed on `geometry.coordinates`; one value of each disagreeing field was kept and the others were discarded",
+                "{store:?}"
+            );
+            assert_eq!(outcome.warnings, 1, "{store:?}");
+        }
+    }
+
+    #[test]
+    fn two_mappings_joined_onto_one_id_do_not_warn() {
+        for store in STORES {
+            let outcome = run_end_to_end(
+                store,
+                &[
+                    RunInput {
+                        mapping: STATION_TEMPERATURE,
+                        records: json!([{ "id": "a", "temperature": 20 }]),
+                    },
+                    RunInput {
+                        mapping: STATION_NAME,
+                        records: json!([{ "id": "a", "name": "Bežigrad" }]),
+                    },
+                ],
+                &["Station"],
+                "",
+            );
+
+            assert_eq!(entity_ids(&outcome), ["urn:ngsi-ld:Station:a"], "{store:?}");
+            assert!(
+                outcome.entities[0].get("temperature").is_some() && outcome.entities[0].get("name").is_some(),
+                "{store:?}"
+            );
+            assert!(outcome.merges.is_empty(), "{store:?}: {:?}", outcome.merges);
+            assert_eq!(outcome.warnings, 0, "{store:?}");
+        }
+    }
+
+    #[test]
+    fn a_synthetic_entity_named_by_many_records_does_not_warn() {
+        for store in STORES {
+            let outcome = run_end_to_end(
+                store,
+                &[RunInput {
+                    mapping: MOUNTAIN_WITH_SYNTHETIC_COUNTRY,
+                    records: json!([
+                        { "name": "Everest", "height": 8849, "country": "Nepal" },
+                        { "name": "Lhotse", "height": 8516, "country": "Nepal" },
+                        { "name": "Makalu", "height": 8485, "country": "Nepal" },
+                    ]),
+                }],
+                &["Mountain", "Country"],
+                "",
+            );
+
+            assert_eq!(
+                entity_ids(&outcome),
+                [
+                    "urn:ngsi-ld:Country:Nepal",
+                    "urn:ngsi-ld:Mountain:Everest",
+                    "urn:ngsi-ld:Mountain:Lhotse",
+                    "urn:ngsi-ld:Mountain:Makalu",
+                ],
+                "{store:?}"
+            );
+            assert!(outcome.merges.is_empty(), "{store:?}: {:?}", outcome.merges);
+            assert_eq!(outcome.warnings, 0, "{store:?}");
+        }
+    }
+
+    #[test]
+    fn a_temporal_mapping_feeding_one_entity_from_several_records_does_not_warn() {
+        let records = json!([
+            { "price": 1900.5, "date": "2026-01-01T00:00:00Z" },
+            { "price": 1950.25, "date": "2026-02-01T00:00:00Z" },
+            { "price": 2010.0, "date": "2026-03-01T00:00:00Z" },
+        ]);
+        for (store, output_extra) in STORES
+            .into_iter()
+            .flat_map(|store| [(store, ""), (store, r#", temporal: { representation: "series" }"#)])
+        {
+            let outcome = run_end_to_end(
+                store,
+                &[RunInput {
+                    mapping: CONSTANT_GOLD_PRICE,
+                    records: records.clone(),
+                }],
+                &["GoldPriceObserved"],
+                output_extra,
+            );
+
+            assert_eq!(entity_ids(&outcome), ["urn:ngsi-ld:GoldPriceObserved:gold"], "{store:?} {output_extra}");
+            assert!(outcome.merges.is_empty(), "{store:?} {output_extra}: {:?}", outcome.merges);
+            assert_eq!(outcome.warnings, 0, "{store:?} {output_extra}");
+        }
+    }
+
+    #[test]
+    fn a_static_mapping_disagreeing_on_an_id_in_a_series_run_warns_too() {
+        for store in STORES {
+            let outcome = run_end_to_end(
+                store,
+                &[RunInput {
+                    mapping: STATION_TEMPERATURE,
+                    records: json!([{ "id": "a", "temperature": 20 }, { "id": "a", "temperature": 21 }]),
+                }],
+                &["Station"],
+                r#", temporal: { representation: "series" }"#,
+            );
+
+            assert_eq!(entity_ids(&outcome), ["urn:ngsi-ld:Station:a"], "{store:?}");
+            assert_eq!(outcome.merges.len(), 1, "{store:?}");
+            assert_eq!(
+                outcome.merges[0].headline,
+                "2 records resolved to `urn:ngsi-ld:Station:a` and disagreed on `temperature`; one value of each disagreeing field was kept and the others were discarded",
+                "{store:?}"
+            );
+        }
     }
 }

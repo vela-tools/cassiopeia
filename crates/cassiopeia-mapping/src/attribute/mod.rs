@@ -162,9 +162,9 @@ where
     if let Some(object) = value.as_object_mut() {
         object.entry("version").or_insert_with(|| JsonValue::String("v4".to_string()));
     }
-    let mapping = serde_json::from_value(value).map_err(DeserializeError::custom)?;
+    let mapping: Mapping = serde_json::from_value(value).map_err(DeserializeError::custom)?;
 
-    Ok(Some(mapping))
+    Ok(Some(mapping.into_synthetic()))
 }
 
 impl Attribute {

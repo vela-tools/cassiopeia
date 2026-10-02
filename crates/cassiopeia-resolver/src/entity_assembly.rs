@@ -6,10 +6,17 @@
 
 use crate::{
     entity_source::EntitySource,
-    entity_store::store::{AssembledFragments as StoredUnits, StoredUnit},
+    entity_store::{
+        merge::first_conflict,
+        store::{AssembledFragments as StoredUnits, StoredUnit},
+    },
     error::{ResolverError, Result},
+    field_path::FieldPath,
     fragment_resolver::FragmentResolver,
+    id_assembly::IdAssembly,
     mapping_id::MappingId,
+    merged_records::MergedRecords,
+    record_merge::RecordMerge,
 };
 use cassiopeia_ir::{
     assembled_entity::{AssembledEntity, AssembledFragments},
@@ -23,6 +30,7 @@ use rayon::prelude::*;
 use smallvec::SmallVec;
 use std::{
     mem,
+    num::NonZeroU64,
     ops::ControlFlow,
     sync::Arc,
     time::{Duration, Instant},
@@ -30,11 +38,12 @@ use std::{
 use tracing::trace;
 use urn_rs::Urn;
 
-/// Every distinct mapping one base id's stored fragments were produced by, paired with its id.
+/// Every distinct mapping one base id's stored fragments were produced by, paired with its id and
+/// with how many records it contributed to the id.
 ///
 /// One entry in the common case, at most one per mapping contributing to the id, so a linear scan
 /// beats any map and the inline capacity keeps the table off the heap.
-type MappingTable = SmallVec<[(MappingId, Arc<Mapping>); 1]>;
+type MappingTable = SmallVec<[(MappingId, Arc<Mapping>, NonZeroU64); 1]>;
 
 /// What one assembly scan spent its time on.
 #[derive(Debug, Clone, Copy, Default)]
@@ -79,26 +88,54 @@ impl FragmentResolver {
         Ok(EntityRelationships::new(relationships, nested, instances))
     }
 
-    /// Resolves each distinct mapping id across one base id's stored units into its mapping.
+    /// Resolves each distinct mapping id across one base id's stored units into its mapping, summing
+    /// the records each contributed.
     ///
     /// A series id repeats a single mapping id across every observation it holds, so resolving per
     /// fragment would take the registry's one matching shard read lock once per observation, from
     /// every rayon worker at once. Resolving per distinct id instead makes that one probe per id.
     /// An id the registry never handed out is a corrupt store, reported as the entity having no
-    /// configuration.
+    /// configuration. A current-state unit holds one fragment per mapping, each counting the records
+    /// folded into it, and a series id one single-record unit per observation, so the sum is the
+    /// mapping's record count whichever store kept them.
     fn resolve_unit_mappings(&self, units: &[StoredUnit], base_id: &Urn) -> Result<MappingTable> {
         let mut resolved = MappingTable::new();
         for stored in units.iter().flatten() {
-            if resolved.iter().any(|(known, _)| *known == stored.mapping_id) {
+            if let Some((_, _, records)) = resolved.iter_mut().find(|(known, _, _)| *known == stored.mapping_id) {
+                *records = records.saturating_add(stored.records.get());
                 continue;
             }
             let mapping = self
                 .mapping_registry
                 .resolve(stored.mapping_id)
                 .ok_or_else(|| ResolverError::MissingConfigForEntity { entity: base_id.clone() })?;
-            resolved.push((stored.mapping_id, mapping));
+            resolved.push((stored.mapping_id, mapping, stored.records));
         }
         Ok(resolved)
+    }
+
+    /// The earliest field `mapping` reads on which the records it contributed to an id, under
+    /// `mapping_id`, disagreed.
+    ///
+    /// A current-state store holds one fragment per mapping that already merged its records and kept
+    /// where they disagreed. A series store holds every record apart, so they are merged here, by the
+    /// same rule the current-state store applies; the answer does not depend on their order.
+    fn conflict_of(mapping_id: MappingId, mapping: &Mapping, units: &[StoredUnit]) -> Option<FieldPath> {
+        let mut fragments = units.iter().flatten().filter(|stored| stored.mapping_id == mapping_id);
+        let first = fragments.next()?;
+        match fragments.next() {
+            // The slot's own record of its conflict is copied out because the fragment it lives on is
+            // still to be moved into its emit-unit.
+            None => first.conflict.clone(),
+            Some(_) => first_conflict(
+                units
+                    .iter()
+                    .flatten()
+                    .filter(|stored| stored.mapping_id == mapping_id)
+                    .map(|stored| &stored.data),
+                mapping.source_reads(),
+            ),
+        }
     }
 
     /// How many ids to assemble per chunk so that one chunk yields roughly `batch_size` emit-units.
@@ -116,7 +153,7 @@ impl FragmentResolver {
 }
 
 impl EntitySource for FragmentResolver {
-    fn assemble(&self, base_id: &Urn) -> Result<Vec<AssembledEntity>> {
+    fn assemble(&self, base_id: &Urn) -> Result<IdAssembly> {
         let StoredUnits { scope, units } = self.entity_store.assemble_entity(base_id)?;
         if units.is_empty() {
             return Err(ResolverError::MissingConfigForEntity { entity: base_id.clone() });
@@ -132,6 +169,19 @@ impl EntitySource for FragmentResolver {
         // Resolved once per distinct mapping id rather than once per fragment: every observation of a
         // series id names the same mapping, and the registry's shard lock is shared by every worker.
         let resolved = self.resolve_unit_mappings(&units, base_id)?;
+        // Only a mapping whose disagreements are reported is asked for them, which keeps the merge a
+        // series store would otherwise need off every temporal id.
+        let merge = RecordMerge::among(
+            base_id,
+            resolved.iter().map(|(mapping_id, mapping, records)| {
+                let conflict = if RecordMerge::counts_records_of(mapping) {
+                    Self::conflict_of(*mapping_id, mapping, &units)
+                } else {
+                    None
+                };
+                (mapping.as_ref(), *records, conflict)
+            }),
+        );
 
         let unit_count = units.len();
         let mut entities = Vec::with_capacity(unit_count);
@@ -140,8 +190,8 @@ impl EntitySource for FragmentResolver {
             for stored in unit {
                 let mapping = resolved
                     .iter()
-                    .find(|(known, _)| *known == stored.mapping_id)
-                    .map(|(_, mapping)| Arc::clone(mapping))
+                    .find(|(known, _, _)| *known == stored.mapping_id)
+                    .map(|(_, mapping, _)| Arc::clone(mapping))
                     .ok_or_else(|| ResolverError::MissingConfigForEntity { entity: base_id.clone() })?;
                 fragments.push((stored.data, mapping));
             }
@@ -161,7 +211,7 @@ impl EntitySource for FragmentResolver {
         }
 
         trace!("Assembled entity {} into {} unit(s)", base_id, entities.len());
-        Ok(entities)
+        Ok(IdAssembly { units: entities, merge })
     }
 
     fn get_entity_ids(&self) -> Result<Vec<Urn>> {
@@ -181,8 +231,14 @@ impl EntitySource for FragmentResolver {
     /// full downstream channel saturate the global pool and starve the next stage's own `par_iter`.
     /// Collecting each chunk first keeps the workers pure-CPU and confines any back-pressure blocking
     /// to the driving thread. Each base id's units are emitted contiguously so the aggregator can
-    /// group by id while holding one id at a time.
-    fn drive_assembly(&self, batch_size: usize, emit: &mut dyn FnMut(Result<AssembledEntity>) -> ControlFlow<()>) -> Result<AssemblyTiming> {
+    /// group by id while holding one id at a time. Merges are recorded on the driving thread too, so
+    /// the tally needs no lock.
+    fn drive_assembly(
+        &self,
+        batch_size: usize,
+        merged: &mut MergedRecords,
+        emit: &mut dyn FnMut(Result<AssembledEntity>) -> ControlFlow<()>,
+    ) -> Result<AssemblyTiming> {
         let id_chunk = self.id_chunk_size(batch_size);
         let mut assembly = Duration::ZERO;
         let mut broken = false;
@@ -192,13 +248,16 @@ impl EntitySource for FragmentResolver {
                 return Ok(());
             }
             let started = Instant::now();
-            let assembled: Vec<Result<Vec<AssembledEntity>>> = chunk.par_iter().map(|urn| self.assemble(urn)).collect();
+            let assembled: Vec<Result<IdAssembly>> = chunk.par_iter().map(|urn| self.assemble(urn)).collect();
             assembly = assembly.saturating_add(started.elapsed());
 
             'chunk: for result in assembled {
                 match result {
-                    Ok(entities) => {
-                        for entity in entities {
+                    Ok(IdAssembly { units, merge }) => {
+                        if let Some(merge) = merge {
+                            merged.record(merge);
+                        }
+                        for entity in units {
                             if emit(Ok(entity)).is_break() {
                                 broken = true;
                                 break 'chunk;
@@ -232,12 +291,17 @@ mod tests {
         entity_store::{
             dashmap_latest_store::DashMapLatestEntityStore,
             dashmap_series_store::DashMapSeriesEntityStore,
-            store::{EntityStore, FragmentWrite},
+            redb_latest_store::RedbLatestEntityStore,
+            redb_series_store::RedbSeriesEntityStore,
+            store::{EntityStore, FragmentWrite, tests::READS_EVERYTHING},
         },
         error::ResolverError,
+        field_path::FieldPath,
         fragment_resolver::FragmentResolver,
         fragment_sink::FragmentSink,
         mapping_id::MappingId,
+        merged_records::MergedRecords,
+        record_merge::RecordMerge,
         relationship_store::dashmap_store::DashMapRelationshipStore,
     };
     use cassiopeia_ir::{
@@ -251,10 +315,14 @@ mod tests {
         relationship_path::RelationshipPath,
         relationships::InstanceObjects,
     };
-    use cassiopeia_mapping::{mapping::Mapping, template::runner::TemplateRunner};
+    use cassiopeia_mapping::{
+        mapping::Mapping,
+        source_reads::{SourceKey, SourceReads},
+        template::runner::TemplateRunner,
+    };
     use cassiopeia_ngsi_ld::entity::name::NameBuf;
     use serde_json::json;
-    use std::{ops::ControlFlow, path::Path, sync::Arc, time::Duration};
+    use std::{num::NonZeroU64, ops::ControlFlow, path::Path, sync::Arc, time::Duration};
     use urn_rs::Urn;
 
     const TEMPORAL: &str = r#"{
@@ -310,7 +378,7 @@ mod tests {
         let mut seen = 0;
         let mut last_id: Option<Urn> = None;
         resolver
-            .drive_assembly(batch_size, &mut |result| {
+            .drive_assembly(batch_size, &mut MergedRecords::new(), &mut |result| {
                 let entity = result.unwrap();
                 if last_id.as_ref() != Some(entity.id()) {
                     last_id = Some(entity.id().clone());
@@ -372,7 +440,7 @@ mod tests {
         assert!(resolver.id_chunk_size(10_000) >= 1);
         let mut emitted = 0;
         resolver
-            .drive_assembly(10_000, &mut |_result| {
+            .drive_assembly(10_000, &mut MergedRecords::new(), &mut |_result| {
                 emitted += 1;
                 ControlFlow::Continue(())
             })
@@ -390,7 +458,9 @@ mod tests {
             sink.resolve(Mapped::new(Fragment::new(record, urn, None, None), Arc::clone(&mapping))).unwrap();
         }
 
-        let timing = resolver.drive_assembly(8, &mut |_result| ControlFlow::Continue(())).unwrap();
+        let timing = resolver
+            .drive_assembly(8, &mut MergedRecords::new(), &mut |_result| ControlFlow::Continue(()))
+            .unwrap();
 
         assert!(timing.assembly > Duration::ZERO);
     }
@@ -417,7 +487,7 @@ mod tests {
 
     /// The one assembled unit for a base id, asserting exactly one exists.
     fn only_unit(resolver: &FragmentResolver, id: &Urn) -> AssembledEntity {
-        let mut units = resolver.assemble(id).unwrap();
+        let mut units = resolver.assemble(id).unwrap().units;
         assert_eq!(units.len(), 1, "expected exactly one unit for {id}");
         units.remove(0)
     }
@@ -589,7 +659,7 @@ mod tests {
 
         assert_eq!(resolver.get_emitted_count().unwrap(), 3);
         assert_eq!(resolver.get_unique_entity_count().unwrap(), 1);
-        let units = resolver.assemble(&base).unwrap();
+        let units = resolver.assemble(&base).unwrap().units;
         assert_eq!(units.len(), 3);
         for unit in &units {
             assert_eq!(unit.id(), &base);
@@ -610,7 +680,7 @@ mod tests {
                 .unwrap();
         }
 
-        let units = resolver.assemble(&base).unwrap();
+        let units = resolver.assemble(&base).unwrap().units;
 
         assert_eq!(units.len(), 3);
         // Resolving the mapping once per distinct id must still hand every unit the very same
@@ -661,6 +731,7 @@ mod tests {
                 temporal: false,
                 observed_at: None,
                 scope: None,
+                reads: &READS_EVERYTHING,
             })
             .unwrap();
 
@@ -677,5 +748,350 @@ mod tests {
         let error = resolver.assemble(&station).unwrap_err();
 
         assert!(matches!(error, ResolverError::MissingConfigForEntity { entity } if entity == station));
+    }
+
+    /// Every entity store a run can select, current-state and series, in memory and on disk.
+    fn every_store() -> [Box<dyn EntityStore>; 4] {
+        [
+            Box::new(DashMapLatestEntityStore::new()),
+            Box::new(RedbLatestEntityStore::new().unwrap()),
+            Box::new(DashMapSeriesEntityStore::new()),
+            Box::new(RedbSeriesEntityStore::new().unwrap()),
+        ]
+    }
+
+    /// Resolves each `(mapping, id, record)` as its own batch, the way separate resolver batches land.
+    fn resolve_each(resolver: &FragmentResolver, fragments: &[(&Arc<Mapping>, &Urn, serde_json::Value)]) {
+        for (mapping, id, record) in fragments {
+            let batch = vec![Mapped::new(Fragment::new(record.clone(), (*id).clone(), None, None), Arc::clone(mapping))];
+            assert!(resolver.resolve_batch(batch).iter().all(Result::is_ok));
+        }
+    }
+
+    /// The merge assembling `id` reveals after `records` of the one `SIMPLE` mapping land on it, in
+    /// `store`, each record resolved as its own batch.
+    fn merge_of(store: Box<dyn EntityStore>, records: &[serde_json::Value]) -> Option<RecordMerge> {
+        let (resolver, mappings) = resolver_with(store, &[SIMPLE]);
+        let station = urn("urn:ngsi-ld:AirQualityObserved:Station");
+        let fragments: Vec<(&Arc<Mapping>, &Urn, serde_json::Value)> = records.iter().map(|record| (&mappings[0], &station, record.clone())).collect();
+        resolve_each(&resolver, &fragments);
+        resolver.assemble(&station).unwrap().merge
+    }
+
+    fn records(count: u64) -> NonZeroU64 {
+        NonZeroU64::new(count).unwrap()
+    }
+
+    #[test]
+    fn two_disagreeing_records_of_one_mapping_assemble_with_a_merge_naming_the_field_in_every_store() {
+        for store in every_store() {
+            let debug = format!("{store:?}");
+
+            let merge = merge_of(store, &[json!({"temperature": 20}), json!({"temperature": 21})]);
+
+            assert_eq!(
+                merge,
+                Some(RecordMerge {
+                    id: urn("urn:ngsi-ld:AirQualityObserved:Station"),
+                    entity_type: name("AirQualityObserved"),
+                    records: records(2),
+                    field: FieldPath::new(&["temperature"]),
+                }),
+                "{debug}"
+            );
+        }
+    }
+
+    #[test]
+    fn identical_records_of_one_mapping_assemble_without_a_merge_in_every_store() {
+        for store in every_store() {
+            let debug = format!("{store:?}");
+
+            let merge = merge_of(store, &[json!({"temperature": 20, "tags": [1, 2]}), json!({"temperature": 20, "tags": [1, 2]})]);
+
+            assert_eq!(merge, None, "{debug}");
+        }
+    }
+
+    #[test]
+    fn records_that_only_add_fields_to_one_another_assemble_without_a_merge_in_every_store() {
+        for store in every_store() {
+            let debug = format!("{store:?}");
+
+            let merge = merge_of(
+                store,
+                &[
+                    json!({"cell": "srbw", "temperature": 280.1}),
+                    json!({"cell": "srbw", "wind_u": 3.2, "wind_v": -1.0}),
+                    json!({"cell": "srbw", "gust": 7.5}),
+                ],
+            );
+
+            assert_eq!(merge, None, "{debug}");
+        }
+    }
+
+    #[test]
+    fn a_disagreeing_leaf_beneath_nested_objects_is_named_by_its_path_in_every_store() {
+        for store in every_store() {
+            let debug = format!("{store:?}");
+
+            let merge = merge_of(
+                store,
+                &[
+                    json!({"shop": {"name": "BikeRent", "geometry": {"type": "Point", "coordinates": [-73.98, 40.78]}}}),
+                    json!({"shop": {"name": "BikeRent", "geometry": {"type": "Point", "coordinates": [-74.00, 40.71]}}}),
+                ],
+            );
+
+            assert_eq!(
+                merge.map(|merge| merge.field.to_string()),
+                Some("shop.geometry.coordinates".to_string()),
+                "{debug}"
+            );
+        }
+    }
+
+    #[test]
+    fn an_array_that_differs_is_a_merge_in_every_store() {
+        for store in every_store() {
+            let debug = format!("{store:?}");
+
+            let merge = merge_of(store, &[json!({"tags": [1, 2]}), json!({"tags": [1, 2, 3]})]);
+
+            assert_eq!(merge.map(|merge| merge.field.to_string()), Some("tags".to_string()), "{debug}");
+        }
+    }
+
+    #[test]
+    fn three_records_where_one_disagrees_are_a_merge_counting_all_three_in_every_order_and_every_store() {
+        let agreeing = json!({"temperature": 20, "name": "a"});
+        let adding = json!({"temperature": 20, "humidity": 0.4});
+        let disagreeing = json!({"temperature": 25});
+        let orders = [
+            [&agreeing, &adding, &disagreeing],
+            [&agreeing, &disagreeing, &adding],
+            [&adding, &agreeing, &disagreeing],
+            [&adding, &disagreeing, &agreeing],
+            [&disagreeing, &agreeing, &adding],
+            [&disagreeing, &adding, &agreeing],
+        ];
+        for order in orders {
+            for store in every_store() {
+                let debug = format!("{store:?}");
+                let records_in_order: Vec<serde_json::Value> = order.iter().map(|record| (*record).clone()).collect();
+
+                let merge = merge_of(store, &records_in_order);
+
+                assert_eq!(
+                    merge.map(|merge| (merge.records, merge.field.to_string())),
+                    Some((records(3), "temperature".to_string())),
+                    "{debug} {order:?}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn disagreeing_records_resolved_in_one_batch_are_a_merge_in_every_store() {
+        for store in every_store() {
+            let (resolver, mappings) = resolver_with(store, &[SIMPLE]);
+            let station = urn("urn:ngsi-ld:AirQualityObserved:Station");
+            let batch = (0..3)
+                .map(|temperature| {
+                    Mapped::new(
+                        Fragment::new(json!({ "temperature": temperature }), station.clone(), None, None),
+                        Arc::clone(&mappings[0]),
+                    )
+                })
+                .collect();
+
+            assert!(resolver.resolve_batch(batch).iter().all(Result::is_ok));
+
+            let merge = resolver.assemble(&station).unwrap().merge;
+            assert_eq!(merge.map(|merge| merge.records), Some(records(3)), "{:?}", resolver.entity_store);
+        }
+    }
+
+    #[test]
+    fn one_record_on_an_id_assembles_without_a_merge_in_every_store() {
+        for store in every_store() {
+            let debug = format!("{store:?}");
+
+            assert_eq!(merge_of(store, &[json!({"temperature": 20})]), None, "{debug}");
+        }
+    }
+
+    #[test]
+    fn two_mappings_joined_onto_one_id_assemble_without_a_merge_even_where_they_disagree_in_every_store() {
+        for store in every_store() {
+            let (resolver, mappings) = resolver_with(store, &[SIMPLE, OTHER]);
+            let station = urn("urn:ngsi-ld:AirQualityObserved:Station");
+
+            resolve_each(
+                &resolver,
+                &[
+                    (&mappings[0], &station, json!({"temperature": 20, "name": "Bezigrad"})),
+                    (&mappings[1], &station, json!({"temperature": 21, "name": "Center"})),
+                ],
+            );
+
+            assert_eq!(resolver.assemble(&station).unwrap().merge, None, "{:?}", resolver.entity_store);
+        }
+    }
+
+    #[test]
+    fn a_temporal_mapping_feeding_one_id_from_several_records_assembles_without_a_merge_in_every_store() {
+        for store in every_store() {
+            let (resolver, mappings) = resolver_with(store, &[TEMPORAL]);
+            let station = urn("urn:ngsi-ld:AirQualityObserved:Station");
+
+            resolve_each(
+                &resolver,
+                &[
+                    (&mappings[0], &station, json!({"temperature": 20, "timestamp": "2026-04-03T22:00:20Z"})),
+                    (&mappings[0], &station, json!({"temperature": 21, "timestamp": "2026-04-03T22:05:20Z"})),
+                ],
+            );
+
+            assert_eq!(resolver.assemble(&station).unwrap().merge, None, "{:?}", resolver.entity_store);
+        }
+    }
+
+    #[test]
+    fn a_synthetic_entity_named_by_many_disagreeing_records_assembles_without_a_merge_in_every_store() {
+        let document = r#"{
+            version: "v4",
+            dataModel: "Mountain",
+            identity: { entityName: "{{ name }}" },
+            attributes: {
+                hasCountry: {
+                    source: "{{ country }}",
+                    type: "Relationship",
+                    target: { entity: "Country" },
+                    syntheticEntity: { dataModel: "Country", identity: { entityName: "{{ country }}" }, attributes: {} },
+                },
+            },
+        }"#;
+        for store in every_store() {
+            let (resolver, mappings) = resolver_with(store, &[document]);
+            // One shared synthetic mapping is the strictest case: every record's fragment lands on the
+            // same mapping id and disagrees on `name`, so only the mapping's role keeps the many-to-one
+            // out of the report.
+            let country = mappings[0]
+                .attributes()
+                .values()
+                .find_map(|attribute| attribute.synthetic_entity().as_ref())
+                .map(|synthetic| Arc::new(synthetic.clone()))
+                .unwrap();
+            let nepal = urn("urn:ngsi-ld:Country:Nepal");
+
+            resolve_each(
+                &resolver,
+                &[
+                    (&country, &nepal, json!({"name": "Everest", "country": "Nepal"})),
+                    (&country, &nepal, json!({"name": "Lhotse", "country": "Nepal"})),
+                    (&country, &nepal, json!({"name": "Makalu", "country": "Nepal"})),
+                ],
+            );
+
+            assert_eq!(resolver.assemble(&nepal).unwrap().merge, None, "{:?}", resolver.entity_store);
+        }
+    }
+
+    #[test]
+    fn the_scan_tallies_each_disagreeing_id_once_and_never_an_agreeing_or_single_one() {
+        for store in every_store() {
+            let (resolver, mappings) = resolver_with(store, &[SIMPLE]);
+            let a = urn("urn:ngsi-ld:AirQualityObserved:a");
+            let b = urn("urn:ngsi-ld:AirQualityObserved:b");
+            let c = urn("urn:ngsi-ld:AirQualityObserved:c");
+            resolve_each(
+                &resolver,
+                &[
+                    (&mappings[0], &a, json!({"temperature": 20})),
+                    (&mappings[0], &a, json!({"temperature": 21})),
+                    (&mappings[0], &b, json!({"temperature": 22})),
+                    (&mappings[0], &c, json!({"temperature": 23})),
+                    (&mappings[0], &c, json!({"temperature": 23})),
+                ],
+            );
+
+            let mut merged = MergedRecords::new();
+            resolver.drive_assembly(1, &mut merged, &mut |_result| ControlFlow::Continue(())).unwrap();
+
+            let entries = merged.into_entries();
+            assert_eq!(entries.len(), 1, "{:?}", resolver.entity_store);
+            assert_eq!(entries[0].ids.get(), 1, "{:?}", resolver.entity_store);
+            assert_eq!(entries[0].exemplar.id, a, "{:?}", resolver.entity_store);
+            assert_eq!(entries[0].exemplar.records, records(2), "{:?}", resolver.entity_store);
+        }
+    }
+
+    /// The merge assembling `cell` reveals after `records` of one static mapping reading exactly
+    /// `reads` land on it, in `store`, each record resolved as its own batch.
+    fn merge_reading(store: Box<dyn EntityStore>, reads: &[&str], records: &[serde_json::Value]) -> Option<RecordMerge> {
+        let mut runner = TemplateRunner::new();
+        let mut mapping = Mapping::from_json5(SIMPLE, Path::new("test.json5"), &mut runner).unwrap();
+        mapping.set_source_reads(SourceReads::Keys(reads.iter().map(|key| SourceKey::new(key)).collect()));
+        let mapping = Arc::new(mapping);
+        let resolver = FragmentResolver::new(store, Box::new(DashMapRelationshipStore::new()), runner.resolver());
+        let cell = urn("urn:ngsi-ld:AirQualityObserved:cell");
+        let fragments: Vec<(&Arc<Mapping>, &Urn, serde_json::Value)> = records.iter().map(|record| (&mapping, &cell, record.clone())).collect();
+        resolve_each(&resolver, &fragments);
+        resolver.assemble(&cell).unwrap().merge
+    }
+
+    #[test]
+    fn records_disagreeing_only_on_a_level_the_mapping_never_reads_assemble_without_a_merge_in_every_store() {
+        let records = [
+            json!({"cell": "srbw", "level": 2, "temperature": 280.1}),
+            json!({"cell": "srbw", "level": 10, "wind_u": 3.2}),
+        ];
+        for store in every_store() {
+            let debug = format!("{store:?}");
+
+            assert_eq!(merge_reading(store, &["cell", "temperature", "wind_u"], &records), None, "{debug}");
+        }
+    }
+
+    #[test]
+    fn the_same_records_are_a_merge_once_the_mapping_reads_the_level_in_every_store() {
+        let records = [
+            json!({"cell": "srbw", "level": 2, "temperature": 280.1}),
+            json!({"cell": "srbw", "level": 10, "wind_u": 3.2}),
+        ];
+        for store in every_store() {
+            let debug = format!("{store:?}");
+
+            let merge = merge_reading(store, &["cell", "level", "temperature", "wind_u"], &records);
+
+            assert_eq!(merge.map(|merge| merge.field.to_string()), Some("level".to_string()), "{debug}");
+        }
+    }
+
+    #[test]
+    fn the_earliest_read_field_is_named_in_every_order_and_every_store_when_an_unread_one_disagrees_too() {
+        let first = json!({"a": 1, "b": 1, "c": 1});
+        let second = json!({"a": 2, "b": 1, "c": 2});
+        let third = json!({"a": 3, "b": 1, "c": 1});
+        let orders = [
+            [&first, &second, &third],
+            [&first, &third, &second],
+            [&second, &first, &third],
+            [&second, &third, &first],
+            [&third, &first, &second],
+            [&third, &second, &first],
+        ];
+        for order in orders {
+            for store in every_store() {
+                let debug = format!("{store:?}");
+                let records: Vec<serde_json::Value> = order.iter().map(|record| (*record).clone()).collect();
+
+                let merge = merge_reading(store, &["b", "c"], &records);
+
+                assert_eq!(merge.map(|merge| merge.field.to_string()), Some("c".to_string()), "{debug} {order:?}");
+            }
+        }
     }
 }

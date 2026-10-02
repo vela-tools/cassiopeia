@@ -9,7 +9,7 @@ use crate::{
 use ahash::RandomState;
 use dashmap::DashMap;
 use smallvec::smallvec;
-use std::sync::Arc;
+use std::{num::NonZeroU64, sync::Arc};
 use urn_rs::Urn;
 
 /// In-memory series entity store using [`DashMap`] for lock-free concurrent access.
@@ -37,7 +37,7 @@ impl EntityStore for DashMapSeriesEntityStore {
         StoreWriteStrategy::Concurrent
     }
 
-    fn store_fragment(&self, write: FragmentWrite) -> Result<()> {
+    fn store_fragment(&self, write: FragmentWrite<'_>) -> Result<()> {
         let FragmentWrite {
             base_id,
             source_data,
@@ -45,7 +45,13 @@ impl EntityStore for DashMapSeriesEntityStore {
             scope,
             ..
         } = write;
-        let fragment = AssembledFragment { mapping_id, data: source_data };
+        // Every observation is kept on its own, so each stored fragment stands for exactly one record.
+        let fragment = AssembledFragment {
+            mapping_id,
+            data: source_data,
+            records: NonZeroU64::MIN,
+            conflict: None,
+        };
 
         // Every observation after an id's first finds the key already present, which is the whole
         // shape of a series run. `get_mut` serves that case without cloning a URN the map would only
@@ -113,7 +119,11 @@ mod tests {
     use crate::{
         entity_store::{
             dashmap_series_store::DashMapSeriesEntityStore,
-            store::{EntityStore, FragmentWrite, tests::assert_merges_scopes_per_id},
+            store::{
+                EntityStore,
+                FragmentWrite,
+                tests::{READS_EVERYTHING, assert_merges_scopes_per_id},
+            },
         },
         mapping_id::MappingId,
     };
@@ -130,7 +140,7 @@ mod tests {
         assert_merges_scopes_per_id(&DashMapSeriesEntityStore::new());
     }
 
-    fn write(base_id: &Urn, data: serde_json::Value, observed_at: &str) -> FragmentWrite {
+    fn write(base_id: &Urn, data: serde_json::Value, observed_at: &str) -> FragmentWrite<'static> {
         FragmentWrite {
             base_id: base_id.clone(),
             source_data: data,
@@ -138,6 +148,7 @@ mod tests {
             temporal: true,
             observed_at: Some(ObservedAt::new(observed_at)),
             scope: None,
+            reads: &READS_EVERYTHING,
         }
     }
 
@@ -160,6 +171,24 @@ mod tests {
         assert_eq!(assembled.units[0][0].data, first);
         assert_eq!(assembled.units[1][0].data, second);
         assert_eq!(assembled.units[2][0].data, third);
+    }
+
+    #[test]
+    fn every_stored_observation_stands_for_exactly_one_record_and_has_nothing_to_disagree_with() {
+        let store = DashMapSeriesEntityStore::new();
+        let id = urn("urn:ngsi-ld:Camera:1");
+
+        store.store_fragment(write(&id, json!({"on": true}), "2026-04-03T22:00:20Z")).unwrap();
+        store.store_fragment(write(&id, json!({"on": false}), "2026-04-03T22:05:20Z")).unwrap();
+
+        let assembled = store.assemble_entity(&id).unwrap();
+        assert!(
+            assembled
+                .units
+                .iter()
+                .flatten()
+                .all(|fragment| fragment.records.get() == 1 && fragment.conflict.is_none())
+        );
     }
 
     #[test]
