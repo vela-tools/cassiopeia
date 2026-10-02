@@ -12,6 +12,7 @@ pub mod template;
 pub mod template_location;
 pub mod template_site;
 pub mod transformation;
+pub mod value_conversion;
 pub mod version;
 
 #[cfg(test)]

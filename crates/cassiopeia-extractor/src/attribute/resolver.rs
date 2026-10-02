@@ -9,7 +9,6 @@ use cassiopeia_geometry::policy::GeometryPolicy;
 use cassiopeia_mapping::{
     attribute::{Attribute, instance::AttributeInstance},
     template::CompiledTemplate,
-    transformation::Transformation,
 };
 use cassiopeia_ngsi_ld::{
     entity::{attribute::NgsiLdAttributeKind, name::NameBuf},
@@ -49,7 +48,7 @@ pub(crate) fn resolve(ctx: &mut ResolutionContext, attr_name: &NameBuf, config: 
 
 /// Resolves a multi-instance Property-family attribute into an array of per-instance values.
 ///
-/// Each instance's `source` is read and transformed with the attribute's shared `transformation`;
+/// Each instance's `source` is read and converted with the attribute's shared conversion;
 /// the value at index `i` aligns with the per-item metadata recorded for instance `i` (its
 /// `datasetId` and the shared attribute-level properties). A missing instance value stays null so the
 /// alignment holds, and the transformer drops it when it builds the instances (ETSI GS CIM 009
@@ -139,12 +138,13 @@ fn resolve_leaf(ctx: &mut ResolutionContext, attr_name: &NameBuf, config: &Attri
 ///
 /// A refusal is not a record failure: the attribute drops, the entity is still emitted, and the run
 /// reports what was lost and why. The three paths that read source values (a leaf, one multi-attribute
-/// instance, and one language-map entry) all bind their outcome here, so none of them can forget to.
+/// instance, and one language-map entry) all bind their outcome here, so none of them can forget to,
+/// and all of them convert through the declaration's [`Attribute::conversion`], so a declaration
+/// naming no transformation gets its kind's default on every path.
 fn transform(ctx: &ResolutionContext, attr_name: &NameBuf, config: &Attribute, parts: SourceParts) -> Value {
-    let transformation: Option<&Transformation> = config.transformation().as_ref();
     let geometry: Option<&GeometryPolicy> = config.geometry().as_ref();
 
-    match Transformer::apply(parts, transformation, geometry) {
+    match Transformer::apply(parts, config.conversion(), geometry) {
         Ok(value) => value,
         Err(AttributeRefusal::Geometry(refusal)) => {
             ctx.dropped_geometries.record(attr_name, refusal);

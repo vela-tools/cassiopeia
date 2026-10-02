@@ -1398,6 +1398,105 @@ mod tests {
     }
 
     #[test]
+    fn a_list_property_without_a_transformation_takes_a_field_array_as_its_list() {
+        let value = extract_label(r#"{ type: "ListProperty", source: "{{ codes }}" }"#, json!({"codes": ["BS", "IN"]}));
+
+        assert_eq!(value, Some(Value::from(json!(["BS", "IN"]))));
+    }
+
+    #[test]
+    fn a_list_property_without_a_transformation_wraps_a_scalar_field_as_a_one_element_list() {
+        let value = extract_label(r#"{ type: "ListProperty", source: "{{ codes }}" }"#, json!({"codes": "BS"}));
+
+        assert_eq!(value, Some(Value::from(json!(["BS"]))));
+    }
+
+    #[test]
+    fn a_list_property_without_a_transformation_over_a_blank_or_null_field_is_absent() {
+        for codes in [json!(""), JsonValue::Null] {
+            let value = extract_label(r#"{ type: "ListProperty", source: "{{ codes }}" }"#, json!({"codes": codes}));
+
+            assert_eq!(value, None);
+        }
+    }
+
+    #[test]
+    fn a_list_property_under_an_explicit_string_transformation_still_becomes_compact_json_text() {
+        let value = extract_label(
+            r#"{ type: "ListProperty", source: "{{ codes }}", transformation: "string" }"#,
+            json!({"codes": ["BS", "IN"]}),
+        );
+
+        assert_eq!(value, Some(Value::String(r#"["BS","IN"]"#.into())));
+    }
+
+    #[test]
+    fn a_json_property_without_a_transformation_keeps_a_field_object_as_it_is() {
+        let value = extract_label(r#"{ type: "JsonProperty", source: "{{ payload }}" }"#, json!({"payload": {"a": 1, "b": ["x"]}}));
+
+        assert_eq!(value, Some(Value::from(json!({"a": 1, "b": ["x"]}))));
+    }
+
+    #[test]
+    fn a_json_property_without_a_transformation_keeps_a_field_array_as_it_is() {
+        let value = extract_label(r#"{ type: "JsonProperty", source: "{{ payload }}" }"#, json!({"payload": [{"a": 1}, {"b": 2}]}));
+
+        assert_eq!(value, Some(Value::from(json!([{"a": 1}, {"b": 2}]))));
+    }
+
+    #[test]
+    fn a_property_without_a_transformation_still_turns_a_field_array_into_compact_json_text() {
+        let value = extract_label(r#"{ source: "{{ codes }}" }"#, json!({"codes": ["BS", "IN"]}));
+
+        assert_eq!(value, Some(Value::String(r#"["BS","IN"]"#.into())));
+    }
+
+    #[test]
+    fn list_property_instances_without_a_transformation_each_take_their_field_array_as_their_list() {
+        let value = extract_label(
+            r#"{
+                type: "ListProperty",
+                instances: [
+                    { source: "{{ a }}", properties: { datasetId: { source: "urn:ngsi-ld:dataset:a" } } },
+                    { source: "{{ b }}", properties: { datasetId: { source: "urn:ngsi-ld:dataset:b" } } },
+                ],
+            }"#,
+            json!({"a": ["x", "y"], "b": "z"}),
+        );
+
+        assert_eq!(value, Some(Value::Array(vec![Value::from(json!(["x", "y"])), Value::from(json!(["z"]))])));
+    }
+
+    #[test]
+    fn a_list_property_sub_attribute_without_a_transformation_takes_a_field_array_as_its_list() {
+        let (resolver, mapping) = prepare(
+            r#"{
+                version: "v4",
+                dataModel: "Product",
+                identity: { entityName: "Product-{{ id }}" },
+                attributes: {
+                    sugars: {
+                        source: "{{ sugars }}",
+                        transformation: "float",
+                        properties: { codes: { type: "ListProperty", source: "{{ codes }}" } },
+                    },
+                },
+            }"#,
+        );
+        let extractor = EntityExtractor::new(resolver);
+        let record = json!({"id": "1", "sugars": 12.0, "codes": ["BS", "IN"]});
+        let mapped = AssembledEntity::from_single(entity("urn:ngsi-ld:Product:1", record), mapping);
+
+        let (result, _) = extractor.extract(mapped, &DroppedAttributes::new()).unwrap().into_parts();
+        let metadata = result.metadata().as_ref().expect("metadata set");
+        let shared = metadata.get(&name("sugars")).expect("sugars metadata").as_shared().expect("shared metadata");
+        let codes = shared.get(&name("codes")).expect("codes sub-attribute");
+
+        assert_eq!(*codes.kind(), NgsiLdAttributeKind::ListProperty);
+        assert_eq!(codes.value(), &json!(["BS", "IN"]));
+    }
+
+    #[test]
     fn a_lone_non_ascii_field_reference_reads_its_column() {
         let value = extract_label(r#"{ source: "{{ čas }}" }"#, json!({"čas": "10:00"}));
 

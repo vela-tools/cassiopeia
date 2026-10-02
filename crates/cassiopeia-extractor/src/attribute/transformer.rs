@@ -1,6 +1,6 @@
 use crate::attribute::refusal::AttributeRefusal;
 use cassiopeia_geometry::{error::GeometryError, policy::GeometryPolicy, target::GeometryTarget};
-use cassiopeia_mapping::transformation::Transformation;
+use cassiopeia_mapping::{transformation::Transformation, value_conversion::ValueConversion};
 use cassiopeia_ngsi_ld::value::{
     parsing::parse_decimal,
     types::{TemporalValue, Value},
@@ -28,27 +28,43 @@ pub(crate) type SourceParts = SmallVec<[JsonValue; 1]>;
 pub(crate) struct Transformer;
 
 impl Transformer {
-    /// Applies a transformation to the source values collected for one attribute.
+    /// Applies a conversion to the source values collected for one attribute.
     ///
-    /// An absent transformation defaults to `String`, matching a mapping that names a source and no
-    /// conversion. `Array` aggregates all parts; every other transformation first merges the parts
-    /// into one intermediate value and then coerces it to the target NGSI-LD type.
+    /// The conversion is already resolved: the declared transformation, or the default the
+    /// attribute's kind implies (see [`ValueConversion::default_for`]). A verbatim conversion keeps
+    /// what the source held. Under a transformation, `Array` aggregates all parts; every other
+    /// transformation first merges the parts into one intermediate value and then coerces it to the
+    /// target NGSI-LD type.
     ///
     /// Two transformations can refuse. A transformation naming a geometry type routes through the
     /// geometry lattice, where the source may carry a geometry a `GeoProperty` cannot hold or one
     /// this mapping did not authorise converting; a temporal transformation refuses text that reads
-    /// as no supported spelling of a date-time. Every other transformation drops an unusable value
-    /// to null and cannot fail.
+    /// as no supported spelling of a date-time. Every other conversion drops an unusable value to
+    /// null and cannot fail.
     ///
     /// # Errors
     /// Returns the [`AttributeRefusal`] naming what the attribute could not take.
-    pub(crate) fn apply(parts: SourceParts, transformation: Option<&Transformation>, geometry: Option<&GeometryPolicy>) -> Result<Value, AttributeRefusal> {
-        let transformation = transformation.copied().unwrap_or(Transformation::String);
-
-        match transformation.geometry_target() {
-            Some(target) => Ok(Self::coerce_geometry(&Self::merge_geometry(parts), target, geometry)?),
-            None => Self::coerce_value(parts, transformation),
+    pub(crate) fn apply(parts: SourceParts, conversion: ValueConversion, geometry: Option<&GeometryPolicy>) -> Result<Value, AttributeRefusal> {
+        match conversion {
+            ValueConversion::Verbatim => Ok(Self::keep_as_read(parts)),
+            ValueConversion::Transform(transformation) => match transformation.geometry_target() {
+                Some(target) => Ok(Self::coerce_geometry(&Self::merge_structured(parts), target, geometry)?),
+                None => Self::coerce_value(parts, transformation),
+            },
         }
+    }
+
+    /// Keeps the parts as the source held them: a lone part is its own value, several are an array
+    /// of the parts in order, and parts that are all null are no value.
+    ///
+    /// Nothing is coerced, stringified, or filtered by JSON type, because the value is raw JSON that
+    /// NGSI-LD never interprets (ETSI GS CIM 009 v1.9.1 clause 4.5.24.2, Table 5.2.38-1).
+    fn keep_as_read(parts: SourceParts) -> Value {
+        if parts.iter().all(JsonValue::is_null) {
+            return Value::Null;
+        }
+
+        Self::merge_structured(parts)
     }
 
     /// Applies a transformation that names no geometry type.
@@ -132,9 +148,10 @@ impl Transformer {
         }
     }
 
-    /// Merges parts for a geometry target: a lone part keeps its type, several keep their array
-    /// structure so the coordinate order survives.
-    fn merge_geometry(mut parts: SourceParts) -> Value {
+    /// Merges parts for a structured target, a geometry or a verbatim value: a lone part keeps its
+    /// type, several keep their array structure so their order (for a geometry, the coordinate order)
+    /// survives.
+    fn merge_structured(mut parts: SourceParts) -> Value {
         if parts.len() == 1 {
             return Value::from(parts.swap_remove(0));
         }
@@ -269,42 +286,50 @@ mod tests {
         policy::GeometryPolicy,
         strategy::ConversionStrategy,
     };
-    use cassiopeia_mapping::transformation::Transformation;
-    use cassiopeia_ngsi_ld::value::types::{Number, Value};
+    use cassiopeia_mapping::{transformation::Transformation, value_conversion::ValueConversion};
+    use cassiopeia_ngsi_ld::{
+        entity::attribute::NgsiLdAttributeKind,
+        value::types::{Number, Value},
+    };
     use serde_json::json;
     use smallvec::smallvec;
 
     #[test]
     fn a_lone_numeric_part_keeps_its_type_under_a_float_transformation() {
-        let value = Transformer::apply(smallvec![json!(25.5)], Some(&Transformation::Float), None).unwrap();
+        let value = Transformer::apply(smallvec![json!(25.5)], ValueConversion::Transform(Transformation::Float), None).unwrap();
 
         assert_eq!(value, Value::Number(Number::Float(25.5)));
     }
 
     #[test]
     fn a_numeric_string_is_parsed_to_an_integer() {
-        let value = Transformer::apply(smallvec![json!("7")], Some(&Transformation::Integer), None).unwrap();
+        let value = Transformer::apply(smallvec![json!("7")], ValueConversion::Transform(Transformation::Integer), None).unwrap();
 
         assert_eq!(value, Value::Number(Number::Integer(7)));
     }
 
     #[test]
     fn a_float_string_is_truncated_to_an_integer() {
-        let value = Transformer::apply(smallvec![json!("7.9")], Some(&Transformation::Integer), None).unwrap();
+        let value = Transformer::apply(smallvec![json!("7.9")], ValueConversion::Transform(Transformation::Integer), None).unwrap();
 
         assert_eq!(value, Value::Number(Number::Integer(7)));
     }
 
     #[test]
     fn a_comma_decimal_string_parses_as_a_float() {
-        let value = Transformer::apply(smallvec![json!("1,5")], Some(&Transformation::Float), None).unwrap();
+        let value = Transformer::apply(smallvec![json!("1,5")], ValueConversion::Transform(Transformation::Float), None).unwrap();
 
         assert_eq!(value, Value::Number(Number::Float(1.5)));
     }
 
     #[test]
     fn several_string_parts_are_concatenated() {
-        let value = Transformer::apply(smallvec![json!("Station-"), json!(42)], Some(&Transformation::String), None).unwrap();
+        let value = Transformer::apply(
+            smallvec![json!("Station-"), json!(42)],
+            ValueConversion::Transform(Transformation::String),
+            None,
+        )
+        .unwrap();
 
         assert_eq!(value, Value::String("Station-42".into()));
     }
@@ -314,7 +339,7 @@ mod tests {
         // Four parts spill the inline capacity of one onto the heap; order must survive the spill.
         let value = Transformer::apply(
             smallvec![json!("Station-"), json!(42), json!("/"), json!("north")],
-            Some(&Transformation::String),
+            ValueConversion::Transform(Transformation::String),
             None,
         )
         .unwrap();
@@ -322,100 +347,185 @@ mod tests {
         assert_eq!(value, Value::String("Station-42/north".into()));
     }
 
+    /// The conversion an attribute of `kind` declared without a transformation resolves to.
+    const fn default_of(kind: NgsiLdAttributeKind) -> ValueConversion {
+        ValueConversion::default_for(kind)
+    }
+
     #[test]
-    fn the_default_transformation_is_string() {
-        let value = Transformer::apply(smallvec![json!(true)], None, None).unwrap();
+    fn a_boolean_part_under_the_property_default_becomes_its_text() {
+        let value = Transformer::apply(smallvec![json!(true)], default_of(NgsiLdAttributeKind::Property), None).unwrap();
 
         assert_eq!(value, Value::String("true".into()));
     }
 
     #[test]
     fn an_array_part_under_a_string_transformation_becomes_its_compact_json_text() {
-        let value = Transformer::apply(smallvec![json!(["BS", "IN"])], Some(&Transformation::String), None).unwrap();
+        let value = Transformer::apply(smallvec![json!(["BS", "IN"])], ValueConversion::Transform(Transformation::String), None).unwrap();
 
         assert_eq!(value, Value::String(r#"["BS","IN"]"#.into()));
     }
 
     #[test]
-    fn an_array_part_without_a_transformation_becomes_its_compact_json_text() {
-        let value = Transformer::apply(smallvec![json!(["BS", "IN"])], None, None).unwrap();
+    fn an_array_part_under_the_property_default_becomes_its_compact_json_text() {
+        let value = Transformer::apply(smallvec![json!(["BS", "IN"])], default_of(NgsiLdAttributeKind::Property), None).unwrap();
 
         assert_eq!(value, Value::String(r#"["BS","IN"]"#.into()));
     }
 
     #[test]
     fn an_object_part_under_a_string_transformation_becomes_its_compact_json_text() {
-        let value = Transformer::apply(smallvec![json!({"a": 1, "b": ["x"]})], Some(&Transformation::String), None).unwrap();
+        let value = Transformer::apply(smallvec![json!({"a": 1, "b": ["x"]})], ValueConversion::Transform(Transformation::String), None).unwrap();
 
         assert_eq!(value, Value::String(r#"{"a":1,"b":["x"]}"#.into()));
     }
 
     #[test]
-    fn an_object_part_without_a_transformation_becomes_its_compact_json_text() {
-        let value = Transformer::apply(smallvec![json!({"a": 1, "b": ["x"]})], None, None).unwrap();
+    fn an_object_part_under_the_property_default_becomes_its_compact_json_text() {
+        let value = Transformer::apply(smallvec![json!({"a": 1, "b": ["x"]})], default_of(NgsiLdAttributeKind::Property), None).unwrap();
 
         assert_eq!(value, Value::String(r#"{"a":1,"b":["x"]}"#.into()));
     }
 
     #[test]
-    fn a_whole_float_part_without_a_transformation_becomes_its_shortest_text() {
-        let value = Transformer::apply(smallvec![json!(3.0)], None, None).unwrap();
+    fn a_whole_float_part_under_the_property_default_becomes_its_shortest_text() {
+        let value = Transformer::apply(smallvec![json!(3.0)], default_of(NgsiLdAttributeKind::Property), None).unwrap();
 
         assert_eq!(value, Value::String("3".into()));
     }
 
     #[test]
+    fn an_array_part_under_the_list_property_default_becomes_the_list_itself() {
+        let value = Transformer::apply(smallvec![json!(["BS", "IN"])], default_of(NgsiLdAttributeKind::ListProperty), None).unwrap();
+
+        assert_eq!(value, Value::from(json!(["BS", "IN"])));
+    }
+
+    #[test]
+    fn a_scalar_part_under_the_list_property_default_becomes_a_one_element_list() {
+        let value = Transformer::apply(smallvec![json!("BS")], default_of(NgsiLdAttributeKind::ListProperty), None).unwrap();
+
+        assert_eq!(value, Value::from(json!(["BS"])));
+    }
+
+    #[test]
+    fn a_blank_or_null_part_under_the_list_property_default_is_no_value() {
+        for part in [json!(""), json!("  "), json!(null)] {
+            let value = Transformer::apply(smallvec![part], default_of(NgsiLdAttributeKind::ListProperty), None).unwrap();
+
+            assert!(value.is_null(), "{value:?}");
+        }
+    }
+
+    #[test]
+    fn an_object_part_under_the_json_property_default_is_kept_as_it_is() {
+        let value = Transformer::apply(smallvec![json!({"a": 1, "b": ["x"]})], default_of(NgsiLdAttributeKind::JsonProperty), None).unwrap();
+
+        assert_eq!(value, Value::from(json!({"a": 1, "b": ["x"]})));
+    }
+
+    #[test]
+    fn an_array_part_under_the_json_property_default_is_kept_as_it_is() {
+        let value = Transformer::apply(smallvec![json!([{"a": 1}, {"b": 2}])], default_of(NgsiLdAttributeKind::JsonProperty), None).unwrap();
+
+        assert_eq!(value, Value::from(json!([{"a": 1}, {"b": 2}])));
+    }
+
+    #[test]
+    fn a_scalar_part_under_the_json_property_default_keeps_its_json_type() {
+        let value = Transformer::apply(smallvec![json!(3.5)], default_of(NgsiLdAttributeKind::JsonProperty), None).unwrap();
+
+        assert_eq!(value, Value::Number(Number::Float(3.5)));
+    }
+
+    #[test]
+    fn a_null_part_under_the_json_property_default_is_no_value() {
+        let value = Transformer::apply(smallvec![json!(null)], default_of(NgsiLdAttributeKind::JsonProperty), None).unwrap();
+
+        assert!(value.is_null());
+    }
+
+    #[test]
+    fn several_parts_under_the_json_property_default_become_an_array_of_the_parts_in_order() {
+        let value = Transformer::apply(
+            smallvec![json!({"a": 1}), json!(null), json!([2])],
+            default_of(NgsiLdAttributeKind::JsonProperty),
+            None,
+        )
+        .unwrap();
+
+        assert_eq!(value, Value::from(json!([{"a": 1}, null, [2]])));
+    }
+
+    #[test]
+    fn several_null_parts_under_the_json_property_default_are_no_value() {
+        let value = Transformer::apply(smallvec![json!(null), json!(null)], default_of(NgsiLdAttributeKind::JsonProperty), None).unwrap();
+
+        assert!(value.is_null());
+    }
+
+    #[test]
     fn an_array_transformation_flattens_and_drops_nulls() {
-        let value = Transformer::apply(smallvec![json!([1, 2]), json!(null), json!(3)], Some(&Transformation::Array), None).unwrap();
+        let value = Transformer::apply(
+            smallvec![json!([1, 2]), json!(null), json!(3)],
+            ValueConversion::Transform(Transformation::Array),
+            None,
+        )
+        .unwrap();
 
         assert_eq!(value, Value::from(json!([1, 2, 3])));
     }
 
     #[test]
     fn an_empty_array_transformation_is_null() {
-        let value = Transformer::apply(smallvec![json!(null)], Some(&Transformation::Array), None).unwrap();
+        let value = Transformer::apply(smallvec![json!(null)], ValueConversion::Transform(Transformation::Array), None).unwrap();
 
         assert!(value.is_null());
     }
 
     #[test]
     fn an_array_transformation_drops_blank_and_null_parts() {
-        let value = Transformer::apply(smallvec![json!(""), json!(null), json!("A")], Some(&Transformation::Array), None).unwrap();
+        let value = Transformer::apply(
+            smallvec![json!(""), json!(null), json!("A")],
+            ValueConversion::Transform(Transformation::Array),
+            None,
+        )
+        .unwrap();
 
         assert_eq!(value, Value::from(json!(["A"])));
     }
 
     #[test]
     fn an_array_transformation_over_only_blank_and_null_parts_is_null() {
-        let value = Transformer::apply(smallvec![json!(""), json!(null)], Some(&Transformation::Array), None).unwrap();
+        let value = Transformer::apply(smallvec![json!(""), json!(null)], ValueConversion::Transform(Transformation::Array), None).unwrap();
 
         assert!(value.is_null());
     }
 
     #[test]
     fn an_array_transformation_keeps_blank_elements_of_an_array_part() {
-        let value = Transformer::apply(smallvec![json!(["a", ""])], Some(&Transformation::Array), None).unwrap();
+        let value = Transformer::apply(smallvec![json!(["a", ""])], ValueConversion::Transform(Transformation::Array), None).unwrap();
 
         assert_eq!(value, Value::from(json!(["a", ""])));
     }
 
     #[test]
     fn an_object_transformation_keeps_an_object_part() {
-        let value = Transformer::apply(smallvec![json!({"a": 1})], Some(&Transformation::Object), None).unwrap();
+        let value = Transformer::apply(smallvec![json!({"a": 1})], ValueConversion::Transform(Transformation::Object), None).unwrap();
 
         assert_eq!(value, Value::from(json!({"a": 1})));
     }
 
     #[test]
     fn an_object_transformation_does_not_parse_text() {
-        let value = Transformer::apply(smallvec![json!(r#"{"a":1}"#)], Some(&Transformation::Object), None).unwrap();
+        let value = Transformer::apply(smallvec![json!(r#"{"a":1}"#)], ValueConversion::Transform(Transformation::Object), None).unwrap();
 
         assert!(value.is_null());
     }
 
     #[test]
     fn an_object_transformation_over_an_empty_object_is_null() {
-        let value = Transformer::apply(smallvec![json!({})], Some(&Transformation::Object), None).unwrap();
+        let value = Transformer::apply(smallvec![json!({})], ValueConversion::Transform(Transformation::Object), None).unwrap();
 
         assert!(value.is_null());
     }
@@ -423,8 +533,8 @@ mod tests {
     #[test]
     fn a_numeric_epoch_reads_as_the_same_instant_as_its_text() {
         for transformation in [Transformation::DateTime, Transformation::Date, Transformation::Time] {
-            let number = Transformer::apply(smallvec![json!(1_775_253_620)], Some(&transformation), None).unwrap();
-            let text = Transformer::apply(smallvec![json!("1775253620")], Some(&transformation), None).unwrap();
+            let number = Transformer::apply(smallvec![json!(1_775_253_620)], ValueConversion::Transform(transformation), None).unwrap();
+            let text = Transformer::apply(smallvec![json!("1775253620")], ValueConversion::Transform(transformation), None).unwrap();
 
             assert!(matches!(number, Value::Temporal(_)), "{transformation:?} left {number:?}");
             assert_eq!(number, text);
@@ -433,35 +543,35 @@ mod tests {
 
     #[test]
     fn a_fractional_numeric_epoch_reads_as_an_instant() {
-        let value = Transformer::apply(smallvec![json!(1_775_253_620.5)], Some(&Transformation::DateTime), None).unwrap();
+        let value = Transformer::apply(smallvec![json!(1_775_253_620.5)], ValueConversion::Transform(Transformation::DateTime), None).unwrap();
 
         assert!(matches!(value, Value::Temporal(_)));
     }
 
     #[test]
     fn a_number_too_small_for_an_epoch_is_refused_quoting_it() {
-        let refusal = Transformer::apply(smallvec![json!(2026)], Some(&Transformation::DateTime), None);
+        let refusal = Transformer::apply(smallvec![json!(2026)], ValueConversion::Transform(Transformation::DateTime), None);
 
         assert!(matches!(refusal, Err(AttributeRefusal::UnreadableTimestamp { ref text }) if text.as_ref() == "2026"));
     }
 
     #[test]
     fn a_boolean_under_a_temporal_transformation_is_refused_quoting_it() {
-        let refusal = Transformer::apply(smallvec![json!(true)], Some(&Transformation::DateTime), None);
+        let refusal = Transformer::apply(smallvec![json!(true)], ValueConversion::Transform(Transformation::DateTime), None);
 
         assert!(matches!(refusal, Err(AttributeRefusal::UnreadableTimestamp { ref text }) if text.as_ref() == "true"));
     }
 
     #[test]
     fn a_blank_temporal_source_is_still_absent_rather_than_refused() {
-        let value = Transformer::apply(smallvec![json!("  ")], Some(&Transformation::DateTime), None).unwrap();
+        let value = Transformer::apply(smallvec![json!("  ")], ValueConversion::Transform(Transformation::DateTime), None).unwrap();
 
         assert!(value.is_null());
     }
 
     #[test]
     fn a_point_transformation_builds_a_geospatial_value() {
-        let value = Transformer::apply(smallvec![json!(14.5), json!(46.0)], Some(&Transformation::Point), None).unwrap();
+        let value = Transformer::apply(smallvec![json!(14.5), json!(46.0)], ValueConversion::Transform(Transformation::Point), None).unwrap();
 
         assert!(matches!(value, Value::Geospatial(_)));
     }
@@ -469,14 +579,14 @@ mod tests {
     #[test]
     fn a_geometry_transformation_keeps_an_already_formed_geometry() {
         let source = json!({"type": "Point", "coordinates": [9.17, 45.47]});
-        let value = Transformer::apply(smallvec![source], Some(&Transformation::Geometry), None).unwrap();
+        let value = Transformer::apply(smallvec![source], ValueConversion::Transform(Transformation::Geometry), None).unwrap();
 
         assert!(matches!(value, Value::Geospatial(_)));
     }
 
     #[test]
     fn a_geometry_transformation_on_a_non_geometry_value_is_null() {
-        let value = Transformer::apply(smallvec![json!("not a geometry")], Some(&Transformation::Geometry), None).unwrap();
+        let value = Transformer::apply(smallvec![json!("not a geometry")], ValueConversion::Transform(Transformation::Geometry), None).unwrap();
 
         assert!(value.is_null());
     }
@@ -484,7 +594,7 @@ mod tests {
     #[test]
     fn a_point_source_promotes_to_a_declared_multipoint() {
         let source = json!({"type": "Point", "coordinates": [9.17, 45.47]});
-        let value = Transformer::apply(smallvec![source], Some(&Transformation::MultiPoint), None).unwrap();
+        let value = Transformer::apply(smallvec![source], ValueConversion::Transform(Transformation::MultiPoint), None).unwrap();
 
         let Value::Geospatial(geometry) = value else {
             panic!("a geometry");
@@ -503,7 +613,7 @@ mod tests {
         });
 
         assert_eq!(
-            Transformer::apply(smallvec![source], Some(&Transformation::Polygon), None),
+            Transformer::apply(smallvec![source], ValueConversion::Transform(Transformation::Polygon), None),
             Err(AttributeRefusal::Geometry(GeometryError::AmbiguousMultiGeometry {
                 origin: GeometryKind::MultiPolygon,
                 members: 2,
@@ -521,7 +631,7 @@ mod tests {
             ],
         });
         let policy = GeometryPolicy::builder().convert(Some(ConversionStrategy::Largest)).build();
-        let value = Transformer::apply(smallvec![source], Some(&Transformation::Polygon), Some(&policy)).unwrap();
+        let value = Transformer::apply(smallvec![source], ValueConversion::Transform(Transformation::Polygon), Some(&policy)).unwrap();
 
         let Value::Geospatial(geometry) = value else {
             panic!("a geometry");
@@ -534,7 +644,7 @@ mod tests {
         let source = json!({"type": "GeometryCollection", "geometries": []});
 
         assert_eq!(
-            Transformer::apply(smallvec![source], Some(&Transformation::Geometry), None),
+            Transformer::apply(smallvec![source], ValueConversion::Transform(Transformation::Geometry), None),
             Err(AttributeRefusal::Geometry(GeometryError::GeometryCollection))
         );
     }
@@ -545,7 +655,7 @@ mod tests {
             "type": "Polygon",
             "coordinates": [[[0.0, 0.0], [0.0, 1.0], [1.0, 1.0], [1.0, 0.0], [0.0, 0.0]]],
         });
-        let value = Transformer::apply(smallvec![source], Some(&Transformation::Polygon), None).unwrap();
+        let value = Transformer::apply(smallvec![source], ValueConversion::Transform(Transformation::Polygon), None).unwrap();
 
         let Value::Geospatial(geometry) = value else {
             panic!("a geometry");
@@ -566,7 +676,7 @@ mod tests {
 
     #[test]
     fn a_null_part_under_a_scalar_transformation_stays_null() {
-        let value = Transformer::apply(smallvec![json!(null)], Some(&Transformation::Integer), None).unwrap();
+        let value = Transformer::apply(smallvec![json!(null)], ValueConversion::Transform(Transformation::Integer), None).unwrap();
 
         assert!(value.is_null());
     }

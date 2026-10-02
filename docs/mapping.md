@@ -227,7 +227,7 @@ Templates support more than plain text. Cassiopeia's `get` reads a map entry, an
 
 ## Convert values
 
-The transformation determines the value Cassiopeia builds. If you omit it, Cassiopeia treats the value as a string: a number becomes its text, and an array or object becomes its compact JSON text, such as `["BS","IN"]`. Use an explicit transformation when the target model expects another type, including `array` or `object` to keep a structured value as it is.
+The transformation determines the value Cassiopeia builds. If you omit it, the attribute's `type` picks the default. A `ListProperty` defaults to `array`, so an array read from the source becomes the list itself. A `JsonProperty` keeps the value exactly as the source holds it, so an object stays an object and an array stays an array (see [ListProperty and JsonProperty](#listproperty-and-jsonproperty)). Every other type defaults to `string`: a number becomes its text, and an array or object becomes its compact JSON text, such as `["BS","IN"]`. A transformation you write is always applied as written, whatever the type. Write one when the target model expects another type, including `array` or `object` to keep a structured value as it is on a plain `Property`.
 
 | Transformation | Result |
 | --- | --- |
@@ -432,16 +432,16 @@ Use `ListProperty` for an ordered list of values. Use `JsonProperty` for a JSON 
 supportedModes: {
     type: "ListProperty",
     source: "{{ modes }}",
-    transformation: "array",
 },
 metadata: {
     type: "JsonProperty",
     source: "{{ metadata }}",
-    transformation: "object",
 }
 ~~~
 
-The source shape and transformation must match the data the source provides. A string containing JSON is not an object or an array, and the `object` and `array` transformations do not parse text. Decode it in the source with `{{ metadata | json_decode }}` and keep the transformation. A bare field reference such as `{{ modes }}` resolves to the record's actual value, so under these transformations an array field stays an array and an object field stays an object. [Example 24](https://github.com/vela-tools/cassiopeia-examples/blob/main/examples/24-json-list-property/example.md) carries an ordered array as a `ListProperty`, while [example 25](https://github.com/vela-tools/cassiopeia-examples/blob/main/examples/25-geojson-json-property/example.md) keeps a variable object whole as a `JsonProperty`.
+Neither needs a transformation, because each type's default keeps the structure the source provides. A `ListProperty` defaults to `array`: a source value that is already an array contributes its elements, any other value becomes one element, and a null or blank source produces no attribute. A `JsonProperty` keeps the value exactly as the source holds it, because its `json` member carries raw JSON that NGSI-LD never interprets (ETSI GS CIM 009 v1.9.1 clauses 4.5.24 and 5.2.38): an object stays an object, an array stays an array, and a number or boolean keeps its JSON type. Several source templates on a `JsonProperty` give an array of their values in order, and a source that resolves to null produces no attribute. A transformation you write replaces the default: `object` keeps only a non-empty object, and `string` writes compact JSON text, which a `ListProperty` then holds as a one-element list.
+
+Neither default parses text. A string containing JSON is not an object or an array, so it stays a string; decode it in the source with `{{ metadata | json_decode }}`. A bare field reference such as `{{ modes }}` resolves to the record's actual value, so an array field stays an array and an object field stays an object. [Example 24](https://github.com/vela-tools/cassiopeia-examples/blob/main/examples/24-json-list-property/example.md) carries an ordered array as a `ListProperty`, while [example 25](https://github.com/vela-tools/cassiopeia-examples/blob/main/examples/25-geojson-json-property/example.md) keeps a variable object whole as a `JsonProperty`.
 
 ### ListRelationship
 

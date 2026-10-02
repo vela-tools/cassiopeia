@@ -7,6 +7,7 @@ use crate::{
     target::Target,
     template::{CompiledTemplate, TemplateSource},
     transformation::Transformation,
+    value_conversion::ValueConversion,
 };
 use cassiopeia_geometry::policy::GeometryPolicy;
 use cassiopeia_ngsi_ld::entity::{attribute::NgsiLdAttributeKind, name::NameBuf};
@@ -45,7 +46,9 @@ pub struct Attribute {
     #[getset(get = "pub")]
     kind: NgsiLdAttributeKind,
 
-    /// The conversion applied to the extracted value.
+    /// The conversion applied to the extracted value, when the mapping names one.
+    ///
+    /// Absent means the default for `kind`; [`Attribute::conversion`] resolves the two together.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[builder(default = Default::default())]
     #[getset(get = "pub")]
@@ -174,6 +177,18 @@ impl Attribute {
         AttributeIterator::new(self)
     }
 
+    /// How this attribute's source values become its value: the declared `transformation` exactly
+    /// as written, or, when none is declared, the default of its NGSI-LD kind.
+    ///
+    /// Every path that reads source values resolves its conversion here: the attribute itself, each
+    /// of its `instances` (which share its `type` and `transformation`), and each `languageMap`
+    /// entry, nested mapping, and sub-attribute through its own declaration.
+    #[must_use]
+    pub fn conversion(&self) -> ValueConversion {
+        self.transformation
+            .map_or_else(|| ValueConversion::default_for(self.kind), ValueConversion::Transform)
+    }
+
     /// The raw `observedAt` template declared directly on this attribute, if any.
     ///
     /// A non-string declaration is stringified rather than rejected: `observedAt` may be written
@@ -213,7 +228,7 @@ impl Attribute {
 
 #[cfg(test)]
 mod tests {
-    use crate::{attribute::Attribute, template::TemplateSource, transformation::Transformation, version::Version};
+    use crate::{attribute::Attribute, template::TemplateSource, transformation::Transformation, value_conversion::ValueConversion, version::Version};
     use cassiopeia_ngsi_ld::entity::attribute::NgsiLdAttributeKind;
     use langtag::LangTagBuf;
 
@@ -234,6 +249,36 @@ mod tests {
 
         assert_eq!(attribute.kind(), &NgsiLdAttributeKind::GeoProperty);
         assert_eq!(attribute.transformation(), &Some(Transformation::Point));
+    }
+
+    #[test]
+    fn a_list_property_without_a_transformation_converts_through_the_array_transformation() {
+        let attribute = parse(r#"{"type": "ListProperty", "source": "{{ codes }}"}"#);
+
+        assert_eq!(attribute.conversion(), ValueConversion::Transform(Transformation::Array));
+    }
+
+    #[test]
+    fn a_json_property_without_a_transformation_keeps_its_value_as_read() {
+        let attribute = parse(r#"{"type": "JsonProperty", "source": "{{ payload }}"}"#);
+
+        assert_eq!(attribute.conversion(), ValueConversion::Verbatim);
+    }
+
+    #[test]
+    fn a_property_without_a_transformation_converts_through_the_string_transformation() {
+        let attribute = parse(r#"{"source": "{{ codes }}"}"#);
+
+        assert_eq!(attribute.conversion(), ValueConversion::Transform(Transformation::String));
+    }
+
+    #[test]
+    fn an_explicit_transformation_wins_over_the_kind_default() {
+        let list = parse(r#"{"type": "ListProperty", "source": "{{ codes }}", "transformation": "string"}"#);
+        let json = parse(r#"{"type": "JsonProperty", "source": "{{ payload }}", "transformation": "object"}"#);
+
+        assert_eq!(list.conversion(), ValueConversion::Transform(Transformation::String));
+        assert_eq!(json.conversion(), ValueConversion::Transform(Transformation::Object));
     }
 
     #[test]
