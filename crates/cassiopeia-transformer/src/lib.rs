@@ -13,11 +13,14 @@
 //! lost instead of leaving the value with nothing anchoring it in time.
 
 pub mod attribute_builder;
+pub(crate) mod attribute_dispatch;
 pub(crate) mod attribute_store;
 pub mod error;
 pub mod metadata;
 pub mod ngsi_ld_transformer;
 pub mod observed_at_cache;
+pub(crate) mod property_instances;
 pub mod qualifier_cache;
+pub(crate) mod relationship_assembly;
 pub mod transformer;
 pub mod unit_code_cache;
