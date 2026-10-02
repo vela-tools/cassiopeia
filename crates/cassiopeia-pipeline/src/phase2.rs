@@ -164,7 +164,7 @@ mod tests {
     fn route_through_the_stages(document: &str, record: Value) -> NgsiLdEntity {
         let mut runner = TemplateRunner::new();
         let mut mapping = Mapping::from_json5(document, Path::new("test.json5"), &mut runner).unwrap();
-        ExpanderCompiler::compile(&mut mapping, &mut runner);
+        ExpanderCompiler::compile(&mut mapping, Path::new("test.json5"), &mut runner).unwrap();
         let mapping = Arc::new(mapping);
         let resolver = runner.resolver();
         let Value::Object(data) = record else {

@@ -431,7 +431,7 @@ mod tests {
     #[test]
     fn a_suppressed_expression_is_incomplete() {
         let mut runner = TemplateRunner::new();
-        let compiled = runner.compile(&TemplateSource::new("{% if city %}{{ city | upper }}{% endif %}"));
+        let compiled = runner.compile(&TemplateSource::new("{% if city %}{{ city | upper }}{% endif %}")).unwrap();
         let resolver = runner.resolver();
 
         assert_eq!(resolver.resolve_complete(&compiled, &json!({"city": null})).unwrap(), None);
@@ -441,7 +441,7 @@ mod tests {
     #[test]
     fn resolve_tokens_yields_one_token_per_element_of_a_split_expression() {
         let mut runner = TemplateRunner::new();
-        let templates = vec![runner.compile(&TemplateSource::new("{{ equipment | split(pat=';') }}"))];
+        let templates = vec![runner.compile(&TemplateSource::new("{{ equipment | split(pat=';') }}")).unwrap()];
         let resolver = runner.resolver();
 
         assert_eq!(resolver.resolve_tokens(&templates, &json!({"equipment": "744;777"})).unwrap(), ["744", "777"]);
@@ -450,7 +450,7 @@ mod tests {
     #[test]
     fn resolve_joined_writes_an_expression_array_as_compact_json() {
         let mut runner = TemplateRunner::new();
-        let templates = vec![runner.compile(&TemplateSource::new("{{ codes | split(pat=' ') }}"))];
+        let templates = vec![runner.compile(&TemplateSource::new("{{ codes | split(pat=' ') }}")).unwrap()];
         let resolver = runner.resolver();
 
         assert_eq!(resolver.resolve_joined(&templates, &json!({"codes": "BS IN"})).unwrap(), r#"["BS","IN"]"#);

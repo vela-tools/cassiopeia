@@ -98,7 +98,7 @@ pub enum PipelineError {
         source: Box<CollectorError>,
     },
 
-    /// A mapping file could not be read or parsed.
+    /// A mapping file could not be read, parsed, or have its templates compiled.
     #[error(transparent)]
     Mapping(#[from] MappingError),
 

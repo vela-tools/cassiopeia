@@ -349,7 +349,7 @@ mod tests {
 
     fn compiled(document: &str, runner: &mut TemplateRunner) -> Arc<Mapping> {
         let mut mapping = Mapping::from_json5(document, Path::new("test.json5"), runner).unwrap();
-        ExpanderCompiler::compile(&mut mapping, runner);
+        ExpanderCompiler::compile(&mut mapping, Path::new("test.json5"), runner).unwrap();
         Arc::new(mapping)
     }
 

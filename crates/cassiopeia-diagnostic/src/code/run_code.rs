@@ -13,7 +13,7 @@ pub enum RunCode {
     CycleFailed,
     /// One cycle failed and is being retried.
     CycleRetrying,
-    /// A mapping file could not be read or parsed.
+    /// A mapping file could not be read, parsed, or have its templates compiled.
     MappingUnusable,
     /// Fragment resolution or one of its backing stores failed.
     ResolutionFailed,

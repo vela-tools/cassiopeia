@@ -31,6 +31,7 @@ use serde_json::Value;
 use std::{
     cmp::Ordering,
     collections::{HashMap, HashSet},
+    path::Path,
 };
 
 /// Everything the mapping wizard keeps between frames: the model picker, the attribute tree being
@@ -376,12 +377,21 @@ impl WizardState {
     ///
     /// # Errors
     /// Returns a [`ConversionError`] when an attribute name or a relationship target model in the
-    /// editing tree is not valid.
+    /// editing tree is not valid, or when the mapping's `observedAt` template cannot be compiled. The
+    /// mapping is named in that error by the file it is about to be saved as.
     pub fn build_mapping(&self, data_model: &DataModel, runner: &mut TemplateRunner) -> Result<Mapping, ConversionError> {
         let attributes = to_domain_attributes(&filter_mapped(&self.root_attributes))?;
         let identity = Identity::new(TemplateSource::new(self.identity_form.entity_id_template.clone()));
 
-        Ok(Mapping::new(Version::V4, data_model.clone(), identity, None, attributes, runner))
+        Ok(Mapping::new(
+            Version::V4,
+            data_model.clone(),
+            identity,
+            None,
+            attributes,
+            Path::new(&self.save_filename),
+            runner,
+        )?)
     }
 }
 

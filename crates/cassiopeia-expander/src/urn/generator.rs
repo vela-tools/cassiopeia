@@ -350,7 +350,7 @@ mod tests {
         .replace("IDENTITY", identity);
         let mut runner = TemplateRunner::new();
         let mut mapping = Mapping::from_json5(&document, Path::new("test.json5"), &mut runner).unwrap();
-        ExpanderCompiler::compile(&mut mapping, &mut runner);
+        ExpanderCompiler::compile(&mut mapping, Path::new("test.json5"), &mut runner).unwrap();
         let generator = UrnGenerator::new(runner.resolver());
 
         generator.generate_id(&mapping, data).map(|urn| urn.to_string())

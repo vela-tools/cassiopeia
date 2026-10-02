@@ -2,6 +2,7 @@ use crate::template::{
     CompiledTemplate,
     TemplatePart,
     TemplateSource,
+    compile_error::TemplateCompileError,
     contrib,
     field_path::FieldPath,
     filter,
@@ -51,32 +52,43 @@ impl TemplateRunner {
     }
 
     /// Classifies one template expression and, when it needs Tera, registers it with the engine.
-    pub fn compile(&mut self, source: &TemplateSource) -> CompiledTemplate {
-        let source = source.as_str();
+    ///
+    /// # Errors
+    /// Returns a [`TemplateCompileError`] when the expression needs Tera and Tera will not register
+    /// it as written: a syntax error, or a filter, function, or test that is not registered.
+    pub fn compile(&mut self, source: &TemplateSource) -> Result<CompiledTemplate, TemplateCompileError> {
+        let text = source.as_str();
 
-        if !source.contains("{{") && !source.contains("{%") {
-            return CompiledTemplate::Static(source.to_string());
+        if !text.contains("{{") && !text.contains("{%") {
+            return Ok(CompiledTemplate::Static(text.to_string()));
         }
 
-        if Self::needs_tera(source) {
-            let name = TemplateName::for_source(source);
+        if Self::needs_tera(text) {
+            let name = TemplateName::for_source(text);
             let tera = Arc::make_mut(&mut self.tera);
             // Registering the same expression twice is not an error: the name is a digest of the
             // expression, so a repeat registration replaces an identical template. The typed form is
             // derived from the source alone, so a digest of the source still names it uniquely.
-            if let Some(typed) = value_expression::typed_form(source)
+            if let Some(typed) = value_expression::typed_form(text)
                 && tera.add_raw_template(name.as_str(), &typed).is_ok()
             {
-                return CompiledTemplate::Expression(name);
+                return Ok(CompiledTemplate::Expression(name));
             }
             // A source the typed rewrite does not apply to, or whose rewrite Tera will not parse,
-            // renders as written: to text.
-            let _ = tera.add_raw_template(name.as_str(), source);
+            // renders as written: to text. The rewrite can fail where the source parses, since its
+            // added parentheses count against Tera's expression nesting limit, so only registering
+            // the source as written decides whether the expression is valid. A failed registration
+            // leaves the engine as it was.
+            tera.add_raw_template(name.as_str(), text).map_err(|cause| TemplateCompileError {
+                // The error outlives the mapping the expression is borrowed from.
+                template: source.clone(),
+                source: cause,
+            })?;
 
-            return CompiledTemplate::Complex(name);
+            return Ok(CompiledTemplate::Complex(name));
         }
 
-        Self::split(source)
+        Ok(Self::split(text))
     }
 
     /// Decides whether an expression needs the full templating engine.
@@ -130,14 +142,24 @@ impl TemplateRunner {
 
 #[cfg(test)]
 mod tests {
-    use crate::template::{CompiledTemplate, TemplateSource, runner::TemplateRunner};
+    use crate::template::{CompiledTemplate, TemplateSource, compile_error::TemplateCompileError, runner::TemplateRunner};
     use serde_json::{Value as JsonValue, json};
+    use std::error::Error;
 
     fn compile(source: &str) -> (TemplateRunner, CompiledTemplate) {
         let mut runner = TemplateRunner::new();
-        let compiled = runner.compile(&TemplateSource::new(source));
+        let compiled = runner.compile(&TemplateSource::new(source)).unwrap();
 
         (runner, compiled)
+    }
+
+    fn compile_error(source: &str) -> TemplateCompileError {
+        TemplateRunner::new().compile(&TemplateSource::new(source)).unwrap_err()
+    }
+
+    /// An expression wrapped in `depth` pairs of parentheses, filtered so it takes the Tera path.
+    fn parenthesised(depth: usize) -> String {
+        format!("{{{{ {}a | upper{} }}}}", "(".repeat(depth), ")".repeat(depth))
     }
 
     fn resolve(source: &str, data: &JsonValue) -> JsonValue {
@@ -329,8 +351,8 @@ mod tests {
     #[test]
     fn compiling_the_same_expression_twice_yields_the_same_template_name() {
         let mut runner = TemplateRunner::new();
-        let first = runner.compile(&TemplateSource::new("{{ name | upper }}"));
-        let second = runner.compile(&TemplateSource::new("{{ name | upper }}"));
+        let first = runner.compile(&TemplateSource::new("{{ name | upper }}")).unwrap();
+        let second = runner.compile(&TemplateSource::new("{{ name | upper }}")).unwrap();
 
         match (first, second) {
             (CompiledTemplate::Expression(first), CompiledTemplate::Expression(second)) => assert_eq!(first, second),
@@ -341,7 +363,7 @@ mod tests {
     #[test]
     fn a_resolver_taken_after_compilation_can_render_the_registered_template() {
         let mut runner = TemplateRunner::new();
-        let compiled = runner.compile(&TemplateSource::new("{{ value | upper }}"));
+        let compiled = runner.compile(&TemplateSource::new("{{ value | upper }}")).unwrap();
         let resolver = runner.resolver();
 
         assert_eq!(resolver.resolve(&compiled, &json!({"value": "x"})).unwrap(), json!("X"));
@@ -352,5 +374,68 @@ mod tests {
         let (runner, compiled) = compile("{{ missing | upper }}");
 
         assert!(runner.resolver().resolve(&compiled, &json!({})).is_err());
+    }
+
+    #[test]
+    fn an_unclosed_expression_is_a_compile_error_naming_the_template_and_chaining_the_engine_report() {
+        let error = compile_error("{{ a | upper ");
+
+        assert_eq!(error.template, TemplateSource::new("{{ a | upper "));
+        assert!(error.to_string().contains("{{ a | upper "));
+        assert!(
+            error
+                .source()
+                .expect("the engine report is chained")
+                .to_string()
+                .contains("Unexpected end of input")
+        );
+    }
+
+    #[test]
+    fn an_unclosed_conditional_is_a_compile_error() {
+        // The typed rewrite applies to this shape and fails too; the error reports the source as
+        // written, not the rewrite.
+        let error = compile_error("{% if a %}{{ a | upper }}");
+
+        assert_eq!(error.template, TemplateSource::new("{% if a %}{{ a | upper }}"));
+        assert!(
+            error
+                .source()
+                .expect("the engine report is chained")
+                .to_string()
+                .contains("{% if a %}{{ a | upper }}")
+        );
+    }
+
+    #[test]
+    fn an_unregistered_filter_is_a_compile_error() {
+        let error = compile_error("{{ a | no_such_filter }}");
+
+        assert!(error.source().expect("the engine report is chained").to_string().contains("no_such_filter"));
+    }
+
+    #[test]
+    fn an_expression_whose_typed_rewrite_exceeds_the_nesting_limit_compiles_as_written() {
+        // Tera allows 40 nested expression levels. The expression body sits one level in, so 39
+        // pairs of parentheses parse as written while the rewrite's extra pair does not.
+        let source = parenthesised(39);
+        let (runner, compiled) = compile(&source);
+
+        assert!(matches!(compiled, CompiledTemplate::Complex(_)));
+        assert_eq!(runner.resolver().resolve(&compiled, &json!({"a": "x"})).unwrap(), json!("X"));
+    }
+
+    #[test]
+    fn an_expression_past_the_nesting_limit_as_written_is_a_compile_error() {
+        assert_eq!(compile_error(&parenthesised(40)).template, TemplateSource::new(parenthesised(40)));
+    }
+
+    #[test]
+    fn a_failed_compilation_leaves_earlier_templates_renderable() {
+        let mut runner = TemplateRunner::new();
+        let compiled = runner.compile(&TemplateSource::new("{{ value | upper }}")).unwrap();
+        assert!(runner.compile(&TemplateSource::new("{{ value | upper ")).is_err());
+
+        assert_eq!(runner.resolver().resolve(&compiled, &json!({"value": "x"})).unwrap(), json!("X"));
     }
 }

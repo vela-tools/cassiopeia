@@ -6,6 +6,7 @@ use crate::{
     observed_at::ObservedAt,
     scope::{CompiledScope, Scope},
     template::{CompiledTemplate, TemplateSource, resolver::TemplateResolver, runner::TemplateRunner},
+    template_site::TemplateSite,
     version::Version,
 };
 use cassiopeia_common::error::io::{IoAction, IoError};
@@ -76,15 +77,21 @@ pub struct Mapping {
 }
 
 impl Mapping {
-    /// Declares a mapping and resolves its temporal fields.
+    /// Declares a mapping and resolves its temporal fields. `origin` names the document in error
+    /// messages.
+    ///
+    /// # Errors
+    /// Returns [`MappingError::UncompilableTemplate`] when the `observedAt` template cannot be
+    /// compiled.
     pub fn new(
         version: Version,
         data_model: DataModel,
         identity: Identity,
         scope: Option<Scope>,
         attributes: Attributes,
+        origin: &Path,
         runner: &mut TemplateRunner,
-    ) -> Mapping {
+    ) -> Result<Mapping> {
         let mut mapping = Mapping {
             version,
             data_model,
@@ -96,16 +103,17 @@ impl Mapping {
             observed_at_template: None,
             has_nested_relationships: false,
         };
-        mapping.compile_temporal_fields(runner);
+        mapping.compile_temporal_fields(origin, runner)?;
         mapping.has_nested_relationships = mapping.detect_nested_relationships();
 
-        mapping
+        Ok(mapping)
     }
 
     /// Reads a mapping document from disk.
     ///
     /// # Errors
-    /// Returns a [`MappingError`] when the file cannot be read, parsed, or its templates compiled.
+    /// Returns a [`MappingError`] when the file cannot be read, or for any reason
+    /// [`Mapping::from_json5`] rejects its content.
     pub fn from_file(path: &Path, runner: &mut TemplateRunner) -> Result<Mapping> {
         let content = read_to_string(path).map_err(|source| IoError::FileOperation {
             source,
@@ -118,15 +126,19 @@ impl Mapping {
 
     /// Parses a mapping document held in memory. `origin` names the document in error messages.
     ///
+    /// Only the `observedAt` template is compiled here; the expansion stage compiles the rest, and
+    /// reports a template it cannot compile against the same `origin`.
+    ///
     /// # Errors
-    /// Returns a [`MappingError`] when the document cannot be parsed or its templates compiled.
+    /// Returns a [`MappingError`] when the document cannot be parsed, declares an attribute that
+    /// cannot run, or its `observedAt` template cannot be compiled.
     pub fn from_json5(content: &str, origin: &Path, runner: &mut TemplateRunner) -> Result<Mapping> {
         let mut mapping: Mapping = serde_json5::from_str(content).map_err(|source| MappingError::Parse {
             path: origin.to_path_buf(),
             source,
         })?;
         validate(&mapping)?;
-        mapping.compile_temporal_fields(runner);
+        mapping.compile_temporal_fields(origin, runner)?;
         mapping.has_nested_relationships = mapping.detect_nested_relationships();
 
         Ok(mapping)
@@ -175,26 +187,39 @@ impl Mapping {
     }
 
     /// Finds and compiles the `observedAt` template, once, at load time.
-    fn compile_temporal_fields(&mut self, runner: &mut TemplateRunner) {
+    fn compile_temporal_fields(&mut self, origin: &Path, runner: &mut TemplateRunner) -> Result<()> {
         let temporal_source = self.iter_all_attributes().find_map(Attribute::observed_at_source);
 
-        self.observed_at_template = temporal_source.as_ref().map(|source| runner.compile(source));
+        self.observed_at_template =
+            temporal_source
+                .as_ref()
+                .map(|source| runner.compile(source))
+                .transpose()
+                .map_err(|source| MappingError::UncompilableTemplate {
+                    path: origin.to_path_buf(),
+                    site: TemplateSite::ObservedAt,
+                    source: Box::new(source),
+                })?;
         self.temporal_source = temporal_source;
+
+        Ok(())
     }
 }
 
 #[cfg(test)]
 mod tests {
     use crate::{
+        attribute::Attribute,
         error::MappingError,
         identity::Identity,
         mapping::Mapping,
         observed_at::ObservedAt,
         scope::Scope,
         template::{TemplateSource, runner::TemplateRunner},
+        template_site::TemplateSite,
         version::Version,
     };
-    use cassiopeia_ngsi_ld::data_model::DataModel;
+    use cassiopeia_ngsi_ld::{data_model::DataModel, entity::name::NameBuf};
     use indexmap::IndexMap;
     use serde_json::json;
     use std::path::Path;
@@ -440,8 +465,10 @@ mod tests {
             Identity::new(TemplateSource::new("S-{{ id }}")),
             Some(Scope::Single(TemplateSource::new("/test"))),
             IndexMap::new(),
+            Path::new("test.json5"),
             &mut TemplateRunner::new(),
-        );
+        )
+        .unwrap();
 
         assert_eq!(
             serde_json::to_value(&mapping).unwrap(),
@@ -463,10 +490,59 @@ mod tests {
             Identity::new(TemplateSource::new("S-{{ id }}")),
             None,
             IndexMap::new(),
+            Path::new("test.json5"),
+            &mut TemplateRunner::new(),
+        )
+        .unwrap();
+
+        assert!(serde_json::to_value(&mapping).unwrap().get("scope").is_none());
+    }
+
+    #[test]
+    fn an_uncompilable_observed_at_template_is_rejected_naming_the_document_and_the_template() {
+        let document = r#"{
+            version: "v4",
+            dataModel: "Sensor",
+            identity: { entityName: "S-{{ id }}" },
+            attributes: {
+                temperature: { source: "{{ t }}", properties: { observedAt: { source: "{{ ts | upper " } } },
+            },
+        }"#;
+
+        let error = Mapping::from_json5(document, Path::new("sensor.json5"), &mut TemplateRunner::new()).unwrap_err();
+
+        assert!(matches!(
+            &error,
+            MappingError::UncompilableTemplate { path, site: TemplateSite::ObservedAt, source }
+                if path == Path::new("sensor.json5") && source.template == TemplateSource::new("{{ ts | upper ")
+        ));
+        assert!(error.to_string().contains("sensor.json5"));
+        assert!(error.to_string().contains("observedAt"));
+    }
+
+    #[test]
+    fn a_declared_mapping_with_an_uncompilable_observed_at_template_is_rejected() {
+        let temperature: Attribute =
+            serde_json5::from_str(r#"{ source: "{{ t }}", properties: { observedAt: { source: "{% if ts %}{{ ts | upper }}" } } }"#).unwrap();
+        let attributes = IndexMap::from([(NameBuf::new("temperature").unwrap(), temperature)]);
+
+        let result = Mapping::new(
+            Version::V4,
+            "Sensor".parse::<DataModel>().unwrap(),
+            Identity::new(TemplateSource::new("S-{{ id }}")),
+            None,
+            attributes,
+            Path::new("Sensor.json5"),
             &mut TemplateRunner::new(),
         );
 
-        assert!(serde_json::to_value(&mapping).unwrap().get("scope").is_none());
+        assert!(matches!(
+            result,
+            Err(MappingError::UncompilableTemplate {
+                site: TemplateSite::ObservedAt,
+                ..
+            })
+        ));
     }
 
     #[test]

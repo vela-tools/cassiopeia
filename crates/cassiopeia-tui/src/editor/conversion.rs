@@ -1,6 +1,7 @@
 use crate::{editor::EditorAttribute, screen::wizard::editor_key::EditorKey};
 use cassiopeia_mapping::{
     attribute::{Attribute, Attributes, LanguageMap},
+    error::MappingError,
     target::Target,
     transformation::Transformation,
 };
@@ -21,17 +22,37 @@ use thiserror::Error;
 pub enum ConversionError {
     /// An attribute name in the editing tree is not a valid NGSI-LD attribute name.
     #[error("'{name}' is not a valid attribute name: {source}")]
-    AttributeName { name: String, source: NgsiLdError },
+    AttributeName {
+        /// The name as the user typed it.
+        name: String,
+        /// Why the name is not a valid NGSI-LD attribute name.
+        source: NgsiLdError,
+    },
 
     /// A relationship's target model is not a valid NGSI-LD model identifier.
     #[error("'{entity}' is not a valid target model: {source}")]
-    TargetEntity { entity: String, source: NgsiLdError },
+    TargetEntity {
+        /// The target model as the user typed it.
+        entity: String,
+        /// Why the target model is not a valid identifier.
+        source: NgsiLdError,
+    },
 
     /// A `languageMap` key in the editing tree is not a valid BCP-47 language tag.
     #[error("'{tag}' is not a valid BCP-47 language tag: {source}")]
-    LanguageTag { tag: String, source: InvalidLangTag<String> },
+    LanguageTag {
+        /// The key as the user typed it.
+        tag: String,
+        /// Why the key is not a valid language tag.
+        source: InvalidLangTag<String>,
+    },
+
+    /// The assembled mapping document was rejected, such as for a template that cannot be compiled.
+    #[error(transparent)]
+    Mapping(#[from] MappingError),
 }
 
+/// The result type used while converting the editing tree into a mapping document.
 pub type Result<T, E = ConversionError> = result::Result<T, E>;
 
 /// Reduces the editing tree to the attributes that will actually be written.

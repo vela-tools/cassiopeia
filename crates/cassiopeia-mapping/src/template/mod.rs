@@ -1,3 +1,4 @@
+pub mod compile_error;
 pub mod contrib;
 pub mod error;
 pub mod field_path;

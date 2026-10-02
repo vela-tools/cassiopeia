@@ -159,7 +159,7 @@ fn compile_mapping(compiled: &mut HashMap<PathBuf, Arc<Mapping>>, runner: &mut T
     }
 
     let mut mapping = Mapping::from_file(path, runner)?;
-    ExpanderCompiler::compile(&mut mapping, runner);
+    ExpanderCompiler::compile(&mut mapping, path, runner)?;
     let mapping = Arc::new(mapping);
     compiled.insert(path.to_path_buf(), Arc::clone(&mapping));
     Ok(mapping)
@@ -167,11 +167,12 @@ fn compile_mapping(compiled: &mut HashMap<PathBuf, Arc<Mapping>>, runner: &mut T
 
 #[cfg(test)]
 mod tests {
-    use crate::cycle::build_router;
+    use crate::{cycle::build_router, error::PipelineError};
     use cassiopeia_common::collection::CollectionName;
+    use cassiopeia_diagnostic::code::{diagnostic_code::DiagnosticCode, run_code::RunCode};
     use cassiopeia_expander::router::MappingRouter;
     use cassiopeia_manifest::mapping_binding::{CollectionMapping, MappingBinding};
-    use cassiopeia_mapping::template::runner::TemplateRunner;
+    use cassiopeia_mapping::{error::MappingError, template::runner::TemplateRunner, template_site::TemplateSite};
     use std::{collections::HashMap, fs, path::PathBuf, sync::Arc};
     use temp_dir::TempDir;
 
@@ -225,5 +226,30 @@ mod tests {
         let camera_area = &by_label[&CollectionName::from("Camera Area")];
         assert!(Arc::ptr_eq(camera, camera_area));
         assert!(!Arc::ptr_eq(camera, &by_label[&CollectionName::from("Flowcount")]));
+    }
+
+    #[test]
+    fn a_mapping_with_an_uncompilable_template_fails_to_load_as_an_unusable_mapping() {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("sensor.json5");
+        fs::write(
+            &path,
+            r#"{ version: "v4", dataModel: "Sensor", identity: { entityName: "S-{{ id }}" }, attributes: { temperature: { source: "{{ t | upper " } } }"#,
+        )
+        .unwrap();
+        let binding = MappingBinding::Single { mapping: path.clone() };
+
+        let mut compiled = HashMap::new();
+        let Err(error) = build_router(&binding, &mut compiled, &mut TemplateRunner::new()) else {
+            panic!("a mapping with an uncompilable template must not build a router");
+        };
+
+        assert!(matches!(
+            &error,
+            PipelineError::Mapping(MappingError::UncompilableTemplate { path: reported, site: TemplateSite::Attribute(name), .. })
+                if *reported == path && name.as_str() == "temperature"
+        ));
+        assert_eq!(DiagnosticCode::from(&error), DiagnosticCode::Run(RunCode::MappingUnusable));
+        assert!(compiled.is_empty());
     }
 }

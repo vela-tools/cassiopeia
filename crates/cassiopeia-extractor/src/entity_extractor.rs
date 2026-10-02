@@ -141,7 +141,7 @@ mod tests {
     fn prepare(document: &str) -> (TemplateResolver, Arc<Mapping>) {
         let mut runner = TemplateRunner::new();
         let mut mapping = Mapping::from_json5(document, Path::new("test.json5"), &mut runner).unwrap();
-        ExpanderCompiler::compile(&mut mapping, &mut runner);
+        ExpanderCompiler::compile(&mut mapping, Path::new("test.json5"), &mut runner).unwrap();
         let resolver = runner.resolver();
 
         (resolver, Arc::new(mapping))
