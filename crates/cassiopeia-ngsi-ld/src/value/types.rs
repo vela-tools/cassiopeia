@@ -134,8 +134,10 @@ impl fmt::Display for Value {
                 }
             },
             Value::Geospatial(g) => write!(f, "{g}"),
-            Value::Array(arr) => write!(f, "{arr:?}"),
-            Value::Object(obj) => write!(f, "{obj:?}"),
+            // A structured value's text is its compact JSON encoding through the `Serialize` impl
+            // above, the same form template resolution writes for an array or object. Encoding can
+            // only fail inside a custom `Serialize`, and `fmt::Error` carries no payload to keep.
+            Value::Array(_) | Value::Object(_) => f.write_str(&serde_json::to_string(self).map_err(|_| fmt::Error)?),
         }
     }
 }
@@ -153,6 +155,26 @@ mod tests {
         assert_eq!(Value::Number(Number::Integer(100)).to_string(), "100");
         assert_eq!(Value::String(CompactString::from("hello")).to_string(), "hello");
         assert_eq!(Value::Null.to_string(), "");
+    }
+
+    #[test]
+    fn display_renders_an_array_as_compact_json() {
+        let value = Value::from(json!(["BS", "IN", 7, true, null]));
+
+        assert_eq!(value.to_string(), r#"["BS","IN",7,true,null]"#);
+    }
+
+    #[test]
+    fn display_renders_a_nested_object_as_compact_json() {
+        let value = Value::from(json!({"a": 1, "b": {"c": ["x", {"d": false}]}}));
+
+        assert_eq!(value.to_string(), r#"{"a":1,"b":{"c":["x",{"d":false}]}}"#);
+    }
+
+    #[test]
+    fn display_renders_a_float_in_its_shortest_form() {
+        assert_eq!(Value::from(3.0).to_string(), "3");
+        assert_eq!(Value::from(2.5).to_string(), "2.5");
     }
 
     #[test]

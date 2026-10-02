@@ -328,6 +328,41 @@ mod tests {
     }
 
     #[test]
+    fn an_array_part_under_a_string_transformation_becomes_its_compact_json_text() {
+        let value = Transformer::apply(smallvec![json!(["BS", "IN"])], Some(&Transformation::String), None).unwrap();
+
+        assert_eq!(value, Value::String(r#"["BS","IN"]"#.into()));
+    }
+
+    #[test]
+    fn an_array_part_without_a_transformation_becomes_its_compact_json_text() {
+        let value = Transformer::apply(smallvec![json!(["BS", "IN"])], None, None).unwrap();
+
+        assert_eq!(value, Value::String(r#"["BS","IN"]"#.into()));
+    }
+
+    #[test]
+    fn an_object_part_under_a_string_transformation_becomes_its_compact_json_text() {
+        let value = Transformer::apply(smallvec![json!({"a": 1, "b": ["x"]})], Some(&Transformation::String), None).unwrap();
+
+        assert_eq!(value, Value::String(r#"{"a":1,"b":["x"]}"#.into()));
+    }
+
+    #[test]
+    fn an_object_part_without_a_transformation_becomes_its_compact_json_text() {
+        let value = Transformer::apply(smallvec![json!({"a": 1, "b": ["x"]})], None, None).unwrap();
+
+        assert_eq!(value, Value::String(r#"{"a":1,"b":["x"]}"#.into()));
+    }
+
+    #[test]
+    fn a_whole_float_part_without_a_transformation_becomes_its_shortest_text() {
+        let value = Transformer::apply(smallvec![json!(3.0)], None, None).unwrap();
+
+        assert_eq!(value, Value::String("3".into()));
+    }
+
+    #[test]
     fn an_array_transformation_flattens_and_drops_nulls() {
         let value = Transformer::apply(smallvec![json!([1, 2]), json!(null), json!(3)], Some(&Transformation::Array), None).unwrap();
 

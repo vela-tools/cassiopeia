@@ -1156,6 +1156,58 @@ mod tests {
         assert_eq!(value, Some(Value::from(json!({"a": 1}))));
     }
 
+    /// Extracts the `label` attribute that the JSON5 attribute `declaration` builds over one record.
+    /// Extraction itself must succeed: the entity is produced.
+    fn extract_label(declaration: &str, record: JsonValue) -> Option<Value> {
+        let (resolver, mapping) = prepare(&format!(
+            r#"{{
+                version: "v4",
+                dataModel: "Item",
+                identity: {{ entityName: "Item-1" }},
+                attributes: {{ label: {declaration} }},
+            }}"#
+        ));
+        let extractor = EntityExtractor::new(resolver);
+
+        let mapped = AssembledEntity::from_single(entity("urn:ngsi-ld:Item:1", record), mapping);
+        let (result, _) = extractor.extract(mapped, &DroppedAttributes::new()).unwrap().into_parts();
+
+        result.values().as_ref().expect("values set").get(&name("label")).cloned()
+    }
+
+    #[test]
+    fn an_unconverted_split_expression_becomes_the_compact_json_text_of_its_tokens() {
+        let value = extract_label(r#"{ source: "{{ codes | split(pat=' ') }}" }"#, json!({"codes": "BS IN"}));
+
+        assert_eq!(value, Some(Value::String(r#"["BS","IN"]"#.into())));
+    }
+
+    #[test]
+    fn a_split_expression_under_a_string_transformation_becomes_the_compact_json_text_of_its_tokens() {
+        let value = extract_label(
+            r#"{ source: "{{ codes | split(pat=' ') }}", transformation: "string" }"#,
+            json!({"codes": "BS IN"}),
+        );
+
+        assert_eq!(value, Some(Value::String(r#"["BS","IN"]"#.into())));
+    }
+
+    #[test]
+    fn an_unconverted_json_decoded_object_becomes_its_compact_json_text() {
+        let value = extract_label(r#"{ source: "{{ payload | json_decode }}" }"#, json!({"payload": r#"{"a":1}"#}));
+
+        assert_eq!(value, Some(Value::String(r#"{"a":1}"#.into())));
+    }
+
+    #[test]
+    fn an_unconverted_rounded_expression_renders_like_an_unconverted_float_field() {
+        let rounded = extract_label(r#"{ source: "{{ n | round }}" }"#, json!({"n": 2.6}));
+        let field = extract_label(r#"{ source: "{{ n }}" }"#, json!({"n": 3.0}));
+
+        assert_eq!(rounded, Some(Value::String("3".into())));
+        assert_eq!(field, rounded);
+    }
+
     #[test]
     fn a_failed_relationship_property_drops_the_relationship_with_it() {
         let (resolver, mapping) = prepare(
