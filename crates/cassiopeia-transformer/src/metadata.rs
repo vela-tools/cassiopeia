@@ -60,12 +60,20 @@ pub fn transform_metadata(
 ///
 /// An attribute whose `observedAt` is dropped is still published, so nothing downstream can tell the
 /// qualifier was ever meant to be there: a temporal series built from it has no instant to fold on
-/// (ETSI GS CIM 009 v1.9.1 clause 4.5.2.2). Only text is recorded, and only when it is not blank: a
-/// blank qualifier is one the record does not carry, and a non-text one is a mapping mistake with no
-/// spelling to quote back.
+/// (ETSI GS CIM 009 v1.9.1 clause 4.5.2.2). A null or blank qualifier is one the record does not
+/// carry and is not recorded; text is quoted as written, and any other value (a number too small to
+/// be an epoch, a boolean, an object) as its JSON rendering, so a mapping mistake is named rather
+/// than lost.
 fn record_unreadable_observed_at(attribute: &NameBuf, value: &JsonValue, unreadable: &UnreadableTimestamps) {
-    if let Some(text) = value.as_str().map(str::trim).filter(|text| !text.is_empty()) {
-        unreadable.record(attribute, text);
+    match value {
+        JsonValue::Null => {}
+        JsonValue::String(text) => {
+            let text = text.trim();
+            if !text.is_empty() {
+                unreadable.record(attribute, text);
+            }
+        }
+        JsonValue::Bool(_) | JsonValue::Number(_) | JsonValue::Array(_) | JsonValue::Object(_) => unreadable.record(attribute, &value.to_string()),
     }
 }
 
@@ -189,6 +197,55 @@ mod tests {
         assert!(summary.unit_code.is_some());
         assert_eq!(summary.custom_attributes.len(), 1);
         assert!(matches!(attribute(&summary, "accuracy"), NgsiLdAttribute::Property(_)));
+    }
+
+    /// The summary for a `temperature` whose only qualifier is the `observedAt` `value`.
+    fn summary_with_observed_at(value: Value, unreadable: &UnreadableTimestamps) -> MetadataSummary {
+        let mut shared = IndexMap::default();
+        shared.insert(name("observedAt"), sub(NgsiLdAttributeKind::Property, value));
+        let mut metadata = IndexMap::default();
+        metadata.insert(name("temperature"), MetadataStorage::shared(shared));
+
+        transform_metadata(
+            Some(&metadata),
+            &name("temperature"),
+            None,
+            &mut QualifierCache::new(&mut ObservedAtCache::new(), &mut UnitCodeCache::new()),
+            unreadable,
+        )
+    }
+
+    #[test]
+    fn a_numeric_epoch_observed_at_is_lifted_as_an_instant() {
+        let unreadable = UnreadableTimestamps::new();
+
+        let summary = summary_with_observed_at(json!(1_775_253_620), &unreadable);
+
+        assert!(summary.observed_at.is_some());
+        assert!(unreadable.is_empty());
+    }
+
+    #[test]
+    fn a_numeric_observed_at_that_is_no_epoch_is_recorded_rather_than_lost() {
+        let unreadable = UnreadableTimestamps::new();
+
+        let summary = summary_with_observed_at(json!(2026), &unreadable);
+
+        assert!(summary.observed_at.is_none());
+        let entries = unreadable.into_entries();
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].0, name("temperature"));
+        assert_eq!(entries[0].1.example.as_ref(), "2026");
+    }
+
+    #[test]
+    fn a_null_observed_at_is_absent_rather_than_unreadable() {
+        let unreadable = UnreadableTimestamps::new();
+
+        let summary = summary_with_observed_at(json!(null), &unreadable);
+
+        assert!(summary.observed_at.is_none());
+        assert!(unreadable.is_empty());
     }
 
     #[test]

@@ -229,14 +229,13 @@ impl Transformer {
     /// An absent source resolves to null, and so does a blank one: CSV and spreadsheet sources spell
     /// an empty field as an empty string, so a blank is a value the record does not carry rather
     /// than one it carries wrongly, and naming every empty cell of a column would drown the run.
-    /// Text that is there and will not read is refused instead, because a timestamp that vanishes
+    /// Any other value that is there and will not read is refused instead, text and non-text alike
+    /// (a number too small to be an epoch, a boolean, an array), because a timestamp that vanishes
     /// unannounced is what leaves a published entity with nothing anchoring it in time.
     ///
-    /// A value carrying no text at all resolves to null: there is no spelling to quote back, so
-    /// there is nothing a mapping author could act on.
-    ///
     /// # Errors
-    /// Returns [`AttributeRefusal::UnreadableTimestamp`] carrying the text that would not read.
+    /// Returns [`AttributeRefusal::UnreadableTimestamp`] quoting the value that would not read: text
+    /// as written, any other value as its rendering.
     fn coerce_temporal(value: &Value, kind: TemporalKind) -> Result<Value, AttributeRefusal> {
         if value.is_null() {
             return Ok(Value::Null);
@@ -251,9 +250,12 @@ impl Transformer {
             return Ok(Value::Temporal(temporal));
         }
 
-        match value.as_str().map(str::trim).filter(|text| !text.is_empty()) {
+        match value.as_str().map(str::trim) {
+            Some("") => Ok(Value::Null),
             Some(text) => Err(AttributeRefusal::UnreadableTimestamp { text: Box::from(text) }),
-            None => Ok(Value::Null),
+            None => Err(AttributeRefusal::UnreadableTimestamp {
+                text: value.to_string().into_boxed_str(),
+            }),
         }
     }
 }
@@ -414,6 +416,45 @@ mod tests {
     #[test]
     fn an_object_transformation_over_an_empty_object_is_null() {
         let value = Transformer::apply(smallvec![json!({})], Some(&Transformation::Object), None).unwrap();
+
+        assert!(value.is_null());
+    }
+
+    #[test]
+    fn a_numeric_epoch_reads_as_the_same_instant_as_its_text() {
+        for transformation in [Transformation::DateTime, Transformation::Date, Transformation::Time] {
+            let number = Transformer::apply(smallvec![json!(1_775_253_620)], Some(&transformation), None).unwrap();
+            let text = Transformer::apply(smallvec![json!("1775253620")], Some(&transformation), None).unwrap();
+
+            assert!(matches!(number, Value::Temporal(_)), "{transformation:?} left {number:?}");
+            assert_eq!(number, text);
+        }
+    }
+
+    #[test]
+    fn a_fractional_numeric_epoch_reads_as_an_instant() {
+        let value = Transformer::apply(smallvec![json!(1_775_253_620.5)], Some(&Transformation::DateTime), None).unwrap();
+
+        assert!(matches!(value, Value::Temporal(_)));
+    }
+
+    #[test]
+    fn a_number_too_small_for_an_epoch_is_refused_quoting_it() {
+        let refusal = Transformer::apply(smallvec![json!(2026)], Some(&Transformation::DateTime), None);
+
+        assert!(matches!(refusal, Err(AttributeRefusal::UnreadableTimestamp { ref text }) if text.as_ref() == "2026"));
+    }
+
+    #[test]
+    fn a_boolean_under_a_temporal_transformation_is_refused_quoting_it() {
+        let refusal = Transformer::apply(smallvec![json!(true)], Some(&Transformation::DateTime), None);
+
+        assert!(matches!(refusal, Err(AttributeRefusal::UnreadableTimestamp { ref text }) if text.as_ref() == "true"));
+    }
+
+    #[test]
+    fn a_blank_temporal_source_is_still_absent_rather_than_refused() {
+        let value = Transformer::apply(smallvec![json!("  ")], Some(&Transformation::DateTime), None).unwrap();
 
         assert!(value.is_null());
     }

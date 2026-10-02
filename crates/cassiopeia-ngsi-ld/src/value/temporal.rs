@@ -1,8 +1,43 @@
 use crate::value::{
-    parsing::parse_integer,
-    types::{TemporalValue, Value},
+    parsing::parse_float,
+    types::{Number, TemporalValue},
 };
 use chrono::{DateTime, NaiveDate, NaiveDateTime, TimeZone, Utc};
+use num_traits::ToPrimitive;
+
+/// The unit a Unix epoch number is counted in, read off its magnitude.
+///
+/// A source writes an epoch as seconds, milliseconds or nanoseconds without saying which, so the
+/// unit is inferred: a present-day instant is about 1.7e9 seconds, 1.7e12 milliseconds or 1.7e18
+/// nanoseconds, and the bands below separate those orders of magnitude. A magnitude below the
+/// seconds band is a year, a count or an identifier rather than an instant.
+#[derive(Clone, Copy)]
+enum EpochUnit {
+    Seconds,
+    Milliseconds,
+    Nanoseconds,
+}
+
+impl EpochUnit {
+    /// The unit a whole epoch count of `whole` is in, or `None` when it is too small to be one.
+    const fn of(whole: i64) -> Option<EpochUnit> {
+        match whole.unsigned_abs() {
+            0..200_000_000 => None,
+            200_000_000..100_000_000_000 => Some(EpochUnit::Seconds),
+            100_000_000_000..100_000_000_000_000 => Some(EpochUnit::Milliseconds),
+            100_000_000_000_000.. => Some(EpochUnit::Nanoseconds),
+        }
+    }
+
+    /// How many nanoseconds one count of this unit spans.
+    const fn nanoseconds(self) -> u32 {
+        match self {
+            EpochUnit::Seconds => 1_000_000_000,
+            EpochUnit::Milliseconds => 1_000_000,
+            EpochUnit::Nanoseconds => 1,
+        }
+    }
+}
 
 /// One candidate spelling of a space-separated timestamp.
 ///
@@ -97,64 +132,53 @@ impl TemporalValue {
             }
         }
 
-        if let Some(n) = parse_integer(s) {
-            return Self::from_timestamp_heuristic(n);
-        }
-
-        None
-    }
-
-    fn from_timestamp_heuristic(n: i64) -> Option<Self> {
-        if n.abs() < 200_000_000 {
-            return None; // Likely a year or small number
-        }
-
-        if n.abs() < 100_000_000_000 {
-            // Seconds
-            Utc.timestamp_opt(n, 0).single().map(TemporalValue::DateTime)
-        } else if n.abs() < 100_000_000_000_000 {
-            // Millis
-            DateTime::from_timestamp_millis(n).map(TemporalValue::DateTime)
-        } else {
-            // Nanos
-            let secs = n / 1_000_000_000;
-            let nsecs = u32::try_from(n.rem_euclid(1_000_000_000)).unwrap_or(0);
-            Utc.timestamp_opt(secs, nsecs).single().map(TemporalValue::DateTime)
+        // A bare number is a Unix epoch. A whole one is read exactly, since a nanosecond epoch
+        // exceeds what an `f64` holds; one with a fraction, such as `1775253620.5`, keeps it rather
+        // than being truncated to the whole second.
+        match s.parse::<i64>() {
+            Ok(whole) => Self::from_epoch(whole),
+            Err(_) => parse_float(s).and_then(Self::from_fractional_epoch),
         }
     }
-}
 
-impl Value {
-    /// Interprets the value as an instant, returning `None` when it carries no parseable one.
+    /// Reads a number as a Unix epoch instant in seconds, milliseconds or nanoseconds, the unit
+    /// inferred from its magnitude, or returns `None` when it is too small to be an epoch.
+    ///
+    /// A JSON source writes an epoch as a number as often as as text, and both must denote the same
+    /// instant. A fractional number keeps its fraction down to the precision the float carries.
     #[must_use]
-    pub fn to_datetime(&self) -> Option<DateTime<Utc>> {
-        match self {
-            Value::Temporal(TemporalValue::DateTime(dt) | TemporalValue::Date(dt) | TemporalValue::Time(dt)) => Some(*dt),
-            Value::String(s) => TemporalValue::try_parse(s).map(|t| match t {
-                TemporalValue::DateTime(dt) | TemporalValue::Date(dt) | TemporalValue::Time(dt) => dt,
-            }),
-            Value::Null | Value::Boolean(_) | Value::Number(_) | Value::Geospatial(_) | Value::Array(_) | Value::Object(_) => None,
+    pub fn from_number(number: &Number) -> Option<TemporalValue> {
+        match *number {
+            Number::Integer(whole) => Self::from_epoch(whole),
+            Number::Float(value) => Self::from_fractional_epoch(value),
         }
     }
 
-    /// Interprets the value as a date, returning `None` when it carries no parseable one.
-    #[must_use]
-    pub fn to_date(&self) -> Option<DateTime<Utc>> {
-        self.to_datetime()
+    /// Reads a whole epoch count, exactly.
+    fn from_epoch(whole: i64) -> Option<TemporalValue> {
+        let unit = EpochUnit::of(whole)?;
+        Self::from_epoch_nanoseconds(i128::from(whole) * i128::from(unit.nanoseconds()))
     }
 
-    /// Interprets the value as a time, returning `None` when it carries no parseable one.
-    #[must_use]
-    pub fn to_time(&self) -> Option<DateTime<Utc>> {
-        self.to_datetime()
+    /// Reads an epoch count that may carry a fraction, its unit decided by its whole part.
+    fn from_fractional_epoch(value: f64) -> Option<TemporalValue> {
+        let unit = EpochUnit::of(value.trunc().to_i64()?)?;
+        Self::from_epoch_nanoseconds((value * f64::from(unit.nanoseconds())).round().to_i128()?)
+    }
+
+    /// Builds the instant `nanoseconds` after the Unix epoch, or `None` when chrono cannot hold it.
+    fn from_epoch_nanoseconds(nanoseconds: i128) -> Option<TemporalValue> {
+        let per_second = i128::from(EpochUnit::Seconds.nanoseconds());
+        let seconds = i64::try_from(nanoseconds.div_euclid(per_second)).ok()?;
+        let subsecond = u32::try_from(nanoseconds.rem_euclid(per_second)).ok()?;
+        Utc.timestamp_opt(seconds, subsecond).single().map(TemporalValue::DateTime)
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use crate::value::types::{TemporalValue, Value};
+    use crate::value::types::{Number, TemporalValue};
     use chrono::{DateTime, Duration, TimeZone, Utc};
-    use compact_str::CompactString;
 
     #[test]
     fn an_rfc3339_string_parses_to_a_datetime() {
@@ -264,9 +288,60 @@ mod tests {
         assert!(matches!(TemporalValue::try_parse("1700000000"), Some(TemporalValue::DateTime(_))));
     }
 
+    /// The instant a number denotes, or `None` when it is not an epoch.
+    fn epoch(number: &Number) -> Option<DateTime<Utc>> {
+        TemporalValue::from_number(number).map(|parsed| match parsed {
+            TemporalValue::DateTime(dt) | TemporalValue::Date(dt) | TemporalValue::Time(dt) => dt,
+        })
+    }
+
+    /// The instant `2026-04-03T22:00:20Z`, 1775253620 seconds after the epoch.
+    fn epoch_instant() -> DateTime<Utc> {
+        Utc.with_ymd_and_hms(2026, 4, 3, 22, 0, 20).unwrap()
+    }
+
     #[test]
-    fn a_non_temporal_value_yields_no_datetime() {
-        assert_eq!(Value::String(CompactString::from("not a date")).to_datetime(), None);
-        assert_eq!(Value::Null.to_datetime(), None);
+    fn an_epoch_number_reads_the_same_instant_in_seconds_milliseconds_and_nanoseconds() {
+        assert_eq!(epoch(&Number::Integer(1_775_253_620)), Some(epoch_instant()));
+        assert_eq!(epoch(&Number::Integer(1_775_253_620_000)), Some(epoch_instant()));
+        assert_eq!(epoch(&Number::Integer(1_775_253_620_000_000_000)), Some(epoch_instant()));
+    }
+
+    #[test]
+    fn an_epoch_number_reads_the_same_instant_as_its_text() {
+        for (number, text) in [
+            (1_775_253_620, "1775253620"),
+            (1_775_253_620_250, "1775253620250"),
+            (-1_775_253_620, "-1775253620"),
+        ] {
+            assert_eq!(epoch(&Number::Integer(number)), instant(text), "mismatch for {number}");
+        }
+    }
+
+    #[test]
+    fn a_whole_float_epoch_reads_like_the_integer() {
+        assert_eq!(epoch(&Number::Float(1_775_253_620.0)), Some(epoch_instant()));
+    }
+
+    #[test]
+    fn a_fractional_epoch_keeps_its_fraction_as_a_number_and_as_text() {
+        let expected = epoch_instant() + Duration::milliseconds(500);
+
+        assert_eq!(epoch(&Number::Float(1_775_253_620.5)), Some(expected));
+        assert_eq!(epoch(&Number::Float(1_775_253_620_500.0)), Some(expected));
+        assert_eq!(instant("1775253620.5"), Some(expected));
+    }
+
+    #[test]
+    fn a_number_too_small_for_an_epoch_is_not_an_instant() {
+        assert_eq!(epoch(&Number::Integer(2026)), None);
+        assert_eq!(epoch(&Number::Float(2026.5)), None);
+        assert_eq!(instant("2026.5"), None);
+    }
+
+    #[test]
+    fn a_number_that_is_not_finite_is_not_an_instant() {
+        assert_eq!(epoch(&Number::Float(f64::NAN)), None);
+        assert_eq!(epoch(&Number::Float(f64::INFINITY)), None);
     }
 }

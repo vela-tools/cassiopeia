@@ -25,12 +25,14 @@ impl ObservedAtCache {
         ObservedAtCache::default()
     }
 
-    /// The instant `value` denotes, parsed once per distinct text.
+    /// The instant `value` denotes, text parsed once per distinct text.
     ///
-    /// A non-string carries no instant and is rejected without touching the cache, so no arbitrary
-    /// JSON is ever copied into it.
+    /// Only text goes through the cache. A number, read as a Unix epoch, is cheap to read directly,
+    /// and any other shape carries no instant, so neither is ever copied into it.
     pub fn observed_at(&mut self, value: &JsonValue) -> Option<DateTime<Utc>> {
-        let text = value.as_str()?;
+        let Some(text) = value.as_str() else {
+            return parse_datetime(value);
+        };
         if let Some((_, parsed)) = self.parsed.iter().find(|(known, _)| known.as_ref() == text) {
             return *parsed;
         }
@@ -74,10 +76,21 @@ mod tests {
     }
 
     #[test]
-    fn a_non_string_observed_at_yields_no_instant() {
+    fn a_numeric_epoch_observed_at_reads_as_the_same_instant_as_its_text() {
         let mut cache = ObservedAtCache::new();
 
-        assert!(cache.observed_at(&json!(1_744_000_000)).is_none());
+        let number = cache.observed_at(&json!(1_744_000_000));
+
+        assert!(number.is_some());
+        assert_eq!(number, cache.observed_at(&json!("1744000000")));
+    }
+
+    #[test]
+    fn an_observed_at_that_is_neither_text_nor_an_epoch_yields_no_instant() {
+        let mut cache = ObservedAtCache::new();
+
+        assert!(cache.observed_at(&json!(2026)).is_none());
+        assert!(cache.observed_at(&json!(true)).is_none());
         assert!(cache.observed_at(&json!(null)).is_none());
         assert!(cache.observed_at(&json!({"at": "2026-04-03T22:00:20Z"})).is_none());
         assert!(cache.observed_at(&json!("not a timestamp")).is_none());
