@@ -38,7 +38,7 @@ humantime = "2.4.0"
 mimalloc = "0.1.52"
 rayon = "1.12.0"
 shadow-rs = "2.0.0"
-thiserror = "2.0.20"
+thiserror = "2.0.21"
 url = "2.5.8"
 
 [dev-dependencies]

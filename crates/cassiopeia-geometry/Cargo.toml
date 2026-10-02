@@ -15,7 +15,7 @@ geojson = "1.0.0"
 getset = "0.1.7"
 serde = { version = "1.0.229", features = ["derive"] }
 strum = { version = "0.28.0", features = ["derive"] }
-thiserror = "2.0.20"
+thiserror = "2.0.21"
 typed-builder = "0.23.2"
 
 [dev-dependencies]

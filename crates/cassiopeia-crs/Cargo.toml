@@ -12,7 +12,7 @@ geo = "0.33.1"
 geo-types = "0.7.20"
 proj4rs = "0.2.0"
 proj4wkt = "0.1.1"
-thiserror = "2.0.20"
+thiserror = "2.0.21"
 
 [lints]
 workspace = true

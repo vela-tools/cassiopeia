@@ -18,7 +18,7 @@ inflections = "1.1.1"
 langtag = { version = "1.1.0", features = ["serde"] }
 ratatui = { version = "0.30.2", features = ["all-widgets", "serde"] }
 serde_json = { version = "1.0.151", features = ["preserve_order"] }
-thiserror = "2.0.20"
+thiserror = "2.0.21"
 tui-tree-widget = "0.24.1"
 
 [lints]

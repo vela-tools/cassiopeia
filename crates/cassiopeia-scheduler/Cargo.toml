@@ -15,7 +15,7 @@ chrono = "0.4.45"
 cron = "0.17.0"
 derive_more = { version = "2.1.1", features = ["deref"] }
 humantime = "2.4.0"
-rand = "0.10.2"
+rand = "0.10.3"
 
 [lints]
 workspace = true
