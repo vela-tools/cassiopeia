@@ -8,6 +8,8 @@ All notable changes to this project will be documented in this file.
 - add cargo machete override
 
 ### 🐛 Bug Fixes
+- report every dropped geoproperty and honour its geometry policy at every level ⚠️ **BREAKING**
+- keep the winding of a geometry its geometry policy already normalised
 - convert a geoproperty without a transformation as a geometry ⚠️ **BREAKING**
 - keep the structure of list and json properties declared without a transformation
 - map a constant identity to one entity and warn when merged records disagree ⚠️ **BREAKING**
