@@ -14,6 +14,17 @@ pub enum TemplateError {
         #[source]
         source: tera::Error,
     },
+
+    /// A template whose output is one expression rendered text that is not the JSON encoding of a
+    /// value, which means the encoding filter it was registered with did not produce its output.
+    #[error("The template `{template}` did not render its value as JSON")]
+    Decode {
+        /// The name the template is registered under in the Tera engine.
+        template: TemplateName,
+        /// The parse failure of the rendered text.
+        #[source]
+        source: serde_json::Error,
+    },
 }
 
 /// The result type used throughout template evaluation.
@@ -35,5 +46,16 @@ mod tests {
         // The renderer's own reason is the chained cause, not part of the headline: a message that
         // repeats its source prints it twice once the cause chain is rendered.
         assert_eq!(error.source().expect("a chained cause").to_string(), "boom");
+    }
+
+    #[test]
+    fn a_decode_error_names_the_template_and_chains_the_parse_failure() {
+        let error = TemplateError::Decode {
+            template: TemplateName::for_source("{{ x | split(pat=' ') }}"),
+            source: serde_json::from_str::<serde_json::Value>("[\"BS\", ").unwrap_err(),
+        };
+
+        assert!(error.to_string().contains("tpl_"));
+        assert!(error.source().is_some());
     }
 }

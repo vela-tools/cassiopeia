@@ -8,6 +8,7 @@ use crate::template::{
     function,
     resolver::TemplateResolver,
     template_name::TemplateName,
+    value_expression,
 };
 use lazy_regex::regex;
 use std::sync::Arc;
@@ -61,7 +62,15 @@ impl TemplateRunner {
             let name = TemplateName::for_source(source);
             let tera = Arc::make_mut(&mut self.tera);
             // Registering the same expression twice is not an error: the name is a digest of the
-            // expression, so a repeat registration replaces an identical template.
+            // expression, so a repeat registration replaces an identical template. The typed form is
+            // derived from the source alone, so a digest of the source still names it uniquely.
+            if let Some(typed) = value_expression::typed_form(source)
+                && tera.add_raw_template(name.as_str(), &typed).is_ok()
+            {
+                return CompiledTemplate::Expression(name);
+            }
+            // A source the typed rewrite does not apply to, or whose rewrite Tera will not parse,
+            // renders as written: to text.
             let _ = tera.add_raw_template(name.as_str(), source);
 
             return CompiledTemplate::Complex(name);
@@ -159,10 +168,67 @@ mod tests {
     }
 
     #[test]
-    fn a_filtered_expression_compiles_to_a_tera_template() {
+    fn a_lone_filtered_expression_compiles_to_a_typed_tera_template() {
         let (_, compiled) = compile("{{ name | upper }}");
 
+        assert!(matches!(compiled, CompiledTemplate::Expression(_)));
+    }
+
+    #[test]
+    fn a_guarded_expression_compiles_to_a_typed_tera_template() {
+        let (_, compiled) = compile("{% if name %}{{ name | upper }}{% endif %}");
+
+        assert!(matches!(compiled, CompiledTemplate::Expression(_)));
+    }
+
+    #[test]
+    fn a_conditional_with_literal_text_compiles_to_a_textual_tera_template() {
+        let (_, compiled) = compile("{% if name %}{{ name }}{% else %}none{% endif %}");
+
         assert!(matches!(compiled, CompiledTemplate::Complex(_)));
+    }
+
+    #[test]
+    fn a_split_expression_resolves_to_an_array() {
+        assert_eq!(
+            resolve(r#"{{ this[2] | split(pat=" ") }}"#, &json!({"0": "India", "1": "IN", "2": "BS IN"})),
+            json!(["BS", "IN"])
+        );
+        assert_eq!(
+            resolve(r#"{{ this[2] | split(pat=" ") }}"#, &json!({"0": "United Kingdom", "1": "GB", "2": "UK"})),
+            json!(["UK"])
+        );
+    }
+
+    #[test]
+    fn a_json_decode_expression_resolves_to_the_decoded_value() {
+        assert_eq!(resolve("{{ codes | json_decode }}", &json!({"codes": r#"["BS","IN"]"#})), json!(["BS", "IN"]));
+        assert_eq!(resolve("{{ payload | json_decode }}", &json!({"payload": r#"{"a":1}"#})), json!({"a": 1}));
+    }
+
+    #[test]
+    fn a_tera_template_mixing_text_and_an_expression_still_resolves_to_a_string() {
+        assert_eq!(resolve("Station-{{ id | upper }}", &json!({"id": "a1"})), json!("Station-A1"));
+    }
+
+    #[test]
+    fn a_suppressed_guard_resolves_to_null() {
+        let source = r#"{% if this[2] %}{{ this[2] | split(pat=" ") }}{% endif %}"#;
+
+        assert_eq!(resolve(source, &json!({"0": "Bonaire", "1": "BQ", "2": null})), JsonValue::Null);
+        assert_eq!(resolve(source, &json!({"0": "Bonaire", "1": "BQ", "2": ""})), JsonValue::Null);
+        assert_eq!(resolve(source, &json!({"0": "India", "1": "IN", "2": "BS IN"})), json!(["BS", "IN"]));
+    }
+
+    #[test]
+    fn an_arithmetic_expression_keeps_its_numeric_type() {
+        assert_eq!(resolve("{{ a | int + b | int }}", &json!({"a": "1", "b": "2"})), json!(3));
+    }
+
+    #[test]
+    fn a_concatenation_operator_is_encoded_whole() {
+        // Without the parentheses the encoding filter would bind to `b | upper` alone.
+        assert_eq!(resolve("{{ a ~ '-' ~ b | upper }}", &json!({"a": "x", "b": "y"})), json!("x-Y"));
     }
 
     #[test]
@@ -267,8 +333,8 @@ mod tests {
         let second = runner.compile(&TemplateSource::new("{{ name | upper }}"));
 
         match (first, second) {
-            (CompiledTemplate::Complex(first), CompiledTemplate::Complex(second)) => assert_eq!(first, second),
-            other => panic!("expected two complex templates, got {other:?}"),
+            (CompiledTemplate::Expression(first), CompiledTemplate::Expression(second)) => assert_eq!(first, second),
+            other => panic!("expected two expression templates, got {other:?}"),
         }
     }
 

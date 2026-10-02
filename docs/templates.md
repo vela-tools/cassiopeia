@@ -37,6 +37,24 @@ Loops walk a list value:
 
 The usual operators are available inside `{{ }}`: comparison (`==`, `!=`, `<`, `<=`, `>`, `>=`), logic (`and`, `or`, `not`), and arithmetic (`+`, `-`, `*`, `/`, `%`).
 
+## Keep a value's type
+
+When a template's whole output is one `{{ }}` expression, the attribute receives that expression's value with its type intact. `split` yields an array, `json_decode` yields whatever the text encodes, and arithmetic yields a number. This is how a text source such as CSV builds a list value from one cell:
+
+~~~text
+{{ this[2] | split(pat=' ') }}
+~~~
+
+With `transformation: "array"`, a cell holding `BS IN` becomes `["BS", "IN"]`. A cell holding the JSON text `["BS","IN"]` gives the same result through `{{ this[2] | json_decode }}`.
+
+The expression may sit behind `{% if %}` conditions and `{% set %}` assignments, with only whitespace around them. A condition that skips the expression gives no value, so the attribute is omitted:
+
+~~~text
+{% if this[2] %}{{ this[2] | split(pat=' ') }}{% endif %}
+~~~
+
+Anything else renders to text. That covers literal text around or between the tags, more than one expression, and a loop. For example, `{% if code %}{{ code }}{% else %}none{% endif %}` always gives a string.
+
 ## Built-in filters
 
 A filter transforms a value inside a template and follows a pipe: `{{ value | filter }}`. Tera provides many filters; these are the ones mappings use most often:

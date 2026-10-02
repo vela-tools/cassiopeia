@@ -7,6 +7,7 @@ pub mod numeric_value;
 pub mod resolver;
 pub mod runner;
 pub mod template_name;
+pub mod value_expression;
 
 use crate::template::{field_path::FieldPath, template_name::TemplateName};
 use derive_more::Display;
@@ -50,8 +51,18 @@ pub enum CompiledTemplate {
     /// A concatenation of literals and field references, such as `Station-{{ id }}`.
     Composite(Vec<TemplatePart>),
 
-    /// An expression needing filters, arithmetic, or conditionals, such as `{{ field | upper }}`.
-    /// Holds the name the expression is registered under in the Tera engine.
+    /// A template whose whole output is one expression needing filters, arithmetic, or a guard,
+    /// such as `{{ field | split(pat=" ") }}` or `{% if field %}{{ field | upper }}{% endif %}`.
+    ///
+    /// It resolves to the expression's value with its type intact, so an array or object a filter
+    /// returns reaches the caller as that array or object rather than as its printed form; a guard
+    /// that suppresses the expression resolves to null. Holds the name the template is registered
+    /// under in the Tera engine.
+    Expression(TemplateName),
+
+    /// A template that renders text around or between its expressions, such as
+    /// `{% if field %}{{ field }}{% else %}none{% endif %}`, and so always resolves to a string.
+    /// Holds the name the template is registered under in the Tera engine.
     Complex(TemplateName),
 }
 
