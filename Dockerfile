@@ -1,4 +1,4 @@
-FROM rust:1.98.0-trixie AS chef
+FROM rust:1.99.1-trixie AS chef
 
 RUN apt-get update \
     && apt-get install -y --no-install-recommends libclang-dev libeccodes-dev pkg-config \
@@ -18,7 +18,7 @@ RUN cargo chef cook --release --locked --recipe-path recipe.json
 COPY . .
 RUN cargo build --release --locked --bin cassiopeia
 
-FROM debian:trixie-20260824-slim AS runtime
+FROM debian:trixie-20261027-slim AS runtime
 
 RUN apt-get update \
     && apt-get install -y --no-install-recommends ca-certificates libeccodes0 \
