@@ -243,6 +243,7 @@ mod tests {
     };
     use cassiopeia_ngsi_ld::{data_model::DataModel, entity::name::NameBuf};
     use indexmap::IndexMap;
+    use pretty_assertions::assert_eq;
     use serde_json::json;
     use std::path::Path;
 

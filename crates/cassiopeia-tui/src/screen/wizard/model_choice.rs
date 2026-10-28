@@ -48,6 +48,7 @@ impl PickerEntry for ModelChoice {
 mod tests {
     use crate::{model_picker::PickerEntry, screen::wizard::model_choice::ModelChoice};
     use cassiopeia_ngsi_ld::data_model::DataModel;
+    use pretty_assertions::assert_eq;
     use std::str::FromStr;
 
     fn model(name: &str) -> DataModel {

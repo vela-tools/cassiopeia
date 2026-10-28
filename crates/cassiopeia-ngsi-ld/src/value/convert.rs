@@ -93,6 +93,7 @@ impl From<Value> for JsonValue {
 #[cfg(test)]
 mod tests {
     use crate::value::types::{Number, Value};
+    use pretty_assertions::assert_eq;
     use serde_json::json;
 
     #[test]
@@ -125,7 +126,7 @@ mod tests {
     fn an_epoch_number_value_parses_to_an_instant() {
         assert!(Value::from(1_775_253_620_i64).try_parse_datetime().is_some());
         assert!(Value::from(1_775_253_620.5).try_parse_datetime().is_some());
-        assert!(Value::from(2026_i64).try_parse_datetime().is_none());
+        assert_eq!(Value::from(2026_i64).try_parse_datetime(), None);
     }
 
     #[test]

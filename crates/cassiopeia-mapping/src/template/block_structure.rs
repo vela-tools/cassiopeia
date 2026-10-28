@@ -92,6 +92,7 @@ pub(crate) fn unclosed_block(source: &str) -> Option<UnclosedBlock> {
 #[cfg(test)]
 mod tests {
     use crate::template::block_structure::{BlockTag, UnclosedBlock, unclosed_block};
+    use pretty_assertions::assert_eq;
 
     #[test]
     fn a_conditional_without_its_end_tag_is_unclosed() {

@@ -22,6 +22,7 @@ mod tests {
         constraint::{Constraint, ConstraintKind},
         schema_node_details::SchemaNodeDetails,
     };
+    use pretty_assertions::assert_eq;
 
     #[test]
     fn a_detail_record_holds_its_facts() {

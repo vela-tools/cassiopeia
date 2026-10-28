@@ -18,6 +18,7 @@ pub mod version;
 #[cfg(test)]
 mod tests {
     use crate::{mapping::Mapping, observed_at::ObservedAt, template::runner::TemplateRunner};
+    use pretty_assertions::assert_eq;
     use serde_json::json;
     use std::path::Path;
 

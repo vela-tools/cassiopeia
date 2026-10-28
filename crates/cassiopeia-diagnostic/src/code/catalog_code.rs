@@ -13,6 +13,7 @@ pub enum CatalogCode {
 #[cfg(test)]
 mod tests {
     use crate::code::catalog_code::CatalogCode;
+    use pretty_assertions::assert_eq;
 
     #[test]
     fn a_catalog_code_renders_a_kebab_case_token() {

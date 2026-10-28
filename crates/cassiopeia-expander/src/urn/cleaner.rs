@@ -50,6 +50,7 @@ impl Cleaner {
 #[cfg(test)]
 mod tests {
     use crate::urn::cleaner::Cleaner;
+    use pretty_assertions::assert_eq;
 
     #[test]
     fn already_clean_ascii_is_returned_unchanged() {

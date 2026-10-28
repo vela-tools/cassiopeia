@@ -51,6 +51,7 @@ mod tests {
         error::ValidatorError,
         schema_verdict::{ValidationDiagnostics, ValidationOutcome},
     };
+    use pretty_assertions::assert_eq;
     use urn_rs::Urn;
 
     fn entity() -> NgsiLdEntity {

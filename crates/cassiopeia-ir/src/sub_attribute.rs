@@ -88,6 +88,7 @@ mod tests {
         value::types::Value,
     };
     use indexmap::IndexMap;
+    use pretty_assertions::assert_eq;
     use serde_json::json;
 
     fn name(value: &str) -> NameBuf {
@@ -127,7 +128,7 @@ mod tests {
     fn a_property_sub_attribute_has_no_object_type() {
         let sub = SubAttribute::new(NgsiLdAttributeKind::Property, Value::from(0.5), IndexMap::default());
 
-        assert!(sub.object_type().is_none());
+        assert_eq!(sub.object_type(), &None);
     }
 
     #[test]

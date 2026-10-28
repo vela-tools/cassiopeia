@@ -178,6 +178,7 @@ mod tests {
         stage::Stage,
         telemetry::{component::StageComponent, run::RunTelemetry},
     };
+    use pretty_assertions::assert_eq;
     use std::{hint::black_box, sync::Arc, thread, time::Duration};
 
     #[test]

@@ -123,6 +123,7 @@ mod tests {
         target::GeometryTarget,
     };
     use geojson::Position;
+    use pretty_assertions::assert_eq;
     use serde_json::json;
 
     fn preserve(value: &Value) -> Result<Option<NgsiLdGeometry>, GeometryError> {

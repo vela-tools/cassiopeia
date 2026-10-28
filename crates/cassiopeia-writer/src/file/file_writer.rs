@@ -274,6 +274,7 @@ mod tests {
         context::{ContextSource, NgsiLdContext},
         name::NameBuf,
     };
+    use pretty_assertions::assert_eq;
     use std::{fs, num::NonZeroUsize};
     use tempfile::TempDir;
     use url::Url;

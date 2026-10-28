@@ -77,6 +77,7 @@ impl SourcePosition {
 #[cfg(test)]
 mod tests {
     use crate::template::source_position::SourcePosition;
+    use pretty_assertions::assert_eq;
 
     #[test]
     fn a_position_in_a_one_line_template_names_only_its_column() {

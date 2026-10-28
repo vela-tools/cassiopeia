@@ -12,6 +12,7 @@ pub enum ResolverCode {
 #[cfg(test)]
 mod tests {
     use crate::code::resolver_code::ResolverCode;
+    use pretty_assertions::assert_eq;
 
     #[test]
     fn a_resolver_code_renders_a_kebab_case_token() {

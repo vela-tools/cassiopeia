@@ -16,6 +16,7 @@ pub struct InstanceIndex(usize);
 #[cfg(test)]
 mod tests {
     use crate::instance_index::InstanceIndex;
+    use pretty_assertions::assert_eq;
 
     #[test]
     fn an_index_round_trips_through_its_text_form() {

@@ -510,6 +510,7 @@ fn is_enclosed_in_quotes(field: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use crate::inspectors::csv::{CsvInspector, dialect::LineTerminator};
+    use pretty_assertions::assert_eq;
 
     #[test]
     fn a_comma_delimited_file_with_headers_is_detected() {

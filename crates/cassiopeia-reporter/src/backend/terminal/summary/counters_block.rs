@@ -111,6 +111,7 @@ mod tests {
         palette::{CAUTION, ERROR, SUCCESS},
         rendering::Rendering,
     };
+    use pretty_assertions::assert_eq;
     use std::time::Duration;
 
     #[test]

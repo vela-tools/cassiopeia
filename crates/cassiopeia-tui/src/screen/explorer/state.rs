@@ -256,6 +256,7 @@ mod tests {
         theme::DARK,
     };
     use cassiopeia_ngsi_ld::data_model::DataModel;
+    use pretty_assertions::assert_eq;
     use serde_json::json;
     use std::str::FromStr;
 

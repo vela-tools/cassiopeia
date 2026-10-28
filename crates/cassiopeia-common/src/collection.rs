@@ -31,6 +31,7 @@ impl From<&str> for CollectionName {
 #[cfg(test)]
 mod tests {
     use crate::collection::CollectionName;
+    use pretty_assertions::{assert_eq, assert_ne};
 
     #[test]
     fn a_collection_name_round_trips_arbitrary_unicode_verbatim() {

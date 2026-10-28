@@ -135,6 +135,7 @@ mod tests {
         value::types::{Number, TemporalValue, Value},
     };
     use chrono::{TimeZone, Utc};
+    use pretty_assertions::assert_eq;
     use serde_json::{Value as JsonValue, json};
     use std::{path::Path, sync::Arc};
     use urn_rs::Urn;
@@ -807,8 +808,8 @@ mod tests {
             .unwrap()
             .into_parts();
 
-        assert!(result.metadata().is_none());
-        assert!(result.instance_relationships().is_none());
+        assert_eq!(result.metadata(), &None);
+        assert_eq!(result.instance_relationships(), &None);
     }
 
     #[test]
@@ -842,7 +843,7 @@ mod tests {
             .unwrap()
             .into_parts();
 
-        assert!(result.instance_relationships().is_none());
+        assert_eq!(result.instance_relationships(), &None);
         assert_eq!(dropped.templates.into_entries()[0].0, name("servesAirports"));
     }
 
@@ -1629,7 +1630,7 @@ mod tests {
             &dropped,
         );
 
-        assert!(footprint.is_none());
+        assert_eq!(footprint, None);
         let entries = dropped.geometries.into_entries();
         assert_eq!(entries.len(), 1);
         assert_eq!(entries[0].0.attribute, name("footprint"));

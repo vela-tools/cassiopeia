@@ -468,6 +468,7 @@ mod tests {
     };
     use cassiopeia_ngsi_ld::data_model::DataModel;
     use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+    use pretty_assertions::assert_eq;
     use std::str::FromStr;
 
     fn press(state: &mut WizardState, code: KeyCode) {

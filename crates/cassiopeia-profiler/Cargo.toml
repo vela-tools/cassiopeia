@@ -14,5 +14,8 @@ cassiopeia-ir.workspace = true
 mediatype = "0.23.0"
 thiserror = "2.0.21"
 
+[dev-dependencies]
+pretty_assertions = "1.4.1"
+
 [lints]
 workspace = true

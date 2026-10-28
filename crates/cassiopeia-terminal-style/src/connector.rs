@@ -18,6 +18,7 @@ pub const fn connector(index: usize, total: usize) -> &'static str {
 #[cfg(test)]
 mod tests {
     use crate::connector::{BRANCH, LAST_BRANCH, connector};
+    use pretty_assertions::assert_eq;
 
     #[test]
     fn the_last_line_of_a_run_closes_the_branch() {

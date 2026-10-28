@@ -21,6 +21,7 @@ pub enum MemoryProfile {
 #[cfg(test)]
 mod tests {
     use crate::memory_profile::MemoryProfile;
+    use pretty_assertions::assert_eq;
 
     #[test]
     fn throughput_tuning_is_the_default() {

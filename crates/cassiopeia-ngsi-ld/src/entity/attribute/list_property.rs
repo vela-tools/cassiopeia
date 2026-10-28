@@ -54,6 +54,7 @@ impl SerializeRepr for NgsiLdListProperty {
 #[cfg(test)]
 mod tests {
     use crate::{entity::attribute::list_property::NgsiLdListProperty, value::types::Value};
+    use pretty_assertions::assert_eq;
     use serde_json::json;
 
     #[test]

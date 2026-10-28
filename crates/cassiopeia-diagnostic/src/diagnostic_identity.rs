@@ -66,6 +66,7 @@ mod tests {
         severity::Severity,
     };
     use http::StatusCode;
+    use pretty_assertions::{assert_eq, assert_ne};
     use std::{
         collections::hash_map::DefaultHasher,
         hash::{Hash, Hasher},

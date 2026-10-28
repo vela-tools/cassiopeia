@@ -233,6 +233,7 @@ mod tests {
     use crate::{attribute::Attribute, template::TemplateSource, transformation::Transformation, value_conversion::ValueConversion, version::Version};
     use cassiopeia_ngsi_ld::entity::attribute::NgsiLdAttributeKind;
     use langtag::LangTagBuf;
+    use pretty_assertions::assert_eq;
 
     fn parse(document: &str) -> Attribute {
         serde_json5::from_str(document).unwrap()

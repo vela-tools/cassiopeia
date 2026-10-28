@@ -16,6 +16,7 @@ pub enum ExtractorCode {
 #[cfg(test)]
 mod tests {
     use crate::code::extractor_code::ExtractorCode;
+    use pretty_assertions::assert_eq;
 
     #[test]
     fn an_extractor_code_renders_a_kebab_case_token() {

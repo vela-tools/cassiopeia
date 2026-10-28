@@ -158,6 +158,7 @@ mod tests {
         fragment_sink::FragmentSink,
         relationship_store::dashmap_store::DashMapRelationshipStore,
     };
+    use pretty_assertions::assert_eq;
     use serde_json::json;
     use std::{path::Path, sync::Arc};
 

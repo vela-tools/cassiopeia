@@ -73,6 +73,7 @@ mod tests {
     };
     use cassiopeia_ngsi_ld::entity::name::NameBuf;
     use cassiopeia_reporter::backend::noop::NoopReporter;
+    use pretty_assertions::assert_eq;
     use std::{path::Path, sync::Arc};
     use urn_rs::Urn;
 

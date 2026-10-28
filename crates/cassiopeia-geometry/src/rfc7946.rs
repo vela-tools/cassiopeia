@@ -193,6 +193,7 @@ fn fold(members: Vec<NgsiLdGeometry>) -> Result<NgsiLdGeometry, GeometryError> {
 mod tests {
     use crate::{error::GeometryError, geometry::NgsiLdGeometry, rfc7946::fold_collection};
     use geojson::{Geometry, GeometryValue};
+    use pretty_assertions::assert_eq;
 
     fn point(x: f64, y: f64) -> Geometry {
         Geometry::new(GeometryValue::Point { coordinates: [x, y].into() })

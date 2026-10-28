@@ -44,6 +44,7 @@ pub struct AttributeInstance {
 mod tests {
     use crate::attribute::Attribute;
     use cassiopeia_ngsi_ld::entity::name::NameBuf;
+    use pretty_assertions::assert_eq;
 
     fn parse(document: &str) -> Attribute {
         serde_json5::from_str(document).unwrap()

@@ -150,6 +150,7 @@ mod tests {
         mapping_binding::{CollectionMapping, MappingBinding},
     };
     use cassiopeia_common::{collection::CollectionName, context::mode::AtContextMode, format::DataFormat, input::Input, schema_source::SchemaSource};
+    use pretty_assertions::assert_eq;
     use std::path::PathBuf;
 
     fn parse(json: &str) -> Result<ManifestInput, serde_json::Error> {

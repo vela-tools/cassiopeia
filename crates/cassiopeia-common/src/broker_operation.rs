@@ -69,6 +69,7 @@ mod tests {
         broker_operation::{BrokerOperation, BrokerOperationKind},
         upsert_mode::UpsertMode,
     };
+    use pretty_assertions::assert_eq;
 
     #[test]
     fn the_default_operation_is_a_replacing_upsert() {

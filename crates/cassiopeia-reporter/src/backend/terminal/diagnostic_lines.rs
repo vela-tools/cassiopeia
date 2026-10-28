@@ -215,6 +215,7 @@ mod tests {
     use cassiopeia_terminal_style::rendering::Rendering;
     use http::StatusCode;
     use iri_rs::IriBuf;
+    use pretty_assertions::assert_eq;
     use url::Url;
 
     const ESCAPE: char = '\u{1b}';

@@ -89,6 +89,7 @@ fn extract(figment: &Figment, file: Option<&Path>) -> Result<Config> {
 mod tests {
     use crate::{loader::ConfigLoader, overrides::ConfigOverride, pipeline::ExtractionMode};
     use cassiopeia_common::{memory_profile::MemoryProfile, store_kind::StoreKind};
+    use pretty_assertions::assert_eq;
     use serial_test::serial;
     use std::{fs::write, path::PathBuf};
     use tempfile::TempDir;

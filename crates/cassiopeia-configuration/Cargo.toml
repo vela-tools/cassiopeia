@@ -17,6 +17,7 @@ smart-default = "0.7.1"
 thiserror = "2.0.21"
 
 [dev-dependencies]
+pretty_assertions = "1.4.1"
 serial_test = "4.0.1"
 temp-env = "0.3.6"
 tempfile = "3.27.0"

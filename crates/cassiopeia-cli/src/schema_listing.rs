@@ -50,6 +50,7 @@ fn count_label(count: usize) -> String {
 mod tests {
     use crate::schema_listing::{ListingSource, render_schema_listing};
     use cassiopeia_terminal_style::rendering::Rendering;
+    use pretty_assertions::assert_eq;
 
     const ESCAPE: char = '\u{1b}';
 

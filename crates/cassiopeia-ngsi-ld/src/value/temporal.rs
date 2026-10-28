@@ -179,6 +179,7 @@ impl TemporalValue {
 mod tests {
     use crate::value::types::{Number, TemporalValue};
     use chrono::{DateTime, Duration, TimeZone, Utc};
+    use pretty_assertions::assert_eq;
 
     #[test]
     fn an_rfc3339_string_parses_to_a_datetime() {

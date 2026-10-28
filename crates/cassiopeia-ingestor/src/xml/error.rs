@@ -46,6 +46,7 @@ pub enum XmlIngestError {
 #[cfg(test)]
 mod tests {
     use crate::xml::error::XmlIngestError;
+    use pretty_assertions::assert_eq;
     use std::{error::Error, io, path::PathBuf};
 
     #[test]

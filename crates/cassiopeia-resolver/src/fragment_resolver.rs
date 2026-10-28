@@ -298,6 +298,7 @@ mod tests {
     };
     use cassiopeia_mapping::{mapping::Mapping, template::runner::TemplateRunner};
     use cassiopeia_ngsi_ld::entity::name::NameBuf;
+    use pretty_assertions::{assert_eq, assert_ne};
     use serde_json::json;
     use std::{path::Path, sync::Arc, time::Duration};
     use urn_rs::Urn;

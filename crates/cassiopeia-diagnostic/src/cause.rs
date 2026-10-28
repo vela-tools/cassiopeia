@@ -42,6 +42,7 @@ pub fn causes_of(error: &dyn Error) -> Vec<Cause> {
 #[cfg(test)]
 mod tests {
     use crate::cause::{Cause, causes_of};
+    use pretty_assertions::assert_eq;
     use std::{
         error::Error,
         fmt::{Display, Formatter, Result as FmtResult},

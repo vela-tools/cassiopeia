@@ -16,6 +16,7 @@ pub struct Resolver {
 mod tests {
     use crate::resolver::Resolver;
     use cassiopeia_common::store_kind::StoreKind;
+    use pretty_assertions::assert_eq;
 
     #[test]
     fn resolution_state_is_held_in_memory_by_default() {

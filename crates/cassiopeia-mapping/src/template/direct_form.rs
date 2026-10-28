@@ -93,6 +93,7 @@ mod tests {
         TemplatePart,
         direct_form::{compile, field_reference},
     };
+    use pretty_assertions::assert_eq;
 
     /// The field path a body reads, as text, or `None` when it is not a field reference.
     fn reference(body: &str) -> Option<String> {

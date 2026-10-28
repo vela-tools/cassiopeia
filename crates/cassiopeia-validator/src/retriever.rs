@@ -177,6 +177,7 @@ pub fn sanitize_schema(root: &mut Value) {
 mod tests {
     use crate::retriever::{FileRetriever, RetrieverError, sanitize_schema};
     use jsonschema::{Retrieve, Uri};
+    use pretty_assertions::assert_eq;
     use serde_json::{Value, json};
     use std::fs;
     use tempfile::TempDir;

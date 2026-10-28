@@ -30,6 +30,7 @@ pub enum TemplateSite {
 mod tests {
     use crate::template_site::TemplateSite;
     use cassiopeia_ngsi_ld::entity::name::NameBuf;
+    use pretty_assertions::assert_eq;
 
     #[test]
     fn each_site_renders_the_document_key_it_stands_for() {

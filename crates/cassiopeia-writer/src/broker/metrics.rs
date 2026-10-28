@@ -75,6 +75,7 @@ impl BrokerMetrics {
 #[cfg(test)]
 mod tests {
     use crate::broker::metrics::BrokerMetrics;
+    use pretty_assertions::assert_eq;
     use std::sync::atomic::Ordering;
 
     #[test]

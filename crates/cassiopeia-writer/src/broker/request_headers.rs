@@ -49,6 +49,7 @@ pub fn sensitive_auth_headers(headers: &BrokerHeaders) -> Arc<[(HeaderName, Head
 mod tests {
     use crate::broker::{request_headers::tenant_header, test_reporter::TestReporter};
     use cassiopeia_common::tenant::Tenant;
+    use pretty_assertions::assert_eq;
     use std::str::FromStr;
 
     #[test]
@@ -65,7 +66,7 @@ mod tests {
     fn no_tenant_produces_no_header_and_no_diagnostic() {
         let reporter = TestReporter::new();
 
-        assert!(tenant_header(None, &reporter).is_none());
+        assert_eq!(tenant_header(None, &reporter), None);
         assert_eq!(reporter.diagnostics(), []);
     }
 }

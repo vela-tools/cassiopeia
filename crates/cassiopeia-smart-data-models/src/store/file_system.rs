@@ -158,6 +158,7 @@ mod tests {
         schema_id::SchemaId,
         store::{ModelCatalog, SchemaStore, file_system::FileSystemStore},
     };
+    use pretty_assertions::assert_eq;
     use std::{collections::BTreeMap, str::FromStr};
     use tempfile::TempDir;
     use url::Url;

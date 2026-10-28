@@ -101,6 +101,7 @@ mod tests {
         user_agent::UserAgent,
     };
     use cassiopeia_ir::payload::CollectedPayload;
+    use pretty_assertions::assert_eq;
     use std::path::PathBuf;
 
     fn extension(value: &str) -> FileExtension {

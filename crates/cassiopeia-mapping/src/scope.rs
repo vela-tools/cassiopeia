@@ -31,6 +31,7 @@ pub enum CompiledScope {
 #[cfg(test)]
 mod tests {
     use crate::{scope::Scope, template::TemplateSource};
+    use pretty_assertions::assert_eq;
 
     #[test]
     fn a_bare_string_deserializes_as_a_single_scope() {

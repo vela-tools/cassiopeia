@@ -64,6 +64,7 @@ fn skip_bom_and_whitespace(bytes: &[u8]) -> &[u8] {
 mod tests {
     use crate::detectors::{Detector, xml::XmlDetector};
     use cassiopeia_common::format::DataFormat;
+    use pretty_assertions::assert_eq;
 
     #[test]
     fn a_declaration_and_empty_root_is_detected_as_xml() {

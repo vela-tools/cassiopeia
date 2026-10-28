@@ -117,6 +117,7 @@ mod tests {
     };
     use cassiopeia_reporter::{backend::noop::NoopReporter, reporter::Reporter};
     use chrono::{DateTime, Utc};
+    use pretty_assertions::assert_eq;
     use serde_json::json;
     use std::{num::NonZeroUsize, sync::Arc};
     use urn_rs::Urn;

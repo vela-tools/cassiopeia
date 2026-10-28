@@ -131,6 +131,7 @@ fn read_rendered(text: &str) -> (String, Option<(usize, usize)>) {
 #[cfg(test)]
 mod tests {
     use crate::template::{engine_report::EngineReport, vocabulary::CallableKind};
+    use pretty_assertions::assert_eq;
     use std::io;
     use tera::Tera;
 

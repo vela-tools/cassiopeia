@@ -16,6 +16,7 @@ pub fn field(label: &str, value: &str, rendering: Rendering) -> String {
 #[cfg(test)]
 mod tests {
     use crate::{field::field, rendering::Rendering};
+    use pretty_assertions::assert_eq;
 
     const ESCAPE: char = '\u{1b}';
 

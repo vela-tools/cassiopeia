@@ -23,6 +23,7 @@ mod tests {
     use crate::dropped_geometry::DroppedGeometry;
     use cassiopeia_geometry::{error::GeometryError, geometry::GeometryKind};
     use cassiopeia_ngsi_ld::entity::name::NameBuf;
+    use pretty_assertions::{assert_eq, assert_ne};
 
     fn dropped(attribute: &str) -> DroppedGeometry {
         DroppedGeometry {

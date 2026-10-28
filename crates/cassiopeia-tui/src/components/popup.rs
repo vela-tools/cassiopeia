@@ -95,6 +95,7 @@ impl<'a> Popup<'a> {
 #[cfg(test)]
 mod tests {
     use crate::components::popup::Popup;
+    use pretty_assertions::assert_eq;
 
     #[test]
     fn the_builder_records_the_optional_lines() {
@@ -106,7 +107,7 @@ mod tests {
     #[test]
     fn a_bare_popup_has_no_optional_lines() {
         let popup = Popup::new("Title", "Body");
-        assert!(popup.suggestion.is_none());
-        assert!(popup.footer.is_none());
+        assert_eq!(popup.suggestion, None);
+        assert_eq!(popup.footer, None);
     }
 }

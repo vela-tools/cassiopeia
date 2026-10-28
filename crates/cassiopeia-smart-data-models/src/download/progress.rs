@@ -41,6 +41,7 @@ pub enum ProgressEvent {
 #[cfg(test)]
 mod tests {
     use crate::{download::progress::ProgressEvent, schema_id::SchemaId};
+    use pretty_assertions::{assert_eq, assert_ne};
     use std::str::FromStr;
 
     #[test]

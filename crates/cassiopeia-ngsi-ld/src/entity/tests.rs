@@ -24,6 +24,7 @@ use cassiopeia_geometry::geometry::NgsiLdGeometry;
 use chrono::{TimeZone, Utc};
 use indexmap::IndexMap;
 use iri_rs::IriBuf;
+use pretty_assertions::assert_eq;
 use serde_json::{Value as JsonValue, json};
 use url::Url;
 use urn_rs::Urn;
@@ -57,6 +58,7 @@ fn serialize_entities(entities: &[NgsiLdEntity], mode: NgsiLdRepresentation, ski
 mod property_tests {
     use super::*;
     use cefact_units::UnitCode;
+    use pretty_assertions::assert_eq;
 
     #[test]
     fn test_simple_property_all_modes() {
@@ -181,6 +183,7 @@ mod property_tests {
 
 mod relationship_tests {
     use super::*;
+    use pretty_assertions::assert_eq;
 
     #[test]
     fn test_simple_relationship_all_modes() {
@@ -250,6 +253,7 @@ mod relationship_tests {
 
 mod geoproperty_tests {
     use super::*;
+    use pretty_assertions::assert_eq;
 
     #[test]
     fn test_geoproperty_all_modes() {
@@ -318,6 +322,7 @@ mod geoproperty_tests {
 
 mod list_relationship_tests {
     use super::*;
+    use pretty_assertions::assert_eq;
 
     #[test]
     fn test_simple_list_relationship_all_modes() {
@@ -475,6 +480,7 @@ mod list_relationship_tests {
 
 mod multi_attribute_tests {
     use super::*;
+    use pretty_assertions::assert_eq;
 
     #[test]
     fn test_multi_property_all_modes() {
@@ -666,6 +672,7 @@ mod multi_attribute_tests {
 
 mod entity_list_tests {
     use super::*;
+    use pretty_assertions::assert_eq;
 
     #[test]
     fn test_entity_list_serialization() {
@@ -757,6 +764,7 @@ mod entity_list_tests {
 mod edge_case_tests {
     use super::*;
     use cefact_units::UnitCode;
+    use pretty_assertions::assert_eq;
 
     #[test]
     fn test_empty_properties() {
@@ -1155,6 +1163,7 @@ mod edge_case_tests {
 
     mod context_tests {
         use super::*;
+        use pretty_assertions::assert_eq;
 
         #[test]
         fn test_context_serialization() {
@@ -1252,6 +1261,7 @@ mod edge_case_tests {
 
     mod property_ordering_tests {
         use super::*;
+        use pretty_assertions::assert_eq;
 
         #[test]
         fn test_ngsi_ld_property_ordering_all_modes() {
@@ -1332,6 +1342,7 @@ mod edge_case_tests {
 
     mod vocab_property_tests {
         use super::*;
+        use pretty_assertions::assert_eq;
 
         #[test]
         fn test_vocab_property_all_modes() {
@@ -1373,6 +1384,7 @@ mod edge_case_tests {
 
     mod list_property_tests {
         use super::*;
+        use pretty_assertions::assert_eq;
 
         #[test]
         fn test_list_property_all_modes() {
@@ -1398,6 +1410,7 @@ mod edge_case_tests {
 
     mod json_property_tests {
         use super::*;
+        use pretty_assertions::assert_eq;
 
         #[test]
         fn test_json_property_all_modes() {

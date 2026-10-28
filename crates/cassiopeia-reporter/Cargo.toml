@@ -32,6 +32,7 @@ tracing-subscriber = { version = "0.3.23", features = ["json", "env-filter", "lo
 [dev-dependencies]
 http = "1.5.0"
 iri-rs = "3.4.1"
+pretty_assertions = "1.4.1"
 url = "2.5.8"
 
 [lints]

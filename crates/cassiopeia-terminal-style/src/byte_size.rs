@@ -22,6 +22,7 @@ pub fn human_size(bytes: u64) -> String {
 #[cfg(test)]
 mod tests {
     use crate::byte_size::human_size;
+    use pretty_assertions::assert_eq;
 
     #[test]
     fn human_size_uses_binary_units_with_one_decimal() {

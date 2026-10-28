@@ -18,6 +18,7 @@ pub fn is_reserved_member(name: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use crate::entity::reserved_member::{RESERVED_MEMBERS, is_reserved_member};
+    use pretty_assertions::assert_eq;
     use std::collections::HashSet;
 
     #[test]

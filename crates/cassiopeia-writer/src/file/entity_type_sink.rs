@@ -173,6 +173,7 @@ mod tests {
     use crate::file::entity_type_sink::EntityTypeSink;
     use cassiopeia_common::{file_framing::FileFraming, representation::NgsiLdRepresentation, skip_null::NgsiLdSkipNull};
     use cassiopeia_ngsi_ld::entity::{NgsiLdEntity, name::NameBuf};
+    use pretty_assertions::assert_eq;
     use std::fs;
     use tempfile::TempDir;
     use urn_rs::Urn;
@@ -264,6 +265,7 @@ mod parity_tests {
     };
     use chrono::{TimeZone, Utc};
     use indexmap::IndexMap;
+    use pretty_assertions::assert_eq;
     use serde_json::{Value as JsonValue, json};
     use urn_rs::Urn;
 

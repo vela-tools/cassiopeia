@@ -135,6 +135,7 @@ mod tests {
     };
     use dbase::{Date, FieldName, FieldValue, Record as DbaseRecord, TableWriterBuilder, yore::code_pages::CP1250};
     use mediatype::media_type;
+    use pretty_assertions::assert_eq;
     use serde_json::{Map, Value};
     use shapefile::{Point as ShpPoint, Writer};
     use std::{

@@ -37,6 +37,7 @@ fn decode(value: &Value) -> TeraResult<Value> {
 #[cfg(test)]
 mod tests {
     use crate::template::{filter::json_decode::register, registrar::Registrar};
+    use pretty_assertions::assert_eq;
     use tera::{Context, Value};
 
     fn render(template: &str, value: Value) -> Result<String, tera::Error> {

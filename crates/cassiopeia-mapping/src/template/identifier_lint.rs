@@ -115,6 +115,7 @@ fn lexemes(source: &str) -> Vec<Lexeme<'_>> {
 #[cfg(test)]
 mod tests {
     use crate::template::identifier_lint::{ambiguous_hyphen, non_ascii_identifier};
+    use pretty_assertions::assert_eq;
 
     fn hyphenated(source: &str) -> Option<String> {
         ambiguous_hyphen(source).map(|reference| reference.written())

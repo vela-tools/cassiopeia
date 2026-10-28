@@ -36,6 +36,7 @@ pub const fn default_detectors() -> &'static [&'static dyn Detector] {
 mod tests {
     use crate::detectors::default_detectors;
     use cassiopeia_common::format::DataFormat;
+    use pretty_assertions::assert_eq;
 
     #[test]
     fn detectors_run_kml_then_json_then_xml_then_csv() {

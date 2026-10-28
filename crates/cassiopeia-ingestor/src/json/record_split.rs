@@ -121,6 +121,7 @@ fn object_item(item: Value) -> Result<Record, JsonIngestError> {
 mod tests {
     use crate::json::{error::JsonIngestError, record_split::split};
     use cassiopeia_ir::record::Record;
+    use pretty_assertions::assert_eq;
     use serde_json::json;
 
     fn records(document: serde_json::Value) -> Result<Vec<Record>, JsonIngestError> {

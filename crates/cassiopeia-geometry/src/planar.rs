@@ -104,6 +104,7 @@ mod tests {
     };
     use geo_types::Geometry as PlanarGeometry;
     use geojson::Position;
+    use pretty_assertions::assert_eq;
 
     #[test]
     fn a_three_component_position_reads_as_a_planar_coordinate_without_its_altitude() {
@@ -115,7 +116,7 @@ mod tests {
 
     #[test]
     fn a_one_component_position_cannot_be_read() {
-        assert!(to_coord(&Position::from(vec![1.0])).is_none());
+        assert_eq!(to_coord(&Position::from(vec![1.0])), None);
     }
 
     #[test]

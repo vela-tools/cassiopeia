@@ -21,6 +21,7 @@ pub enum StoreKind {
 #[cfg(test)]
 mod tests {
     use crate::store_kind::StoreKind;
+    use pretty_assertions::assert_eq;
 
     #[test]
     fn the_wire_form_is_kebab_case() {

@@ -127,6 +127,7 @@ pub fn plain_version_banner() -> String {
 mod tests {
     use crate::cli::version::{LICENSE, long_version, render_long_version, short_version};
     use cassiopeia_terminal_style::rendering::Rendering;
+    use pretty_assertions::{assert_eq, assert_ne};
 
     const ESCAPE: char = '\u{1b}';
 

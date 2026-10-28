@@ -11,6 +11,7 @@ pub struct IdentityState {
 #[cfg(test)]
 mod tests {
     use crate::screen::wizard::identity_state::IdentityState;
+    use pretty_assertions::assert_eq;
 
     #[test]
     fn a_new_identity_state_is_empty_and_focused_on_the_first_field() {

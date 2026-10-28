@@ -22,6 +22,7 @@ impl Notification {
 #[cfg(test)]
 mod tests {
     use crate::notification::Notification;
+    use pretty_assertions::assert_eq;
     use ratatui::style::Color;
 
     #[test]

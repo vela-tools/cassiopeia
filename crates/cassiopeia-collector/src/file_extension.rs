@@ -36,6 +36,7 @@ impl FileExtension {
 #[cfg(test)]
 mod tests {
     use crate::{error::CollectorError, file_extension::FileExtension};
+    use pretty_assertions::assert_eq;
 
     #[test]
     fn a_plain_extension_is_accepted() {

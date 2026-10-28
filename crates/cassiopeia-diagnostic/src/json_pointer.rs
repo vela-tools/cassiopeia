@@ -41,6 +41,7 @@ impl JsonPointer {
 #[cfg(test)]
 mod tests {
     use crate::json_pointer::JsonPointer;
+    use pretty_assertions::assert_eq;
 
     #[test]
     fn the_root_pointer_carries_no_segment() {

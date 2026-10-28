@@ -159,6 +159,7 @@ impl TryFrom<ScopeWire> for NgsiLdScope {
 #[cfg(test)]
 mod tests {
     use crate::entity::scope::{NgsiLdScope, ScopeBuf, ScopeMerge};
+    use pretty_assertions::assert_eq;
     use serde_json::json;
 
     fn scope(text: &str) -> ScopeBuf {
@@ -242,7 +243,7 @@ mod tests {
 
     #[test]
     fn no_scopes_yield_no_scope_set() {
-        assert!(NgsiLdScope::from_scopes([]).is_none());
+        assert_eq!(NgsiLdScope::from_scopes([]), None);
     }
 
     #[test]

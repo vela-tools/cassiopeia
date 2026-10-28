@@ -101,6 +101,7 @@ mod tests {
         line_derivation::{boundary, connect, exterior_ring},
     };
     use geojson::Position;
+    use pretty_assertions::assert_eq;
 
     fn exterior() -> Vec<Position> {
         vec![

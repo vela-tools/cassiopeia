@@ -98,6 +98,7 @@ impl Clone for Box<dyn RelationshipStore> {
 #[cfg(test)]
 pub(crate) mod tests {
     use crate::relationship_store::store::RelationshipStore;
+    use pretty_assertions::assert_eq;
     use urn_rs::Urn;
 
     /// Cross-backend contract every [`RelationshipStore`] must honour: a child

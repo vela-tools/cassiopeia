@@ -59,6 +59,7 @@ mod tests {
     use crate::broker::{batch_reconciliation::reconcile, batch_result::BatchOperationResult};
     use cassiopeia_ngsi_ld::entity::{NgsiLdEntity, name::NameBuf};
     use iri_rs::{Iri, IriBuf};
+    use pretty_assertions::assert_eq;
     use urn_rs::Urn;
 
     fn entities(ids: &[&str]) -> Vec<NgsiLdEntity> {

@@ -30,6 +30,7 @@ impl TemplateLocation {
 mod tests {
     use crate::{template_location::TemplateLocation, template_site::TemplateSite};
     use cassiopeia_ngsi_ld::entity::name::NameBuf;
+    use pretty_assertions::assert_eq;
     use std::{path::Path, sync::Arc};
 
     #[test]

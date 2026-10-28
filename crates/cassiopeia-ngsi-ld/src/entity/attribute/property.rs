@@ -60,13 +60,14 @@ impl SerializeRepr for NgsiLdProperty {
 #[cfg(test)]
 mod tests {
     use crate::{entity::attribute::property::NgsiLdProperty, value::types::Value};
+    use pretty_assertions::assert_eq;
     use serde_json::json;
 
     #[test]
     fn a_new_property_holds_its_value_and_no_qualifiers() {
         let property = NgsiLdProperty::new(Value::from(json!(42)));
-        assert!(property.observed_at.is_none());
-        assert!(property.unit_code.is_none());
+        assert_eq!(property.observed_at, None);
+        assert_eq!(property.unit_code, None);
         assert!(property.attributes.is_empty());
     }
 }

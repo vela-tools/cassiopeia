@@ -47,6 +47,7 @@ pub fn register(registrar: &mut Registrar) {
 #[cfg(test)]
 mod tests {
     use crate::template::{filter::trigonometry::register, registrar::Registrar};
+    use pretty_assertions::assert_eq;
     use std::f64::consts::PI;
     use tera::{Context, Value};
 

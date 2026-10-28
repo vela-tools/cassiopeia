@@ -15,6 +15,7 @@ pub enum PipelineMode {
 #[cfg(test)]
 mod tests {
     use crate::pipeline_mode::PipelineMode;
+    use pretty_assertions::assert_eq;
 
     #[test]
     fn processing_is_batched_by_default() {

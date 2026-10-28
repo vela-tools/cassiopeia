@@ -133,6 +133,7 @@ mod tests {
         backend::noop::NoopReporter,
         reporter::{Reporter, StageOutput},
     };
+    use pretty_assertions::assert_ne;
 
     #[test]
     fn a_type_implementing_every_capability_is_a_reporter() {

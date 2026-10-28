@@ -15,6 +15,7 @@ pub enum Parallelism {
 #[cfg(test)]
 mod tests {
     use crate::parallelism::Parallelism;
+    use pretty_assertions::assert_eq;
 
     #[test]
     fn parallel_is_the_default() {

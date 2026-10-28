@@ -45,6 +45,7 @@ impl<'a> TextInput<'a> {
 #[cfg(test)]
 mod tests {
     use crate::components::input::TextInput;
+    use pretty_assertions::assert_eq;
 
     #[test]
     fn a_field_records_its_title_value_and_active_state() {

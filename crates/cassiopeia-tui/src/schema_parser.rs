@@ -209,6 +209,7 @@ const fn geojson_default_transformation() -> Transformation {
 mod tests {
     use crate::{schema_parser::parse_schema, screen::wizard::editor_key::EditorKey};
     use cassiopeia_ngsi_ld::entity::attribute::NgsiLdAttributeKind;
+    use pretty_assertions::assert_eq;
     use serde_json::json;
 
     fn field(name: &str) -> EditorKey {

@@ -15,6 +15,7 @@ pub enum NgsiLdSkipNull {
 #[cfg(test)]
 mod tests {
     use crate::skip_null::NgsiLdSkipNull;
+    use pretty_assertions::assert_eq;
 
     #[test]
     fn every_choice_round_trips_through_its_lowercase_token() {

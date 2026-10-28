@@ -128,6 +128,7 @@ mod tests {
     use cassiopeia_ir::payload_origin::PayloadOrigin;
     use cassiopeia_ngsi_ld::entity::name::NameBuf;
     use cassiopeia_profiler::error::ProfilerError;
+    use pretty_assertions::assert_eq;
     use std::path::PathBuf;
     use urn_rs::Urn;
 

@@ -31,6 +31,7 @@ mod tests {
         run::{RunCount, RunNumber},
         signal::MetaSignal,
     };
+    use pretty_assertions::assert_eq;
 
     #[test]
     fn a_payload_becomes_a_schedule_run_meta_signal() {

@@ -106,6 +106,7 @@ mod tests {
         dashmap_store::DashMapRelationshipStore,
         store::{RelationshipStore, tests::assert_preserves_insertion_order_and_duplicates},
     };
+    use pretty_assertions::assert_eq;
     use urn_rs::Urn;
 
     #[test]

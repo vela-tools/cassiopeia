@@ -34,6 +34,7 @@ impl CatalogIndex {
 #[cfg(test)]
 mod tests {
     use crate::{schema_id::SchemaId, store::catalog_index::CatalogIndex};
+    use pretty_assertions::assert_eq;
     use std::str::FromStr;
 
     fn id(value: &str) -> SchemaId {

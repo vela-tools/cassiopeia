@@ -105,6 +105,7 @@ impl ProgressStage for PipelineStage {
 mod tests {
     use crate::pipeline_stage::PipelineStage;
     use cassiopeia_reporter::reporter::ProgressStage;
+    use pretty_assertions::assert_eq;
 
     #[test]
     fn the_run_stages_exclude_the_scheduler() {

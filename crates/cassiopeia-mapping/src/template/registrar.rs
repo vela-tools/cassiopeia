@@ -65,6 +65,7 @@ impl Registrar {
 #[cfg(test)]
 mod tests {
     use crate::template::{registrar::Registrar, vocabulary::CallableKind};
+    use pretty_assertions::assert_eq;
     use tera::{Context, Kwargs, State};
 
     #[test]

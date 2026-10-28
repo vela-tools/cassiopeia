@@ -178,6 +178,7 @@ mod tests {
     use cassiopeia_manifest::mapping_binding::{CollectionMapping, MappingBinding};
     use cassiopeia_mapping::{error::MappingError, template::runner::TemplateRunner, template_site::TemplateSite};
     use cassiopeia_ngsi_ld::entity::name::NameBuf;
+    use pretty_assertions::assert_eq;
     use std::{collections::HashMap, fs, path::PathBuf, sync::Arc};
     use temp_dir::TempDir;
 

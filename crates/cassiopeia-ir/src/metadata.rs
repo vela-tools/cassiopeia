@@ -82,6 +82,7 @@ mod tests {
         value::types::Value,
     };
     use indexmap::IndexMap;
+    use pretty_assertions::{assert_eq, assert_ne};
     use serde_json::{Value as JsonValue, json};
 
     fn entry(key: &str, value: JsonValue) -> SubAttributes {
@@ -97,7 +98,7 @@ mod tests {
     fn default_is_an_empty_shared_map() {
         let storage = MetadataStorage::default();
         assert_eq!(storage.as_shared(), Some(&IndexMap::default()));
-        assert!(storage.as_per_item().is_none());
+        assert_eq!(storage.as_per_item(), None);
     }
 
     #[test]
@@ -122,7 +123,7 @@ mod tests {
     fn per_item_metadata_is_indexed_and_out_of_range_is_none() {
         let storage = MetadataStorage::per_item(vec![entry("count", json!(5)), entry("count", json!(3))]);
         assert_eq!(storage.get_for_index(1), Some(&entry("count", json!(3))));
-        assert!(storage.get_for_index(2).is_none());
-        assert!(storage.as_shared().is_none());
+        assert_eq!(storage.get_for_index(2), None);
+        assert_eq!(storage.as_shared(), None);
     }
 }

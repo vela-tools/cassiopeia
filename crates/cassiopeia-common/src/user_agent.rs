@@ -23,6 +23,7 @@ impl UserAgent {
 #[cfg(test)]
 mod tests {
     use crate::user_agent::UserAgent;
+    use pretty_assertions::assert_eq;
     use std::str::FromStr;
 
     #[test]

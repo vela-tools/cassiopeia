@@ -26,6 +26,7 @@ impl Detail {
 #[cfg(test)]
 mod tests {
     use crate::detail::Detail;
+    use pretty_assertions::assert_eq;
 
     #[test]
     fn a_detail_renders_the_text_it_was_given() {

@@ -61,6 +61,7 @@ mod tests {
         validation_mode::ValidationMode,
     };
     use cassiopeia_common::{file_framing::FileFraming, representation::NgsiLdRepresentation, schema_source::SchemaSource};
+    use pretty_assertions::assert_eq;
     use std::path::PathBuf;
 
     #[test]

@@ -88,6 +88,7 @@ mod tests {
     use cassiopeia_mapping::{mapping::Mapping, template::runner::TemplateRunner};
     use cassiopeia_ngsi_ld::entity::name::NameBuf;
     use indexmap::IndexMap;
+    use pretty_assertions::assert_eq;
     use serde_json::json;
     use std::{path::Path, sync::Arc};
     use urn_rs::Urn;
@@ -134,10 +135,10 @@ mod tests {
 
         let (id, scope, relationships, fragments) = assembled.into_parts();
         assert_eq!(id, urn());
-        assert!(scope.is_none());
+        assert_eq!(scope, None);
         assert!(relationships.top_level().is_empty());
-        assert!(relationships.nested().is_none());
-        assert!(relationships.instances().is_none());
+        assert_eq!(relationships.nested(), &None);
+        assert_eq!(relationships.instances(), &None);
         assert_eq!(fragments.len(), 1);
     }
 }

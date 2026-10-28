@@ -370,6 +370,7 @@ mod tests {
     use cassiopeia_ngsi_ld::entity::{NgsiLdEntity, name::NameBuf};
     use cassiopeia_reporter::stage_id::StageId;
     use crossbeam_channel::bounded;
+    use pretty_assertions::assert_eq;
     use std::{
         sync::{
             Arc,
@@ -473,6 +474,7 @@ mod finalize_tests {
         writer::Writer,
     };
     use cassiopeia_diagnostic::code::broker_code::BrokerCode;
+    use pretty_assertions::assert_eq;
     use std::{
         any::Any,
         error::Error,

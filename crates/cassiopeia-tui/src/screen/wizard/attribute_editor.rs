@@ -166,6 +166,7 @@ mod tests {
     };
     use cassiopeia_mapping::transformation::Transformation;
     use cassiopeia_ngsi_ld::entity::attribute::NgsiLdAttributeKind;
+    use pretty_assertions::assert_eq;
     use serde_json::Value;
 
     #[test]

@@ -22,6 +22,7 @@ pub type Result<T> = result::Result<T, ExtractionError>;
 #[cfg(test)]
 mod tests {
     use crate::error::ExtractionError;
+    use pretty_assertions::assert_eq;
 
     #[test]
     fn a_recursion_failure_names_the_depth_it_tripped_at() {

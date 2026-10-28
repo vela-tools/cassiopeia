@@ -68,6 +68,7 @@ mod tests {
         point_derivation::{bbox_center, centroid, first_vertex, point_on_surface},
     };
     use geojson::Position;
+    use pretty_assertions::assert_eq;
 
     /// An L-shaped surface whose centroid falls outside it.
     fn concave() -> NgsiLdGeometry {

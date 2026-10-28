@@ -164,6 +164,7 @@ mod tests {
         target::GeometryTarget,
     };
     use geojson::{Geometry, GeometryValue, Position};
+    use pretty_assertions::assert_eq;
 
     fn declaring(strategy: ConversionStrategy) -> GeometryPolicy {
         GeometryPolicy::builder().convert(Some(strategy)).build()

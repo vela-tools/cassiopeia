@@ -12,6 +12,7 @@ pub const SUCCESS_SYMBOL: &str = "✓";
 #[cfg(test)]
 mod tests {
     use crate::symbol::{ERROR_SYMBOL, INFO_SYMBOL, SUCCESS_SYMBOL, WARN_SYMBOL};
+    use pretty_assertions::assert_eq;
     use std::collections::HashSet;
 
     #[test]

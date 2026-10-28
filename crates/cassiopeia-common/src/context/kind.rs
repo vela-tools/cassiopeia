@@ -18,6 +18,7 @@ pub enum ContextType {
 #[cfg(test)]
 mod tests {
     use crate::context::kind::ContextType;
+    use pretty_assertions::assert_eq;
 
     #[test]
     fn every_type_round_trips_through_its_kebab_case_token() {

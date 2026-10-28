@@ -51,6 +51,7 @@ mod tests {
     };
     use cassiopeia_common::format::DataFormat;
     use mediatype::media_type;
+    use pretty_assertions::assert_eq;
 
     #[test]
     fn a_profile_exposes_the_format_mime_and_confidence_it_was_built_with() {

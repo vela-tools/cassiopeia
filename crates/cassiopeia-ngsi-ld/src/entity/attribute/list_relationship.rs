@@ -62,14 +62,15 @@ impl SerializeRepr for NgsiLdListRelationship {
 #[cfg(test)]
 mod tests {
     use crate::entity::attribute::list_relationship::NgsiLdListRelationship;
+    use pretty_assertions::assert_eq;
     use urn_rs::Urn;
 
     #[test]
     fn a_new_list_relationship_holds_its_objects() {
         let rel = NgsiLdListRelationship::new(vec!["urn:ngsi-ld:A:1".parse::<Urn>().unwrap()]);
         assert_eq!(rel.object_list.len(), 1);
-        assert!(rel.object_type.is_none());
-        assert!(rel.dataset_id.is_none());
+        assert_eq!(rel.object_type, None);
+        assert_eq!(rel.dataset_id, None);
     }
 
     #[test]

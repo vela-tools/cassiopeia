@@ -177,6 +177,7 @@ mod tests {
         telemetry::{channel_boundary::ChannelBoundary, run::RunTelemetry},
     };
     use cassiopeia_reporter::{backend::noop::NoopReporter, guard::StageGuard, reporter::Reporter};
+    use pretty_assertions::assert_eq;
     use std::{
         num::NonZeroUsize,
         ops::ControlFlow,

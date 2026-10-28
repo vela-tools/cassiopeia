@@ -47,6 +47,7 @@ mod tests {
     use crate::{config::Config, overrides::ConfigOverride};
     use cassiopeia_common::{memory_profile::MemoryProfile, store_kind::StoreKind};
     use figment2::{Figment, providers::Serialized};
+    use pretty_assertions::assert_eq;
     use std::num::NonZeroUsize;
 
     fn config_with(override_value: &ConfigOverride) -> Config {

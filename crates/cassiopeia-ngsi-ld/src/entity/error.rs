@@ -80,6 +80,7 @@ pub type Result<T> = StdResult<T, NgsiLdError>;
 #[cfg(test)]
 mod tests {
     use crate::entity::error::{MandatoryMember, NgsiLdError};
+    use pretty_assertions::assert_eq;
 
     #[test]
     fn each_variant_renders_a_message_naming_the_offending_value() {

@@ -19,6 +19,7 @@ pub(crate) const fn from_nanos(nanos: u64) -> Duration {
 #[cfg(test)]
 mod tests {
     use crate::telemetry::nanos::{from_nanos, to_nanos};
+    use pretty_assertions::assert_eq;
     use std::time::Duration;
 
     #[test]

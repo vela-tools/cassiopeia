@@ -144,6 +144,7 @@ mod tests {
     use cefact_units::UnitCode;
     use chrono::{DateTime, TimeZone, Utc};
     use indexmap::IndexMap;
+    use pretty_assertions::{assert_eq, assert_ne};
     use serde_json::json;
     use std::{path::Path, sync::Arc};
     use urn_rs::Urn;

@@ -90,6 +90,7 @@ mod tests {
         detail::Detail,
     };
     use http::StatusCode;
+    use pretty_assertions::assert_eq;
     use urn_rs::Urn;
 
     #[test]

@@ -20,6 +20,7 @@ pub enum UpsertMode {
 #[cfg(test)]
 mod tests {
     use crate::upsert_mode::UpsertMode;
+    use pretty_assertions::assert_eq;
 
     #[test]
     fn the_default_mode_is_replace() {

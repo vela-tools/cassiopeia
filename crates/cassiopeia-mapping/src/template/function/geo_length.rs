@@ -30,6 +30,7 @@ pub fn geo_length(kwargs: Kwargs, _state: &State) -> TeraResult<Value> {
 #[cfg(test)]
 mod tests {
     use crate::template::function::geo_length::geo_length;
+    use pretty_assertions::assert_eq;
     use serde_json::json;
     use tera::{Context, Tera, Value};
 

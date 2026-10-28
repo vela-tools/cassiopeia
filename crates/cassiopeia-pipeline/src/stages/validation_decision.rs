@@ -95,6 +95,7 @@ mod tests {
         validator::Validator,
     };
     use jsonschema::Validator as JsonSchemaValidator;
+    use pretty_assertions::assert_eq;
     use serde_json::json;
     use std::{collections::HashMap, fs};
     use tempfile::TempDir;

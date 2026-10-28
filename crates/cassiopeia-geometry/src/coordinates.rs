@@ -66,6 +66,7 @@ impl CoordinateShape {
 mod tests {
     use crate::coordinates::CoordinateShape;
     use geojson::Position;
+    use pretty_assertions::assert_eq;
 
     fn position(x: f64, y: f64) -> CoordinateShape {
         CoordinateShape::Position(Position::from([x, y]))
@@ -83,13 +84,13 @@ mod tests {
         let shape = CoordinateShape::Group(vec![position(1.0, 2.0), position(3.0, 4.0)]);
 
         assert_eq!(shape.clone().into_positions().map(|positions| positions.len()), Some(2));
-        assert!(shape.into_rings().is_none());
+        assert_eq!(shape.into_rings(), None);
     }
 
     #[test]
     fn a_bare_position_reads_only_as_a_position() {
         assert!(position(1.0, 2.0).into_position().is_some());
-        assert!(position(1.0, 2.0).into_positions().is_none());
+        assert_eq!(position(1.0, 2.0).into_positions(), None);
     }
 
     #[test]

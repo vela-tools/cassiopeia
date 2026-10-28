@@ -193,6 +193,7 @@ mod tests {
         template::{resolver::TemplateResolver, runner::TemplateRunner},
     };
     use cassiopeia_reporter::reporter::Reporter;
+    use pretty_assertions::assert_eq;
     use serde_json::{Value as JsonValue, json};
     use std::{path::Path, sync::Arc};
     use urn_rs::Urn;

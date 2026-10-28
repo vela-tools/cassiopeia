@@ -89,6 +89,7 @@ mod tests {
     };
     use cassiopeia_common::error::io::{IoAction, IoError};
     use cassiopeia_ngsi_ld::entity::name::NameBuf;
+    use pretty_assertions::assert_eq;
     use std::{
         error::Error,
         io,

@@ -76,6 +76,7 @@ pub enum SchemaKeyword {
 #[cfg(test)]
 mod tests {
     use crate::schema_keyword::SchemaKeyword;
+    use pretty_assertions::assert_eq;
     use std::collections::HashSet;
     use strum::{EnumCount, IntoEnumIterator};
 

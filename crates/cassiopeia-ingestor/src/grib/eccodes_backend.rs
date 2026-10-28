@@ -146,6 +146,7 @@ mod tests {
     use grib_core::{GridDefinition, LatLonGrid, metadata::ReferenceTime};
     use grib_writer::{Grib1Field, Grib1FieldBuilder, Grib1ProductDefinition, GribWriter, PackingStrategy};
     use mediatype::media_type;
+    use pretty_assertions::assert_eq;
     use serde_json::Value;
     use std::{env::var, fs::File, io::Write, path::Path, sync::mpsc::sync_channel, thread};
     use temp_dir::TempDir;

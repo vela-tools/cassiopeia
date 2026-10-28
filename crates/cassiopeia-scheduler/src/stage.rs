@@ -125,6 +125,7 @@ mod tests {
     };
     use cassiopeia_manifest::schedule::{Schedule, trigger::Trigger};
     use cassiopeia_reporter::backend::noop::NoopReporter;
+    use pretty_assertions::assert_eq;
     use std::{
         convert::Infallible,
         num::NonZeroU32,

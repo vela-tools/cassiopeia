@@ -221,6 +221,7 @@ pub fn parameter_key_grib1(table2_version: i64, centre: i64, indicator: i64) -> 
 #[cfg(test)]
 mod tests {
     use crate::grib::parameter::{GribParameter, parameter_key_grib1, parameter_key_grib2};
+    use pretty_assertions::assert_eq;
 
     #[test]
     fn a_known_grib2_triple_resolves_to_its_canonical_key() {

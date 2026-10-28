@@ -21,5 +21,8 @@ serde_json = { version = "1.0.154", features = ["preserve_order"] }
 thiserror = "2.0.21"
 tui-tree-widget = "0.24.1"
 
+[dev-dependencies]
+pretty_assertions = "1.4.1"
+
 [lints]
 workspace = true

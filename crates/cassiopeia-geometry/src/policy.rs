@@ -41,6 +41,7 @@ mod tests {
         policy::GeometryPolicy,
         strategy::{Altitude, ConversionStrategy, Winding},
     };
+    use pretty_assertions::assert_eq;
 
     #[test]
     fn an_absent_policy_normalises_winding_keeps_altitude_and_declares_no_conversion() {

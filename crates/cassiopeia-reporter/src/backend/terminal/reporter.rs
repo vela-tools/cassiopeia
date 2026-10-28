@@ -228,6 +228,7 @@ mod tests {
     };
     use cassiopeia_terminal_style::rendering::Rendering;
     use execution_time::ExecutionTime;
+    use pretty_assertions::assert_eq;
 
     /// A stage identity for the registry tests.
     #[derive(Debug)]

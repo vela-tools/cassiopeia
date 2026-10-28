@@ -135,6 +135,7 @@ fn fold_multi_geometry(members: impl Iterator<Item = GeometryValue>) -> Option<G
 mod tests {
     use crate::kml::geometry::kml_geometry_to_geojson;
     use ::kml::types::{Coord, Geometry as KmlGeometry, LineString, LinearRing, MultiGeometry, Point, Polygon};
+    use pretty_assertions::assert_eq;
 
     fn point(x: f64, y: f64) -> KmlGeometry {
         KmlGeometry::Point(Point::new(x, y, None))
@@ -186,7 +187,7 @@ mod tests {
     fn a_multi_geometry_mixing_families_has_no_geojson_equivalent() {
         let multi = KmlGeometry::MultiGeometry(MultiGeometry::new(vec![point(1.0, 2.0), line()]));
 
-        assert!(kml_geometry_to_geojson(&multi).is_none());
+        assert_eq!(kml_geometry_to_geojson(&multi), None);
     }
 
     #[test]

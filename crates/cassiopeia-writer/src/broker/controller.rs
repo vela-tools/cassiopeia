@@ -42,6 +42,7 @@ pub fn adjust_target_bytes(current: usize, metrics: &BrokerMetrics, tuning: &Bro
 #[cfg(test)]
 mod tests {
     use crate::broker::{controller::adjust_target_bytes, metrics::BrokerMetrics, tuning::BrokerTuning};
+    use pretty_assertions::assert_eq;
     use std::sync::atomic::Ordering;
 
     #[test]

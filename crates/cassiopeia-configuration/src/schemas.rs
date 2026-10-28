@@ -18,6 +18,7 @@ pub struct Schemas {
 #[cfg(test)]
 mod tests {
     use crate::schemas::Schemas;
+    use pretty_assertions::assert_eq;
     use std::path::PathBuf;
 
     #[test]

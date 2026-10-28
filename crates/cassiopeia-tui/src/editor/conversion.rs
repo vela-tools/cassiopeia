@@ -218,6 +218,7 @@ mod tests {
     use cassiopeia_ngsi_ld::entity::{attribute::NgsiLdAttributeKind, name::NameBuf};
     use indexmap::IndexMap;
     use langtag::LangTagBuf;
+    use pretty_assertions::assert_eq;
     use serde_json::Value;
 
     fn field(name: &str) -> EditorKey {

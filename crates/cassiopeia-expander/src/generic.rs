@@ -344,6 +344,7 @@ mod tests {
     use cassiopeia_common::collection::CollectionName;
     use cassiopeia_ir::{fragment::Fragment, mapped::Mapped, parent_context::ParentContextType, record::Record};
     use cassiopeia_mapping::{mapping::Mapping, template::runner::TemplateRunner};
+    use pretty_assertions::assert_eq;
     use serde_json::{Map, Value, json};
     use std::{error::Error, path::Path, sync::Arc};
 
@@ -578,7 +579,7 @@ mod tests {
 
         let fragments = expander.expand(record(json!({"id": 1, "temperature": 21.5}))).unwrap();
 
-        assert!(fragments[0].inner().scope().is_none());
+        assert_eq!(fragments[0].inner().scope(), &None);
     }
 
     #[test]
@@ -594,7 +595,7 @@ mod tests {
 
         let fragments = expander.expand(record(json!({"id": 1, "temperature": 21.5}))).unwrap();
 
-        assert!(fragments[0].inner().scope().is_none());
+        assert_eq!(fragments[0].inner().scope(), &None);
     }
 
     #[test]
@@ -681,7 +682,7 @@ mod tests {
 
         assert_eq!(fragments.len(), 1);
         assert_eq!(urn(&fragments[0]), "urn:ngsi-ld:AirQualityObserved:Station-1");
-        assert!(fragments[0].inner().parent_context().is_none());
+        assert_eq!(fragments[0].inner().parent_context(), &None);
     }
 
     #[test]
@@ -692,7 +693,7 @@ mod tests {
 
         assert_eq!(fragments.len(), 1);
         assert_eq!(urn(&fragments[0]), "urn:ngsi-ld:AirQualityObserved:Station-1");
-        assert!(fragments[0].inner().parent_context().is_none());
+        assert_eq!(fragments[0].inner().parent_context(), &None);
     }
 
     #[test]
@@ -783,7 +784,7 @@ mod tests {
 
         // A materialised target is emitted as an entity in its own right, not linked back as a child.
         let country = fragments.iter().find(|fragment| urn(fragment).contains("Country")).unwrap();
-        assert!(country.inner().parent_context().is_none());
+        assert_eq!(country.inner().parent_context(), &None);
     }
 
     /// An `AircraftModel` mapping over a headerless `planes.dat` record whose single
@@ -815,7 +816,7 @@ mod tests {
     fn assert_only_the_main_aircraft_model(fragments: &[Mapped<Fragment>]) {
         assert_eq!(fragments.len(), 1);
         assert_eq!(urn(&fragments[0]), "urn:ngsi-ld:AircraftModel:BE58");
-        assert!(fragments[0].inner().parent_context().is_none());
+        assert_eq!(fragments[0].inner().parent_context(), &None);
     }
 
     #[test]
@@ -881,7 +882,7 @@ mod tests {
 
         // A single synthetic Relationship records its one edge on the synthetic fragment, pointing back
         // at the main entity, rather than as a child context on the main fragment.
-        assert!(main.inner().parent_context().is_none());
+        assert_eq!(main.inner().parent_context(), &None);
         let contexts = aircraft_type.inner().parent_context().as_ref().unwrap();
         assert_eq!(contexts.len(), 1);
         assert_eq!(contexts[0].key().to_string(), "belongsToAircraftType");
@@ -1188,7 +1189,7 @@ mod tests {
 
         assert_eq!(fragments.len(), 1);
         assert_eq!(urn(&fragments[0]), "urn:ngsi-ld:Route:R-1");
-        assert!(fragments[0].inner().parent_context().is_none());
+        assert_eq!(fragments[0].inner().parent_context(), &None);
     }
 
     #[test]

@@ -45,6 +45,7 @@ cassiopeia-data-profiler.workspace = true
 grib-core = "0.6.0"
 grib-writer = "0.6.0"
 mediatype = "0.23.0"
+pretty_assertions = "1.4.1"
 temp-dir = "0.2.0"
 zip = { version = "9.1.3", default-features = false, features = ["deflate"] }
 

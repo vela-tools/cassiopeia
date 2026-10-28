@@ -72,6 +72,7 @@ mod tests {
     use cassiopeia_ngsi_ld::entity::name::NameBuf;
     use cassiopeia_reporter::backend::noop::NoopReporter;
     use cassiopeia_resolver::{field_path::FieldPath, merged_records::MergedRecords, record_merge::RecordMerge};
+    use pretty_assertions::assert_eq;
     use std::num::NonZeroU64;
 
     fn merge(entity_type: &str, id: &str, records: u64) -> RecordMerge {

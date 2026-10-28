@@ -52,6 +52,7 @@ impl<T> Batch<T> {
 #[cfg(test)]
 mod tests {
     use crate::batch::Batch;
+    use pretty_assertions::assert_eq;
     use std::mem;
 
     #[test]

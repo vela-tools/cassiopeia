@@ -96,6 +96,7 @@ mod tests {
         severity::Severity,
     };
     use http::StatusCode;
+    use pretty_assertions::assert_eq;
 
     fn builder() -> DiagnosticBuilder {
         DiagnosticBuilder::new(

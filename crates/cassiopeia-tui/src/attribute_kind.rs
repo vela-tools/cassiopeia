@@ -59,6 +59,7 @@ fn has_relationship_array_pattern(schema: &Value) -> bool {
 mod tests {
     use crate::attribute_kind::classify_attribute_kind;
     use cassiopeia_ngsi_ld::entity::attribute::NgsiLdAttributeKind;
+    use pretty_assertions::assert_eq;
     use serde_json::json;
 
     #[test]

@@ -70,6 +70,7 @@ mod tests {
     use crate::{transformation::Transformation, value_conversion::ValueConversion};
     use cassiopeia_geometry::{geometry::GeometryKind, target::GeometryTarget};
     use cassiopeia_ngsi_ld::entity::attribute::NgsiLdAttributeKind;
+    use pretty_assertions::assert_eq;
 
     #[test]
     fn a_geo_property_defaults_to_the_geometry_transformation() {

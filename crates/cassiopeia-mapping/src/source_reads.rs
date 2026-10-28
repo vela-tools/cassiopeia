@@ -113,6 +113,7 @@ mod tests {
         source_reads::{SourceKey, SourceReads},
         template::field_path::FieldPath,
     };
+    use pretty_assertions::assert_eq;
     use std::collections::BTreeSet;
 
     fn keys(names: &[&str]) -> SourceReads {

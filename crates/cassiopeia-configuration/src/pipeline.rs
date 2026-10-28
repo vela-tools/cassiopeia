@@ -59,6 +59,7 @@ pub struct Pipeline {
 mod tests {
     use crate::pipeline::{ExtractionMode, Pipeline};
     use cassiopeia_common::memory_profile::MemoryProfile;
+    use pretty_assertions::assert_eq;
     use std::num::NonZeroUsize;
 
     #[test]

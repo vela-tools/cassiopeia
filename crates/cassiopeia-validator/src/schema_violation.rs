@@ -73,6 +73,7 @@ mod tests {
     };
     use cassiopeia_diagnostic::schema_keyword::SchemaKeyword;
     use jsonschema::Validator;
+    use pretty_assertions::assert_eq;
     use serde_json::{Value, json};
 
     /// Every violation a schema raises for an instance, as Cassiopeia keeps them.
@@ -109,7 +110,7 @@ mod tests {
     fn a_violation_at_the_entity_root_resolves_no_attribute() {
         let violations = violations(&json!({"type": "object", "required": ["temperature"]}), &json!({}));
 
-        assert!(violations[0].attribute().is_none());
+        assert_eq!(violations[0].attribute(), None);
         assert_eq!(
             violations[0].kind(),
             &SchemaViolationKind::MissingProperty {
@@ -123,6 +124,6 @@ mod tests {
         let violations = violations(&json!({"type": "object", "properties": {"type": {"type": "string"}}}), &json!({"type": 7}));
 
         assert_eq!(violations[0].instance_path().as_str(), "/type");
-        assert!(violations[0].attribute().is_none());
+        assert_eq!(violations[0].attribute(), None);
     }
 }

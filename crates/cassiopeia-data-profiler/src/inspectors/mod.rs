@@ -36,6 +36,7 @@ pub fn inspect(format: DataFormat, bytes: &[u8]) -> Result<Option<FormatMetadata
 mod tests {
     use crate::inspectors::inspect;
     use cassiopeia_common::format::DataFormat;
+    use pretty_assertions::assert_eq;
 
     #[test]
     fn a_declared_csv_is_inspected_for_its_dialect() {

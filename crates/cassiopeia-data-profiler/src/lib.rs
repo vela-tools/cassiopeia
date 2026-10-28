@@ -98,6 +98,7 @@ pub fn profile_bytes(bytes: &[u8]) -> Result<Profile> {
 mod tests {
     use crate::{error::DataProfilerError, metadata::FormatMetadata, profile_bytes};
     use cassiopeia_common::format::DataFormat;
+    use pretty_assertions::assert_eq;
 
     #[test]
     fn kml_is_detected_by_its_root_element_and_ogc_namespace() {

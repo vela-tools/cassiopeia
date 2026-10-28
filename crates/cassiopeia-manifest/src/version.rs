@@ -16,6 +16,7 @@ pub enum Version {
 #[cfg(test)]
 mod tests {
     use crate::version::Version;
+    use pretty_assertions::assert_eq;
 
     #[test]
     fn the_wire_form_is_the_lowercase_version_tag() {

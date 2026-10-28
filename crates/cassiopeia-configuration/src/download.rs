@@ -39,6 +39,7 @@ pub struct Download {
 #[cfg(test)]
 mod tests {
     use crate::download::Download;
+    use pretty_assertions::assert_eq;
     use std::time::Duration;
 
     const EXPLICIT: &str = r#"

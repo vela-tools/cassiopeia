@@ -53,6 +53,7 @@ impl SerializeRepr for NgsiLdVocabProperty {
 mod tests {
     use crate::entity::attribute::vocab_property::NgsiLdVocabProperty;
     use iri_rs::IriBuf;
+    use pretty_assertions::assert_eq;
 
     #[test]
     fn a_new_vocab_property_holds_its_iri() {

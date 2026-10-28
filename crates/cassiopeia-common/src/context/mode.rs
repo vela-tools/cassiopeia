@@ -66,6 +66,7 @@ fn parse_context_mode(s: &str) -> AtContextMode {
 #[cfg(test)]
 mod tests {
     use crate::context::mode::{AtContextMode, parse_context_mode};
+    use pretty_assertions::assert_eq;
     use std::path::PathBuf;
     use url::Url;
 

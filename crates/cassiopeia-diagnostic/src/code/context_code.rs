@@ -31,6 +31,7 @@ pub enum ContextCode {
 #[cfg(test)]
 mod tests {
     use crate::code::context_code::ContextCode;
+    use pretty_assertions::assert_eq;
 
     #[test]
     fn a_context_code_renders_a_kebab_case_token() {

@@ -137,6 +137,7 @@ mod tests {
     };
     use cassiopeia_ngsi_ld::data_model::DataModel;
     use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+    use pretty_assertions::assert_eq;
     use std::str::FromStr;
 
     fn press(state: &mut ExplorerState, code: KeyCode) {
@@ -156,7 +157,7 @@ mod tests {
         let mut state = ExplorerState::new(Vec::new());
         state.error_message = Some("boom".to_string());
         press(&mut state, KeyCode::Esc);
-        assert!(state.error_message.is_none());
+        assert_eq!(state.error_message, None);
         assert!(!state.should_quit);
     }
 }

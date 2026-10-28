@@ -79,6 +79,7 @@ fn is_element_key(key: &str) -> bool {
 mod tests {
     use crate::xml::{record_split::split, value::document_to_value};
     use cassiopeia_ir::record::Record;
+    use pretty_assertions::assert_eq;
     use serde_json::{Value, json};
 
     fn split_xml(xml: &[u8]) -> Vec<Record> {

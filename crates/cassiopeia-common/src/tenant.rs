@@ -47,6 +47,7 @@ impl FromStr for Tenant {
 #[cfg(test)]
 mod tests {
     use crate::tenant::{Tenant, TenantError};
+    use pretty_assertions::assert_eq;
     use std::str::FromStr;
 
     #[test]

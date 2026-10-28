@@ -98,6 +98,7 @@ mod tests {
     };
     use cassiopeia_common::{representation::NgsiLdRepresentation, skip_null::NgsiLdSkipNull};
     use indexmap::IndexMap;
+    use pretty_assertions::assert_eq;
     use serde::{Serialize, Serializer};
     use serde_json::Value;
 

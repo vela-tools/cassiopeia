@@ -69,6 +69,7 @@ mod tests {
         format::LogFormat,
         level::LogLevel,
     };
+    use pretty_assertions::assert_eq;
     use std::path::PathBuf;
 
     #[test]

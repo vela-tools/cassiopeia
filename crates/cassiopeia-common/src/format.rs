@@ -130,6 +130,7 @@ impl DataFormat {
 #[cfg(test)]
 mod tests {
     use crate::format::DataFormat;
+    use pretty_assertions::assert_eq;
 
     #[test]
     fn auto_carries_no_extension_and_no_concrete_format() {

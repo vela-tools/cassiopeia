@@ -75,6 +75,7 @@ mod tests {
     use crate::input_config::build_input_config;
     use cassiopeia_common::{format::DataFormat, input::Input};
     use cassiopeia_manifest::{input::ManifestInput, mapping_binding::MappingBinding};
+    use pretty_assertions::assert_eq;
     use serde_json::{Map, json};
     use std::{path::PathBuf, str::FromStr};
 

@@ -54,6 +54,7 @@ mod tests {
         metadata::FormatMetadata,
     };
     use cassiopeia_common::format::DataFormat;
+    use pretty_assertions::assert_eq;
 
     #[test]
     fn a_header_row_with_records_is_detected_as_csv() {

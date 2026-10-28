@@ -35,6 +35,7 @@ mod tests {
         payload::{BytesPayload, CollectedPayload, FilePayload},
         payload_origin::PayloadOrigin,
     };
+    use pretty_assertions::assert_eq;
     use std::path::PathBuf;
 
     #[test]

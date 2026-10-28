@@ -22,6 +22,7 @@ mod tests {
     use cassiopeia_diagnostic::code::{diagnostic_code::DiagnosticCode, run_code::RunCode, schema_code::SchemaCode};
     use cassiopeia_ngsi_ld::entity::name::NameBuf;
     use cassiopeia_pipeline::{error::PipelineError, pipeline_stage::PipelineStage};
+    use pretty_assertions::assert_eq;
     use urn_rs::Urn;
 
     #[test]

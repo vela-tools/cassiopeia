@@ -81,6 +81,7 @@ mod tests {
         geometry::{GeometryKind, NgsiLdGeometry},
     };
     use geojson::Position;
+    use pretty_assertions::assert_eq;
 
     fn closed_curve() -> Vec<Position> {
         vec![

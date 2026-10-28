@@ -269,6 +269,7 @@ mod tests {
         data_model::DataModelRepository,
         entity::{NgsiLdEntity, name::NameBuf},
     };
+    use pretty_assertions::assert_eq;
     use std::{collections::HashMap, fs, path::PathBuf};
     use tempfile::TempDir;
     use urn_rs::Urn;

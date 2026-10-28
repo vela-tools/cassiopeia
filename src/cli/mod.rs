@@ -118,6 +118,7 @@ mod tests {
     use crate::cli::Cli;
     use cassiopeia_diagnostic::verbosity::Verbosity;
     use clap::Parser;
+    use pretty_assertions::assert_eq;
 
     fn parsed(arguments: &[&str]) -> Cli {
         Cli::try_parse_from(arguments).expect("the arguments must parse")

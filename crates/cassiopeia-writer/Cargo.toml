@@ -36,6 +36,7 @@ urn-rs = { version = "0.9.2", features = ["serde"] }
 cassiopeia-geometry.workspace = true
 chrono = "0.4.45"
 execution-time = "0.3.1"
+pretty_assertions = "1.4.1"
 
 [lints]
 workspace = true

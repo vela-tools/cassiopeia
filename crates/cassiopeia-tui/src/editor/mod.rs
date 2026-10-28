@@ -61,11 +61,12 @@ mod tests {
     use crate::editor::EditorAttribute;
     use cassiopeia_mapping::transformation::Transformation;
     use cassiopeia_ngsi_ld::entity::attribute::NgsiLdAttributeKind;
+    use pretty_assertions::assert_eq;
 
     #[test]
     fn a_new_attribute_has_no_source_or_children() {
         let attribute = EditorAttribute::new(NgsiLdAttributeKind::Property, Some(Transformation::String));
-        assert!(attribute.source.is_none());
+        assert_eq!(attribute.source, None);
         assert!(attribute.mappings.is_empty());
         assert!(!attribute.is_container());
     }

@@ -338,6 +338,7 @@ fn number_length(text: &str) -> usize {
 #[cfg(test)]
 mod tests {
     use crate::template::lexer::{LexError, Lexeme, LexemeKind, Lexer, Opener};
+    use pretty_assertions::assert_eq;
 
     /// Every lexeme of `source` as `(kind, text)`, and how lexing ended.
     fn lex(source: &str) -> (Vec<(LexemeKind, &str)>, Option<LexError>) {

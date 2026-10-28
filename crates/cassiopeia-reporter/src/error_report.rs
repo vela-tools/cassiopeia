@@ -40,6 +40,7 @@ mod tests {
         verbosity::Verbosity,
     };
     use cassiopeia_terminal_style::rendering::Rendering;
+    use pretty_assertions::assert_eq;
     use std::{io::Error, path::PathBuf};
 
     fn failure() -> IoError {

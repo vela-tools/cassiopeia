@@ -23,6 +23,7 @@ mod tests {
     };
     use cassiopeia_common::{file_framing::FileFraming, representation::NgsiLdRepresentation, skip_null::NgsiLdSkipNull};
     use cassiopeia_ngsi_ld::entity::{NgsiLdEntity, context::ContextSource, name::NameBuf};
+    use pretty_assertions::assert_eq;
     use std::num::NonZeroUsize;
     use tempfile::TempDir;
     use urn_rs::Urn;

@@ -179,6 +179,7 @@ mod tests {
     use cassiopeia_geometry::geometry::NgsiLdGeometry;
     use chrono::{TimeZone, Utc};
     use compact_str::CompactString;
+    use pretty_assertions::assert_eq;
     use urn_rs::Urn;
 
     fn property(value: Value) -> NgsiLdAttribute {

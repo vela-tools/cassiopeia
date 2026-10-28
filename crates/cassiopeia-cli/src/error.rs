@@ -88,6 +88,7 @@ pub type Result<T, E = CliError> = result::Result<T, E>;
 #[cfg(test)]
 mod tests {
     use crate::error::IoAction;
+    use pretty_assertions::assert_eq;
 
     #[test]
     fn io_actions_render_as_their_verb() {

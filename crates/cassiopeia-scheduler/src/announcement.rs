@@ -24,6 +24,7 @@ mod tests {
     use crate::announcement::announce_schedule;
     use cassiopeia_manifest::schedule::{Schedule, time_of_day::TimeOfDay, trigger::Trigger};
     use cassiopeia_reporter::reporter::MessageLog;
+    use pretty_assertions::assert_eq;
     use std::{num::NonZeroU32, str::FromStr, sync::Mutex, time::Duration};
 
     /// Captures only the informational lines `announce_schedule` emits, so a test can assert the

@@ -38,6 +38,7 @@ impl Identity {
 #[cfg(test)]
 mod tests {
     use crate::{identity::Identity, template::TemplateSource};
+    use pretty_assertions::assert_eq;
 
     #[test]
     fn reads_an_entity_name() {

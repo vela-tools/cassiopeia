@@ -19,6 +19,7 @@ use cassiopeia_ir::{
     record::Record,
 };
 use dbase::{FieldName, FieldValue, Record as DbaseRecord, TableWriterBuilder};
+use pretty_assertions::assert_eq;
 use shapefile::{Point as ShpPoint, Writer};
 use std::{
     collections::HashMap,

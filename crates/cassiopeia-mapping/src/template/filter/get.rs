@@ -35,6 +35,7 @@ pub fn get(value: &Value, kwargs: Kwargs, _state: &State) -> TeraResult<Value> {
 #[cfg(test)]
 mod tests {
     use crate::template::filter::get::get;
+    use pretty_assertions::assert_eq;
     use std::collections::BTreeMap;
     use tera::{Context, Tera};
 

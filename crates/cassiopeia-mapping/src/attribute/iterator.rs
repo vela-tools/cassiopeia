@@ -36,6 +36,7 @@ impl<'a> Iterator for AttributeIterator<'a> {
 #[cfg(test)]
 mod tests {
     use crate::attribute::Attribute;
+    use pretty_assertions::assert_eq;
 
     #[test]
     fn the_walk_descends_through_mappings_language_maps_and_properties() {

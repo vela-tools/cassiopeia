@@ -274,6 +274,7 @@ fn map_value_error(error: Error) -> XmlIngestError {
 #[cfg(test)]
 mod tests {
     use crate::xml::{error::XmlIngestError, value::document_to_value};
+    use pretty_assertions::assert_eq;
     use serde_json::json;
 
     #[test]

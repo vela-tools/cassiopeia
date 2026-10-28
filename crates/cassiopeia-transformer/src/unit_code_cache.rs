@@ -40,6 +40,7 @@ impl UnitCodeCache {
 mod tests {
     use crate::unit_code_cache::UnitCodeCache;
     use cefact_units::UnitCode;
+    use pretty_assertions::assert_eq;
 
     #[test]
     fn two_distinct_unit_codes_both_resolve_through_one_cache() {

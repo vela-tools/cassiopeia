@@ -101,6 +101,7 @@ mod tests {
     };
     use cassiopeia_expander::error::ExpanderError;
     use cassiopeia_reporter::backend::noop::NoopReporter;
+    use pretty_assertions::assert_eq;
 
     fn records() -> SkippedRecords<ExpanderCode, ExpanderError> {
         SkippedRecords::new()

@@ -41,6 +41,7 @@ mod tests {
         validator::Validator,
     };
     use cassiopeia_ngsi_ld::entity::{NgsiLdEntity, name::NameBuf};
+    use pretty_assertions::assert_eq;
     use urn_rs::Urn;
 
     /// A validator that finds no schema for anything, used to exercise the default batch behaviour.

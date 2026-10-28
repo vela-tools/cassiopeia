@@ -112,6 +112,7 @@ impl Transformation {
 mod tests {
     use crate::transformation::Transformation;
     use cassiopeia_geometry::{geometry::GeometryKind, target::GeometryTarget};
+    use pretty_assertions::assert_eq;
 
     #[test]
     fn transformations_deserialize_from_their_lowercase_tokens() {

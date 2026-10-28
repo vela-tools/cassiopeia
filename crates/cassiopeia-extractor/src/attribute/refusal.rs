@@ -24,6 +24,7 @@ pub(crate) enum AttributeRefusal {
 mod tests {
     use crate::attribute::refusal::AttributeRefusal;
     use cassiopeia_geometry::error::GeometryError;
+    use pretty_assertions::assert_eq;
 
     #[test]
     fn a_geometry_error_converts_into_a_refusal() {

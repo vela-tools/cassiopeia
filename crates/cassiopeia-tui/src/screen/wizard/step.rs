@@ -19,6 +19,7 @@ pub enum WizardStep {
 #[cfg(test)]
 mod tests {
     use crate::screen::wizard::step::WizardStep;
+    use pretty_assertions::{assert_eq, assert_ne};
 
     #[test]
     fn steps_compare_by_value() {

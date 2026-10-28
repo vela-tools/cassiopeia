@@ -69,6 +69,7 @@ mod tests {
         broker_rejection::{BrokerRejection, RejectionHeadline},
         problem_details::ProblemDetails,
     };
+    use pretty_assertions::assert_eq;
 
     fn rejection(body: &str) -> BrokerRejection {
         BrokerRejection::new(serde_json::from_str::<ProblemDetails>(body).unwrap())

@@ -38,6 +38,7 @@ pub fn geo_convert(kwargs: Kwargs, _state: &State) -> TeraResult<Value> {
 #[cfg(test)]
 mod tests {
     use crate::template::function::geo_convert::geo_convert;
+    use pretty_assertions::assert_eq;
     use serde_json::json;
     use tera::{Context, Tera, Value};
 

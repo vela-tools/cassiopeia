@@ -109,6 +109,7 @@ mod tests {
         record::Record,
     };
     use mediatype::media_type;
+    use pretty_assertions::assert_eq;
     use std::{fs::File, io::Write, sync::mpsc::sync_channel, thread};
     use temp_dir::TempDir;
 

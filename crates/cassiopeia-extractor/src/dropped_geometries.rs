@@ -54,6 +54,7 @@ mod tests {
     use crate::dropped_geometries::DroppedGeometries;
     use cassiopeia_geometry::{error::GeometryError, geometry::GeometryKind};
     use cassiopeia_ngsi_ld::entity::name::NameBuf;
+    use pretty_assertions::assert_eq;
 
     fn name(value: &str) -> NameBuf {
         NameBuf::new(value).expect("valid name")

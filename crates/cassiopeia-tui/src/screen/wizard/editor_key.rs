@@ -45,6 +45,7 @@ impl EditorKey {
 #[cfg(test)]
 mod tests {
     use crate::screen::wizard::editor_key::EditorKey;
+    use pretty_assertions::assert_eq;
 
     #[test]
     fn a_schema_field_displays_as_its_name() {

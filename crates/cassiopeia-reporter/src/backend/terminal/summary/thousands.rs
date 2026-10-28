@@ -14,6 +14,7 @@ pub(crate) fn thousands(value: u64) -> String {
 #[cfg(test)]
 mod tests {
     use crate::backend::terminal::summary::thousands::thousands;
+    use pretty_assertions::assert_eq;
 
     #[test]
     fn counts_carry_thousands_separators() {

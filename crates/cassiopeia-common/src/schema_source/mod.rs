@@ -64,6 +64,7 @@ impl<'de> Deserialize<'de> for SchemaSource {
 #[cfg(test)]
 mod tests {
     use crate::schema_source::{SchemaSource, parse_schema_source};
+    use pretty_assertions::assert_eq;
     use std::path::PathBuf;
     use url::Url;
 

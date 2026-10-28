@@ -143,6 +143,7 @@ mod tests {
         schedule::{Schedule, trigger::Trigger},
         version::Version,
     };
+    use pretty_assertions::assert_eq;
     use std::{path::Path, time::Duration};
 
     const MINIMAL: &str = r#"{

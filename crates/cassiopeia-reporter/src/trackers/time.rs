@@ -48,6 +48,7 @@ impl TimeTracker {
 mod tests {
     use crate::trackers::time::TimeTracker;
     use execution_time::ExecutionTime;
+    use pretty_assertions::assert_eq;
     use std::{thread::sleep, time::Duration};
 
     #[test]

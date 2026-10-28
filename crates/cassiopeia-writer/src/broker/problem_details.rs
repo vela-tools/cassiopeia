@@ -39,6 +39,7 @@ fn about_blank() -> IriRefBuf {
 mod tests {
     use crate::broker::problem_details::ProblemDetails;
     use iri_rs::IriRef;
+    use pretty_assertions::assert_eq;
 
     #[test]
     fn the_specification_example_parses_every_field() {

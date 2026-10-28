@@ -92,6 +92,7 @@ pub enum IoError {
 #[cfg(test)]
 mod tests {
     use crate::error::io::{IoAction, IoError};
+    use pretty_assertions::assert_eq;
     use std::{io, path::PathBuf};
 
     #[test]

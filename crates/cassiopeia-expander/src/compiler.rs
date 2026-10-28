@@ -183,6 +183,7 @@ mod tests {
         template_site::TemplateSite,
     };
     use cassiopeia_ngsi_ld::entity::name::NameBuf;
+    use pretty_assertions::assert_eq;
     use std::{error::Error, path::Path};
 
     const ORIGIN: &str = "sensor.json5";

@@ -28,6 +28,7 @@ impl BrokerAtomicity {
 #[cfg(test)]
 mod tests {
     use crate::broker_atomicity::BrokerAtomicity;
+    use pretty_assertions::assert_eq;
 
     #[test]
     fn every_atomicity_round_trips_through_its_kebab_case_token() {

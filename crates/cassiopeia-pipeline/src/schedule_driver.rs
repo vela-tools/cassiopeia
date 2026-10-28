@@ -195,6 +195,7 @@ mod tests {
     };
     use cassiopeia_common::run::RunCount;
     use cassiopeia_manifest::failure_policy::FailurePolicy;
+    use pretty_assertions::assert_eq;
     use std::ops::ControlFlow;
 
     /// A stand-in fatal failure whose variant the tests can match on.

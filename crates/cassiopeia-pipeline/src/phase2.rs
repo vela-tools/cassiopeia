@@ -103,6 +103,7 @@ mod tests {
     };
     use cassiopeia_transformer::{ngsi_ld_transformer::NgsiLdTransformer, transformer::Transformer};
     use cassiopeia_unreadable_timestamps::unreadable_timestamps::UnreadableTimestamps;
+    use pretty_assertions::assert_eq;
     use serde_json::{Map, Value, json};
     use std::{ops::ControlFlow, path::Path, sync::Arc};
     use urn_rs::Urn;

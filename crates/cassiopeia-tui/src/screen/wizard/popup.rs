@@ -25,6 +25,7 @@ pub struct WizardPopup {
 #[cfg(test)]
 mod tests {
     use crate::screen::wizard::popup::{PopupAction, WizardPopup};
+    use pretty_assertions::assert_eq;
 
     #[test]
     fn a_popup_carries_its_message_and_action() {

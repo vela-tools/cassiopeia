@@ -17,6 +17,7 @@ pub enum Version {
 #[cfg(test)]
 mod tests {
     use crate::version::Version;
+    use pretty_assertions::assert_eq;
 
     #[test]
     fn the_current_version_deserializes_from_its_lowercase_token() {

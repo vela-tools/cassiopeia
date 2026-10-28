@@ -32,6 +32,7 @@ pub fn map_range(kwargs: Kwargs, _state: &State) -> TeraResult<Value> {
 #[cfg(test)]
 mod tests {
     use crate::template::function::map_range::map_range;
+    use pretty_assertions::assert_eq;
     use tera::{Context, Tera};
 
     fn render(template: &str) -> String {

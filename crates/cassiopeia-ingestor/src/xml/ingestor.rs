@@ -96,6 +96,7 @@ mod tests {
         record::Record,
     };
     use mediatype::media_type;
+    use pretty_assertions::assert_eq;
     use serde_json::Value;
     use std::{fs::File, io::Write, path::PathBuf, sync::mpsc::sync_channel, thread};
     use temp_dir::TempDir;
@@ -169,7 +170,7 @@ mod tests {
     fn a_single_station_feed_ingests_to_one_nested_record() {
         let records = try_ingest(profiled_xml(ARSO_ONE_STATION).1).unwrap();
         assert_eq!(records.len(), 1);
-        assert!(records[0].collection().is_none());
+        assert_eq!(records[0].collection(), &None);
         let met_data = records[0].data().get("metData").unwrap();
         assert_eq!(met_data.get("t"), Some(&Value::String("24".to_owned())));
     }

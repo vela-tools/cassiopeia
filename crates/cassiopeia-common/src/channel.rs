@@ -292,6 +292,7 @@ fn update_peak(peak: &AtomicUsize, value: usize) {
 #[cfg(test)]
 mod tests {
     use super::{ChannelPolicy, ChannelSender, channel};
+    use pretty_assertions::assert_eq;
     use std::{
         num::NonZeroUsize,
         sync::{

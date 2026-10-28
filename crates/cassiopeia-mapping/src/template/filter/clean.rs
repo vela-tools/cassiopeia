@@ -18,6 +18,7 @@ pub fn clean(value: &str, _kwargs: Kwargs, _state: &State) -> String {
 #[cfg(test)]
 mod tests {
     use crate::template::filter::clean::clean;
+    use pretty_assertions::assert_eq;
     use tera::{Context, Tera};
 
     fn apply(input: &str) -> String {

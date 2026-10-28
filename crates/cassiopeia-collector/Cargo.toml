@@ -19,6 +19,7 @@ tracing = "0.1.44"
 url = "2.5.8"
 
 [dev-dependencies]
+pretty_assertions = "1.4.1"
 tempfile = "3.27.0"
 
 [lints]

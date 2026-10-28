@@ -45,6 +45,7 @@ impl Trigger {
 #[cfg(test)]
 mod tests {
     use crate::schedule::{time_of_day::TimeOfDay, trigger::Trigger};
+    use pretty_assertions::assert_eq;
     use std::{str::FromStr, time::Duration};
 
     #[test]

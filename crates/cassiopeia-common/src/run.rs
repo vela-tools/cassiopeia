@@ -49,6 +49,7 @@ impl RunCount {
 #[cfg(test)]
 mod tests {
     use crate::run::{RunCount, RunNumber};
+    use pretty_assertions::assert_eq;
 
     #[test]
     fn a_run_number_exposes_and_displays_its_index() {

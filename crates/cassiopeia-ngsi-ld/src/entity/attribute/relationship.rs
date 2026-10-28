@@ -59,12 +59,13 @@ impl SerializeRepr for NgsiLdRelationship {
 #[cfg(test)]
 mod tests {
     use crate::entity::attribute::relationship::NgsiLdRelationship;
+    use pretty_assertions::assert_eq;
     use urn_rs::Urn;
 
     #[test]
     fn a_new_relationship_carries_only_its_object() {
         let rel = NgsiLdRelationship::new("urn:ngsi-ld:Building:1".parse::<Urn>().unwrap());
-        assert!(rel.object_type.is_none());
+        assert_eq!(rel.object_type, None);
         assert!(rel.attributes.is_empty());
     }
 }

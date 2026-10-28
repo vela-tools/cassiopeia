@@ -31,6 +31,7 @@ impl GribInspector {
 #[cfg(test)]
 mod tests {
     use crate::{inspectors::grib::GribInspector, metadata::GribEdition};
+    use pretty_assertions::assert_eq;
 
     #[test]
     fn grib2_edition_is_read_from_octet_eight() {

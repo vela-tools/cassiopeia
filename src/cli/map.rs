@@ -171,6 +171,7 @@ mod tests {
     use crate::cli::{Cli, Commands};
     use cassiopeia_common::{channel::ChannelPolicy, run_var::run_vars_to_map};
     use clap::Parser;
+    use pretty_assertions::assert_eq;
     use std::num::NonZeroUsize;
 
     /// Parses a `map` command line, returning its flattened arguments.

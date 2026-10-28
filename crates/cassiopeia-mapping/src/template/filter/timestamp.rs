@@ -88,6 +88,7 @@ fn parse_textual_timestamp(text: &str) -> TeraResult<DateTime<Utc>> {
 mod tests {
     use crate::template::filter::timestamp::{date_subtract_seconds, parse_textual_timestamp, seconds_argument};
     use chrono::{DateTime, Utc};
+    use pretty_assertions::assert_eq;
     use tera::{Context, Tera, Value};
 
     fn render(value: Value, seconds: Value) -> Result<String, tera::Error> {

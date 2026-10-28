@@ -67,6 +67,7 @@ mod tests {
     use crate::{cli::Cli, config_overrides::overrides_from_cli};
     use cassiopeia_configuration::overrides::ConfigOverride;
     use clap::Parser;
+    use pretty_assertions::assert_eq;
 
     /// A minimal `map` command line with the given engine/run flags appended.
     fn overrides_for(extra: &[&str]) -> Vec<ConfigOverride> {

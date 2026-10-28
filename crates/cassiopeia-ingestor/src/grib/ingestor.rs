@@ -166,6 +166,7 @@ mod tests {
         encoder::{EncodingMethod, GpvEncoder, LatLonGrid, SimplePackingStrategy, SingleGrib2Message, WriteGrib2Message},
     };
     use mediatype::media_type;
+    use pretty_assertions::assert_eq;
     use serde_json::Value;
     use std::{borrow::Cow, collections::HashMap, fs::File, io::Write, sync::mpsc::sync_channel, thread};
     use temp_dir::TempDir;

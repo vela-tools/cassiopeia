@@ -421,6 +421,7 @@ dependencies = [
  "human-panic",
  "humantime",
  "mimalloc",
+ "pretty_assertions",
  "rayon",
  "shadow-rs",
  "thiserror 2.0.21",
@@ -436,6 +437,7 @@ dependencies = [
  "cassiopeia-geometry",
  "cassiopeia-ngsi-ld",
  "chrono",
+ "pretty_assertions",
  "serde_json",
  "urn-rs",
 ]
@@ -457,6 +459,7 @@ dependencies = [
  "clap",
  "clap-markdown",
  "json5format",
+ "pretty_assertions",
  "serde_json",
  "serde_json5",
  "strum",
@@ -474,6 +477,7 @@ dependencies = [
  "cassiopeia-ir",
  "derive_more",
  "http",
+ "pretty_assertions",
  "reqwest",
  "temp-dir",
  "tempfile",
@@ -493,6 +497,7 @@ dependencies = [
  "http",
  "num-traits",
  "parking_lot 0.13.0",
+ "pretty_assertions",
  "serde",
  "serde_json",
  "smart-default",
@@ -509,6 +514,7 @@ dependencies = [
  "cassiopeia-directories",
  "figment2",
  "humantime-serde",
+ "pretty_assertions",
  "serde",
  "serial_test",
  "smart-default",
@@ -542,6 +548,7 @@ dependencies = [
  "lazy-regex",
  "mediatype",
  "memmap2",
+ "pretty_assertions",
  "quick-xml 0.42.0",
  "serde",
  "serde_json",
@@ -560,6 +567,7 @@ dependencies = [
  "getset",
  "http",
  "iri-rs",
+ "pretty_assertions",
  "strum",
  "url",
  "urn-rs",
@@ -571,6 +579,7 @@ version = "1.1.0"
 dependencies = [
  "etcetera",
  "is-docker",
+ "pretty_assertions",
 ]
 
 [[package]]
@@ -583,6 +592,7 @@ dependencies = [
  "cassiopeia-mapping",
  "cassiopeia-ngsi-ld",
  "deunicode",
+ "pretty_assertions",
  "rayon",
  "serde_json",
  "thiserror 2.0.21",
@@ -606,6 +616,7 @@ dependencies = [
  "derive_more",
  "indexmap 2.14.2",
  "parking_lot 0.13.0",
+ "pretty_assertions",
  "rayon",
  "serde_json",
  "smallvec",
@@ -622,6 +633,7 @@ dependencies = [
  "geo-types",
  "geojson",
  "getset",
+ "pretty_assertions",
  "serde",
  "serde_json",
  "strum",
@@ -651,6 +663,7 @@ dependencies = [
  "indexmap 2.14.2",
  "kml",
  "mediatype",
+ "pretty_assertions",
  "quick-xml 0.42.0",
  "rustc-hash",
  "serde",
@@ -677,6 +690,7 @@ dependencies = [
  "foldhash",
  "getset",
  "indexmap 2.14.2",
+ "pretty_assertions",
  "serde",
  "serde_json",
  "smallvec",
@@ -696,6 +710,7 @@ dependencies = [
  "getset",
  "humantime-serde",
  "json5format",
+ "pretty_assertions",
  "serde",
  "serde_json",
  "serde_json5",
@@ -721,6 +736,7 @@ dependencies = [
  "langtag",
  "lazy-regex",
  "md5",
+ "pretty_assertions",
  "serde",
  "serde_json",
  "serde_json5",
@@ -750,6 +766,7 @@ dependencies = [
  "langtag",
  "lazy-regex",
  "num-traits",
+ "pretty_assertions",
  "serde",
  "serde_json",
  "strum",
@@ -788,6 +805,7 @@ dependencies = [
  "indexmap 2.14.2",
  "jsonschema",
  "memory-stats",
+ "pretty_assertions",
  "serde_json",
  "temp-dir",
  "tempfile",
@@ -804,6 +822,7 @@ dependencies = [
  "cassiopeia-data-profiler",
  "cassiopeia-ir",
  "mediatype",
+ "pretty_assertions",
  "thiserror 2.0.21",
 ]
 
@@ -825,6 +844,7 @@ dependencies = [
  "num-traits",
  "once_cell",
  "parking_lot 0.13.0",
+ "pretty_assertions",
  "smart-default",
  "tabular",
  "thiserror 2.0.21",
@@ -849,6 +869,7 @@ dependencies = [
  "derive_more",
  "foldhash",
  "indexmap 2.14.2",
+ "pretty_assertions",
  "rayon",
  "redb",
  "rmp-serde",
@@ -873,6 +894,7 @@ dependencies = [
  "cron",
  "derive_more",
  "humantime",
+ "pretty_assertions",
  "rand 0.10.3",
 ]
 
@@ -888,6 +910,7 @@ dependencies = [
  "futures",
  "lazy-regex",
  "mediatype",
+ "pretty_assertions",
  "reqwest",
  "rustc-hash",
  "serde",
@@ -904,6 +927,7 @@ name = "cassiopeia-terminal-style"
 version = "1.1.0"
 dependencies = [
  "anstyle",
+ "pretty_assertions",
 ]
 
 [[package]]
@@ -921,6 +945,7 @@ dependencies = [
  "indexmap 2.14.2",
  "iri-rs",
  "langtag",
+ "pretty_assertions",
  "rayon",
  "serde_json",
  "thiserror 2.0.21",
@@ -939,6 +964,7 @@ dependencies = [
  "indexmap 2.14.2",
  "inflections",
  "langtag",
+ "pretty_assertions",
  "ratatui",
  "serde_json",
  "thiserror 2.0.21",
@@ -952,6 +978,7 @@ dependencies = [
  "cassiopeia-ngsi-ld",
  "indexmap 2.14.2",
  "parking_lot 0.13.0",
+ "pretty_assertions",
 ]
 
 [[package]]
@@ -966,6 +993,7 @@ dependencies = [
  "foldhash",
  "getset",
  "jsonschema",
+ "pretty_assertions",
  "rayon",
  "serde",
  "serde_json",
@@ -996,6 +1024,7 @@ dependencies = [
  "iri-rs",
  "memchr",
  "parking_lot 0.13.0",
+ "pretty_assertions",
  "rayon",
  "reqwest",
  "serde",
@@ -1679,6 +1708,12 @@ name = "deunicode"
 version = "1.6.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "abd57806937c9cc163efc8ea3910e00a62e2aeb0b8119f1793a978088f8f6b04"
+
+[[package]]
+name = "diff"
+version = "0.1.13"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "56254986775e3233ffa9c4d7d3faaf6d36a2c09d30b20687e9f88bc8bafc16c8"
 
 [[package]]
 name = "digest"
@@ -4321,6 +4356,16 @@ name = "powerfmt"
 version = "0.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4a6394b9e965e73d0a289ee54f589087e2c676aedf60885baf52c76b771e4958"
+
+[[package]]
+name = "pretty_assertions"
+version = "1.4.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3ae130e2f271fbc2ac3a40fb1d07180839cdbbe443c7a27e1e3c13c5cac0116d"
+dependencies = [
+ "diff",
+ "yansi",
+]
 
 [[package]]
 name = "prettyplease"
@@ -7112,6 +7157,12 @@ checksum = "3ad82d2a33cdc9674dc7465672f271e096168fcdbe0f799d9e6db8c5892679dc"
 dependencies = [
  "either",
 ]
+
+[[package]]
+name = "yansi"
+version = "1.0.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "cfe53a6657fd280eaa890a3bc59152892ffa3e30101319d168b781ed6529b049"
 
 [[package]]
 name = "yoke"

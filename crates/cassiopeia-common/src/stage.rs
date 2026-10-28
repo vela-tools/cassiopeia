@@ -72,6 +72,7 @@ impl Stage {
 #[cfg(test)]
 mod tests {
     use crate::stage::Stage;
+    use pretty_assertions::assert_eq;
     use std::str::FromStr;
 
     #[test]

@@ -157,6 +157,7 @@ impl<'de> Visitor<'de> for BrokerHeadersVisitor {
 #[cfg(test)]
 mod tests {
     use crate::broker_header::{BrokerHeader, BrokerHeaderError, BrokerHeaders};
+    use pretty_assertions::assert_eq;
     use std::str::FromStr;
 
     #[test]

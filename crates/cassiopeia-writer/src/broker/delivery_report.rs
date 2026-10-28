@@ -94,6 +94,7 @@ mod tests {
     };
     use cassiopeia_ngsi_ld::entity::{NgsiLdEntity, name::NameBuf};
     use iri_rs::IriBuf;
+    use pretty_assertions::assert_eq;
     use url::Url;
     use urn_rs::Urn;
 
@@ -127,7 +128,7 @@ mod tests {
 
     #[test]
     fn an_empty_batch_contributes_no_entities_field() {
-        assert!(entities_field(&[]).is_none());
+        assert_eq!(entities_field(&[]), None);
     }
 
     #[test]

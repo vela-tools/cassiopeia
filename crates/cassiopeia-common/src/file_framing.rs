@@ -19,6 +19,7 @@ pub enum FileFraming {
 #[cfg(test)]
 mod tests {
     use crate::file_framing::FileFraming;
+    use pretty_assertions::assert_eq;
 
     #[test]
     fn every_framing_round_trips_through_its_kebab_case_token() {

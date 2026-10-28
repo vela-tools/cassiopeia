@@ -94,6 +94,7 @@ mod tests {
         store_kind::StoreKind,
         user_agent::UserAgent,
     };
+    use pretty_assertions::assert_eq;
     use std::{num::NonZeroUsize, path::PathBuf};
 
     fn config(memory_profile: MemoryProfile) -> PipelineConfig {

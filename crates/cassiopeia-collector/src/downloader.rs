@@ -98,6 +98,7 @@ impl Downloader {
 mod tests {
     use crate::{downloader::Downloader, error::CollectorError};
     use cassiopeia_common::user_agent::UserAgent;
+    use pretty_assertions::assert_eq;
     use std::{
         fs::read_to_string,
         io::{Read as _, Write as _},

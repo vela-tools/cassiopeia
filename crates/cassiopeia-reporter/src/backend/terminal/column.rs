@@ -120,6 +120,7 @@ fn format_elapsed(secs: u64, millis: u32) -> String {
 #[cfg(test)]
 mod tests {
     use crate::backend::terminal::column::{format_elapsed, format_rate};
+    use pretty_assertions::assert_eq;
 
     #[test]
     fn rate_scales_by_magnitude() {

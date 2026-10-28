@@ -23,6 +23,7 @@ impl StoreWriteStrategy {
 #[cfg(test)]
 mod tests {
     use crate::store_write_strategy::StoreWriteStrategy;
+    use pretty_assertions::assert_eq;
 
     #[test]
     fn concurrent_stores_remain_concurrent() {

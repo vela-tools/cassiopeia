@@ -18,6 +18,7 @@ pub struct TuiConfig {
 #[cfg(test)]
 mod tests {
     use crate::{config::TuiConfig, theme::LIGHT};
+    use pretty_assertions::assert_eq;
     use std::path::PathBuf;
 
     #[test]

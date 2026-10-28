@@ -50,6 +50,7 @@ pub fn normalize_longitude(longitude: f64) -> f64 {
 #[cfg(test)]
 mod tests {
     use crate::grib::field::normalize_longitude;
+    use pretty_assertions::assert_eq;
 
     /// Bit equality, because these are exact grid coordinates rather than computed measurements: a
     /// folded longitude that is merely close would shift a cell and change its geohash identity.

@@ -51,6 +51,7 @@ fn zip_holds_a_shp(bytes: &[u8]) -> bool {
 mod tests {
     use crate::detectors::{Detector, shapefile::ShapefileDetector};
     use cassiopeia_common::format::DataFormat;
+    use pretty_assertions::assert_eq;
     use std::io::{Cursor, Write};
     use zip::{ZipWriter, write::SimpleFileOptions};
 

@@ -53,6 +53,7 @@ fn is_kml(bytes: &[u8]) -> bool {
 mod tests {
     use crate::detectors::{Detector, kml::KmlDetector};
     use cassiopeia_common::format::DataFormat;
+    use pretty_assertions::assert_eq;
 
     #[test]
     fn kml_is_detected_by_its_root_element_and_ogc_namespace() {

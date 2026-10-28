@@ -186,6 +186,7 @@ mod tests {
     use cassiopeia_common::{representation::NgsiLdRepresentation, skip_null::NgsiLdSkipNull};
     use cassiopeia_geometry::geometry::NgsiLdGeometry;
     use chrono::{DateTime, Utc};
+    use pretty_assertions::assert_eq;
     use serde_json::json;
     use urn_rs::Urn;
 

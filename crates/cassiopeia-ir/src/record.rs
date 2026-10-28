@@ -37,6 +37,7 @@ impl Record {
 mod tests {
     use crate::record::Record;
     use cassiopeia_common::collection::CollectionName;
+    use pretty_assertions::assert_eq;
     use serde_json::{Map, Value, json};
 
     #[test]

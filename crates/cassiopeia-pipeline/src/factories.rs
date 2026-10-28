@@ -161,6 +161,7 @@ mod tests {
     use crate::factories::map_context_delivery;
     use cassiopeia_manifest::output::context_delivery::ContextDelivery as ManifestContextDelivery;
     use cassiopeia_writer::context_delivery::ContextDelivery;
+    use pretty_assertions::assert_eq;
 
     #[test]
     fn context_delivery_maps_across_the_two_enums() {

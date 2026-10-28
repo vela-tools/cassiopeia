@@ -92,6 +92,7 @@ pub enum TemplatePart {
 #[cfg(test)]
 mod tests {
     use crate::template::TemplateSource;
+    use pretty_assertions::assert_eq;
 
     #[test]
     fn a_template_source_round_trips_through_json_transparently() {

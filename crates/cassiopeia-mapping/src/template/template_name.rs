@@ -26,6 +26,7 @@ impl TemplateName {
 #[cfg(test)]
 mod tests {
     use crate::template::template_name::TemplateName;
+    use pretty_assertions::{assert_eq, assert_ne};
 
     #[test]
     fn the_same_source_yields_the_same_name() {

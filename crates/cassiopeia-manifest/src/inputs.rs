@@ -40,6 +40,7 @@ impl TryFrom<Vec<ManifestInput>> for Inputs {
 mod tests {
     use crate::{input::ManifestInput, inputs::Inputs, mapping_binding::MappingBinding};
     use cassiopeia_common::input::Input;
+    use pretty_assertions::assert_eq;
     use std::path::PathBuf;
 
     fn an_input() -> ManifestInput {

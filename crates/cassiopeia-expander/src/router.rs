@@ -60,6 +60,7 @@ mod tests {
     };
     use cassiopeia_common::collection::CollectionName;
     use cassiopeia_mapping::{mapping::Mapping, template::runner::TemplateRunner};
+    use pretty_assertions::assert_eq;
     use std::{path::Path, sync::Arc};
 
     fn mapping(data_model: &str) -> Arc<Mapping> {

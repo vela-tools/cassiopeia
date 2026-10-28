@@ -54,6 +54,7 @@ impl NodePath {
 #[cfg(test)]
 mod tests {
     use crate::screen::wizard::{editor_key::EditorKey, node_path::NodePath};
+    use pretty_assertions::assert_eq;
 
     fn field(name: &str) -> EditorKey {
         EditorKey::SchemaField(name.to_string())

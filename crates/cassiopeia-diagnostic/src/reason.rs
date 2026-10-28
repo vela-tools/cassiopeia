@@ -55,6 +55,7 @@ mod tests {
         reason::{Reason, Sighting},
         severity::Severity,
     };
+    use pretty_assertions::{assert_eq, assert_ne};
 
     #[test]
     fn the_two_sightings_are_distinct() {

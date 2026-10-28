@@ -119,6 +119,7 @@ mod tests {
         geometry::Dimension,
         strategy::{Altitude, ConversionStrategy, Winding},
     };
+    use pretty_assertions::assert_eq;
 
     #[test]
     fn strategies_read_and_write_their_kebab_case_tokens() {

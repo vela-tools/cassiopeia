@@ -30,6 +30,7 @@ pub enum RunCode {
 #[cfg(test)]
 mod tests {
     use crate::code::run_code::RunCode;
+    use pretty_assertions::assert_eq;
 
     #[test]
     fn a_run_code_renders_a_kebab_case_token() {

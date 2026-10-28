@@ -31,5 +31,8 @@ thiserror = "2.0.21"
 typed-builder = "0.23.2"
 unicode-ident = "1.0.27"
 
+[dev-dependencies]
+pretty_assertions = "1.4.1"
+
 [lints]
 workspace = true

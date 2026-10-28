@@ -46,6 +46,7 @@ impl ObservedAtCache {
 mod tests {
     use crate::observed_at_cache::ObservedAtCache;
     use cassiopeia_ngsi_ld::value::types::Value;
+    use pretty_assertions::{assert_eq, assert_ne};
     use serde_json::{Value as JsonValue, json};
 
     fn as_value(json: JsonValue) -> Value {
@@ -94,9 +95,9 @@ mod tests {
     fn an_observed_at_that_is_neither_text_nor_an_epoch_yields_no_instant() {
         let mut cache = ObservedAtCache::new();
 
-        assert!(cache.observed_at(&as_value(json!(2026))).is_none());
-        assert!(cache.observed_at(&as_value(json!(true))).is_none());
-        assert!(cache.observed_at(&as_value(json!(null))).is_none());
+        assert_eq!(cache.observed_at(&as_value(json!(2026))), None);
+        assert_eq!(cache.observed_at(&as_value(json!(true))), None);
+        assert_eq!(cache.observed_at(&as_value(json!(null))), None);
         assert!(cache.observed_at(&as_value(json!({"at": "2026-04-03T22:00:20Z"}))).is_none());
         assert!(cache.observed_at(&as_value(json!("not a timestamp"))).is_none());
     }

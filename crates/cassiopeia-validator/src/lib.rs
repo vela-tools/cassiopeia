@@ -29,6 +29,7 @@ mod tests {
     };
     use cassiopeia_common::{representation::NgsiLdRepresentation, skip_null::NgsiLdSkipNull};
     use cassiopeia_ngsi_ld::entity::{NgsiLdEntity, name::NameBuf};
+    use pretty_assertions::assert_eq;
     use std::collections::HashMap;
     use tempfile::TempDir;
     use urn_rs::Urn;

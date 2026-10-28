@@ -80,6 +80,7 @@ impl NgsiLdEntity {
 #[cfg(test)]
 mod tests {
     use crate::entity::{builder::NgsiLdEntityBuilder, name::NameBuf};
+    use pretty_assertions::assert_eq;
 
     #[test]
     fn the_builder_assembles_an_entity_with_its_id_and_type() {

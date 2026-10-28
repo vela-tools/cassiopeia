@@ -82,6 +82,7 @@ impl RecordMerge {
 mod tests {
     use crate::{field_path::FieldPath, record_merge::RecordMerge};
     use cassiopeia_mapping::{mapping::Mapping, template::runner::TemplateRunner};
+    use pretty_assertions::assert_eq;
     use std::{num::NonZeroU64, path::Path};
     use urn_rs::Urn;
 

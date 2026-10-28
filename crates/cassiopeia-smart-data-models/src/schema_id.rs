@@ -141,6 +141,7 @@ impl FromStr for SchemaId {
 mod tests {
     use crate::schema_id::{SchemaId, SchemaName};
     use cassiopeia_ngsi_ld::data_model::DataModel;
+    use pretty_assertions::assert_eq;
     use std::str::FromStr;
 
     #[test]

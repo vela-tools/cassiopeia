@@ -43,6 +43,7 @@ pub enum BrokerCode {
 #[cfg(test)]
 mod tests {
     use crate::code::broker_code::BrokerCode;
+    use pretty_assertions::assert_eq;
 
     #[test]
     fn a_broker_code_renders_a_kebab_case_token() {

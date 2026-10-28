@@ -72,6 +72,7 @@ pub enum RunVarError {
 #[cfg(test)]
 mod tests {
     use crate::run_var::{RunVar, RunVarError, run_vars_to_map};
+    use pretty_assertions::assert_eq;
     use serde_json::json;
     use std::str::FromStr;
 

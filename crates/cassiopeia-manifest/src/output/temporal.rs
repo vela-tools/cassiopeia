@@ -30,6 +30,7 @@ pub enum TemporalRepresentation {
 #[cfg(test)]
 mod tests {
     use crate::output::temporal::{ManifestTemporal, TemporalRepresentation};
+    use pretty_assertions::assert_eq;
 
     #[test]
     fn reads_a_series_representation() {

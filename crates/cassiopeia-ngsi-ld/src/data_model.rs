@@ -120,6 +120,7 @@ impl<'de> Deserialize<'de> for DataModel {
 #[cfg(test)]
 mod tests {
     use crate::data_model::{DataModel, DataModelRepository};
+    use pretty_assertions::assert_eq;
     use std::str::FromStr;
 
     #[test]

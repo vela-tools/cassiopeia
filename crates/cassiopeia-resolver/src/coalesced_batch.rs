@@ -180,6 +180,7 @@ mod tests {
         source_reads::{SourceKey, SourceReads},
         template::runner::TemplateRunner,
     };
+    use pretty_assertions::assert_eq;
     use serde_json::json;
     use std::{path::Path, sync::Arc};
     use urn_rs::Urn;

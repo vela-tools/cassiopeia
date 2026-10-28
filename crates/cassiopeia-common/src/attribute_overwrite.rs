@@ -20,6 +20,7 @@ pub enum AttributeOverwrite {
 #[cfg(test)]
 mod tests {
     use crate::attribute_overwrite::AttributeOverwrite;
+    use pretty_assertions::assert_eq;
 
     #[test]
     fn the_default_is_overwrite() {

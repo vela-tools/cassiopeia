@@ -218,6 +218,7 @@ mod tests {
         },
     };
     use clap::Parser;
+    use pretty_assertions::assert_eq;
     use std::path::PathBuf;
 
     /// Parses a `map` command line, returning its flattened arguments.

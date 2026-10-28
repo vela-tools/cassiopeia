@@ -25,6 +25,7 @@ pub enum StageComponent {
 #[cfg(test)]
 mod tests {
     use crate::telemetry::component::StageComponent;
+    use pretty_assertions::assert_eq;
 
     #[test]
     fn a_component_renders_as_its_kebab_case_name() {

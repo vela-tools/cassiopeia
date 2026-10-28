@@ -48,6 +48,7 @@ pub fn detect_rendering(stream: Stream) -> Rendering {
 #[cfg(test)]
 mod tests {
     use crate::rendering::{Rendering, Stream, detect_rendering};
+    use pretty_assertions::assert_eq;
 
     // Under the project's redirect-then-read test convention both standard streams are captured, so
     // neither is a terminal and the decision collapses to `Plain` regardless of `NO_COLOR`.

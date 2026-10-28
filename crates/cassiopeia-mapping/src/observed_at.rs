@@ -29,6 +29,7 @@ impl ObservedAt {
 #[cfg(test)]
 mod tests {
     use crate::observed_at::ObservedAt;
+    use pretty_assertions::assert_eq;
 
     #[test]
     fn a_qualifier_preserves_its_exact_text() {

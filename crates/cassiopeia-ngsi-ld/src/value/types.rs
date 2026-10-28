@@ -147,6 +147,7 @@ mod tests {
     use crate::value::types::{Number, TemporalValue, Value};
     use chrono::{TimeZone, Utc};
     use compact_str::CompactString;
+    use pretty_assertions::assert_eq;
     use serde_json::json;
 
     #[test]

@@ -114,6 +114,7 @@ mod tests {
         profile_bytes,
     };
     use cassiopeia_terminal_style::rendering::Rendering;
+    use pretty_assertions::assert_eq;
 
     const ESCAPE: char = '\u{1b}';
 
@@ -172,7 +173,7 @@ mod tests {
 
     #[test]
     fn a_metadata_line_is_absent_for_a_format_without_metadata() {
-        assert!(metadata_line(None, Rendering::Plain).is_none());
+        assert_eq!(metadata_line(None, Rendering::Plain), None);
     }
 
     #[test]

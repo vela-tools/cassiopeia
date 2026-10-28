@@ -266,6 +266,7 @@ mod tests {
         version::Version,
     };
     use cassiopeia_reporter::{backend::noop::NoopReporter, reporter::Reporter};
+    use pretty_assertions::{assert_eq, assert_ne};
     use serde_json::{Value, json};
     use std::{
         fs,

@@ -46,6 +46,7 @@ impl AtomicRunCounters {
 #[cfg(test)]
 mod tests {
     use crate::telemetry::run_counters::AtomicRunCounters;
+    use pretty_assertions::assert_eq;
     use std::sync::atomic::Ordering;
 
     #[test]

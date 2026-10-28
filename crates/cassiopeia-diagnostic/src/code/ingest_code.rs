@@ -19,6 +19,7 @@ pub enum IngestCode {
 #[cfg(test)]
 mod tests {
     use crate::code::ingest_code::IngestCode;
+    use pretty_assertions::assert_eq;
 
     #[test]
     fn an_ingest_code_renders_a_kebab_case_token() {

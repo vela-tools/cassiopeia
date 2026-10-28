@@ -91,6 +91,7 @@ impl<T> AsRef<T> for Mapped<T> {
 mod tests {
     use crate::mapped::{Mapped, Mappings};
     use cassiopeia_mapping::{mapping::Mapping, template::runner::TemplateRunner};
+    use pretty_assertions::assert_eq;
     use std::{path::Path, sync::Arc};
 
     const DOCUMENT: &str = r#"{

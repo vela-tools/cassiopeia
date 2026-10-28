@@ -76,6 +76,7 @@ impl From<NameBuf> for String {
 #[cfg(test)]
 mod tests {
     use crate::entity::name::NameBuf;
+    use pretty_assertions::assert_eq;
     use std::collections::HashMap;
 
     #[test]

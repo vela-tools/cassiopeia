@@ -48,6 +48,7 @@ pub struct BatchEntityError {
 mod tests {
     use crate::broker::batch_result::BatchOperationResult;
     use iri_rs::{Iri, IriBuf};
+    use pretty_assertions::assert_eq;
 
     #[test]
     fn a_partial_result_separates_the_successes_from_the_errors() {

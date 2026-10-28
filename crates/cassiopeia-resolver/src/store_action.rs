@@ -45,6 +45,7 @@ pub enum StoreAction {
 #[cfg(test)]
 mod tests {
     use crate::store_action::StoreAction;
+    use pretty_assertions::assert_eq;
 
     #[test]
     fn an_action_reads_as_the_operation_it_names() {

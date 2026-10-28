@@ -22,6 +22,7 @@ impl Http2PriorKnowledge {
 #[cfg(test)]
 mod tests {
     use crate::broker::http2_prior_knowledge::Http2PriorKnowledge;
+    use pretty_assertions::assert_eq;
 
     #[test]
     fn the_default_negotiates_normally() {

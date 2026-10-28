@@ -44,6 +44,7 @@ mod tests {
         download::{schema_kind::SchemaKind, task::DownloadTask},
         schema_id::SchemaId,
     };
+    use pretty_assertions::assert_eq;
     use std::str::FromStr;
     use url::Url;
 

@@ -117,6 +117,7 @@ mod tests {
         severity::Severity,
     };
     use http::StatusCode;
+    use pretty_assertions::assert_eq;
     use std::num::NonZeroU64;
 
     fn rejection(status: u16, detail: &str, occurrences: u64) -> Diagnostic {

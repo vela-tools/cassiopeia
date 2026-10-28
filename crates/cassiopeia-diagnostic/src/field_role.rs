@@ -52,6 +52,7 @@ mod tests {
     use cassiopeia_ngsi_ld::entity::name::NameBuf;
     use http::StatusCode;
     use iri_rs::IriBuf;
+    use pretty_assertions::assert_eq;
     use std::{collections::HashSet, path::PathBuf};
     use strum::IntoEnumIterator;
     use url::Url;

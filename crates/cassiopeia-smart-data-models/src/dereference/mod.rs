@@ -169,6 +169,7 @@ mod tests {
         dereference::{CircularReferences, ExternalReferences, dereference, document_ref::DocumentRef, resolver::SchemaResolver},
         error::{Result, SdmError},
     };
+    use pretty_assertions::assert_eq;
     use serde_json::{Value, json};
     use std::sync::Arc;
 

@@ -31,6 +31,7 @@ impl ContextDelivery {
 #[cfg(test)]
 mod tests {
     use crate::output::context_delivery::ContextDelivery;
+    use pretty_assertions::assert_eq;
 
     #[test]
     fn the_wire_form_is_kebab_case() {

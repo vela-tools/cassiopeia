@@ -40,6 +40,7 @@ mod tests {
     use crate::{observed_at_cache::ObservedAtCache, qualifier_cache::QualifierCache, unit_code_cache::UnitCodeCache};
     use cassiopeia_ngsi_ld::value::types::Value;
     use cefact_units::UnitCode;
+    use pretty_assertions::{assert_eq, assert_ne};
 
     #[test]
     fn both_qualifiers_resolve_through_one_borrowed_pair() {

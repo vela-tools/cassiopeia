@@ -126,6 +126,7 @@ pub const SHARED_SCHEMAS: &[SharedSchema] = &[
 #[cfg(test)]
 mod tests {
     use crate::{download::shared_schema::SHARED_SCHEMAS, schema_id::SchemaName};
+    use pretty_assertions::assert_eq;
 
     #[test]
     fn every_shared_schema_has_a_storable_name() {

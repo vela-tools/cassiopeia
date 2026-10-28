@@ -106,6 +106,7 @@ mod tests {
     use crate::stages::{nonconformant_types::NonconformantTypes, validation_decision::WarnReason};
     use cassiopeia_ngsi_ld::entity::{NgsiLdEntity, name::NameBuf};
     use cassiopeia_reporter::backend::noop::NoopReporter;
+    use pretty_assertions::assert_eq;
     use urn_rs::Urn;
 
     fn entity(entity_type: &str, id: &str) -> NgsiLdEntity {

@@ -128,6 +128,7 @@ mod tests {
         mapping_id::MappingId,
     };
     use cassiopeia_mapping::observed_at::ObservedAt;
+    use pretty_assertions::assert_eq;
     use serde_json::json;
     use urn_rs::Urn;
 

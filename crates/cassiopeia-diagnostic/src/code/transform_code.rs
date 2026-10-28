@@ -14,6 +14,7 @@ pub enum TransformCode {
 #[cfg(test)]
 mod tests {
     use crate::code::transform_code::TransformCode;
+    use pretty_assertions::assert_eq;
 
     #[test]
     fn a_transform_code_renders_a_kebab_case_token() {

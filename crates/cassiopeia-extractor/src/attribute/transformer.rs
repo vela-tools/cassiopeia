@@ -295,6 +295,7 @@ mod tests {
         entity::attribute::NgsiLdAttributeKind,
         value::types::{Number, Value},
     };
+    use pretty_assertions::assert_eq;
     use serde_json::json;
     use smallvec::smallvec;
 

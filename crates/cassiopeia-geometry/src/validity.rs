@@ -65,6 +65,7 @@ fn check_ring(ring: &LineStringType) -> Result<(), GeometryError> {
 mod tests {
     use crate::{error::GeometryError, geometry::NgsiLdGeometry};
     use geojson::Position;
+    use pretty_assertions::assert_eq;
 
     #[test]
     fn a_well_formed_geometry_of_each_kind_passes() {

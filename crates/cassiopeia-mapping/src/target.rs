@@ -37,6 +37,7 @@ pub struct Target {
 #[cfg(test)]
 mod tests {
     use crate::{target::Target, template::TemplateSource};
+    use pretty_assertions::assert_eq;
 
     #[test]
     fn reads_a_target_naming_only_its_entity() {

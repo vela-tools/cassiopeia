@@ -78,6 +78,7 @@ impl BrokerFailures {
 mod tests {
     use crate::{broker::broker_failures::BrokerFailures, error::WriterError};
     use cassiopeia_diagnostic::code::broker_code::BrokerCode;
+    use pretty_assertions::assert_eq;
 
     fn opaque(status: u16) -> WriterError {
         WriterError::BrokerOpaqueStatus { status, count: 10 }

@@ -19,6 +19,7 @@ pub enum LogLevel {
 #[cfg(test)]
 mod tests {
     use crate::log::level::LogLevel;
+    use pretty_assertions::assert_eq;
 
     #[test]
     fn every_level_round_trips_through_its_lowercase_token() {

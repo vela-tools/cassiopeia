@@ -97,6 +97,7 @@ mod tests {
         selection::{first, largest},
     };
     use geojson::Position;
+    use pretty_assertions::assert_eq;
 
     /// A closed square ring of `size` degrees, anchored at the origin.
     fn square(size: f64) -> Vec<Position> {

@@ -80,6 +80,7 @@ mod tests {
     use crate::broker::response_verdict::{ResponseVerdict, interpret_response};
     use cassiopeia_common::captured_body::CapturedBody;
     use http::StatusCode;
+    use pretty_assertions::{assert_eq, assert_ne};
 
     fn body(bytes: &[u8]) -> CapturedBody {
         CapturedBody::capped(bytes.to_vec(), 64 * 1024)

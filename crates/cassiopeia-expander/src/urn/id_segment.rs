@@ -34,6 +34,7 @@ impl IdSegment {
 #[cfg(test)]
 mod tests {
     use crate::urn::id_segment::IdSegment;
+    use pretty_assertions::assert_eq;
 
     #[test]
     fn a_clean_identifier_becomes_a_segment_unchanged() {

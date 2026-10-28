@@ -20,6 +20,7 @@ pub(crate) fn dim_header(table: &Table, rendering: Rendering) -> Vec<String> {
 mod tests {
     use crate::backend::terminal::summary::table_layout::{dim_header, header_row};
     use cassiopeia_terminal_style::rendering::Rendering;
+    use pretty_assertions::assert_eq;
     use tabular::{Row, Table};
 
     const ESCAPE: char = '\u{1b}';

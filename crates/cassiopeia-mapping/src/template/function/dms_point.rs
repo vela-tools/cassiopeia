@@ -137,6 +137,7 @@ fn set_once(slot: &mut Option<f64>, value: f64, axis: &str, text: &str) -> TeraR
 #[cfg(test)]
 mod tests {
     use crate::template::function::dms_point::dms_point;
+    use pretty_assertions::assert_eq;
     use serde_json::json;
     use tera::{Context, Tera, Value};
 

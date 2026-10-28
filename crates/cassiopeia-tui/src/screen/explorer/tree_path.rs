@@ -43,6 +43,7 @@ impl TreePath {
 #[cfg(test)]
 mod tests {
     use crate::screen::explorer::tree_path::TreePath;
+    use pretty_assertions::assert_eq;
 
     #[test]
     fn a_path_reports_its_tail_label() {

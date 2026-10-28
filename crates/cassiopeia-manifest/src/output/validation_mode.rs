@@ -23,6 +23,7 @@ pub enum ValidationMode {
 #[cfg(test)]
 mod tests {
     use crate::output::validation_mode::ValidationMode;
+    use pretty_assertions::assert_eq;
     use std::str::FromStr;
 
     #[test]

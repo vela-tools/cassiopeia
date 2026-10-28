@@ -118,6 +118,7 @@ mod tests {
         published_list::{ExtraSchemaEntry, ModelListEntry, PublishedList, extra_schema_download_tasks, model_download_tasks},
         schema_kind::SchemaKind,
     };
+    use pretty_assertions::assert_eq;
 
     #[test]
     fn a_model_entry_becomes_one_task_per_model_under_its_repository() {

@@ -190,6 +190,7 @@ mod tests {
         telemetry::{run::RunTelemetry, stage_metrics::RateReader},
     };
     use parking_lot::Mutex;
+    use pretty_assertions::assert_eq;
     use std::sync::{
         Arc,
         atomic::{AtomicU64, Ordering},

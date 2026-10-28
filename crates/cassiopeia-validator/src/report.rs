@@ -31,6 +31,7 @@ pub struct ValidationReport {
 mod tests {
     use crate::report::{ValidationReport, ValidationReportEntry};
     use cassiopeia_ngsi_ld::entity::name::NameBuf;
+    use pretty_assertions::assert_eq;
     use serde_json::{Value, json};
     use urn_rs::Urn;
 

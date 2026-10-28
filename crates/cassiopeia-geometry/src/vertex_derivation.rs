@@ -65,6 +65,7 @@ mod tests {
         vertex_derivation::{first_position, vertices},
     };
     use geojson::Position;
+    use pretty_assertions::assert_eq;
 
     fn ring() -> Vec<Position> {
         vec![

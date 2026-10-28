@@ -37,6 +37,7 @@ pub enum JsonIngestError {
 #[cfg(test)]
 mod tests {
     use crate::json::error::JsonIngestError;
+    use pretty_assertions::assert_eq;
     use std::{error::Error, io, path::PathBuf};
 
     #[test]

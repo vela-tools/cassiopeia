@@ -47,6 +47,7 @@ impl RetryPolicy {
 #[cfg(test)]
 mod tests {
     use crate::schedule::retry::RetryPolicy;
+    use pretty_assertions::assert_eq;
     use std::{num::NonZeroU32, time::Duration};
 
     #[test]

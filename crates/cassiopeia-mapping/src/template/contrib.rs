@@ -41,6 +41,7 @@ pub fn register(registrar: &mut Registrar) {
 #[cfg(test)]
 mod tests {
     use crate::template::{contrib::register, registrar::Registrar};
+    use pretty_assertions::assert_eq;
     use tera::Context;
 
     fn render(template: &str) -> String {

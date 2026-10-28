@@ -60,6 +60,7 @@ pub(crate) fn typed_form(source: &str) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use crate::template::value_expression::typed_form;
+    use pretty_assertions::assert_eq;
 
     #[test]
     fn a_lone_filtered_expression_is_encoded_as_json() {

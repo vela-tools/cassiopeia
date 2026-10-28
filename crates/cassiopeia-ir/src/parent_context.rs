@@ -42,6 +42,7 @@ mod tests {
         relationship_path::RelationshipPath,
     };
     use cassiopeia_ngsi_ld::entity::name::NameBuf;
+    use pretty_assertions::assert_eq;
     use urn_rs::Urn;
 
     #[test]

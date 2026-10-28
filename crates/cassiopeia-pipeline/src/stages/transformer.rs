@@ -147,6 +147,7 @@ mod tests {
     };
     use cassiopeia_reporter::reporter::Reporter;
     use indexmap::IndexMap;
+    use pretty_assertions::assert_eq;
     use serde_json::json;
     use std::{path::Path, sync::Arc};
     use urn_rs::Urn;

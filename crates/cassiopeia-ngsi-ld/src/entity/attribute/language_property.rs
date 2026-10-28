@@ -62,6 +62,7 @@ mod tests {
     use crate::entity::attribute::language_property::NgsiLdLanguageProperty;
     use indexmap::IndexMap;
     use langtag::LangTagBuf;
+    use pretty_assertions::assert_eq;
 
     #[test]
     fn a_new_language_property_holds_its_map() {

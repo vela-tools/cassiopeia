@@ -89,6 +89,7 @@ mod tests {
     use cassiopeia_ngsi_ld::entity::name::NameBuf;
     use cassiopeia_reporter::backend::noop::NoopReporter;
     use cassiopeia_validator::report::ValidationReportEntry;
+    use pretty_assertions::assert_eq;
     use serde_json::json;
     use std::fs;
     use temp_dir::TempDir;

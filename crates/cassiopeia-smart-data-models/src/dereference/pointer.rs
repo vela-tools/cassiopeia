@@ -42,6 +42,7 @@ fn unescape(token: &str) -> String {
 #[cfg(test)]
 mod tests {
     use crate::dereference::pointer::resolve;
+    use pretty_assertions::assert_eq;
     use serde_json::json;
 
     #[test]

@@ -55,6 +55,7 @@ fn sign(value: f64) -> f64 {
 #[cfg(test)]
 mod tests {
     use crate::template::{filter::elementary::register, registrar::Registrar};
+    use pretty_assertions::assert_eq;
     use std::f64::consts::E;
     use tera::{Context, Value};
 

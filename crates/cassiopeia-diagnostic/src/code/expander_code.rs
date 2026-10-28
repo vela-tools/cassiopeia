@@ -15,6 +15,7 @@ pub enum ExpanderCode {
 #[cfg(test)]
 mod tests {
     use crate::code::expander_code::ExpanderCode;
+    use pretty_assertions::assert_eq;
 
     #[test]
     fn an_expander_code_renders_a_kebab_case_token() {

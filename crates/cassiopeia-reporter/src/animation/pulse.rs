@@ -43,6 +43,7 @@ fn to_f64(value: u64) -> f64 {
 #[cfg(test)]
 mod tests {
     use crate::animation::pulse::PulseAnimation;
+    use pretty_assertions::assert_eq;
 
     #[test]
     fn the_pulse_starts_at_the_midpoint() {

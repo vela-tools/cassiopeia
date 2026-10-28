@@ -110,6 +110,7 @@ mod tests {
         target::GeometryTarget,
     };
     use geojson::Position;
+    use pretty_assertions::assert_eq;
 
     fn point() -> NgsiLdGeometry {
         NgsiLdGeometry::Point {

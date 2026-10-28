@@ -31,6 +31,7 @@ pub fn geo_centroid(kwargs: Kwargs, _state: &State) -> TeraResult<Value> {
 #[cfg(test)]
 mod tests {
     use crate::template::function::geo_centroid::geo_centroid;
+    use pretty_assertions::assert_eq;
     use serde_json::json;
     use tera::{Context, Tera, Value};
 

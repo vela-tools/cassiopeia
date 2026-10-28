@@ -46,6 +46,7 @@ impl StageLabel {
 #[cfg(test)]
 mod tests {
     use crate::stage_id::{StageId, StageLabel};
+    use pretty_assertions::assert_eq;
 
     #[test]
     fn a_stage_id_displays_and_derefs_to_its_inner_string() {

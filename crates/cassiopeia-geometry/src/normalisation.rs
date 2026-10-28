@@ -55,6 +55,7 @@ mod tests {
         strategy::{Altitude, Winding},
     };
     use geojson::Position;
+    use pretty_assertions::assert_eq;
 
     /// A one-degree square wound clockwise, as an ESRI shapefile writes an exterior ring.
     fn clockwise() -> Vec<Position> {

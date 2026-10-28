@@ -129,6 +129,7 @@ mod tests {
         ring::{close_rings, is_closed, normalise_winding, require_ring},
     };
     use geojson::Position;
+    use pretty_assertions::assert_eq;
 
     /// A one-degree square wound clockwise, the way ESRI shapefiles write an exterior ring.
     fn clockwise_ring() -> Vec<Position> {

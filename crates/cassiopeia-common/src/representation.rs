@@ -24,6 +24,7 @@ pub enum NgsiLdRepresentation {
 #[cfg(test)]
 mod tests {
     use crate::representation::NgsiLdRepresentation;
+    use pretty_assertions::assert_eq;
 
     #[test]
     fn every_representation_round_trips_through_its_lowercase_token() {

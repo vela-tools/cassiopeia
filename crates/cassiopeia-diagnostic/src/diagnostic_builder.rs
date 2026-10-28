@@ -133,6 +133,7 @@ mod tests {
     };
     use cassiopeia_common::error::io::{IoAction, IoError};
     use iri_rs::IriBuf;
+    use pretty_assertions::assert_eq;
     use std::{io::Error, num::NonZeroU64, path::PathBuf};
 
     fn code() -> DiagnosticCode {

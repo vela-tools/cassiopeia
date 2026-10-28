@@ -95,6 +95,7 @@ mod tests {
         diagnostic_code::{DIAGNOSTIC_CODE_COUNT, DiagnosticCode},
         schema_code::SchemaCode,
     };
+    use pretty_assertions::assert_eq;
     use std::collections::HashSet;
 
     #[test]

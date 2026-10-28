@@ -201,6 +201,7 @@ mod tests {
     use crate::schema_violation_kind::{AlternativeMatch, JsonTypeName, MemberName, SchemaViolationKind, violation_of};
     use cassiopeia_diagnostic::schema_keyword::SchemaKeyword;
     use jsonschema::Validator;
+    use pretty_assertions::assert_eq;
     use serde_json::{Value, json};
     use std::sync::Arc;
 

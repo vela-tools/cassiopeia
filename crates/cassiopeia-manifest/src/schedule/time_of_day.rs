@@ -54,6 +54,7 @@ impl From<TimeOfDay> for String {
 mod tests {
     use crate::schedule::time_of_day::TimeOfDay;
     use chrono::Timelike;
+    use pretty_assertions::assert_eq;
 
     #[test]
     fn reads_a_time_written_as_hours_and_minutes() {

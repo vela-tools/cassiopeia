@@ -54,6 +54,7 @@ mod tests {
     };
     use cassiopeia_data_profiler::metadata::FormatMetadata;
     use cassiopeia_ir::payload::{BytesPayload, CollectedPayload};
+    use pretty_assertions::assert_eq;
     use std::sync::Arc;
 
     fn csv_bytes_payload() -> CollectedPayload {

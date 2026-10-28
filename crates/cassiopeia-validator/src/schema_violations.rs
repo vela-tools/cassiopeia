@@ -103,6 +103,7 @@ impl Display for SchemaViolations {
 mod tests {
     use crate::schema_violations::{MAX_VIOLATIONS_PER_ENTITY, SchemaViolations, ViolationCount};
     use jsonschema::Validator;
+    use pretty_assertions::assert_eq;
     use serde_json::{Map, Value, json};
 
     fn collect(schema: &Value, instance: &Value) -> SchemaViolations {

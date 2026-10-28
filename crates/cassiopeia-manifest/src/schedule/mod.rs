@@ -78,6 +78,7 @@ impl Schedule {
 #[cfg(test)]
 mod tests {
     use crate::schedule::{Schedule, trigger::Trigger};
+    use pretty_assertions::assert_eq;
     use std::{num::NonZeroU32, time::Duration};
 
     #[test]
@@ -126,7 +127,7 @@ mod tests {
     fn assembling_without_a_trigger_yields_no_schedule() {
         let schedule = Schedule::assemble(None, NonZeroU32::new(10), None, None, None);
 
-        assert!(schedule.is_none());
+        assert_eq!(schedule, None);
     }
 
     #[test]

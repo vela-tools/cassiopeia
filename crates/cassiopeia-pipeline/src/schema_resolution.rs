@@ -190,6 +190,7 @@ mod tests {
     use cassiopeia_mapping::{mapping::Mapping, template::runner::TemplateRunner};
     use cassiopeia_ngsi_ld::entity::name::NameBuf;
     use cassiopeia_reporter::backend::noop::NoopReporter;
+    use pretty_assertions::assert_eq;
     use std::{
         fs,
         io::{Read, Write},

@@ -148,6 +148,7 @@ mod tests {
     };
     use bytes::Bytes;
     use cassiopeia_diagnostic::code::{broker_code::BrokerCode, diagnostic_code::DiagnosticCode};
+    use pretty_assertions::assert_eq;
     use std::{net::TcpListener, sync::Arc};
     use url::Url;
 

@@ -134,6 +134,7 @@ mod tests {
         record::Record,
     };
     use mediatype::media_type;
+    use pretty_assertions::assert_eq;
     use serde_json::json;
     use std::{fs::File, io::Write, sync::mpsc::sync_channel, thread};
     use temp_dir::TempDir;
@@ -180,7 +181,7 @@ mod tests {
     fn a_top_level_object_becomes_one_record() {
         let records = try_ingest(profiled_json(r#"{"a": 1}"#).1).unwrap();
         assert_eq!(records.len(), 1);
-        assert!(records[0].collection().is_none());
+        assert_eq!(records[0].collection(), &None);
     }
 
     #[test]

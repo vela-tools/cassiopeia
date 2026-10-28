@@ -113,6 +113,7 @@ fn state_root(runtime: Runtime) -> PathBuf {
 #[cfg(test)]
 mod tests {
     use crate::base::{Runtime, config_root, data_root, state_root};
+    use pretty_assertions::assert_eq;
     use std::path::PathBuf;
 
     #[test]

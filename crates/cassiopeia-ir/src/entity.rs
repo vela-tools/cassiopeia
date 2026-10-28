@@ -104,6 +104,7 @@ mod tests {
     use crate::{entity::Entity, relationship_path::RelationshipPath};
     use cassiopeia_ngsi_ld::{entity::name::NameBuf, value::types::Value as NgsiValue};
     use indexmap::IndexMap;
+    use pretty_assertions::assert_eq;
     use serde_json::json;
     use urn_rs::Urn;
 
@@ -116,16 +117,16 @@ mod tests {
         let mut relationships = IndexMap::default();
         relationships.insert(NameBuf::new("refRoad").expect("valid"), vec![urn()]);
         let entity = Entity::new(urn(), json!({"id": "1"}), None, relationships.clone(), None);
-        assert!(entity.metadata().is_none());
+        assert_eq!(entity.metadata(), &None);
         assert_eq!(entity.relationships(), &relationships);
         let (id, _data, scope, rels, values, metadata, instance_relationships, nested_relationships) = entity.into_parts();
         assert_eq!(id, urn());
-        assert!(scope.is_none());
+        assert_eq!(scope, None);
         assert_eq!(rels, relationships);
-        assert!(values.is_none());
-        assert!(metadata.is_none());
-        assert!(instance_relationships.is_none());
-        assert!(nested_relationships.is_none());
+        assert_eq!(values, None);
+        assert_eq!(metadata, None);
+        assert_eq!(instance_relationships, None);
+        assert_eq!(nested_relationships, None);
     }
 
     #[test]
@@ -140,7 +141,7 @@ mod tests {
     #[test]
     fn nested_relationships_default_to_none_and_are_reflected_once_set() {
         let mut entity = Entity::new(urn(), json!({}), None, IndexMap::default(), None);
-        assert!(entity.nested_relationships().is_none());
+        assert_eq!(entity.nested_relationships(), &None);
 
         let mut nested = IndexMap::default();
         nested.insert(

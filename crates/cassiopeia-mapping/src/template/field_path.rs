@@ -57,6 +57,7 @@ impl FieldPath {
 #[cfg(test)]
 mod tests {
     use crate::template::field_path::FieldPath;
+    use pretty_assertions::assert_eq;
     use serde_json::{Value as JsonValue, json};
 
     #[test]

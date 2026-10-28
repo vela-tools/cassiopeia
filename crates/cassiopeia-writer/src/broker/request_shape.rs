@@ -96,6 +96,7 @@ pub const fn route(operation: BrokerOperation) -> OperationRouting {
 mod tests {
     use crate::broker::request_shape::{OperationRouting, RequestShape, route};
     use cassiopeia_common::{attribute_overwrite::AttributeOverwrite, broker_operation::BrokerOperation, upsert_mode::UpsertMode};
+    use pretty_assertions::assert_eq;
     use url::Url;
 
     /// Resolves an operation's routing into the endpoint string a `BrokerWriter` would build.

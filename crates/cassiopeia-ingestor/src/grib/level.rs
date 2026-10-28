@@ -244,6 +244,7 @@ pub struct LevelGroupKey {
 #[cfg(test)]
 mod tests {
     use crate::grib::level::{GribLevel, LevelType};
+    use pretty_assertions::assert_eq;
 
     #[test]
     fn a_height_surface_type_normalizes_to_the_canonical_token_and_value() {

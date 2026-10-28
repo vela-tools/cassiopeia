@@ -134,6 +134,7 @@ mod tests {
     use http::StatusCode;
     use iri_rs::IriBuf;
     use parking_lot::Mutex;
+    use pretty_assertions::assert_eq;
     use std::sync::Arc;
 
     /// Records the calls made to it into shared vectors observable after the reporter is boxed.

@@ -101,6 +101,7 @@ mod tests {
     };
     use cassiopeia_diagnostic::code::{context_code::ContextCode, diagnostic_code::DiagnosticCode};
     use cassiopeia_ngsi_ld::entity::context::{ContextSource, NgsiLdContext};
+    use pretty_assertions::assert_eq;
     use url::Url;
 
     #[test]

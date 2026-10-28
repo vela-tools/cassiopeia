@@ -85,6 +85,7 @@ mod tests {
     };
     use cassiopeia_data_profiler::metadata::FormatMetadata;
     use cassiopeia_ir::payload::{BytesPayload, CollectedPayload, ProfiledPayload};
+    use pretty_assertions::assert_eq;
     use std::sync::Arc;
 
     /// Routes one in-memory payload through a passthrough profiler for `format` and returns the profiled

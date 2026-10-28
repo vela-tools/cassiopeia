@@ -19,6 +19,7 @@ pub enum CsvInspectError {
 #[cfg(test)]
 mod tests {
     use crate::inspectors::csv::error::CsvInspectError;
+    use pretty_assertions::assert_eq;
     use std::{error::Error, io};
 
     #[test]

@@ -40,6 +40,7 @@ pub(crate) fn identifier_length(text: &str) -> usize {
 #[cfg(test)]
 mod tests {
     use crate::template::identifier::{identifier_length, is_identifier};
+    use pretty_assertions::assert_eq;
 
     #[test]
     fn ascii_identifiers_follow_teras_grammar() {

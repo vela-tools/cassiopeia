@@ -69,6 +69,7 @@ impl DataType {
 #[cfg(test)]
 mod tests {
     use crate::inspectors::csv::data_type::DataType;
+    use pretty_assertions::assert_eq;
 
     #[test]
     fn blank_fields_are_empty() {

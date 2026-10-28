@@ -43,6 +43,7 @@ url = "2.5.8"
 
 [dev-dependencies]
 cassiopeia-ngsi-ld.workspace = true
+pretty_assertions = "1.4.1"
 urn-rs = "0.9.2"
 
 [build-dependencies]

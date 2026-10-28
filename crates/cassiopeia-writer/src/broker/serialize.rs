@@ -80,6 +80,7 @@ mod tests {
         sender::test_support::{context, thing},
         serialize::serialize_batch,
     };
+    use pretty_assertions::assert_eq;
 
     #[test]
     fn an_array_shape_serializes_a_json_array() {

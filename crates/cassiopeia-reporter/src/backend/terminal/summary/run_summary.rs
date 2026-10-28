@@ -52,6 +52,7 @@ mod tests {
         severity::Severity,
     };
     use cassiopeia_terminal_style::rendering::Rendering;
+    use pretty_assertions::assert_eq;
 
     /// A snapshot of a run that counted `errors` failures and nothing else.
     fn snapshot(errors: u64) -> TelemetrySnapshot {

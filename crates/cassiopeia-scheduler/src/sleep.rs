@@ -48,6 +48,7 @@ mod tests {
         sleep::{SleepOutcome, interruptible_sleep},
         wait::Wait,
     };
+    use pretty_assertions::assert_eq;
     use std::{sync::atomic::AtomicBool, time::Duration};
 
     #[test]

@@ -34,6 +34,7 @@ impl<'a> DocumentRef<'a> {
 #[cfg(test)]
 mod tests {
     use crate::dereference::document_ref::DocumentRef;
+    use pretty_assertions::assert_eq;
 
     #[test]
     fn a_reference_exposes_its_string_and_emptiness() {

@@ -69,6 +69,7 @@ fn file_name(path: &Path) -> String {
 mod tests {
     use crate::outcome_report::{Outcome, render_outcome};
     use cassiopeia_terminal_style::rendering::Rendering;
+    use pretty_assertions::assert_eq;
     use std::path::PathBuf;
 
     const ESCAPE: char = '\u{1b}';

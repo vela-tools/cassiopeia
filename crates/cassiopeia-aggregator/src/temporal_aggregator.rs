@@ -59,6 +59,7 @@ mod tests {
         value::types::Value,
     };
     use chrono::{DateTime, Utc};
+    use pretty_assertions::assert_eq;
     use serde_json::json;
     use urn_rs::Urn;
 
@@ -175,7 +176,7 @@ mod tests {
         // Id C is still open; finish flushes it.
         let c = aggregator.finish().expect("C flushed");
         assert_eq!(c.id, urn("urn:ngsi-ld:TropicalCyclone:C"));
-        assert!(aggregator.finish().is_none());
+        assert_eq!(aggregator.finish(), None);
     }
 
     #[test]

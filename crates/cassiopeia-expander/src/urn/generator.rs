@@ -292,6 +292,7 @@ mod tests {
         urn::{error::UrnError, generator::UrnGenerator},
     };
     use cassiopeia_mapping::{mapping::Mapping, template::runner::TemplateRunner};
+    use pretty_assertions::assert_eq;
     use serde_json::{Value, json};
     use std::path::Path;
 

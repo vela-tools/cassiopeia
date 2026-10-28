@@ -15,6 +15,7 @@ pub enum LogFormat {
 #[cfg(test)]
 mod tests {
     use crate::log::format::LogFormat;
+    use pretty_assertions::assert_eq;
 
     #[test]
     fn every_format_round_trips_through_its_lowercase_token() {

@@ -10,6 +10,7 @@ pub struct BatchJob {
 mod tests {
     use crate::broker::batch_job::BatchJob;
     use cassiopeia_ngsi_ld::entity::{NgsiLdEntity, name::NameBuf};
+    use pretty_assertions::assert_eq;
     use urn_rs::Urn;
 
     #[test]

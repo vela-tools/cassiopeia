@@ -64,6 +64,7 @@ impl Config {
 mod tests {
     use crate::{config::Config, pipeline::ExtractionMode};
     use cassiopeia_common::{memory_profile::MemoryProfile, store_kind::StoreKind};
+    use pretty_assertions::assert_eq;
 
     #[test]
     fn the_default_profile_leaves_every_section_alone() {

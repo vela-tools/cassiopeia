@@ -77,6 +77,7 @@ impl<T: Clone + PickerEntry> ModelPicker<T> {
 #[cfg(test)]
 mod tests {
     use crate::model_picker::{ModelPicker, PickerEntry};
+    use pretty_assertions::assert_eq;
 
     #[derive(Clone, PartialEq, Eq, Debug)]
     struct Entry(String);

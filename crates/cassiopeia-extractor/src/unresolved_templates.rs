@@ -66,6 +66,7 @@ mod tests {
         template_site::TemplateSite,
     };
     use cassiopeia_ngsi_ld::entity::name::NameBuf;
+    use pretty_assertions::assert_eq;
     use std::{path::Path, sync::Arc};
     use urn_rs::Urn;
 

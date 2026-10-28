@@ -236,6 +236,7 @@ mod tests {
     use cassiopeia_ngsi_ld::entity::{NgsiLdEntity, name::NameBuf};
     use cassiopeia_reporter::{backend::noop::NoopReporter, reporter::Reporter};
     use cassiopeia_validator::{schema_validator::SchemaValidator, schema_validator_config::SchemaValidatorConfig};
+    use pretty_assertions::assert_eq;
     use std::{collections::HashMap, sync::Arc};
     use temp_dir::TempDir;
     use urn_rs::Urn;

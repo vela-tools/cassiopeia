@@ -159,6 +159,7 @@ pub(super) fn per_second(count: u64, seconds: f64) -> f64 {
 #[cfg(test)]
 mod tests {
     use crate::telemetry::rate::{RateTracker, RateWindow};
+    use pretty_assertions::assert_eq;
     use std::time::Duration;
 
     #[test]

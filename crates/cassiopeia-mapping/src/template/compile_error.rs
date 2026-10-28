@@ -143,6 +143,7 @@ mod tests {
         engine_report::EngineReport,
         identifier_lint::{ambiguous_hyphen, non_ascii_identifier},
     };
+    use pretty_assertions::assert_eq;
     use std::error::Error;
     use tera::Tera;
 

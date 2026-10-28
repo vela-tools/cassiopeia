@@ -34,6 +34,7 @@ mod tests {
         severity::Severity,
     };
     use cassiopeia_terminal_style::rendering::Rendering;
+    use pretty_assertions::assert_eq;
 
     #[test]
     fn the_table_names_each_code_its_count_and_an_example() {

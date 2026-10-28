@@ -93,6 +93,7 @@ impl CollectedPayload {
 mod tests {
     use crate::payload::{BytesPayload, CollectedPayload, FilePayload};
     use cassiopeia_common::format::DataFormat;
+    use pretty_assertions::assert_eq;
     use std::path::PathBuf;
 
     #[test]

@@ -54,6 +54,7 @@ mod tests {
         relationship_path::RelationshipPath,
     };
     use cassiopeia_ngsi_ld::entity::name::NameBuf;
+    use pretty_assertions::assert_eq;
     use serde_json::json;
     use urn_rs::Urn;
 
@@ -70,7 +71,7 @@ mod tests {
         let fragment = Fragment::new(json!({"t": 1}), urn("urn:ngsi-ld:Station:1"), None, Some(vec![context.clone()]));
         assert_eq!(fragment.source_data(), &json!({"t": 1}));
         assert_eq!(fragment.target_urn(), &urn("urn:ngsi-ld:Station:1"));
-        assert!(fragment.scope().is_none());
+        assert_eq!(fragment.scope(), &None);
         assert_eq!(fragment.parent_context().as_ref(), Some(&vec![context]));
     }
 }

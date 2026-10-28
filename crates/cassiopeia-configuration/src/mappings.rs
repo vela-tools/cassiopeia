@@ -18,6 +18,7 @@ pub struct Mappings {
 #[cfg(test)]
 mod tests {
     use crate::mappings::Mappings;
+    use pretty_assertions::assert_eq;
     use std::path::PathBuf;
 
     #[test]

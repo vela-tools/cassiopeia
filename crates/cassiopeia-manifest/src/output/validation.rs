@@ -49,6 +49,7 @@ pub struct ManifestValidation {
 mod tests {
     use crate::output::{validation::ManifestValidation, validation_mode::ValidationMode};
     use cassiopeia_common::{representation::NgsiLdRepresentation, schema_source::SchemaSource, skip_null::NgsiLdSkipNull};
+    use pretty_assertions::assert_eq;
     use std::path::PathBuf;
 
     #[test]

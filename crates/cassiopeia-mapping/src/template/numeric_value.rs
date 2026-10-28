@@ -53,6 +53,7 @@ pub(crate) fn number_arg(kwargs: &Kwargs, name: &str) -> TeraResult<f64> {
 #[cfg(test)]
 mod tests {
     use crate::template::numeric_value::{finite_or_none, number_from_value};
+    use pretty_assertions::assert_eq;
     use tera::Value;
 
     #[test]

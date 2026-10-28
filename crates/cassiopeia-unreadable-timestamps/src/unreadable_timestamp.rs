@@ -35,6 +35,7 @@ impl UnreadableTimestamp {
 #[cfg(test)]
 mod tests {
     use crate::unreadable_timestamp::UnreadableTimestamp;
+    use pretty_assertions::assert_eq;
 
     #[test]
     fn the_first_text_is_kept_as_the_example_however_many_follow() {

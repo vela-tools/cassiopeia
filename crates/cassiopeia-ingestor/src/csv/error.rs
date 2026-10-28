@@ -25,6 +25,7 @@ pub enum CsvIngestError {
 #[cfg(test)]
 mod tests {
     use crate::csv::error::CsvIngestError;
+    use pretty_assertions::assert_eq;
     use std::{error::Error, io, path::PathBuf};
 
     #[test]

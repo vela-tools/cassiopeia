@@ -128,6 +128,7 @@ mod tests {
         error::ProfilerError,
         profiler::{Profiler, ProfilerRoutes},
     };
+    use pretty_assertions::assert_eq;
     use std::{collections::HashMap, sync::Arc};
 
     /// A profiler that fails as a missing or unreadable source file does: format detection cannot

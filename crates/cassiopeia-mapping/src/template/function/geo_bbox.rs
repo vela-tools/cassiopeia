@@ -29,6 +29,7 @@ pub fn geo_bbox(kwargs: Kwargs, _state: &State) -> TeraResult<Value> {
 #[cfg(test)]
 mod tests {
     use crate::template::function::geo_bbox::geo_bbox;
+    use pretty_assertions::assert_eq;
     use serde_json::json;
     use tera::{Context, Tera, Value};
 

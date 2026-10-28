@@ -71,6 +71,7 @@ mod tests {
         lexer::Opener,
         vocabulary::{CallableKind, Vocabulary},
     };
+    use pretty_assertions::assert_eq;
     use tera::Tera;
 
     /// The diagnosis of Tera's refusal to register `source`.

@@ -199,6 +199,7 @@ pub(crate) mod tests {
     };
     use cassiopeia_mapping::source_reads::SourceReads;
     use cassiopeia_ngsi_ld::entity::scope::{NgsiLdScope, ScopeBuf};
+    use pretty_assertions::assert_eq;
     use serde_json::json;
     use urn_rs::Urn;
 
@@ -241,6 +242,6 @@ pub(crate) mod tests {
 
         let scope = store.assemble_entity(&scoped).unwrap().scope;
         assert_eq!(serde_json::to_value(scope).unwrap(), json!(["/a", "/b", "/c", "/d"]));
-        assert!(store.assemble_entity(&unscoped).unwrap().scope.is_none());
+        assert_eq!(store.assemble_entity(&unscoped).unwrap().scope, None);
     }
 }

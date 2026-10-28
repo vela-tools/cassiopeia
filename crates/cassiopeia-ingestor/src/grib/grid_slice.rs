@@ -205,6 +205,7 @@ fn level_number(value: f64) -> Option<Value> {
 #[cfg(test)]
 mod tests {
     use crate::grib::{grid_slice::GridSlice, level::GribLevel, parameter::ParameterName};
+    use pretty_assertions::assert_eq;
     use serde_json::Value;
 
     fn slice() -> GridSlice {

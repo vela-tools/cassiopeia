@@ -56,6 +56,7 @@ mod tests {
         stage::Stage,
         telemetry::channel_boundary::ChannelBoundary,
     };
+    use pretty_assertions::assert_eq;
     use std::num::NonZeroUsize;
 
     #[test]

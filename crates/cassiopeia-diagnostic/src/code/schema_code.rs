@@ -17,6 +17,7 @@ pub enum SchemaCode {
 #[cfg(test)]
 mod tests {
     use crate::code::schema_code::SchemaCode;
+    use pretty_assertions::assert_eq;
 
     #[test]
     fn a_schema_code_renders_a_kebab_case_token() {

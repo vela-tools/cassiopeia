@@ -58,6 +58,7 @@ impl<'de> Deserialize<'de> for Input {
 #[cfg(test)]
 mod tests {
     use crate::input::Input;
+    use pretty_assertions::assert_eq;
     use std::{path::PathBuf, str::FromStr};
 
     #[test]

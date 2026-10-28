@@ -67,6 +67,7 @@ mod tests {
         relationships::{InstanceObjects, InstanceRelationships, Relationships},
     };
     use cassiopeia_ngsi_ld::entity::name::NameBuf;
+    use pretty_assertions::assert_eq;
     use urn_rs::Urn;
 
     fn name(value: &str) -> NameBuf {
@@ -122,7 +123,7 @@ mod tests {
         let (top_level, nested, instances) = with_instance_objects().into_parts();
 
         assert_eq!(top_level.len(), 1);
-        assert!(nested.is_none());
+        assert_eq!(nested, None);
         assert_eq!(instances.map(|instances| instances.len()), Some(1));
     }
 }

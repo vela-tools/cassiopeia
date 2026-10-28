@@ -139,6 +139,7 @@ mod tests {
         types::{Number, Value},
     };
     use compact_str::CompactString;
+    use pretty_assertions::assert_eq;
 
     #[test]
     fn boolean_tokens_parse_and_unknown_tokens_do_not() {

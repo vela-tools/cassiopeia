@@ -83,6 +83,7 @@ mod tests {
         writer::{Writer, WriterStats},
     };
     use cassiopeia_ngsi_ld::entity::{NgsiLdEntity, name::NameBuf};
+    use pretty_assertions::assert_eq;
     use std::time::Duration;
     use urn_rs::Urn;
 

@@ -42,6 +42,7 @@ impl<T, E> Signal<T, E> {
     ///
     /// ```
     /// use cassiopeia_common::signal::Signal;
+    /// use pretty_assertions::assert_eq;
     /// let signal: Signal<i32, ()> = Signal::Data(10);
     /// let mapped = signal.map(|x| x * 2);
     /// assert_eq!(mapped, Signal::Data(20));
@@ -95,6 +96,7 @@ mod tests {
         run::{RunCount, RunNumber},
         signal::{MetaSignal, Signal},
     };
+    use pretty_assertions::assert_eq;
 
     #[test]
     fn mapping_data_applies_the_function_to_the_payload() {

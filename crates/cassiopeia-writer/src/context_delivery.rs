@@ -15,6 +15,7 @@ pub enum ContextDelivery {
 #[cfg(test)]
 mod tests {
     use crate::context_delivery::ContextDelivery;
+    use pretty_assertions::assert_eq;
 
     #[test]
     fn the_default_embeds_the_context_in_the_body() {

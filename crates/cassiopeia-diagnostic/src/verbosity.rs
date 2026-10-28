@@ -13,6 +13,7 @@ pub enum Verbosity {
 #[cfg(test)]
 mod tests {
     use crate::verbosity::Verbosity;
+    use pretty_assertions::assert_ne;
 
     #[test]
     fn the_two_verbosities_are_distinct() {

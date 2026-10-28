@@ -79,6 +79,7 @@ mod tests {
     use cassiopeia_geometry::{error::GeometryError, geometry::GeometryKind};
     use cassiopeia_ngsi_ld::entity::error::{MandatoryMember, NgsiLdError};
     use cassiopeia_transformer::error::TransformationError;
+    use pretty_assertions::assert_eq;
 
     #[test]
     fn an_expander_failure_names_its_reason() {

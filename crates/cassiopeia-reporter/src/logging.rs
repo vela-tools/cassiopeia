@@ -116,6 +116,7 @@ where
 #[cfg(test)]
 mod tests {
     use crate::logging::effective_directory;
+    use pretty_assertions::assert_eq;
     use std::path::Path;
 
     #[test]

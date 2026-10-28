@@ -159,6 +159,7 @@ mod tests {
         template_location::TemplateLocation,
         template_site::TemplateSite,
     };
+    use pretty_assertions::assert_eq;
     use serde_json::{Value as JsonValue, json};
     use std::{error::Error, path::Path, sync::Arc};
 

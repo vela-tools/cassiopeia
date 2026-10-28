@@ -46,6 +46,7 @@ mod tests {
     use cassiopeia_common::{channel::ChannelPolicy, context::mode::AtContextMode, user_agent::UserAgent};
     use cassiopeia_configuration::{config::Config, pipeline::ExtractionMode};
     use cassiopeia_pipeline::pipeline_config::ExtractionParallelism;
+    use pretty_assertions::assert_eq;
     use std::num::NonZeroUsize;
 
     #[test]

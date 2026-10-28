@@ -22,6 +22,7 @@ pub enum DestinationKind {
 #[cfg(test)]
 mod tests {
     use crate::destination_kind::DestinationKind;
+    use pretty_assertions::assert_eq;
 
     #[test]
     fn the_file_kind_uses_a_kebab_case_wire_form() {

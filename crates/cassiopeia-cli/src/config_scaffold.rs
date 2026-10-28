@@ -67,6 +67,7 @@ mod tests {
         error::CliError,
     };
     use cassiopeia_configuration::config::Config;
+    use pretty_assertions::assert_eq;
     use std::fs::{read_to_string, write};
     use tempfile::TempDir;
 

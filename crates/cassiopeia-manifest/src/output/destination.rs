@@ -90,6 +90,7 @@ mod tests {
         file_framing::FileFraming,
         upsert_mode::UpsertMode,
     };
+    use pretty_assertions::assert_eq;
     use std::path::PathBuf;
 
     #[test]

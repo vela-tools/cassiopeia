@@ -66,6 +66,7 @@ pub fn node_constraints(schema: &Value) -> Vec<Constraint> {
 #[cfg(test)]
 mod tests {
     use crate::constraint::{Constraint, ConstraintKind, node_constraints};
+    use pretty_assertions::assert_eq;
     use serde_json::json;
 
     #[test]

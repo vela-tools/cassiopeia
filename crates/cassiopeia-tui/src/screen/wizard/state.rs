@@ -403,6 +403,7 @@ mod tests {
     };
     use cassiopeia_mapping::{template::runner::TemplateRunner, transformation::Transformation};
     use cassiopeia_ngsi_ld::{data_model::DataModel, entity::attribute::NgsiLdAttributeKind};
+    use pretty_assertions::assert_eq;
     use serde_json::Value;
     use std::str::FromStr;
 

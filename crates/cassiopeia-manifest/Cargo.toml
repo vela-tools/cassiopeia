@@ -26,5 +26,8 @@ url = { version = "2.5.8", features = ["serde"] }
 [package.metadata.cargo-machete]
 ignored = ["humantime-serde"]
 
+[dev-dependencies]
+pretty_assertions = "1.4.1"
+
 [lints]
 workspace = true

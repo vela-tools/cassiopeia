@@ -138,6 +138,7 @@ impl GeometryKind {
 #[cfg(test)]
 mod tests {
     use crate::geometry::{Cardinality, Dimension, GeometryKind, NgsiLdGeometry};
+    use pretty_assertions::assert_eq;
     use serde_json::json;
     use strum::IntoEnumIterator;
 

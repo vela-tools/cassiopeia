@@ -219,6 +219,7 @@ mod tests {
         value::types::{Number, Value},
     };
     use indexmap::IndexMap;
+    use pretty_assertions::assert_eq;
     use serde_json::json;
 
     fn empty_meta() -> MetadataSummary {

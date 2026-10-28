@@ -165,6 +165,7 @@ mod tests {
         schema_id::SchemaId,
         store::{ModelCatalog, SchemaStore, file_system::FileSystemStore},
     };
+    use pretty_assertions::assert_eq;
     use std::str::FromStr;
     use tempfile::TempDir;
 

@@ -44,6 +44,7 @@ fn channel_label(boundary: Option<ChannelBoundary>) -> String {
 mod tests {
     use crate::backend::terminal::summary::channels_table::channel_label;
     use cassiopeia_common::{stage::Stage, telemetry::channel_boundary::ChannelBoundary};
+    use pretty_assertions::assert_eq;
 
     #[test]
     fn channel_labels_name_the_stage_boundary() {

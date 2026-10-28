@@ -140,6 +140,7 @@ mod tests {
         test_reporter::{static_shutdown, static_test_reporter},
     };
     use cassiopeia_common::user_agent::UserAgent;
+    use pretty_assertions::assert_eq;
     use url::Url;
 
     #[test]

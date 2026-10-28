@@ -78,6 +78,7 @@ mod tests {
         field_path::FieldPath,
     };
     use cassiopeia_mapping::source_reads::{SourceKey, SourceReads};
+    use pretty_assertions::assert_eq;
     use serde_json::{Value, json};
 
     fn merged(mut dst: Value, src: &Value) -> (Value, Option<String>) {

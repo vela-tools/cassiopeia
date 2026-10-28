@@ -44,6 +44,7 @@ pub fn sleep_or_shutdown(duration: Duration, shutdown: &AtomicBool) -> BackoffSl
 #[cfg(test)]
 mod tests {
     use crate::broker::backoff::{BackoffSleep, backoff_delay, sleep_or_shutdown};
+    use pretty_assertions::assert_eq;
     use std::{sync::atomic::AtomicBool, time::Duration};
 
     #[test]

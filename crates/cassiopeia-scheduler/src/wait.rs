@@ -104,6 +104,7 @@ pub(crate) fn apply_jitter(wait: Wait, jitter: Jitter) -> Wait {
 mod tests {
     use crate::wait::{Jitter, Wait, apply_jitter, next_wait};
     use cassiopeia_manifest::schedule::{time_of_day::TimeOfDay, trigger::Trigger};
+    use pretty_assertions::assert_eq;
     use std::{str::FromStr, time::Duration};
 
     #[test]

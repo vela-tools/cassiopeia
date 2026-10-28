@@ -16,6 +16,7 @@ pub enum Severity {
 #[cfg(test)]
 mod tests {
     use crate::severity::Severity;
+    use pretty_assertions::assert_eq;
 
     #[test]
     fn an_error_sorts_ahead_of_a_warning() {

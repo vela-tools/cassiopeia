@@ -292,6 +292,7 @@ mod tests {
         download::{Downloader, context_urls, entity_model_ids, replacement::replacements, rewrite, schema_kind::SchemaKind, task::DownloadTask},
         schema_id::SchemaId,
     };
+    use pretty_assertions::assert_eq;
     use std::str::FromStr;
     use url::Url;
 

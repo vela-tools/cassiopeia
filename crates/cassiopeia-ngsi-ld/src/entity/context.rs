@@ -88,6 +88,7 @@ impl ContextSource {
 #[cfg(test)]
 mod tests {
     use crate::entity::context::{NgsiLdContext, NgsiLdContextEntry};
+    use pretty_assertions::assert_eq;
     use url::Url;
 
     fn url(s: &str) -> Url {

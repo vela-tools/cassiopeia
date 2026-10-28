@@ -51,6 +51,7 @@ impl MemoryUsage {
 #[cfg(test)]
 mod tests {
     use crate::telemetry::memory::MemoryUsage;
+    use pretty_assertions::assert_eq;
 
     #[test]
     fn an_unsampled_accumulator_reports_zero_peak_and_average() {

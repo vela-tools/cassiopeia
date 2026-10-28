@@ -134,6 +134,7 @@ fn char_boundary(bytes: &[u8], cap: usize) -> usize {
 #[cfg(test)]
 mod tests {
     use crate::captured_body::{BodyCapture, CapturedBody};
+    use pretty_assertions::assert_eq;
     use std::io::Error;
 
     #[test]

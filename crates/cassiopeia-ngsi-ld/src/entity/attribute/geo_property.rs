@@ -48,6 +48,7 @@ impl SerializeRepr for NgsiLdGeoProperty {
 mod tests {
     use crate::entity::attribute::geo_property::NgsiLdGeoProperty;
     use cassiopeia_geometry::geometry::NgsiLdGeometry;
+    use pretty_assertions::assert_eq;
 
     #[test]
     fn a_new_geo_property_holds_its_geometry_and_no_qualifiers() {
@@ -61,7 +62,7 @@ mod tests {
                 coordinates: [1.5, 2.5].into(),
             }
         );
-        assert!(geo.observed_at.is_none());
-        assert!(geo.dataset_id.is_none());
+        assert_eq!(geo.observed_at, None);
+        assert_eq!(geo.dataset_id, None);
     }
 }

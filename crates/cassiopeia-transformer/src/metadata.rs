@@ -151,6 +151,7 @@ mod tests {
     use cassiopeia_unreadable_timestamps::unreadable_timestamps::UnreadableTimestamps;
     use chrono::{TimeZone, Utc};
     use indexmap::IndexMap;
+    use pretty_assertions::{assert_eq, assert_ne};
     use serde_json::{Value as JsonValue, json};
 
     fn name(value: &str) -> NameBuf {
@@ -178,9 +179,9 @@ mod tests {
             &UnreadableTimestamps::new(),
         );
 
-        assert!(summary.observed_at.is_none());
-        assert!(summary.unit_code.is_none());
-        assert!(summary.dataset_id.is_none());
+        assert_eq!(summary.observed_at, None);
+        assert_eq!(summary.unit_code, None);
+        assert_eq!(summary.dataset_id, None);
         assert!(summary.custom_attributes.is_empty());
     }
 
@@ -239,7 +240,7 @@ mod tests {
 
         let summary = summary_with_observed_at(Value::from(2026_i64), &unreadable);
 
-        assert!(summary.observed_at.is_none());
+        assert_eq!(summary.observed_at, None);
         let entries = unreadable.into_entries();
         assert_eq!(entries.len(), 1);
         assert_eq!(entries[0].0, name("temperature"));
@@ -263,7 +264,7 @@ mod tests {
 
         let summary = summary_with_observed_at(Value::Null, &unreadable);
 
-        assert!(summary.observed_at.is_none());
+        assert_eq!(summary.observed_at, None);
         assert!(unreadable.is_empty());
     }
 

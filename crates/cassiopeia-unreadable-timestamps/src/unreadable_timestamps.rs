@@ -55,6 +55,7 @@ impl UnreadableTimestamps {
 mod tests {
     use crate::unreadable_timestamps::UnreadableTimestamps;
     use cassiopeia_ngsi_ld::entity::name::NameBuf;
+    use pretty_assertions::assert_eq;
 
     fn name(value: &str) -> NameBuf {
         NameBuf::new(value).expect("valid name")

@@ -28,6 +28,7 @@ mod tests {
         palette::FRAME,
         rendering::Rendering,
     };
+    use pretty_assertions::assert_eq;
 
     const ESCAPE: char = '\u{1b}';
 

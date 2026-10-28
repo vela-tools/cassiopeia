@@ -19,6 +19,7 @@ pub enum MappingRole {
 #[cfg(test)]
 mod tests {
     use crate::{mapping::Mapping, mapping_role::MappingRole, template::runner::TemplateRunner};
+    use pretty_assertions::assert_eq;
     use std::path::Path;
 
     #[test]

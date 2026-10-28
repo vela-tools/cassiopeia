@@ -129,6 +129,7 @@ impl Vocabulary {
 #[cfg(test)]
 mod tests {
     use crate::template::vocabulary::{CallableKind, ENGINE_FILTERS, ENGINE_FUNCTIONS, ENGINE_TESTS, Vocabulary};
+    use pretty_assertions::assert_eq;
     use tera::Tera;
 
     #[test]

@@ -30,6 +30,7 @@ pub enum FailurePolicy {
 #[cfg(test)]
 mod tests {
     use crate::failure_policy::FailurePolicy;
+    use pretty_assertions::assert_eq;
     use std::str::FromStr;
 
     #[test]

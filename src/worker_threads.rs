@@ -47,6 +47,7 @@ fn fallback_parallelism() -> usize {
 #[cfg(test)]
 mod tests {
     use crate::worker_threads::{fallback_parallelism, worker_thread_count};
+    use pretty_assertions::assert_eq;
     use std::num::NonZeroUsize;
 
     #[test]

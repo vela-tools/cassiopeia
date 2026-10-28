@@ -66,6 +66,7 @@ impl Detector for JsonDetector {
 mod tests {
     use crate::detectors::{Detector, json::JsonDetector};
     use cassiopeia_common::format::DataFormat;
+    use pretty_assertions::assert_eq;
 
     #[test]
     fn a_feature_collection_is_detected_as_geojson() {

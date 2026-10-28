@@ -22,5 +22,8 @@ strum = { version = "0.28.0", features = ["derive"] }
 thiserror = "2.0.21"
 url = "2.5.8"
 
+[dev-dependencies]
+pretty_assertions = "1.4.1"
+
 [lints]
 workspace = true

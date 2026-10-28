@@ -122,6 +122,7 @@ impl ReporterBuilder {
 mod tests {
     use crate::builder::{ReporterBuilder, ReporterMode};
     use cassiopeia_diagnostic::verbosity::Verbosity;
+    use pretty_assertions::assert_eq;
 
     #[test]
     fn the_builder_defaults_to_terminal_mode_and_concise_output() {

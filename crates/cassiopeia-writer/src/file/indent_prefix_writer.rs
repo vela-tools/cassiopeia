@@ -39,6 +39,7 @@ impl<W: Write> Write for IndentPrefixWriter<'_, W> {
 #[cfg(test)]
 mod tests {
     use crate::file::indent_prefix_writer::IndentPrefixWriter;
+    use pretty_assertions::assert_eq;
     use std::io::Write;
 
     #[test]

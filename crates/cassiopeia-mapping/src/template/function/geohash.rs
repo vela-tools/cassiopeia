@@ -65,6 +65,7 @@ fn precision_argument(argument: Option<Value>) -> TeraResult<usize> {
 #[cfg(test)]
 mod tests {
     use crate::template::function::geohash::geohash;
+    use pretty_assertions::{assert_eq, assert_ne};
     use tera::{Context, Tera, Value};
 
     fn render(template: &str, latitude: Value, longitude: Value) -> Result<String, tera::Error> {

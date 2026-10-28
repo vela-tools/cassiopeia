@@ -321,6 +321,7 @@ mod tests {
         template::runner::TemplateRunner,
     };
     use cassiopeia_ngsi_ld::entity::name::NameBuf;
+    use pretty_assertions::assert_eq;
     use serde_json::json;
     use std::{num::NonZeroU64, ops::ControlFlow, path::Path, sync::Arc, time::Duration};
     use urn_rs::Urn;
@@ -521,8 +522,8 @@ mod tests {
 
         let unit = only_unit(&resolver, &station);
         assert_eq!(unit.relationships().top_level().get(&name("refRoad")).map(Vec::as_slice), Some(&[road][..]));
-        assert!(unit.relationships().nested().is_none());
-        assert!(unit.relationships().instances().is_none());
+        assert_eq!(unit.relationships().nested(), &None);
+        assert_eq!(unit.relationships().instances(), &None);
     }
 
     #[test]

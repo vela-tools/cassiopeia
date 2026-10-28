@@ -32,6 +32,7 @@ impl ThemeChoice {
 mod tests {
     use crate::theme_choice::ThemeChoice;
     use cassiopeia_tui::theme::{DARK, LIGHT};
+    use pretty_assertions::{assert_eq, assert_ne};
 
     #[test]
     fn each_choice_selects_its_own_palette() {

@@ -32,6 +32,7 @@ impl FieldPath {
 #[cfg(test)]
 mod tests {
     use crate::field_path::FieldPath;
+    use pretty_assertions::assert_eq;
 
     #[test]
     fn a_path_renders_its_keys_joined_by_dots() {

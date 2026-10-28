@@ -35,6 +35,7 @@ pub enum GeometryCode {
 #[cfg(test)]
 mod tests {
     use crate::code::geometry_code::GeometryCode;
+    use pretty_assertions::assert_eq;
 
     #[test]
     fn a_geometry_code_renders_a_kebab_case_token() {

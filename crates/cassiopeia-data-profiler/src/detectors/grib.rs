@@ -35,6 +35,7 @@ mod tests {
         metadata::{FormatMetadata, GribEdition},
     };
     use cassiopeia_common::format::DataFormat;
+    use pretty_assertions::assert_eq;
 
     #[test]
     fn grib2_magic_is_detected_as_grib_with_edition_metadata() {

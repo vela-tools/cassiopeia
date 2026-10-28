@@ -102,6 +102,7 @@ impl Default for Theme {
 #[cfg(test)]
 mod tests {
     use crate::theme::{DARK, LIGHT, Theme};
+    use pretty_assertions::{assert_eq, assert_ne};
 
     #[test]
     fn the_default_theme_is_the_dark_palette() {
