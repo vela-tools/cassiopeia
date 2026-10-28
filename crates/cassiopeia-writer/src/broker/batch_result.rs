@@ -47,7 +47,7 @@ pub struct BatchEntityError {
 #[cfg(test)]
 mod tests {
     use crate::broker::batch_result::BatchOperationResult;
-    use iri_rs::Iri;
+    use iri_rs::{Iri, IriBuf};
 
     #[test]
     fn a_partial_result_separates_the_successes_from_the_errors() {
@@ -67,7 +67,7 @@ mod tests {
         let result: BatchOperationResult = serde_json::from_str(r#"{"success":["urn:ngsi-ld:A"],"errors":[]}"#).unwrap();
 
         assert_eq!(result.success.len(), 1);
-        assert!(result.errors.is_empty());
+        assert_eq!(result.errors, []);
     }
 
     #[test]
@@ -75,8 +75,8 @@ mod tests {
         let accepted: BatchOperationResult = serde_json::from_str(r#"{"success":["urn:ngsi-ld:A"]}"#).unwrap();
         let rejected: BatchOperationResult = serde_json::from_str(r#"{"errors":[{"entityId":"urn:ngsi-ld:C","error":{}}]}"#).unwrap();
 
-        assert!(accepted.errors.is_empty());
-        assert!(rejected.success.is_empty());
+        assert_eq!(accepted.errors, []);
+        assert_eq!(rejected.success, [] as [IriBuf; 0]);
     }
 
     #[test]

@@ -176,7 +176,7 @@ mod tests {
         let editor = AttributeEditorState::from_editor("field".to_string(), &attribute, Some(EditorKey::SchemaField("field".to_string())));
 
         assert_eq!(editor.source_parts, vec!["{{ a }}", "{{ b }}"]);
-        assert!(editor.source_input.is_empty());
+        assert_eq!(editor.source_input, "");
     }
 
     #[test]

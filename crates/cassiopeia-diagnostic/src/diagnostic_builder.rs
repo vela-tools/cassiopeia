@@ -166,7 +166,7 @@ mod tests {
             .with_context(entities("urn:ngsi-ld:A:1"))
             .build();
 
-        assert!(diagnostic.defining().is_empty());
+        assert_eq!(diagnostic.defining(), []);
         assert_eq!(diagnostic.incidental().len(), 1);
     }
 
@@ -182,8 +182,8 @@ mod tests {
     fn an_absent_optional_field_changes_nothing() {
         let diagnostic = DiagnosticBuilder::new(Severity::Error, code(), "rejected").with_optional_context(None).build();
 
-        assert!(diagnostic.defining().is_empty());
-        assert!(diagnostic.incidental().is_empty());
+        assert_eq!(diagnostic.defining(), []);
+        assert_eq!(diagnostic.incidental(), &[]);
     }
 
     #[test]

@@ -86,6 +86,6 @@ mod tests {
 
     #[test]
     fn an_error_without_a_source_yields_no_causes() {
-        assert!(causes_of(&layered(&["standalone"])).is_empty());
+        assert_eq!(causes_of(&layered(&["standalone"])), []);
     }
 }

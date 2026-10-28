@@ -97,7 +97,7 @@ mod tests {
     #[test]
     fn a_fresh_tally_holds_nothing() {
         assert!(MergedRecords::new().is_empty());
-        assert!(MergedRecords::new().into_entries().is_empty());
+        assert_eq!(MergedRecords::new().into_entries(), []);
     }
 
     #[test]

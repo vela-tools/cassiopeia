@@ -209,6 +209,6 @@ mod tests {
 
         assert!(saw_start);
         assert!(saw_stop);
-        assert!(runs.is_empty());
+        assert_eq!(runs, []);
     }
 }

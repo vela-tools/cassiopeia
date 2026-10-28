@@ -504,7 +504,7 @@ mod tests {
             TemplatePart::Dynamic(FieldPath::new("gate")),
         ])];
 
-        assert!(resolver.resolve_tokens(&templates, &json!({})).unwrap().is_empty());
+        assert_eq!(resolver.resolve_tokens(&templates, &json!({})).unwrap(), [] as [String; 0]);
     }
 
     #[test]
@@ -523,7 +523,7 @@ mod tests {
         let resolver = TemplateRunner::new().resolver();
         let templates = vec![CompiledTemplate::Simple(FieldPath::new("missing"))];
 
-        assert!(resolver.resolve_tokens(&templates, &json!({})).unwrap().is_empty());
+        assert_eq!(resolver.resolve_tokens(&templates, &json!({})).unwrap(), [] as [String; 0]);
     }
 
     #[test]
@@ -588,6 +588,6 @@ mod tests {
         let mut identifiers = Vec::new();
         collect_identifiers(json!(null), &mut identifiers);
 
-        assert!(identifiers.is_empty());
+        assert_eq!(identifiers, [] as [String; 0]);
     }
 }

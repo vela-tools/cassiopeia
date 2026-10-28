@@ -453,7 +453,7 @@ mod tests {
             let _ = handle.join();
         }
 
-        assert!(REPORTER.messages().is_empty());
+        assert_eq!(REPORTER.messages(), []);
     }
 }
 

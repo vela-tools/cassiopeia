@@ -58,7 +58,7 @@ mod tests {
         let header = tenant_header(Some(&Tenant::from_str("acme").unwrap()), &reporter);
 
         assert_eq!(header.unwrap().to_str().unwrap(), "acme");
-        assert!(reporter.diagnostics().is_empty());
+        assert_eq!(reporter.diagnostics(), []);
     }
 
     #[test]
@@ -66,6 +66,6 @@ mod tests {
         let reporter = TestReporter::new();
 
         assert!(tenant_header(None, &reporter).is_none());
-        assert!(reporter.diagnostics().is_empty());
+        assert_eq!(reporter.diagnostics(), []);
     }
 }

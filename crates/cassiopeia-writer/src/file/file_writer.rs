@@ -356,7 +356,7 @@ mod tests {
         writer.write(entity("Sensor", "urn:ngsi-ld:Sensor:1")).unwrap();
         assert_eq!(writer.pending.len(), 1);
         writer.write(entity("Sensor", "urn:ngsi-ld:Sensor:2")).unwrap();
-        assert!(writer.pending.is_empty());
+        assert_eq!(writer.pending, []);
         assert_eq!(writer.written_count, 2);
         writer.write(entity("Sensor", "urn:ngsi-ld:Sensor:3")).unwrap();
         assert_eq!(writer.pending.len(), 1);

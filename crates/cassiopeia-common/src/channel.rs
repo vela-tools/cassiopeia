@@ -269,10 +269,7 @@ impl ChannelMetrics {
     }
 
     fn decrement_depth(&self) {
-        let previous = self
-            .depth
-            .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |depth| Some(depth.saturating_sub(1)))
-            .unwrap_or(0);
+        let previous = self.depth.update(Ordering::Relaxed, Ordering::Relaxed, |depth| depth.saturating_sub(1));
         if self.capacity.is_some_and(|capacity| previous >= capacity) {
             let since = self.capacity_since_ns.swap(0, Ordering::Relaxed);
             if since != 0 {

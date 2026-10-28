@@ -181,6 +181,6 @@ mod tests {
 
     #[test]
     fn the_cached_long_version_is_non_empty() {
-        assert!(!long_version().is_empty());
+        assert_ne!(long_version(), "");
     }
 }

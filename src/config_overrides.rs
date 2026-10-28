@@ -90,6 +90,6 @@ mod tests {
         // a configuration override.
         let overrides = overrides_for(&["--validation-representation", "concise"]);
 
-        assert!(overrides.is_empty());
+        assert_eq!(overrides, []);
     }
 }

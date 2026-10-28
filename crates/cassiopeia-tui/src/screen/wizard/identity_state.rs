@@ -15,7 +15,7 @@ mod tests {
     #[test]
     fn a_new_identity_state_is_empty_and_focused_on_the_first_field() {
         let state = IdentityState::default();
-        assert!(state.entity_id_template.is_empty());
+        assert_eq!(state.entity_id_template, "");
         assert_eq!(state.focus_index, 0);
     }
 }

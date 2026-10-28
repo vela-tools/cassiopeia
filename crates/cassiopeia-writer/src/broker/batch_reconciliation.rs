@@ -58,7 +58,7 @@ pub fn reconcile(result: &BatchOperationResult, entities: &[NgsiLdEntity]) -> Re
 mod tests {
     use crate::broker::{batch_reconciliation::reconcile, batch_result::BatchOperationResult};
     use cassiopeia_ngsi_ld::entity::{NgsiLdEntity, name::NameBuf};
-    use iri_rs::Iri;
+    use iri_rs::{Iri, IriBuf};
     use urn_rs::Urn;
 
     fn entities(ids: &[&str]) -> Vec<NgsiLdEntity> {
@@ -80,7 +80,7 @@ mod tests {
 
         assert_eq!(outcome.written(), 2);
         assert_eq!(outcome.failed(), 1);
-        assert!(outcome.unaccounted().is_empty());
+        assert_eq!(outcome.unaccounted(), &[] as &[IriBuf]);
     }
 
     #[test]

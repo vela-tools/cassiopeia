@@ -114,7 +114,7 @@ mod tests {
         let ResponseVerdict::UnreadableMultiStatus { source } = verdict else {
             panic!("expected an unreadable multi-status verdict");
         };
-        assert!(!source.to_string().is_empty());
+        assert_ne!(source.to_string(), "");
     }
 
     #[test]

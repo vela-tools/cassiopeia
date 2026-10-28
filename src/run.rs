@@ -148,12 +148,10 @@ fn dispatch_sdm(command: &SdmSubcommand, cli_config: &CliConfig, reporter: &'sta
     match command {
         SdmSubcommand::Download => {
             sdm::download_schemas(cli_config, reporter)?;
-            Ok(())
         }
         SdmSubcommand::List => {
             let names = sdm::list_schemas(cli_config)?;
             println!("{}", render_schema_listing(ListingSource::All, &names, detect_rendering(Stream::Stdout)));
-            Ok(())
         }
         SdmSubcommand::Search { query } => {
             let names = sdm::search_schemas(cli_config, query)?;
@@ -161,9 +159,9 @@ fn dispatch_sdm(command: &SdmSubcommand, cli_config: &CliConfig, reporter: &'sta
                 "{}",
                 render_schema_listing(ListingSource::Query(query), &names, detect_rendering(Stream::Stdout))
             );
-            Ok(())
         }
     }
+    Ok(())
 }
 
 /// Dispatches a `mapping` subcommand.
@@ -175,7 +173,6 @@ fn dispatch_mapping(command: &MappingSubcommand) -> Result<()> {
                 // The formatted JSON5 already went to stdout; it is the result, and needs no report.
                 FormatOutcome::ToStdout => {}
             }
-            Ok(())
         }
         MappingSubcommand::Convert { mapping, output } => {
             let path = convert::convert_mapping(mapping, output)?;
@@ -183,9 +180,9 @@ fn dispatch_mapping(command: &MappingSubcommand) -> Result<()> {
                 size: written_size(&path),
                 path,
             });
-            Ok(())
         }
     }
+    Ok(())
 }
 
 /// Dispatches a `schema` subcommand.

@@ -100,6 +100,6 @@ mod tests {
 
     #[test]
     fn a_node_without_constraints_yields_an_empty_list() {
-        assert!(node_constraints(&json!({"type": "string"})).is_empty());
+        assert_eq!(node_constraints(&json!({"type": "string"})), []);
     }
 }

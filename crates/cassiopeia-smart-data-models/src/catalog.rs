@@ -226,6 +226,6 @@ mod tests {
     fn searching_for_something_absent_matches_nothing() {
         let (_directory, catalog) = catalog();
 
-        assert!(catalog.search("weather").unwrap().is_empty());
+        assert_eq!(catalog.search("weather").unwrap(), []);
     }
 }
