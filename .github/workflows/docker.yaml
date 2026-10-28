@@ -113,6 +113,7 @@ jobs:
         with:
           images: ${{ env.IMAGE }}
           tags: |
+            type=semver,pattern={{version}}
             type=raw,value=${{ github.ref_name }},enable=${{ github.ref_type == 'tag' }}
             type=raw,value=latest,enable=${{ github.ref_type == 'tag' && !contains(github.ref_name, '-') }}
             type=sha,enable=${{ github.ref_type == 'branch' }}
