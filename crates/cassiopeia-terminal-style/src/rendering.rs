@@ -30,6 +30,20 @@ pub enum Stream {
     Stderr,
 }
 
+/// Whether a stream is attached to an interactive terminal.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Interactivity {
+    Terminal,
+    Redirected,
+}
+
+/// Whether the environment asks for colour to be left out, per the `NO_COLOR` convention.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ColorPreference {
+    Allowed,
+    Refused,
+}
+
 /// Colours output only for an interactive terminal on the named stream, honouring the `NO_COLOR`
 /// convention.
 #[must_use]
@@ -38,27 +52,43 @@ pub fn detect_rendering(stream: Stream) -> Rendering {
         Stream::Stdout => stdout().is_terminal(),
         Stream::Stderr => stderr().is_terminal(),
     };
-    if is_terminal && var_os("NO_COLOR").is_none() {
-        Rendering::Colored
+    let interactivity = if is_terminal { Interactivity::Terminal } else { Interactivity::Redirected };
+    let preference = if var_os("NO_COLOR").is_some() {
+        ColorPreference::Refused
     } else {
-        Rendering::Plain
+        ColorPreference::Allowed
+    };
+    rendering_for(interactivity, preference)
+}
+
+/// The rendering a stream of the given interactivity gets under the given colour preference.
+const fn rendering_for(interactivity: Interactivity, preference: ColorPreference) -> Rendering {
+    match (interactivity, preference) {
+        (Interactivity::Terminal, ColorPreference::Allowed) => Rendering::Colored,
+        (Interactivity::Terminal, ColorPreference::Refused) | (Interactivity::Redirected, ColorPreference::Allowed | ColorPreference::Refused) => {
+            Rendering::Plain
+        }
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use crate::rendering::{Rendering, Stream, detect_rendering};
+    use crate::rendering::{ColorPreference, Interactivity, Rendering, rendering_for};
     use pretty_assertions::assert_eq;
 
-    // Under the project's redirect-then-read test convention both standard streams are captured, so
-    // neither is a terminal and the decision collapses to `Plain` regardless of `NO_COLOR`.
     #[test]
-    fn stdout_is_plain_when_it_is_not_a_terminal() {
-        assert_eq!(detect_rendering(Stream::Stdout), Rendering::Plain);
+    fn a_terminal_is_coloured_when_colour_is_allowed() {
+        assert_eq!(rendering_for(Interactivity::Terminal, ColorPreference::Allowed), Rendering::Colored);
     }
 
     #[test]
-    fn stderr_is_plain_when_it_is_not_a_terminal() {
-        assert_eq!(detect_rendering(Stream::Stderr), Rendering::Plain);
+    fn a_terminal_is_plain_when_no_color_refuses_colour() {
+        assert_eq!(rendering_for(Interactivity::Terminal, ColorPreference::Refused), Rendering::Plain);
+    }
+
+    #[test]
+    fn a_redirected_stream_is_plain_whatever_the_colour_preference() {
+        assert_eq!(rendering_for(Interactivity::Redirected, ColorPreference::Allowed), Rendering::Plain);
+        assert_eq!(rendering_for(Interactivity::Redirected, ColorPreference::Refused), Rendering::Plain);
     }
 }

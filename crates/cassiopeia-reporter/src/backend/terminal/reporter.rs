@@ -16,7 +16,7 @@ use cassiopeia_terminal_style::{
     symbol::{INFO_SYMBOL, SUCCESS_SYMBOL},
 };
 use execution_time::ExecutionTime;
-use indicatif::{MultiProgress, ProgressBar};
+use indicatif::{MultiProgress, ProgressBar, ProgressDrawTarget};
 use parking_lot::Mutex;
 use std::{
     sync::atomic::{AtomicBool, Ordering},
@@ -43,15 +43,16 @@ pub struct TerminalReporter {
 }
 
 impl TerminalReporter {
-    /// Builds a terminal reporter with no active stages or progress bar.
+    /// Builds a terminal reporter with no active stages or progress bar, drawing to `draw_target`.
     ///
-    /// `indicatif` hides its managed bars whenever stderr is not a terminal or the terminal is
-    /// `dumb`, which is exactly when its output would otherwise vanish. In that case the reporter
-    /// writes plain lines straight to stderr instead, so a piped run keeps its diagnostics, and it
-    /// renders without ANSI codes so a redirected log stays greppable.
+    /// `indicatif` hides its managed bars whenever the target is hidden, or is stderr while stderr is
+    /// not a terminal or the terminal is `dumb`, which is exactly when its output would otherwise
+    /// vanish. In that case the reporter writes plain lines straight to stderr instead, so a piped
+    /// run keeps its diagnostics, and it renders without ANSI codes so a redirected log stays
+    /// greppable.
     #[must_use]
-    pub fn new(verbosity: Verbosity) -> TerminalReporter {
-        let multi_progress = MultiProgress::new();
+    pub fn new(verbosity: Verbosity, draw_target: ProgressDrawTarget) -> TerminalReporter {
+        let multi_progress = MultiProgress::with_draw_target(draw_target);
         let rendering = if multi_progress.is_hidden() {
             Rendering::Plain
         } else {
@@ -228,6 +229,7 @@ mod tests {
     };
     use cassiopeia_terminal_style::rendering::Rendering;
     use execution_time::ExecutionTime;
+    use indicatif::ProgressDrawTarget;
     use pretty_assertions::assert_eq;
 
     /// A stage identity for the registry tests.
@@ -245,7 +247,7 @@ mod tests {
 
     #[test]
     fn quiet_mode_suppresses_stage_creation() {
-        let reporter = TerminalReporter::new(Verbosity::Concise);
+        let reporter = TerminalReporter::new(Verbosity::Concise, ProgressDrawTarget::hidden());
         reporter.set_quiet_stages(StageOutput::Quiet);
         let guard = reporter.enter_stage(Box::new(NamedStage("s")), ExecutionTime::start());
         guard.inc_by(5);
@@ -256,7 +258,7 @@ mod tests {
 
     #[test]
     fn a_visible_stage_is_registered_and_can_be_finished() {
-        let reporter = TerminalReporter::new(Verbosity::Concise);
+        let reporter = TerminalReporter::new(Verbosity::Concise, ProgressDrawTarget::hidden());
         let guard = reporter.enter_stage(Box::new(NamedStage("s")), ExecutionTime::start());
         assert_eq!(reporter.stages.len(), 1);
 
@@ -268,7 +270,7 @@ mod tests {
 
     #[test]
     fn logging_helpers_do_not_panic() {
-        let reporter = TerminalReporter::new(Verbosity::Full);
+        let reporter = TerminalReporter::new(Verbosity::Full, ProgressDrawTarget::hidden());
         reporter.info("info");
         reporter.success("success");
         reporter.debug("debug");
@@ -281,16 +283,17 @@ mod tests {
         );
     }
 
-    // Under the project's redirect-then-read test convention stderr is captured, so indicatif hides
-    // its bars and the reporter takes the plain, straight-to-stderr path.
     #[test]
-    fn a_captured_stderr_renders_plain_text() {
-        assert_eq!(TerminalReporter::new(Verbosity::Concise).rendering, Rendering::Plain);
+    fn a_hidden_draw_target_renders_plain_text() {
+        assert_eq!(
+            TerminalReporter::new(Verbosity::Concise, ProgressDrawTarget::hidden()).rendering,
+            Rendering::Plain
+        );
     }
 
     #[test]
     fn concurrent_workers_share_a_stage_lifecycle_until_the_last_finishes() {
-        let reporter = TerminalReporter::new(Verbosity::Concise);
+        let reporter = TerminalReporter::new(Verbosity::Concise, ProgressDrawTarget::hidden());
         let id = StageId::new("resolver");
         let first = reporter.enter_stage(Box::new(NamedStage("resolver")), ExecutionTime::start());
         let second = reporter.enter_stage(Box::new(NamedStage("resolver")), ExecutionTime::start());
@@ -304,7 +307,7 @@ mod tests {
 
     #[test]
     fn a_live_annotation_reaches_the_registered_stage() {
-        let reporter = TerminalReporter::new(Verbosity::Concise);
+        let reporter = TerminalReporter::new(Verbosity::Concise, ProgressDrawTarget::hidden());
         let guard = reporter.enter_stage(Box::new(NamedStage("writer")), ExecutionTime::start());
 
         reporter.stage_set_message(StageId::new("writer"), "~12ms");

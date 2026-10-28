@@ -13,6 +13,7 @@ use crate::{
 };
 use cassiopeia_common::log::config::LoggerConfig;
 use cassiopeia_diagnostic::verbosity::Verbosity;
+use indicatif::ProgressDrawTarget;
 use tracing_subscriber::{layer::SubscriberExt, reload::Layer, util::SubscriberInitExt};
 
 /// Which backend the reporter drives.
@@ -93,7 +94,7 @@ impl ReporterBuilder {
         tracing_subscriber::registry().with(reload_layer).init();
 
         let backend: Box<dyn Reporter> = match self.mode {
-            ReporterMode::Terminal => Box::new(TerminalReporter::new(self.verbosity)),
+            ReporterMode::Terminal => Box::new(TerminalReporter::new(self.verbosity, ProgressDrawTarget::stderr())),
             ReporterMode::Tracing => Box::new(TracingReporter::new()),
         };
 
