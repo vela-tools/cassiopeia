@@ -2,6 +2,31 @@
 
 All notable changes to this project will be documented in this file.
 
+## [v1.1.1] - 2026-10-28
+
+### 🏗️ Build
+- bump docker base images to rust 1.99.1 and trixie-20261027
+
+### 🐛 Bug Fixes
+- clear clippy warnings under rust 1.99.1
+
+### 👷 CI
+- check the msrv with cargo msrv every two weeks
+- pin the rust toolchain and let dependabot bump it
+
+### 📚 Documentation
+- state rust 1.96.1 as the minimum
+- add clippy and cargo deny badges to the readme
+
+### 🧪 Tests
+- keep reporter and rendering tests independent of the terminal
+- use pretty_assertions across the workspace
+
+### 🧹 Chores
+- bump version
+- adjust msrv
+- update dependencies
+
 ## [v1.1.0] - 2026-10-02
 
 ### 🏗️ Build
