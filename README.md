@@ -19,6 +19,8 @@
 </p>
 
 <p align="center">
+  <a href="https://github.com/vela-tools/cassiopeia/actions/workflows/clippy.yaml"><img alt="clippy" src="https://github.com/vela-tools/cassiopeia/actions/workflows/clippy.yaml/badge.svg"></a>
+  <a href="https://github.com/vela-tools/cassiopeia/actions/workflows/deny.yaml"><img alt="cargo deny" src="https://github.com/vela-tools/cassiopeia/actions/workflows/deny.yaml/badge.svg"></a>
   <a href="https://github.com/vela-tools/cassiopeia/actions/workflows/test.yaml"><img alt="tests" src="https://github.com/vela-tools/cassiopeia/actions/workflows/test.yaml/badge.svg"></a>
   <a href="LICENSE.md"><img alt="license: EUPL-1.2" src="https://img.shields.io/badge/license-EUPL--1.2-blue"></a>
   <img alt="rust 1.96+" src="https://img.shields.io/badge/rust-1.96%2B-orange">
