@@ -1,0 +1,27 @@
+name: msrv
+
+on:
+  schedule:
+    - cron: "17 6 1,15 * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  msrv:
+    name: cargo msrv find
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/native-dependencies
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-msrv
+      - run: |
+          declared="$(sed -n 's/^rust-version = "\(.*\)"$/\1/p' Cargo.toml)"
+          found="$(cargo msrv find --min "$declared" --include-all-patch-releases --output-format json --no-log -- cargo check --workspace --all-targets --all-features --locked | jq -r 'select(.type == "subcommand_result" and .subcommand_id == "find") | .result.version // empty')"
+          if [ "$found" != "$declared" ]; then
+            echo "::error::rust-version is $declared, but the lowest toolchain that builds the workspace is ${found:-none found}"
+            exit 1
+          fi
