@@ -401,7 +401,7 @@ dependencies = [
 
 [[package]]
 name = "cassiopeia"
-version = "1.1.0"
+version = "1.1.1"
 dependencies = [
  "bugreport",
  "cassiopeia-cli",
@@ -431,7 +431,7 @@ dependencies = [
 
 [[package]]
 name = "cassiopeia-aggregator"
-version = "1.1.0"
+version = "1.1.1"
 dependencies = [
  "cassiopeia-common",
  "cassiopeia-geometry",
@@ -444,7 +444,7 @@ dependencies = [
 
 [[package]]
 name = "cassiopeia-cli"
-version = "1.1.0"
+version = "1.1.1"
 dependencies = [
  "anstyle",
  "cassiopeia-configuration",
@@ -471,7 +471,7 @@ dependencies = [
 
 [[package]]
 name = "cassiopeia-collector"
-version = "1.1.0"
+version = "1.1.1"
 dependencies = [
  "cassiopeia-common",
  "cassiopeia-ir",
@@ -488,7 +488,7 @@ dependencies = [
 
 [[package]]
 name = "cassiopeia-common"
-version = "1.1.0"
+version = "1.1.1"
 dependencies = [
  "clap",
  "cpu-time",
@@ -508,7 +508,7 @@ dependencies = [
 
 [[package]]
 name = "cassiopeia-configuration"
-version = "1.1.0"
+version = "1.1.1"
 dependencies = [
  "cassiopeia-common",
  "cassiopeia-directories",
@@ -526,7 +526,7 @@ dependencies = [
 
 [[package]]
 name = "cassiopeia-crs"
-version = "1.1.0"
+version = "1.1.1"
 dependencies = [
  "geo",
  "geo-types",
@@ -537,7 +537,7 @@ dependencies = [
 
 [[package]]
 name = "cassiopeia-data-profiler"
-version = "1.1.0"
+version = "1.1.1"
 dependencies = [
  "bytecount",
  "cassiopeia-common",
@@ -558,7 +558,7 @@ dependencies = [
 
 [[package]]
 name = "cassiopeia-diagnostic"
-version = "1.1.0"
+version = "1.1.1"
 dependencies = [
  "cassiopeia-common",
  "cassiopeia-ngsi-ld",
@@ -575,7 +575,7 @@ dependencies = [
 
 [[package]]
 name = "cassiopeia-directories"
-version = "1.1.0"
+version = "1.1.1"
 dependencies = [
  "etcetera",
  "is-docker",
@@ -584,7 +584,7 @@ dependencies = [
 
 [[package]]
 name = "cassiopeia-expander"
-version = "1.1.0"
+version = "1.1.1"
 dependencies = [
  "ahash",
  "cassiopeia-common",
@@ -602,7 +602,7 @@ dependencies = [
 
 [[package]]
 name = "cassiopeia-extractor"
-version = "1.1.0"
+version = "1.1.1"
 dependencies = [
  "cassiopeia-common",
  "cassiopeia-expander",
@@ -626,7 +626,7 @@ dependencies = [
 
 [[package]]
 name = "cassiopeia-geometry"
-version = "1.1.0"
+version = "1.1.1"
 dependencies = [
  "derive_more",
  "geo",
@@ -643,7 +643,7 @@ dependencies = [
 
 [[package]]
 name = "cassiopeia-ingestor"
-version = "1.1.0"
+version = "1.1.1"
 dependencies = [
  "cassiopeia-common",
  "cassiopeia-crs",
@@ -679,7 +679,7 @@ dependencies = [
 
 [[package]]
 name = "cassiopeia-ir"
-version = "1.1.0"
+version = "1.1.1"
 dependencies = [
  "cassiopeia-common",
  "cassiopeia-data-profiler",
@@ -701,7 +701,7 @@ dependencies = [
 
 [[package]]
 name = "cassiopeia-manifest"
-version = "1.1.0"
+version = "1.1.1"
 dependencies = [
  "cassiopeia-common",
  "chrono",
@@ -722,7 +722,7 @@ dependencies = [
 
 [[package]]
 name = "cassiopeia-mapping"
-version = "1.1.0"
+version = "1.1.1"
 dependencies = [
  "cassiopeia-common",
  "cassiopeia-geometry",
@@ -751,7 +751,7 @@ dependencies = [
 
 [[package]]
 name = "cassiopeia-ngsi-ld"
-version = "1.1.0"
+version = "1.1.1"
 dependencies = [
  "cassiopeia-common",
  "cassiopeia-geometry",
@@ -777,7 +777,7 @@ dependencies = [
 
 [[package]]
 name = "cassiopeia-pipeline"
-version = "1.1.0"
+version = "1.1.1"
 dependencies = [
  "cassiopeia-aggregator",
  "cassiopeia-collector",
@@ -816,7 +816,7 @@ dependencies = [
 
 [[package]]
 name = "cassiopeia-profiler"
-version = "1.1.0"
+version = "1.1.1"
 dependencies = [
  "cassiopeia-common",
  "cassiopeia-data-profiler",
@@ -828,7 +828,7 @@ dependencies = [
 
 [[package]]
 name = "cassiopeia-reporter"
-version = "1.1.0"
+version = "1.1.1"
 dependencies = [
  "anstyle",
  "cassiopeia-common",
@@ -858,7 +858,7 @@ dependencies = [
 
 [[package]]
 name = "cassiopeia-resolver"
-version = "1.1.0"
+version = "1.1.1"
 dependencies = [
  "ahash",
  "cassiopeia-common",
@@ -885,7 +885,7 @@ dependencies = [
 
 [[package]]
 name = "cassiopeia-scheduler"
-version = "1.1.0"
+version = "1.1.1"
 dependencies = [
  "cassiopeia-common",
  "cassiopeia-manifest",
@@ -900,7 +900,7 @@ dependencies = [
 
 [[package]]
 name = "cassiopeia-smart-data-models"
-version = "1.1.0"
+version = "1.1.1"
 dependencies = [
  "cassiopeia-common",
  "cassiopeia-ngsi-ld",
@@ -924,7 +924,7 @@ dependencies = [
 
 [[package]]
 name = "cassiopeia-terminal-style"
-version = "1.1.0"
+version = "1.1.1"
 dependencies = [
  "anstyle",
  "pretty_assertions",
@@ -932,7 +932,7 @@ dependencies = [
 
 [[package]]
 name = "cassiopeia-transformer"
-version = "1.1.0"
+version = "1.1.1"
 dependencies = [
  "cassiopeia-common",
  "cassiopeia-geometry",
@@ -954,7 +954,7 @@ dependencies = [
 
 [[package]]
 name = "cassiopeia-tui"
-version = "1.1.0"
+version = "1.1.1"
 dependencies = [
  "cassiopeia-mapping",
  "cassiopeia-ngsi-ld",
@@ -973,7 +973,7 @@ dependencies = [
 
 [[package]]
 name = "cassiopeia-unreadable-timestamps"
-version = "1.1.0"
+version = "1.1.1"
 dependencies = [
  "cassiopeia-ngsi-ld",
  "indexmap 2.14.2",
@@ -983,7 +983,7 @@ dependencies = [
 
 [[package]]
 name = "cassiopeia-validator"
-version = "1.1.0"
+version = "1.1.1"
 dependencies = [
  "cassiopeia-common",
  "cassiopeia-diagnostic",
@@ -1006,7 +1006,7 @@ dependencies = [
 
 [[package]]
 name = "cassiopeia-writer"
-version = "1.1.0"
+version = "1.1.1"
 dependencies = [
  "ahash",
  "bytes",
