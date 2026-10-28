@@ -20,7 +20,7 @@ thiserror = "2.0.21"
 serial_test = "4.0.1"
 temp-env = "0.3.6"
 tempfile = "3.27.0"
-toml = "1.1.6"
+toml = "1.1.8"
 
 [package.metadata.cargo-machete]
 ignored = ["humantime-serde"]

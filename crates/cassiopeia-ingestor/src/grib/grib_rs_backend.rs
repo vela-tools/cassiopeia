@@ -45,9 +45,10 @@ pub fn decode(reader: BufReader<File>, set: &mut GridSliceSet) -> Result<(), Gri
         let grid = submessage.grid_def().iter().copied().collect::<Vec<u8>>();
 
         // `latlons` yields an owned iterator, so it outlives the decoder that consumes the submessage;
-        // both must be drawn before the submessage is moved into the decoder. grib-rs yields single
-        // precision, widened losslessly into the field's `f64` currency.
-        let latlons: Vec<(f64, f64)> = submessage.latlons()?.map(|(lat, lon)| (f64::from(lat), f64::from(lon))).collect();
+        // both must be drawn before the submessage is moved into the decoder. grib-rs yields
+        // coordinates in double precision but values in single precision, widened losslessly into the
+        // field's `f64` currency.
+        let latlons: Vec<(f64, f64)> = submessage.latlons()?.collect();
         let decoder = Grib2SubmessageDecoder::from(submessage)?;
         let values: Vec<f64> = decoder.dispatch()?.map(f64::from).collect();
 

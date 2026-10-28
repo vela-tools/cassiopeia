@@ -10,8 +10,8 @@ repository.workspace = true
 [dependencies]
 geo = "0.33.1"
 geo-types = "0.7.20"
-proj4rs = "0.2.0"
-proj4wkt = "0.1.1"
+proj4rs = "0.3.0"
+proj4wkt = "0.2.0"
 thiserror = "2.0.21"
 
 [lints]

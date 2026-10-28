@@ -16,7 +16,7 @@ getset = "0.1.7"
 humantime-serde = "1.1.1"
 json5format = "0.2.6"
 serde = { version = "1.0.229", features = ["derive"] }
-serde_json = { version = "1.0.151", features = ["preserve_order"] }
+serde_json = { version = "1.0.154", features = ["preserve_order"] }
 serde_json5 = "0.2.1"
 strum = { version = "0.28.0", features = ["derive"] }
 thiserror = "2.0.21"

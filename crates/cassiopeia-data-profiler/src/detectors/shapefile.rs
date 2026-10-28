@@ -39,8 +39,11 @@ fn zip_holds_a_shp(bytes: &[u8]) -> bool {
         return false;
     };
     (0..archive.len()).any(|index| {
-        // A single unreadable entry must not abort the scan; skip it and keep looking.
-        archive.by_index(index).is_ok_and(|entry| entry.name().to_ascii_lowercase().ends_with(".shp"))
+        // A single unreadable entry, or one whose name can't be decoded, must not abort the scan;
+        // skip it and keep looking.
+        archive
+            .by_index(index)
+            .is_ok_and(|entry| entry.name().is_ok_and(|name| name.to_ascii_lowercase().ends_with(".shp")))
     })
 }
 

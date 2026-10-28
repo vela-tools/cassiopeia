@@ -22,7 +22,8 @@ impl Detector for KmlDetector {
             let Ok(mut entry) = archive.by_index(index) else {
                 continue;
             };
-            if !entry.name().to_ascii_lowercase().ends_with(".kml") {
+            // An entry whose name can't be decoded can't be a `.kml` member either.
+            if !entry.name().is_ok_and(|name| name.to_ascii_lowercase().ends_with(".kml")) {
                 continue;
             }
 

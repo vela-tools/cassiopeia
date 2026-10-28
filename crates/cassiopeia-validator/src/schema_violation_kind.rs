@@ -2,6 +2,7 @@ use cassiopeia_diagnostic::schema_keyword::SchemaKeyword;
 use derive_more::{AsRef, Display, From};
 use jsonschema::error::{TypeKind, ValidationErrorKind};
 use serde_json::Value;
+use std::sync::Arc;
 use strum::{Display as StrumDisplay, EnumString};
 
 /// One JSON object member name, as a schema or an instance spells it.
@@ -74,13 +75,15 @@ pub enum SchemaViolationKind {
     },
     /// The value fell outside a bound the schema set, or is not the required constant.
     OutOfBounds {
-        /// The bound or constant the schema declared.
-        limit: Value,
+        /// The bound or constant the schema declared, shared with the compiled schema rather than
+        /// copied out of it.
+        limit: Arc<Value>,
     },
     /// The value is not one of an enumerated set.
     NotEnumerated {
-        /// The values the schema enumerated.
-        options: Value,
+        /// The values the schema enumerated, shared with the compiled schema rather than copied out
+        /// of it.
+        options: Arc<Value>,
     },
     /// The value did not satisfy a syntactic constraint: a format, a pattern, or a media type.
     Malformed {
@@ -138,15 +141,19 @@ fn payload_of(kind: &ValidationErrorKind) -> SchemaViolationKind {
         ValidationErrorKind::ExclusiveMaximum { limit }
         | ValidationErrorKind::ExclusiveMinimum { limit }
         | ValidationErrorKind::Maximum { limit }
-        | ValidationErrorKind::Minimum { limit } => SchemaViolationKind::OutOfBounds { limit: limit.clone() },
+        | ValidationErrorKind::Minimum { limit } => SchemaViolationKind::OutOfBounds {
+            limit: Arc::new(limit.clone()),
+        },
         ValidationErrorKind::MaxItems { limit }
         | ValidationErrorKind::MaxLength { limit }
         | ValidationErrorKind::MaxProperties { limit }
         | ValidationErrorKind::MinItems { limit }
         | ValidationErrorKind::MinLength { limit }
-        | ValidationErrorKind::MinProperties { limit } => SchemaViolationKind::OutOfBounds { limit: Value::from(*limit) },
+        | ValidationErrorKind::MinProperties { limit } => SchemaViolationKind::OutOfBounds {
+            limit: Arc::new(Value::from(*limit)),
+        },
         ValidationErrorKind::MultipleOf { multiple_of } => SchemaViolationKind::OutOfBounds {
-            limit: Value::from(*multiple_of),
+            limit: Arc::new(Value::from(*multiple_of)),
         },
         ValidationErrorKind::Enum { options } => SchemaViolationKind::NotEnumerated { options: options.clone() },
         ValidationErrorKind::Format { format } => SchemaViolationKind::Malformed {
@@ -195,6 +202,7 @@ mod tests {
     use cassiopeia_diagnostic::schema_keyword::SchemaKeyword;
     use jsonschema::Validator;
     use serde_json::{Value, json};
+    use std::sync::Arc;
 
     /// The first violation a schema raises for an instance, as Cassiopeia keeps it.
     fn first(schema: &Value, instance: &Value) -> (SchemaKeyword, SchemaViolationKind) {
@@ -246,7 +254,7 @@ mod tests {
         let (keyword, kind) = first(&json!({"type": "number", "minimum": 5}), &json!(1));
 
         assert_eq!(keyword, SchemaKeyword::Minimum);
-        assert_eq!(kind, SchemaViolationKind::OutOfBounds { limit: json!(5) });
+        assert_eq!(kind, SchemaViolationKind::OutOfBounds { limit: Arc::new(json!(5)) });
     }
 
     #[test]
@@ -254,7 +262,7 @@ mod tests {
         let (keyword, kind) = first(&json!({"type": "string", "minLength": 3}), &json!("a"));
 
         assert_eq!(keyword, SchemaKeyword::MinLength);
-        assert_eq!(kind, SchemaViolationKind::OutOfBounds { limit: json!(3) });
+        assert_eq!(kind, SchemaViolationKind::OutOfBounds { limit: Arc::new(json!(3)) });
     }
 
     #[test]
@@ -262,7 +270,12 @@ mod tests {
         let (keyword, kind) = first(&json!({"enum": ["ok", "bad"]}), &json!("other"));
 
         assert_eq!(keyword, SchemaKeyword::Enum);
-        assert_eq!(kind, SchemaViolationKind::NotEnumerated { options: json!(["ok", "bad"]) });
+        assert_eq!(
+            kind,
+            SchemaViolationKind::NotEnumerated {
+                options: Arc::new(json!(["ok", "bad"]))
+            }
+        );
     }
 
     #[test]
