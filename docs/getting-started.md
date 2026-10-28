@@ -4,7 +4,7 @@ This guide gets Cassiopeia installed and verifies that it runs. Choose a prebuil
 
 ## Prerequisites
 
-Cassiopeia is written in Rust and builds with Cargo. You need a recent stable toolchain. The workspace uses the 2024 edition and declares Rust 1.96 as its minimum, so install Rust 1.96 or newer. If Rust is not installed, install it with [rustup](https://rustup.rs/):
+Cassiopeia is written in Rust and builds with Cargo. You need a recent stable toolchain. The workspace uses the 2024 edition and declares Rust 1.96.1 as its minimum, so install Rust 1.96.1 or newer. If Rust is not installed, install it with [rustup](https://rustup.rs/):
 
 ```bash
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
