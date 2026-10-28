@@ -103,7 +103,9 @@ Mappings address named fields, so a headerless file may need preprocessing befor
 
 ## JSON
 
-The generic JSON ingestor expects a top-level array of objects. Each object becomes one record, and its nested structure is preserved:
+The generic JSON ingestor decides the records from the shape of the document. It applies the same rule to every document and never guesses from member names.
+
+An array of objects is the most common shape. Each object becomes one record, and its nested structure is preserved:
 
 ~~~json
 [
@@ -122,7 +124,71 @@ The generic JSON ingestor expects a top-level array of objects. Each object beco
 ]
 ~~~
 
-A mapping can address the nested value with `{{ reading.value }}`. Cassiopeia does not treat a top-level object as one generic JSON record, and it does not accept an array of scalar items. Wrap the source in an array of objects or use a format whose record convention matches the source.
+A mapping can address the nested value with `{{ reading.value }}`.
+
+A single object is one record:
+
+~~~json
+{
+    "id": "A-17",
+    "reading": {
+        "value": 21.5
+    }
+}
+~~~
+
+An object with exactly one array member is an envelope. The items of that array are the records, and the other members of the object are dropped. This document yields the records `A-17` and `A-18`, and `generated` is part of neither:
+
+~~~json
+{
+    "generated": "2026-10-25",
+    "items": [
+        {
+            "id": "A-17"
+        },
+        {
+            "id": "A-18"
+        }
+    ]
+}
+~~~
+
+An envelope whose array is empty yields no records.
+
+An object with no array member, or with two or more, is one record. Cassiopeia does not pick one array over another, so this document is a single record that keeps both arrays:
+
+~~~json
+{
+    "id": "A-17",
+    "inbound": [
+        {
+            "line": "1"
+        }
+    ],
+    "outbound": [
+        {
+            "line": "2"
+        }
+    ]
+}
+~~~
+
+Every record must be a JSON object. A top-level scalar is refused with `expected a top-level JSON object or an array of objects`. An array, or an envelope array, that holds anything other than objects is refused with `expected every array element to be a JSON object`.
+
+The envelope rule limits what a single record can hold. A single object with exactly one array member is read as an envelope, not as a record. When that array holds objects, they become the records and the other members are lost:
+
+~~~json
+{
+    "id": "C-1",
+    "tags": [
+        {
+            "id": "x"
+        }
+    ]
+}
+~~~
+
+This document yields one record, `{"id": "x"}`, and `C-1` is lost. When the array holds scalars, as in `"tags": ["a", "b"]`, the document is refused. Wrap such a record in an array, `[{...}]`, so that the array is the top-level value and the record is read whole.
 
 Generic JSON and GeoJSON use the same syntax, but they have different record conventions. Cassiopeia routes a valid GeoJSON document to the GeoJSON ingestor.
 
