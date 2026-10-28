@@ -19,6 +19,6 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - uses: ./.github/actions/native-dependencies
-      - uses: dtolnay/rust-toolchain@stable
+      - run: rustup toolchain install
       - uses: Swatinem/rust-cache@v2
       - run: cargo test --workspace --all-features --locked

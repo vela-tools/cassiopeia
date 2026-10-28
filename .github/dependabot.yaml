@@ -47,3 +47,9 @@ updates:
         update-types:
           - "minor"
           - "patch"
+  - package-ecosystem: "rust-toolchain"
+    directories:
+      - "."
+    schedule:
+      interval: "daily"
+    rebase-strategy: "auto"
