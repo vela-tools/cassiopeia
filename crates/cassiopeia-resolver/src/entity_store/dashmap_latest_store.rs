@@ -1,5 +1,6 @@
 use crate::{
     entity_store::{
+        concurrent_expiries::ConcurrentExpiries,
         concurrent_scopes::ConcurrentScopes,
         error::Result,
         merge::deep_merge,
@@ -41,6 +42,7 @@ struct LatestFragment {
 #[derive(Clone, Debug, Default)]
 pub struct DashMapLatestEntityStore {
     scopes: ConcurrentScopes,
+    expiries: ConcurrentExpiries,
     data: Arc<DashMap<Urn, AHashMap<MappingId, LatestFragment>, RandomState>>,
 }
 
@@ -65,6 +67,7 @@ impl EntityStore for DashMapLatestEntityStore {
             temporal,
             observed_at,
             scope,
+            expires_at,
             reads,
         } = write;
 
@@ -92,6 +95,10 @@ impl EntityStore for DashMapLatestEntityStore {
             }
         }
 
+        // The expiry merges first: it borrows the id, while the scope merge consumes it.
+        if let Some(expires_at) = expires_at {
+            self.expiries.merge(&base_id, expires_at);
+        }
         if let Some(scope) = scope {
             self.scopes.merge(base_id, scope);
         }
@@ -123,7 +130,8 @@ impl EntityStore for DashMapLatestEntityStore {
             _ => Vec::new(),
         };
         let scope = self.scopes.get(base_id);
-        Ok(AssembledFragments { scope, units })
+        let expires_at = self.expiries.get(base_id);
+        Ok(AssembledFragments { scope, expires_at, units })
     }
 
     fn count(&self) -> usize {
@@ -137,6 +145,7 @@ impl EntityStore for DashMapLatestEntityStore {
 
     fn clear(&self) -> Result<()> {
         self.scopes.clear();
+        self.expiries.clear();
         self.data.clear();
         Ok(())
     }
@@ -193,7 +202,7 @@ mod tests {
             store::{
                 EntityStore,
                 FragmentWrite,
-                tests::{READS_EVERYTHING, assert_merges_scopes_per_id},
+                tests::{READS_EVERYTHING, assert_merges_expiries_per_id, assert_merges_scopes_per_id},
             },
         },
         mapping_id::MappingId,
@@ -212,6 +221,11 @@ mod tests {
         assert_merges_scopes_per_id(&DashMapLatestEntityStore::new());
     }
 
+    #[test]
+    fn the_greatest_expiry_of_every_fragment_of_an_id_is_kept() {
+        assert_merges_expiries_per_id(&DashMapLatestEntityStore::new());
+    }
+
     fn write(base_id: &Urn, data: serde_json::Value, mapping: u32, temporal: bool, observed_at: Option<&str>) -> FragmentWrite<'static> {
         FragmentWrite {
             base_id: base_id.clone(),
@@ -220,6 +234,7 @@ mod tests {
             temporal,
             observed_at: observed_at.map(ObservedAt::new),
             scope: None,
+            expires_at: None,
             reads: &READS_EVERYTHING,
         }
     }

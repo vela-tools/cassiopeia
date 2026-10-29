@@ -1,5 +1,6 @@
 use crate::{
     attribute::{Attribute, Attributes},
+    entity_members::EntityMembers,
     error::{MappingError, Result},
     geometry_validation::validate,
     identity::Identity,
@@ -54,6 +55,20 @@ pub struct Mapping {
     #[getset(get = "pub", set = "pub")]
     compiled_scope: Option<CompiledScope>,
 
+    /// The optional entity `expiresAt` declaration, resolved per record into the entity's
+    /// `expiresAt` member (ETSI GS CIM 009 v1.9.1 clause 4.5.1).
+    ///
+    /// The key is spelled in camelCase like the rest of the document's own keys (`dataModel`,
+    /// `entityName`), not in Cassiopeia's internal `snake_case`.
+    #[serde(default, rename = "expiresAt", skip_serializing_if = "Option::is_none")]
+    #[getset(get = "pub")]
+    expires_at: Option<TemplateSource>,
+
+    /// The compiled `expiresAt`, filled in by the expansion stage once the mapping is loaded.
+    #[serde(skip)]
+    #[getset(get = "pub", set = "pub")]
+    compiled_expires_at: Option<CompiledTemplate>,
+
     /// The attribute declarations.
     ///
     /// Mutable access exists so the expansion stage can compile each attribute's templates in place
@@ -104,17 +119,20 @@ impl Mapping {
         version: Version,
         data_model: DataModel,
         identity: Identity,
-        scope: Option<Scope>,
+        members: EntityMembers,
         attributes: Attributes,
         origin: &Path,
         runner: &mut TemplateRunner,
     ) -> Result<Mapping> {
+        let EntityMembers { scope, expires_at } = members;
         let mut mapping = Mapping {
             version,
             data_model,
             identity,
             scope,
             compiled_scope: None,
+            expires_at,
+            compiled_expires_at: None,
             attributes,
             temporal_source: None,
             observed_at_template: None,
@@ -232,6 +250,7 @@ impl Mapping {
 mod tests {
     use crate::{
         attribute::Attribute,
+        entity_members::EntityMembers,
         error::MappingError,
         identity::Identity,
         mapping::Mapping,
@@ -450,6 +469,39 @@ mod tests {
     }
 
     #[test]
+    fn an_expires_at_template_declared_beside_the_identity_is_read() {
+        let document = r#"{
+            version: "v4",
+            dataModel: "Sensor",
+            identity: { entityName: "S-{{ id }}" },
+            expiresAt: "{{ until }}",
+            attributes: {},
+        }"#;
+
+        assert_eq!(parse(document).expires_at(), &Some(TemplateSource::new("{{ until }}")));
+    }
+
+    #[test]
+    fn an_expires_at_is_optional() {
+        assert_eq!(parse(NON_TEMPORAL).expires_at(), &None);
+    }
+
+    #[test]
+    fn an_expires_at_declared_inside_the_identity_is_rejected() {
+        let document = r#"{
+            version: "v4",
+            dataModel: "Sensor",
+            identity: { entityName: "S-{{ id }}", expiresAt: "{{ until }}" },
+            attributes: {},
+        }"#;
+
+        assert!(matches!(
+            Mapping::from_json5(document, Path::new("test.json5"), &mut TemplateRunner::new()),
+            Err(MappingError::Parse { .. })
+        ));
+    }
+
+    #[test]
     fn a_scope_declared_inside_the_identity_is_rejected() {
         let document = r#"{
             version: "v4",
@@ -486,7 +538,10 @@ mod tests {
             Version::V4,
             "Sensor".parse::<DataModel>().unwrap(),
             Identity::new(TemplateSource::new("S-{{ id }}")),
-            Some(Scope::Single(TemplateSource::new("/test"))),
+            EntityMembers {
+                scope: Some(Scope::Single(TemplateSource::new("/test"))),
+                expires_at: None,
+            },
             IndexMap::new(),
             Path::new("test.json5"),
             &mut TemplateRunner::new(),
@@ -511,7 +566,7 @@ mod tests {
             Version::V4,
             "Sensor".parse::<DataModel>().unwrap(),
             Identity::new(TemplateSource::new("S-{{ id }}")),
-            None,
+            EntityMembers::default(),
             IndexMap::new(),
             Path::new("test.json5"),
             &mut TemplateRunner::new(),
@@ -519,6 +574,35 @@ mod tests {
         .unwrap();
 
         assert!(serde_json::to_value(&mapping).unwrap().get("scope").is_none());
+    }
+
+    #[test]
+    fn a_declared_expires_at_round_trips_through_the_constructor_and_the_wire_form() {
+        let mapping = Mapping::new(
+            Version::V4,
+            "Sensor".parse::<DataModel>().unwrap(),
+            Identity::new(TemplateSource::new("S-{{ id }}")),
+            EntityMembers {
+                scope: None,
+                expires_at: Some(TemplateSource::new("{{ until }}")),
+            },
+            IndexMap::new(),
+            Path::new("test.json5"),
+            &mut TemplateRunner::new(),
+        )
+        .unwrap();
+
+        assert_eq!(mapping.expires_at(), &Some(TemplateSource::new("{{ until }}")));
+        assert_eq!(
+            serde_json::to_value(&mapping).unwrap(),
+            json!({
+                "version": "v4",
+                "dataModel": "Sensor",
+                "identity": { "entityName": "S-{{ id }}" },
+                "expiresAt": "{{ until }}",
+                "attributes": {},
+            })
+        );
     }
 
     #[test]
@@ -555,7 +639,7 @@ mod tests {
             Version::V4,
             "Sensor".parse::<DataModel>().unwrap(),
             Identity::new(TemplateSource::new("S-{{ id }}")),
-            None,
+            EntityMembers::default(),
             attributes,
             Path::new("Sensor.json5"),
             &mut TemplateRunner::new(),

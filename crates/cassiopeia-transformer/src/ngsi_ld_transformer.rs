@@ -45,7 +45,7 @@ fn transform_entity(mapped: Mapped<Entity>, unit_codes: &mut UnitCodeCache, unre
     let (entity, mappings) = mapped.into_mappings();
     // Nested relationships were folded into `metadata` as sub-attributes by the extractor, so the
     // transformer reads them from there and ignores the raw nested-relationship map here.
-    let (id, _data, scope, mut relationships, values, metadata, instance_relationships, _nested_relationships) = entity.into_parts();
+    let (id, _data, scope, expires_at, mut relationships, values, metadata, instance_relationships, _nested_relationships) = entity.into_parts();
     let mut values = values.unwrap_or_default();
     // Empty in the common case: `IndexMap::default()` allocates nothing until first insert, so an
     // entity with no instance list relationships pays no allocation here.
@@ -57,6 +57,9 @@ fn transform_entity(mapped: Mapped<Entity>, unit_codes: &mut UnitCodeCache, unre
     let mut builder = NgsiLdEntityBuilder::new(id, entity_type);
     if let Some(scope) = scope {
         builder = builder.scope(scope);
+    }
+    if let Some(expires_at) = expires_at {
+        builder = builder.expires_at(expires_at);
     }
 
     // One instant memo per entity: a mapping repeats the same `observedAt` and `expiresAt`
@@ -137,6 +140,7 @@ mod tests {
                 relationship::NgsiLdRelationship,
             },
             name::NameBuf,
+            scope::{NgsiLdScope, ScopeBuf},
         },
         value::types::{Number, Value},
     };
@@ -200,7 +204,7 @@ mod tests {
     #[test]
     fn the_entity_type_comes_from_the_mapping_data_model() {
         let mapping = mapping(r#"{ version: "v4", dataModel: "dataModel.Weather/WeatherObserved", identity: { entityName: "W-{{ id }}" }, attributes: {} }"#);
-        let entity = Entity::new(urn("urn:ngsi-ld:WeatherObserved:1"), json!({}), None, IndexMap::default(), None);
+        let entity = Entity::new(urn("urn:ngsi-ld:WeatherObserved:1"), json!({}), None, None, IndexMap::default(), None);
 
         let result = NgsiLdTransformer::new()
             .transform(Mapped::new(entity, mapping), &UnreadableTimestamps::new())
@@ -220,7 +224,7 @@ mod tests {
                 airTemperature: { source: "{{ air }}" },
             } }"#,
         );
-        let mut entity = Entity::new(urn("urn:ngsi-ld:Sensor:1"), json!({}), None, IndexMap::default(), None);
+        let mut entity = Entity::new(urn("urn:ngsi-ld:Sensor:1"), json!({}), None, None, IndexMap::default(), None);
         entity.set_values(Some(values(vec![
             ("zone", Value::String("north".into())),
             ("humidity", Value::Number(Number::Integer(51))),
@@ -243,7 +247,7 @@ mod tests {
             r#"{ version: "v4", dataModel: "Sensor", identity: { entityName: "S-{{ id }}" }, attributes: { temperature: { source: "{{ t }}", transformation: "float" } } }"#,
         );
         let value_map = values(vec![("temperature", Value::Number(Number::Float(25.5)))]);
-        let entity = Entity::new(urn("urn:ngsi-ld:Sensor:1"), json!({}), None, IndexMap::default(), Some(value_map));
+        let entity = Entity::new(urn("urn:ngsi-ld:Sensor:1"), json!({}), None, None, IndexMap::default(), Some(value_map));
 
         let result = NgsiLdTransformer::new()
             .transform(Mapped::new(entity, mapping), &UnreadableTimestamps::new())
@@ -262,7 +266,7 @@ mod tests {
     fn a_value_without_a_declaration_is_dropped() {
         let mapping = mapping(r#"{ version: "v4", dataModel: "Sensor", identity: { entityName: "S-{{ id }}" }, attributes: {} }"#);
         let value_map = values(vec![("stray", Value::String("x".into()))]);
-        let entity = Entity::new(urn("urn:ngsi-ld:Sensor:1"), json!({}), None, IndexMap::default(), Some(value_map));
+        let entity = Entity::new(urn("urn:ngsi-ld:Sensor:1"), json!({}), None, None, IndexMap::default(), Some(value_map));
 
         let result = NgsiLdTransformer::new()
             .transform(Mapped::new(entity, mapping), &UnreadableTimestamps::new())
@@ -278,7 +282,7 @@ mod tests {
         );
         let mut relationships = IndexMap::default();
         relationships.insert(name("controlledAsset"), vec![urn("urn:ngsi-ld:Building:9")]);
-        let entity = Entity::new(urn("urn:ngsi-ld:Device:1"), json!({}), None, relationships, None);
+        let entity = Entity::new(urn("urn:ngsi-ld:Device:1"), json!({}), None, None, relationships, None);
 
         let result = NgsiLdTransformer::new()
             .transform(Mapped::new(entity, mapping), &UnreadableTimestamps::new())
@@ -301,7 +305,7 @@ mod tests {
         );
         let mut relationships = IndexMap::default();
         relationships.insert(name("assets"), vec![urn("urn:ngsi-ld:Building:1"), urn("urn:ngsi-ld:Building:2")]);
-        let entity = Entity::new(urn("urn:ngsi-ld:Device:1"), json!({}), None, relationships, None);
+        let entity = Entity::new(urn("urn:ngsi-ld:Device:1"), json!({}), None, None, relationships, None);
 
         let result = NgsiLdTransformer::new()
             .transform(Mapped::new(entity, mapping), &UnreadableTimestamps::new())
@@ -327,7 +331,7 @@ mod tests {
         let mut shared = IndexMap::default();
         shared.insert(name("observedAt"), qualifier(json!("2026-04-03T22:00:20Z")));
         metadata.insert(name("temperature"), MetadataStorage::shared(shared));
-        let mut entity = Entity::new(urn("urn:ngsi-ld:Sensor:1"), json!({}), None, IndexMap::default(), Some(value_map));
+        let mut entity = Entity::new(urn("urn:ngsi-ld:Sensor:1"), json!({}), None, None, IndexMap::default(), Some(value_map));
         entity.set_metadata(Some(metadata));
 
         let result = NgsiLdTransformer::new()
@@ -367,7 +371,7 @@ mod tests {
         let mut shared = IndexMap::default();
         shared.insert(name("expiresAt"), qualifier(json!(expires_at)));
         metadata.insert(name("temperature"), MetadataStorage::shared(shared));
-        let mut entity = Entity::new(urn("urn:ngsi-ld:Sensor:1"), json!({}), None, IndexMap::default(), Some(value_map));
+        let mut entity = Entity::new(urn("urn:ngsi-ld:Sensor:1"), json!({}), None, None, IndexMap::default(), Some(value_map));
         entity.set_metadata(Some(metadata));
 
         (entity, mapping)
@@ -393,7 +397,7 @@ mod tests {
         let mut shared = IndexMap::default();
         shared.insert(name("observedAt"), qualifier(json!(observed_at)));
         metadata.insert(name("temperature"), MetadataStorage::shared(shared));
-        let mut entity = Entity::new(urn("urn:ngsi-ld:Sensor:1"), json!({}), None, IndexMap::default(), Some(value_map));
+        let mut entity = Entity::new(urn("urn:ngsi-ld:Sensor:1"), json!({}), None, None, IndexMap::default(), Some(value_map));
         entity.set_metadata(Some(metadata));
 
         (entity, mapping)
@@ -430,6 +434,21 @@ mod tests {
             .unwrap();
 
         assert_eq!(expires_at_of(&result), Some(Utc.with_ymd_and_hms(2026, 10, 25, 13, 0, 0).unwrap()));
+    }
+
+    #[test]
+    fn an_entity_expires_at_lands_on_the_built_entity_beside_its_scope() {
+        let mapping = mapping(r#"{ version: "v4", dataModel: "Sensor", identity: { entityName: "S-{{ id }}" }, attributes: {} }"#);
+        let scope = NgsiLdScope::from_scopes(vec![ScopeBuf::new("/Ljubljana").unwrap()]);
+        let expires_at = Utc.with_ymd_and_hms(2026, 10, 25, 13, 0, 0).unwrap();
+        let entity = Entity::new(urn("urn:ngsi-ld:Sensor:1"), json!({}), scope, Some(expires_at), IndexMap::default(), None);
+
+        let result = NgsiLdTransformer::new()
+            .transform(Mapped::new(entity, mapping), &UnreadableTimestamps::new())
+            .unwrap();
+
+        assert_eq!(result.expires_at, Some(expires_at));
+        assert!(result.scope.is_some());
     }
 
     #[test]
@@ -511,7 +530,14 @@ mod tests {
                 entry("urn:ngsi-ld:dataset:model:c"),
             ]),
         );
-        let mut entity = Entity::new(urn("urn:ngsi-ld:WeatherForecast:1"), json!({}), None, IndexMap::default(), Some(value_map));
+        let mut entity = Entity::new(
+            urn("urn:ngsi-ld:WeatherForecast:1"),
+            json!({}),
+            None,
+            None,
+            IndexMap::default(),
+            Some(value_map),
+        );
         entity.set_metadata(Some(per_item));
 
         let result = NgsiLdTransformer::new()
@@ -561,7 +587,7 @@ mod tests {
                 dataset_entry("urn:ngsi-ld:dataset:role:arrival"),
             ]),
         );
-        let mut entity = Entity::new(urn("urn:ngsi-ld:Flight:1"), json!({}), None, IndexMap::default(), None);
+        let mut entity = Entity::new(urn("urn:ngsi-ld:Flight:1"), json!({}), None, None, IndexMap::default(), None);
         entity.set_metadata(Some(metadata));
         entity.set_instance_relationships(Some(instance_relationships(
             "servesAirport",
@@ -618,7 +644,7 @@ mod tests {
                 dataset_entry("urn:ngsi-ld:dataset:role:arrival"),
             ]),
         );
-        let mut entity = Entity::new(urn("urn:ngsi-ld:Flight:1"), json!({}), None, IndexMap::default(), None);
+        let mut entity = Entity::new(urn("urn:ngsi-ld:Flight:1"), json!({}), None, None, IndexMap::default(), None);
         entity.set_metadata(Some(metadata));
         entity.set_instance_relationships(Some(instance_relationships(
             "servesAirport",
@@ -665,7 +691,7 @@ mod tests {
                 dataset_entry("urn:ngsi-ld:dataset:role:arrival"),
             ]),
         );
-        let mut entity = Entity::new(urn("urn:ngsi-ld:Route:1"), json!({}), None, IndexMap::default(), None);
+        let mut entity = Entity::new(urn("urn:ngsi-ld:Route:1"), json!({}), None, None, IndexMap::default(), None);
         entity.set_metadata(Some(metadata));
         entity.set_instance_relationships(Some(instance_relationships(
             "servesAirports",
@@ -725,7 +751,7 @@ mod tests {
                 dataset_entry("urn:ngsi-ld:dataset:role:arrival"),
             ]),
         );
-        let mut entity = Entity::new(urn("urn:ngsi-ld:Route:1"), json!({}), None, IndexMap::default(), None);
+        let mut entity = Entity::new(urn("urn:ngsi-ld:Route:1"), json!({}), None, None, IndexMap::default(), None);
         entity.set_metadata(Some(metadata));
         entity.set_instance_relationships(Some(instance_relationships(
             "servesAirports",
@@ -777,7 +803,7 @@ mod tests {
             name("location"),
             MetadataStorage::per_item(vec![dataset_entry("urn:ngsi-ld:dataset:a"), dataset_entry("urn:ngsi-ld:dataset:b")]),
         );
-        let mut entity = Entity::new(urn("urn:ngsi-ld:Sensor:1"), json!({}), None, IndexMap::default(), Some(value_map));
+        let mut entity = Entity::new(urn("urn:ngsi-ld:Sensor:1"), json!({}), None, None, IndexMap::default(), Some(value_map));
         entity.set_metadata(Some(metadata));
 
         let result = NgsiLdTransformer::new()
@@ -824,7 +850,7 @@ mod tests {
                 dataset_entry("urn:ngsi-ld:dataset:c"),
             ]),
         );
-        let mut entity = Entity::new(urn("urn:ngsi-ld:Sensor:1"), json!({}), None, IndexMap::default(), Some(value_map));
+        let mut entity = Entity::new(urn("urn:ngsi-ld:Sensor:1"), json!({}), None, None, IndexMap::default(), Some(value_map));
         entity.set_metadata(Some(metadata));
 
         let result = NgsiLdTransformer::new()
@@ -875,7 +901,7 @@ mod tests {
                 name(key),
                 MetadataStorage::per_item(vec![dataset_entry("urn:ngsi-ld:dataset:a"), dataset_entry("urn:ngsi-ld:dataset:b")]),
             );
-            let mut entity = Entity::new(urn("urn:ngsi-ld:Sensor:1"), json!({}), None, IndexMap::default(), Some(value_map));
+            let mut entity = Entity::new(urn("urn:ngsi-ld:Sensor:1"), json!({}), None, None, IndexMap::default(), Some(value_map));
             entity.set_metadata(Some(metadata));
 
             let result = NgsiLdTransformer::new()
@@ -908,7 +934,7 @@ mod tests {
         );
         let mut metadata = IndexMap::default();
         metadata.insert(name("hasLeadActor"), MetadataStorage::shared(shared));
-        let mut entity = Entity::new(urn("urn:ngsi-ld:Movie:1"), json!({}), None, relationships, None);
+        let mut entity = Entity::new(urn("urn:ngsi-ld:Movie:1"), json!({}), None, None, relationships, None);
         entity.set_metadata(Some(metadata));
 
         let result = NgsiLdTransformer::new()
@@ -943,7 +969,7 @@ mod tests {
         shared.insert(name("castSize"), qualifier(json!(2)));
         let mut metadata = IndexMap::default();
         metadata.insert(name("hasCast"), MetadataStorage::shared(shared));
-        let mut entity = Entity::new(urn("urn:ngsi-ld:Movie:1"), json!({}), None, relationships, None);
+        let mut entity = Entity::new(urn("urn:ngsi-ld:Movie:1"), json!({}), None, None, relationships, None);
         entity.set_metadata(Some(metadata));
 
         let result = NgsiLdTransformer::new()
@@ -965,10 +991,13 @@ mod tests {
         let mapping = mapping(r#"{ version: "v4", dataModel: "Sensor", identity: { entityName: "S-{{ id }}" }, attributes: {} }"#);
         let batch = vec![
             Mapped::new(
-                Entity::new(urn("urn:ngsi-ld:Sensor:1"), json!({}), None, IndexMap::default(), None),
+                Entity::new(urn("urn:ngsi-ld:Sensor:1"), json!({}), None, None, IndexMap::default(), None),
                 Arc::clone(&mapping),
             ),
-            Mapped::new(Entity::new(urn("urn:ngsi-ld:Sensor:2"), json!({}), None, IndexMap::default(), None), mapping),
+            Mapped::new(
+                Entity::new(urn("urn:ngsi-ld:Sensor:2"), json!({}), None, None, IndexMap::default(), None),
+                mapping,
+            ),
         ];
 
         let results = NgsiLdTransformer::new()
@@ -984,10 +1013,13 @@ mod tests {
         let mapping = mapping(r#"{ version: "v4", dataModel: "Sensor", identity: { entityName: "S-{{ id }}" }, attributes: {} }"#);
         let batch = vec![
             Mapped::new(
-                Entity::new(urn("urn:ngsi-ld:Sensor:1"), json!({}), None, IndexMap::default(), None),
+                Entity::new(urn("urn:ngsi-ld:Sensor:1"), json!({}), None, None, IndexMap::default(), None),
                 Arc::clone(&mapping),
             ),
-            Mapped::new(Entity::new(urn("urn:ngsi-ld:Sensor:2"), json!({}), None, IndexMap::default(), None), mapping),
+            Mapped::new(
+                Entity::new(urn("urn:ngsi-ld:Sensor:2"), json!({}), None, None, IndexMap::default(), None),
+                mapping,
+            ),
         ];
 
         let results = NgsiLdTransformer::new()
@@ -1013,7 +1045,7 @@ mod tests {
         shared.insert(name("unitCode"), qualifier(json!(unit_code)));
         let mut metadata = IndexMap::default();
         metadata.insert(name("temperature"), MetadataStorage::shared(shared));
-        let mut entity = Entity::new(urn(id), json!({}), None, IndexMap::default(), Some(value_map));
+        let mut entity = Entity::new(urn(id), json!({}), None, None, IndexMap::default(), Some(value_map));
         entity.set_metadata(Some(metadata));
         entity
     }

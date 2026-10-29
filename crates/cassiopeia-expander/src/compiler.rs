@@ -56,6 +56,11 @@ impl ExpanderCompiler {
             mapping.set_compiled_scope(Some(compiled_scope));
         }
 
+        if let Some(source) = mapping.expires_at() {
+            let compiled = Self::compile_template(source, document, runner, TemplateSite::ExpiresAt, &mut reads)?;
+            mapping.set_compiled_expires_at(Some(compiled));
+        }
+
         for (name, attribute) in mapping.attributes_mut() {
             Self::compile_attribute(name, attribute, document, runner, &mut reads)?;
         }
@@ -307,6 +312,27 @@ mod tests {
         let document = document("S-{{ id }}", r#"scope: "/{{ city | lower ","#, "{}");
 
         assert_eq!(rejection(&document), (TemplateSite::Scope, TemplateSource::new("/{{ city | lower ")));
+    }
+
+    #[test]
+    fn an_expires_at_with_a_syntax_error_is_rejected_naming_the_site() {
+        let document = document("S-{{ id }}", r#"expiresAt: "{{ until | lower ","#, "{}");
+
+        assert_eq!(rejection(&document), (TemplateSite::ExpiresAt, TemplateSource::new("{{ until | lower ")));
+        assert!(compile(&document).unwrap_err().to_string().contains("expiresAt"));
+    }
+
+    #[test]
+    fn the_expires_at_source_is_read() {
+        let mapping = compile(&document(
+            "{{ id }}",
+            r#"expiresAt: "{{ until }}","#,
+            r#"{ t: { source: "{{ temperature }}" } }"#,
+        ))
+        .unwrap();
+
+        assert_eq!(mapping.source_reads(), &keys(&["id", "temperature", "until"]));
+        assert!(mapping.compiled_expires_at().is_some());
     }
 
     #[test]

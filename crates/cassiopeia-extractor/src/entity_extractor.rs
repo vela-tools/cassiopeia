@@ -45,7 +45,7 @@ impl EntityExtractor {
 
 impl Extractor for EntityExtractor {
     fn extract(&self, assembled: AssembledEntity, dropped: &DroppedAttributes) -> Result<Mapped<Entity>> {
-        let (id, scope, mut relationships, fragments) = assembled.into_parts();
+        let (id, scope, expires_at, mut relationships, fragments) = assembled.into_parts();
         let mut values = AttributeValues::default();
         let mut metadata = EntityMetadata::default();
         let mappings: Mappings = fragments.iter().map(|(_, mapping)| Arc::clone(mapping)).collect();
@@ -93,7 +93,7 @@ impl Extractor for EntityExtractor {
         // objects were folded into the metadata as sub-attributes, so only the top-level and the
         // per-instance objects travel on.
         let (relationships, _nested, instance_relationships) = relationships.into_parts();
-        let mut entity = Entity::new(id, JsonValue::Null, scope, relationships, Some(values));
+        let mut entity = Entity::new(id, JsonValue::Null, scope, expires_at, relationships, Some(values));
         if !metadata.is_empty() {
             entity.set_metadata(Some(metadata));
         }
@@ -161,7 +161,7 @@ mod tests {
     }
 
     fn entity(id: &str, data: JsonValue) -> Entity {
-        Entity::new(urn(id), data, None, Relationships::default(), None)
+        Entity::new(urn(id), data, None, None, Relationships::default(), None)
     }
 
     fn nested_path(segments: &[&str]) -> RelationshipPath {
@@ -896,7 +896,7 @@ mod tests {
         let extractor = EntityExtractor::new(resolver);
         let mut relationships = Relationships::default();
         relationships.insert(name("controlledAsset"), vec![urn("urn:ngsi-ld:Asset:9")]);
-        let entity = Entity::new(urn("urn:ngsi-ld:Device:1"), json!({"id": "1"}), None, relationships, None);
+        let entity = Entity::new(urn("urn:ngsi-ld:Device:1"), json!({"id": "1"}), None, None, relationships, None);
         let mapped = AssembledEntity::from_single(entity, mapping);
 
         let (result, _) = extractor.extract(mapped, &DroppedAttributes::new()).unwrap().into_parts();
@@ -932,6 +932,7 @@ mod tests {
         let mut entity = Entity::new(
             urn("urn:ngsi-ld:Movie:1"),
             json!({"id": "1", "actor": "31", "character": "JackSparrow", "order": 0}),
+            None,
             None,
             relationships,
             None,
@@ -987,6 +988,7 @@ mod tests {
             urn("urn:ngsi-ld:Movie:1"),
             json!({"id": "1", "actor": "31", "character": "X", "place": "Y"}),
             None,
+            None,
             relationships,
             None,
         );
@@ -1035,6 +1037,7 @@ mod tests {
             urn("urn:ngsi-ld:Movie:1"),
             json!({"id": "1", "director": "5", "films": "10 20"}),
             None,
+            None,
             relationships,
             None,
         );
@@ -1063,6 +1066,7 @@ mod tests {
         let mut entity = Entity::new(
             urn("urn:ngsi-ld:Movie:1"),
             json!({"id": "1", "actor": "31", "order": 0}),
+            None,
             None,
             relationships,
             None,
@@ -1101,6 +1105,7 @@ mod tests {
         let entity = Entity::new(
             urn("urn:ngsi-ld:Movie:1"),
             json!({"id": "1", "cast": "1 2", "size": 2}),
+            None,
             None,
             relationships,
             None,
@@ -1355,7 +1360,7 @@ mod tests {
         let dropped = DroppedAttributes::new();
         let mut relationships = Relationships::default();
         relationships.insert(name("owner"), vec![urn("urn:ngsi-ld:Person:7")]);
-        let source = Entity::new(urn("urn:ngsi-ld:Vehicle:1"), json!({"id": "1", "owner": "7"}), None, relationships, None);
+        let source = Entity::new(urn("urn:ngsi-ld:Vehicle:1"), json!({"id": "1", "owner": "7"}), None, None, relationships, None);
 
         let (result, _) = extractor.extract(AssembledEntity::from_single(source, mapping), &dropped).unwrap().into_parts();
 

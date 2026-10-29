@@ -1,6 +1,7 @@
 use crate::{entity_store::error::Result, field_path::FieldPath, mapping_id::MappingId, store_write_strategy::StoreWriteStrategy};
 use cassiopeia_mapping::{observed_at::ObservedAt, source_reads::SourceReads};
 use cassiopeia_ngsi_ld::entity::scope::NgsiLdScope;
+use chrono::{DateTime, Utc};
 use serde_json::Value;
 use smallvec::SmallVec;
 use std::{fmt::Debug, num::NonZeroU64};
@@ -31,6 +32,8 @@ pub struct FragmentWrite<'a> {
     pub observed_at: Option<ObservedAt>,
     /// The entity's scope, when one was resolved.
     pub scope: Option<NgsiLdScope>,
+    /// The entity's `expiresAt`, when one was resolved (ETSI GS CIM 009 v1.9.1 clause 4.5.1).
+    pub expires_at: Option<DateTime<Utc>>,
     /// The top-level source keys the producing mapping reads: a current-state store counts a
     /// disagreement between merged records only beneath one of them.
     pub reads: &'a SourceReads,
@@ -72,6 +75,8 @@ pub type StoredUnit = SmallVec<[AssembledFragment; 1]>;
 pub struct AssembledFragments {
     /// The entity's scope, when one was stored.
     pub scope: Option<NgsiLdScope>,
+    /// The entity's `expiresAt`, when one was stored (ETSI GS CIM 009 v1.9.1 clause 4.5.1).
+    pub expires_at: Option<DateTime<Utc>>,
     /// One fragment-list per emit-unit.
     pub units: Vec<StoredUnit>,
 }
@@ -199,6 +204,7 @@ pub(crate) mod tests {
     };
     use cassiopeia_mapping::source_reads::SourceReads;
     use cassiopeia_ngsi_ld::entity::scope::{NgsiLdScope, ScopeBuf};
+    use chrono::{DateTime, TimeZone, Utc};
     use pretty_assertions::assert_eq;
     use serde_json::json;
     use urn_rs::Urn;
@@ -215,7 +221,17 @@ pub(crate) mod tests {
             temporal: false,
             observed_at: None,
             scope: NgsiLdScope::from_scopes(scopes.iter().map(|scope| ScopeBuf::new(*scope).unwrap())),
+            expires_at: None,
             reads: &READS_EVERYTHING,
+        }
+    }
+
+    /// A write like [`write`], carrying one entity `expiresAt` at `epoch_seconds`, or none when
+    /// `epoch_seconds` is `None`.
+    fn write_expiring(base_id: &Urn, mapping: u32, epoch_seconds: Option<i64>) -> FragmentWrite<'static> {
+        FragmentWrite {
+            expires_at: epoch_seconds.map(|seconds| Utc.timestamp_opt(seconds, 0).single().unwrap()),
+            ..write(base_id, mapping, &[])
         }
     }
 
@@ -243,5 +259,31 @@ pub(crate) mod tests {
         let scope = store.assemble_entity(&scoped).unwrap().scope;
         assert_eq!(serde_json::to_value(scope).unwrap(), json!(["/a", "/b", "/c", "/d"]));
         assert_eq!(store.assemble_entity(&unscoped).unwrap().scope, None);
+    }
+
+    /// Cross-backend contract every [`EntityStore`] must honour: one entity carries one `expiresAt`
+    /// (ETSI GS CIM 009 v1.9.1 clause 4.5.1), so of every instant its fragments declare the greatest
+    /// wins and a fragment without one clears nothing. The merge spans separate writes as well as one
+    /// batch, whichever order the fragments arrive in, and an id none of whose fragments declares an
+    /// expiry assembles without one. Every backend calls this so all of them are held to identical
+    /// behaviour.
+    pub(crate) fn assert_merges_expiries_per_id(store: &dyn EntityStore) {
+        let expiring: Urn = "urn:ngsi-ld:Camera:1".parse().unwrap();
+        let unexpiring: Urn = "urn:ngsi-ld:Camera:2".parse().unwrap();
+        let instant = |seconds: i64| -> DateTime<Utc> { Utc.timestamp_opt(seconds, 0).single().unwrap() };
+
+        store.store_fragment(write_expiring(&expiring, 1, Some(100))).unwrap();
+        store
+            .store_fragment_batch(vec![
+                write_expiring(&expiring, 2, Some(300)),
+                write_expiring(&expiring, 1, None),
+                write_expiring(&expiring, 3, Some(200)),
+                write_expiring(&unexpiring, 1, None),
+            ])
+            .unwrap();
+        store.store_fragment(write_expiring(&expiring, 2, Some(250))).unwrap();
+
+        assert_eq!(store.assemble_entity(&expiring).unwrap().expires_at, Some(instant(300)));
+        assert_eq!(store.assemble_entity(&unexpiring).unwrap().expires_at, None);
     }
 }

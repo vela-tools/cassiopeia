@@ -16,6 +16,7 @@ use cassiopeia_ir::{
 };
 use cassiopeia_mapping::{attribute::Attribute, mapping::Mapping, template::resolver::TemplateResolver};
 use cassiopeia_ngsi_ld::entity::{attribute::NgsiLdAttributeKind, name::NameBuf};
+use cassiopeia_unreadable_timestamps::unreadable_expiries::UnreadableExpiries;
 use rayon::prelude::*;
 use serde_json::{Map, Value, json};
 use std::sync::Arc;
@@ -71,18 +72,19 @@ impl GenericExpander {
 
     /// Expands one record's data into a main fragment plus any synthetic-entity fragments, under the
     /// mapping the router selected for it.
-    fn expand_value(&self, mapping: &Arc<Mapping>, data: Value) -> Result<Vec<Mapped<Fragment>>, ExpanderError> {
+    fn expand_value(&self, mapping: &Arc<Mapping>, data: Value, unreadable_expiries: &UnreadableExpiries) -> Result<Vec<Mapped<Fragment>>, ExpanderError> {
         let mut fragments = Vec::new();
         let mut child_contexts = Vec::new();
 
         let main_urn = self.urn_generator.generate_id(mapping, &data)?;
         let main_scope = self.urn_generator.generate_scope(mapping, &data)?;
+        let main_expires_at = self.urn_generator.generate_expires_at(mapping, &main_urn, &data, unreadable_expiries)?;
 
         for (attribute_name, attribute) in mapping.attributes() {
             if let Some(synthetic) = attribute.synthetic_entity() {
                 if attribute.target().is_some() && matches!(attribute.kind(), NgsiLdAttributeKind::ListRelationship) {
-                    self.expand_synthetic_targets(attribute_name, attribute, synthetic, &data, &mut fragments, &mut child_contexts)?;
-                } else if let Some(fragment) = self.expand_synthetic_entity(attribute_name, attribute, synthetic, &main_urn, &data)? {
+                    child_contexts.extend(self.expand_synthetic_targets(attribute_name, attribute, synthetic, &data, unreadable_expiries, &mut fragments)?);
+                } else if let Some(fragment) = self.expand_synthetic_entity(attribute_name, attribute, synthetic, &main_urn, &data, unreadable_expiries)? {
                     fragments.push(fragment);
                 }
             } else if matches!(attribute.kind(), NgsiLdAttributeKind::ListRelationship) && attribute.target().is_some() && attribute.instances().is_some() {
@@ -147,7 +149,7 @@ impl GenericExpander {
         }
 
         let parent_context = if child_contexts.is_empty() { None } else { Some(child_contexts) };
-        let main_fragment = Fragment::new(data, main_urn, main_scope, parent_context);
+        let main_fragment = Fragment::new(data, main_urn, main_scope, main_expires_at, parent_context);
         fragments.push(Mapped::new(main_fragment, Arc::clone(mapping)));
 
         Ok(fragments)
@@ -161,16 +163,18 @@ impl GenericExpander {
     /// record, so the synthetic mapping reads it with the same `this[0]` accessor a headerless source
     /// uses. Minting the id once and reusing it for the link keeps the relationship and the emitted
     /// entity in step, so a token whose synthetic identity names no target contributes neither: the
-    /// rest of the list, and the main entity, are still produced.
+    /// rest of the list, and the main entity, are still produced. The parent-child contexts minted
+    /// for the tokens are returned, since they belong to the main entity's own fragment.
     fn expand_synthetic_targets(
         &self,
         attribute_name: &NameBuf,
         attribute: &Attribute,
         synthetic: &Mapping,
         data: &Value,
+        unreadable_expiries: &UnreadableExpiries,
         fragments: &mut Vec<Mapped<Fragment>>,
-        child_contexts: &mut Vec<ParentContext>,
-    ) -> Result<(), ExpanderError> {
+    ) -> Result<Vec<ParentContext>, ExpanderError> {
+        let mut child_contexts = Vec::new();
         for token in self.urn_generator.source_identifiers(attribute, data)? {
             let mut token_data = json!({ "0": token });
             if let Value::Object(object) = &mut token_data {
@@ -182,18 +186,21 @@ impl GenericExpander {
                 Err(other) => return Err(other.into()),
             };
             let synthetic_scope = self.urn_generator.generate_scope(synthetic, &token_data)?;
+            let synthetic_expires_at = self
+                .urn_generator
+                .generate_expires_at(synthetic, &synthetic_urn, &token_data, unreadable_expiries)?;
 
             child_contexts.push(ParentContext::new(
                 ParentContextType::Child(synthetic_urn.clone()),
                 Self::top_level_key(attribute_name),
             ));
-            let fragment = Fragment::new(token_data, synthetic_urn, synthetic_scope, None);
+            let fragment = Fragment::new(token_data, synthetic_urn, synthetic_scope, synthetic_expires_at, None);
             // The fragment owns its mapping behind an `Arc`, and the synthetic mapping is only
             // borrowed from the parent attribute here.
             fragments.push(Mapped::new(fragment, Arc::new(synthetic.clone())));
         }
 
-        Ok(())
+        Ok(child_contexts)
     }
 
     /// Expands the one synthetic entity a non-list attribute materialises, linked back to the main
@@ -211,6 +218,7 @@ impl GenericExpander {
         synthetic: &Mapping,
         main_urn: &Urn,
         data: &Value,
+        unreadable_expiries: &UnreadableExpiries,
     ) -> Result<Option<Mapped<Fragment>>, ExpanderError> {
         if attribute.target().is_some() && attribute.source().is_some() {
             // The minted object is discarded: this only asks whether the relationship source names a
@@ -228,12 +236,13 @@ impl GenericExpander {
             Err(other) => return Err(other.into()),
         };
         let synthetic_scope = self.urn_generator.generate_scope(synthetic, data)?;
+        let synthetic_expires_at = self.urn_generator.generate_expires_at(synthetic, &synthetic_urn, data, unreadable_expiries)?;
 
         // The parent context owns its URN and path, while the main entity keeps its own for its fragment.
         let parent = ParentContext::new(ParentContextType::Parent(main_urn.clone()), Self::top_level_key(attribute_name));
         // Each synthetic fragment carries its own copy of the source data; the main fragment consumes
         // the record once every attribute has been expanded.
-        let fragment = Fragment::new(data.clone(), synthetic_urn, synthetic_scope, Some(vec![parent]));
+        let fragment = Fragment::new(data.clone(), synthetic_urn, synthetic_scope, synthetic_expires_at, Some(vec![parent]));
         // The fragment owns its mapping behind an `Arc`, and the synthetic mapping is only borrowed
         // from the parent attribute here.
         Ok(Some(Mapped::new(fragment, Arc::new(synthetic.clone()))))
@@ -316,17 +325,17 @@ impl GenericExpander {
 }
 
 impl Expander for GenericExpander {
-    fn expand(&self, record: Record) -> Result<Vec<Mapped<Fragment>>, ExpanderError> {
+    fn expand(&self, record: Record, unreadable_expiries: &UnreadableExpiries) -> Result<Vec<Mapped<Fragment>>, ExpanderError> {
         let mapping = self.router.select(record.collection().as_ref())?;
         let mut data = record.into_data();
         self.inject_vars(&mut data);
-        self.expand_value(mapping, Value::Object(data))
+        self.expand_value(mapping, Value::Object(data), unreadable_expiries)
     }
 
-    fn expand_batch(&self, records: Vec<Record>) -> Vec<Result<Vec<Mapped<Fragment>>, ExpanderError>> {
+    fn expand_batch(&self, records: Vec<Record>, unreadable_expiries: &UnreadableExpiries) -> Vec<Result<Vec<Mapped<Fragment>>, ExpanderError>> {
         match self.parallelism {
-            Parallelism::Parallel => records.into_par_iter().map(|record| self.expand(record)).collect(),
-            Parallelism::Sequential => records.into_iter().map(|record| self.expand(record)).collect(),
+            Parallelism::Parallel => records.into_par_iter().map(|record| self.expand(record, unreadable_expiries)).collect(),
+            Parallelism::Sequential => records.into_iter().map(|record| self.expand(record, unreadable_expiries)).collect(),
         }
     }
 }
@@ -344,6 +353,8 @@ mod tests {
     use cassiopeia_common::collection::CollectionName;
     use cassiopeia_ir::{fragment::Fragment, mapped::Mapped, parent_context::ParentContextType, record::Record};
     use cassiopeia_mapping::{mapping::Mapping, template::runner::TemplateRunner};
+    use cassiopeia_unreadable_timestamps::unreadable_expiries::UnreadableExpiries;
+    use chrono::{TimeZone, Utc};
     use pretty_assertions::assert_eq;
     use serde_json::{Map, Value, json};
     use std::{error::Error, path::Path, sync::Arc};
@@ -354,16 +365,32 @@ mod tests {
         Arc::new(mapping)
     }
 
-    fn expander(document: &str) -> GenericExpander {
+    /// An expander bundled with the fresh expiry-warning sink its expansions record into, so a test
+    /// that cares about the sink can read it and every other test passes it through untouched.
+    struct Lane {
+        expander: GenericExpander,
+        unreadable_expiries: UnreadableExpiries,
+    }
+
+    impl Lane {
+        fn expand(&self, record: Record) -> Result<Vec<Mapped<Fragment>>, ExpanderError> {
+            Expander::expand(&self.expander, record, &self.unreadable_expiries)
+        }
+    }
+
+    fn expander(document: &str) -> Lane {
         expander_with_vars(document, Map::new())
     }
 
-    fn expander_with_vars(document: &str, vars: Map<String, Value>) -> GenericExpander {
+    fn expander_with_vars(document: &str, vars: Map<String, Value>) -> Lane {
         let mut runner = TemplateRunner::new();
         let mapping = compiled(document, &mut runner);
         let resolver = runner.resolver();
 
-        GenericExpander::new(MappingRouter::Single(mapping), resolver, vars)
+        Lane {
+            expander: GenericExpander::new(MappingRouter::Single(mapping), resolver, vars),
+            unreadable_expiries: UnreadableExpiries::new(),
+        }
     }
 
     fn record(data: Value) -> Record {
@@ -635,6 +662,163 @@ mod tests {
     }
 
     #[test]
+    fn an_expires_at_resolves_per_record_from_a_record_field() {
+        let expander = expander(
+            r#"{
+                version: "v4",
+                dataModel: "AirQualityObserved",
+                identity: { entityName: "S-{{ id }}" },
+                expiresAt: "{{ until }}",
+                attributes: { temperature: { source: "{{ temperature }}" } },
+            }"#,
+        );
+
+        let fragments = expander
+            .expand(record(json!({"id": 1, "temperature": 21.5, "until": "2026-10-25T13:00:00Z"})))
+            .unwrap();
+
+        assert_eq!(fragments[0].inner().expires_at(), &Some(Utc.with_ymd_and_hms(2026, 10, 25, 13, 0, 0).unwrap()));
+    }
+
+    #[test]
+    fn a_numeric_expires_at_reads_as_an_epoch() {
+        let expander = expander(
+            r#"{
+                version: "v4",
+                dataModel: "Sensor",
+                identity: { entityName: "S-{{ id }}" },
+                expiresAt: "{{ until }}",
+                attributes: { temperature: { source: "{{ temperature }}" } },
+            }"#,
+        );
+
+        let fragments = expander.expand(record(json!({"id": 1, "until": 1_775_253_620}))).unwrap();
+
+        assert_eq!(fragments[0].inner().expires_at(), &Utc.timestamp_opt(1_775_253_620, 0).single());
+    }
+
+    #[test]
+    fn an_expires_at_template_over_a_missing_field_leaves_the_fragment_without_one() {
+        let expander = expander(
+            r#"{
+                version: "v4",
+                dataModel: "AirQualityObserved",
+                identity: { entityName: "S-{{ id }}" },
+                expiresAt: "/{{ until }}",
+                attributes: { temperature: { source: "{{ temperature }}" } },
+            }"#,
+        );
+
+        let fragments = expander.expand(record(json!({"id": 1, "temperature": 21.5}))).unwrap();
+
+        assert_eq!(fragments[0].inner().expires_at(), &None);
+        assert!(expander.unreadable_expiries.is_empty());
+    }
+
+    #[test]
+    fn an_unreadable_expires_at_drops_the_expiry_keeps_the_record_and_names_the_entity() {
+        let expander = expander(
+            r#"{
+                version: "v4",
+                dataModel: "AirQualityObserved",
+                identity: { entityName: "S-{{ id }}" },
+                expiresAt: "{{ until }}",
+                attributes: { temperature: { source: "{{ temperature }}" } },
+            }"#,
+        );
+
+        let fragments = expander
+            .expand(record(json!({"id": 1, "temperature": 21.5, "until": "the day after tomorrow"})))
+            .unwrap();
+
+        assert_eq!(fragments[0].inner().expires_at(), &None);
+        assert_eq!(fragments[0].inner().target_urn().to_string(), "urn:ngsi-ld:AirQualityObserved:S-1");
+        let entries = expander.unreadable_expiries.into_entries();
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].0.to_string(), "urn:ngsi-ld:AirQualityObserved:S-1");
+        assert_eq!(entries[0].1.example.as_ref(), "the day after tomorrow");
+        assert_eq!(entries[0].1.occurrences.get(), 1);
+    }
+
+    #[test]
+    fn a_blank_expires_at_is_an_absent_member_rather_than_an_unreadable_one() {
+        let expander = expander(
+            r#"{
+                version: "v4",
+                dataModel: "Sensor",
+                identity: { entityName: "S-{{ id }}" },
+                expiresAt: "{{ until }}",
+                attributes: { temperature: { source: "{{ temperature }}" } },
+            }"#,
+        );
+
+        let fragments = expander.expand(record(json!({"id": 1, "until": "   "}))).unwrap();
+
+        assert_eq!(fragments[0].inner().expires_at(), &None);
+        assert!(expander.unreadable_expiries.is_empty());
+    }
+
+    #[test]
+    fn a_mapping_without_an_expires_at_produces_a_fragment_without_one() {
+        let expander = expander(
+            r#"{
+                version: "v4",
+                dataModel: "AirQualityObserved",
+                identity: { entityName: "S-{{ id }}" },
+                attributes: { temperature: { source: "{{ temperature }}" } },
+            }"#,
+        );
+
+        let fragments = expander.expand(record(json!({"id": 1, "temperature": 21.5}))).unwrap();
+
+        assert_eq!(fragments[0].inner().expires_at(), &None);
+    }
+
+    #[test]
+    fn a_synthetic_entity_takes_its_own_expiry_not_its_parents() {
+        let expander = expander(
+            r#"{
+                version: "v4",
+                dataModel: "Building",
+                identity: { entityName: "B-{{ id }}" },
+                expiresAt: "{{ building_until }}",
+                attributes: {
+                    owner: {
+                        type: "Relationship",
+                        source: "{{ owner_id }}",
+                        target: { entity: "Organization" },
+                        syntheticEntity: {
+                            dataModel: "Organization",
+                            identity: { entityName: "{{ owner_id }}" },
+                            expiresAt: "{{ org_until }}",
+                            attributes: { name: { source: "{{ owner_name }}" } },
+                        },
+                    },
+                },
+            }"#,
+        );
+
+        let fragments = expander
+            .expand(record(json!(
+                {"id": 1, "owner_id": "acme", "owner_name": "ACME", "building_until": "2026-01-01T00:00:00Z", "org_until": "2027-01-01T00:00:00Z"}
+            )))
+            .unwrap();
+        let expires_at_of = |target: &str| {
+            let fragment = fragments.iter().find(|fragment| urn(fragment) == target).unwrap();
+            fragment.inner().expires_at()
+        };
+
+        assert_eq!(
+            expires_at_of("urn:ngsi-ld:Building:B-1"),
+            &Some(Utc.with_ymd_and_hms(2026, 1, 1, 0, 0, 0).unwrap())
+        );
+        assert_eq!(
+            expires_at_of("urn:ngsi-ld:Organization:acme"),
+            &Some(Utc.with_ymd_and_hms(2027, 1, 1, 0, 0, 0).unwrap())
+        );
+    }
+
+    #[test]
     fn a_relationship_attribute_attaches_a_child_context_to_the_main_fragment() {
         let expander = expander(
             r#"{
@@ -660,7 +844,7 @@ mod tests {
     }
 
     /// An `AirQualityObserved` mapping whose `refRoad` Relationship reads its target from `source`.
-    fn road_expander(source: &str) -> GenericExpander {
+    fn road_expander(source: &str) -> Lane {
         expander(
             &r#"{
                 version: "v4",
@@ -790,7 +974,7 @@ mod tests {
     /// An `AircraftModel` mapping over a headerless `planes.dat` record whose single
     /// `belongsToAircraftType` Relationship materialises its target as a synthetic `AircraftType`
     /// named by `synthetic_identity`.
-    fn aircraft_expander(synthetic_identity: &str) -> GenericExpander {
+    fn aircraft_expander(synthetic_identity: &str) -> Lane {
         let document = r#"{
             version: "v4",
             dataModel: "AircraftModel",
@@ -1036,7 +1220,7 @@ mod tests {
 
     /// A `Route` whose `servesAirports` `ListRelationship` declares a departure instance read from `a`
     /// and an arrival instance read from `b` (ETSI GS CIM 009 v1.9.1 clause 4.5.5, EXAMPLE 19).
-    fn route_instances_expander(source_a: &str) -> GenericExpander {
+    fn route_instances_expander(source_a: &str) -> Lane {
         let document = r#"{
             version: "v4",
             dataModel: "Route",
@@ -1136,7 +1320,7 @@ mod tests {
     }
 
     /// A `Route` mapping whose `usesEquipment` `ListRelationship` reads its targets from `equipment`.
-    fn route_equipment_expander() -> GenericExpander {
+    fn route_equipment_expander() -> Lane {
         expander(
             r#"{
                 version: "v4",
@@ -1240,7 +1424,7 @@ mod tests {
         assert_eq!(urn(&second[0]), "urn:ngsi-ld:Sensor:Sensor");
     }
 
-    fn collections_expander() -> GenericExpander {
+    fn collections_expander() -> Lane {
         let mut runner = TemplateRunner::new();
         let camera = compiled(
             r#"{ version: "v4", dataModel: "Camera", identity: { entityName: "Cam-{{ id }}" }, attributes: { v: { source: "{{ v }}" } } }"#,
@@ -1255,7 +1439,10 @@ mod tests {
         let mut mappings = CollectionRoutes::default();
         mappings.insert(CollectionName::from("Camera"), camera);
         mappings.insert(CollectionName::from("Flowcount"), sensor);
-        GenericExpander::new(MappingRouter::Collections(mappings), resolver, Map::new())
+        Lane {
+            expander: GenericExpander::new(MappingRouter::Collections(mappings), resolver, Map::new()),
+            unreadable_expiries: UnreadableExpiries::new(),
+        }
     }
 
     #[test]
@@ -1488,7 +1675,10 @@ mod tests {
         );
         assert!(!mapping.has_nested_relationships());
         let resolver = runner.resolver();
-        let expander = GenericExpander::new(MappingRouter::Single(mapping), resolver, Map::new());
+        let expander = Lane {
+            expander: GenericExpander::new(MappingRouter::Single(mapping), resolver, Map::new()),
+            unreadable_expiries: UnreadableExpiries::new(),
+        };
 
         let fragments = expander.expand(record(json!({"id": 1, "road": 9}))).unwrap();
 

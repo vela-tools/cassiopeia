@@ -18,6 +18,7 @@ use crate::{
     },
 };
 use cassiopeia_mapping::{
+    entity_members::EntityMembers,
     identity::Identity,
     mapping::Mapping,
     template::{TemplateSource, runner::TemplateRunner},
@@ -387,7 +388,7 @@ impl WizardState {
             Version::V4,
             data_model.clone(),
             identity,
-            None,
+            EntityMembers::default(),
             attributes,
             Path::new(&self.save_filename),
             runner,

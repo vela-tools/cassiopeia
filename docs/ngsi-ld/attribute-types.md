@@ -280,6 +280,19 @@ An `observedAt` anywhere in an entity marks the entity as temporal. Successive r
 
 Source text that reads as no date-time is not emitted as a malformed qualifier: the attribute is still published without `expiresAt`, and the run warns with the attribute name and the text it could not read, under its own `expires-at-unreadable` code.
 
+`expiresAt` is also an optional reserved member of the entity itself (ETSI GS CIM 009 v1.9.1 clause 4.5.1): one `DateTime` bounding the whole entity, not one of its values. A mapping declares it at the top level, beside `identity` (see [Set an expiry](mapping.md#set-an-expiry)), and Cassiopeia writes it as a direct member of the entity object, right after `scope`, in every representation:
+
+```json
+{
+    "id": "urn:ngsi-ld:Ticket:42",
+    "type": "Ticket",
+    "scope": "/support",
+    "expiresAt": "2026-10-25T13:00:00Z"
+}
+```
+
+The member is merged across the records that contribute to one entity, the greatest instant winning, and never cleared by a record that declares none. It behaves exactly like the attribute qualifier on unreadable source text, except that the loss is named with the entity id under the `expander-expiry-unreadable` code.
+
 ### unitCode
 
 `unitCode` records the unit of a `Property` value, and it is valid only on `Property`. The value is a UN/CEFACT Common Code, not the printed unit symbol: `CEL` means degree Celsius, `MTS` metre per second, and `A97` hectopascal. The temperature in example 14 carries `"unitCode": "CEL"`. When a unit has no Common Code, Cassiopeia leaves `unitCode` out instead of inventing one. [Example 20](https://github.com/vela-tools/cassiopeia-examples/blob/main/examples/20-csv-at-context/example.md) uses that rule for radius in Earth radii.

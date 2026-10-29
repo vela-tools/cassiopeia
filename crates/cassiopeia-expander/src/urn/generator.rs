@@ -12,10 +12,15 @@ use cassiopeia_mapping::{
         resolver::{TemplateResolver, collect_identifiers},
     },
 };
-use cassiopeia_ngsi_ld::entity::{
-    name::NameBuf,
-    scope::{NgsiLdScope, ScopeBuf},
+use cassiopeia_ngsi_ld::{
+    entity::{
+        name::NameBuf,
+        scope::{NgsiLdScope, ScopeBuf},
+    },
+    value::types::Value as NgsiValue,
 };
+use cassiopeia_unreadable_timestamps::{unreadable_expiries::UnreadableExpiries, unreadable_timestamp::unreadable_text};
+use chrono::{DateTime, Utc};
 use serde_json::Value;
 use std::slice;
 use urn_rs::Urn;
@@ -89,6 +94,37 @@ impl UrnGenerator {
 
                 Ok(NgsiLdScope::from_scopes(scopes))
             }
+        }
+    }
+
+    /// Generates the entity `expiresAt` for one record from its mapping's `expiresAt` declaration.
+    ///
+    /// A mapping without the declaration yields `None`, as does a template whose plain path reads a
+    /// missing or empty field: a record that carries no expiry contributes none, exactly as it
+    /// contributes no scope. Resolved text is read in the same spellings as attribute date-times,
+    /// and a number as a Unix epoch. Text that reads as no instant costs the record its expiry but
+    /// not the record itself; the loss is recorded in `unreadable` under `entity`, in parity with an
+    /// attribute qualifier that would not read (ETSI GS CIM 009 v1.9.1 clause 4.5.1).
+    ///
+    /// # Errors
+    ///
+    /// Returns [`UrnError`] when the template fails to resolve.
+    pub fn generate_expires_at(&self, mapping: &Mapping, entity: &Urn, data: &Value, unreadable: &UnreadableExpiries) -> Result<Option<DateTime<Utc>>> {
+        let Some(template) = mapping.compiled_expires_at() else {
+            return Ok(None);
+        };
+        let Some(resolved) = self.resolver.resolve_complete(template, data)? else {
+            return Ok(None);
+        };
+
+        let value = NgsiValue::from(resolved);
+        if let Some(instant) = value.try_parse_datetime() {
+            Ok(Some(instant))
+        } else {
+            if let Some(text) = unreadable_text(&value) {
+                unreadable.record(entity, text.as_ref());
+            }
+            Ok(None)
         }
     }
 

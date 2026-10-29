@@ -1,4 +1,5 @@
 pub mod attribute;
+pub mod entity_members;
 pub mod error;
 pub mod geometry_validation;
 pub mod identity;

@@ -2,6 +2,7 @@ use crate::{
     entity_store::{
         error::Result,
         redb_database::RedbDatabase,
+        redb_expiry::{EXPIRIES_TABLE, PendingExpiries, read_expiry},
         redb_key::{collect_ids, for_each_id_chunk, make_prefix, prefix_end},
         redb_scope::{PendingScopes, SCOPES_TABLE, read_scope},
         store::{AssembledFragment, AssembledFragments, EntityStore, FragmentWrite, StoredUnit},
@@ -47,7 +48,7 @@ impl RedbSeriesEntityStore {
     /// directory or the database file cannot be created.
     pub fn new() -> Result<RedbSeriesEntityStore> {
         let db = RedbDatabase::open("entities.redb")?;
-        db.init_tables(&[DATA_TABLE, SCOPES_TABLE])?;
+        db.init_tables(&[DATA_TABLE, SCOPES_TABLE, EXPIRIES_TABLE])?;
         Ok(RedbSeriesEntityStore {
             db,
             next_seq: Arc::new(AtomicU64::new(0)),
@@ -76,6 +77,7 @@ impl EntityStore for RedbSeriesEntityStore {
         }
 
         let mut pending_scopes = PendingScopes::default();
+        let mut pending_expiries = PendingExpiries::default();
 
         let mut write_txn = self
             .db
@@ -89,6 +91,9 @@ impl EntityStore for RedbSeriesEntityStore {
         {
             let mut data_table = write_txn.open_table(DATA_TABLE).map_err(|e| self.db.err(e.into(), StoreAction::OpenTable))?;
             let mut scope_table = write_txn.open_table(SCOPES_TABLE).map_err(|e| self.db.err(e.into(), StoreAction::OpenTable))?;
+            let mut expiry_table = write_txn
+                .open_table(EXPIRIES_TABLE)
+                .map_err(|e| self.db.err(e.into(), StoreAction::OpenTable))?;
 
             for write in fragments {
                 let FragmentWrite {
@@ -97,6 +102,7 @@ impl EntityStore for RedbSeriesEntityStore {
                     mapping_id,
                     observed_at,
                     scope,
+                    expires_at,
                     ..
                 } = write;
                 // Append-only: a fresh sequence number gives a new key, so no read of prior state.
@@ -118,9 +124,13 @@ impl EntityStore for RedbSeriesEntityStore {
                 if let Some(scope) = scope {
                     pending_scopes.add(&base_id, scope);
                 }
+                if let Some(expires_at) = expires_at {
+                    pending_expiries.add(&base_id, expires_at);
+                }
             }
 
             pending_scopes.flush(&mut scope_table, &self.db)?;
+            pending_expiries.flush(&mut expiry_table, &self.db)?;
         }
 
         write_txn.commit().map_err(|e| self.db.err(e.into(), StoreAction::CommitTransaction))?;
@@ -146,6 +156,7 @@ impl EntityStore for RedbSeriesEntityStore {
             .map_err(|e| self.db.err(e.into(), StoreAction::BeginTransaction))?;
         let data_table = read_txn.open_table(DATA_TABLE).map_err(|e| self.db.err(e.into(), StoreAction::OpenTable))?;
         let scope_table = read_txn.open_table(SCOPES_TABLE).map_err(|e| self.db.err(e.into(), StoreAction::OpenTable))?;
+        let expiry_table = read_txn.open_table(EXPIRIES_TABLE).map_err(|e| self.db.err(e.into(), StoreAction::OpenTable))?;
 
         let mut units: Vec<StoredUnit> = Vec::new();
         for entry in data_table
@@ -163,8 +174,9 @@ impl EntityStore for RedbSeriesEntityStore {
         }
 
         let scope = read_scope(&scope_table, base_id, &self.db)?;
+        let expires_at = read_expiry(&expiry_table, base_id, &self.db)?;
 
-        Ok(AssembledFragments { scope, units })
+        Ok(AssembledFragments { scope, expires_at, units })
     }
 
     fn count(&self) -> usize {
@@ -197,9 +209,15 @@ impl EntityStore for RedbSeriesEntityStore {
             let _ = write_txn
                 .delete_table(SCOPES_TABLE)
                 .map_err(|e| self.db.err(e.into(), StoreAction::DeleteTable))?;
+            let _ = write_txn
+                .delete_table(EXPIRIES_TABLE)
+                .map_err(|e| self.db.err(e.into(), StoreAction::DeleteTable))?;
             write_txn.open_table(DATA_TABLE).map_err(|e| self.db.err(e.into(), StoreAction::CreateTable))?;
             write_txn
                 .open_table(SCOPES_TABLE)
+                .map_err(|e| self.db.err(e.into(), StoreAction::CreateTable))?;
+            write_txn
+                .open_table(EXPIRIES_TABLE)
                 .map_err(|e| self.db.err(e.into(), StoreAction::CreateTable))?;
         }
         write_txn.commit().map_err(|e| self.db.err(e.into(), StoreAction::CommitTransaction))?;
@@ -230,7 +248,7 @@ mod tests {
             store::{
                 EntityStore,
                 FragmentWrite,
-                tests::{READS_EVERYTHING, assert_merges_scopes_per_id},
+                tests::{READS_EVERYTHING, assert_merges_expiries_per_id, assert_merges_scopes_per_id},
             },
         },
         mapping_id::MappingId,
@@ -249,6 +267,11 @@ mod tests {
         assert_merges_scopes_per_id(&RedbSeriesEntityStore::new().unwrap());
     }
 
+    #[test]
+    fn the_greatest_expiry_of_every_fragment_of_an_id_is_kept() {
+        assert_merges_expiries_per_id(&RedbSeriesEntityStore::new().unwrap());
+    }
+
     fn write(base_id: &Urn, data: serde_json::Value, observed_at: &str) -> FragmentWrite<'static> {
         FragmentWrite {
             base_id: base_id.clone(),
@@ -257,6 +280,7 @@ mod tests {
             temporal: true,
             observed_at: Some(ObservedAt::new(observed_at)),
             scope: None,
+            expires_at: None,
             reads: &READS_EVERYTHING,
         }
     }

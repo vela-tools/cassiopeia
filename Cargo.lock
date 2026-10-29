@@ -591,6 +591,8 @@ dependencies = [
  "cassiopeia-ir",
  "cassiopeia-mapping",
  "cassiopeia-ngsi-ld",
+ "cassiopeia-unreadable-timestamps",
+ "chrono",
  "deunicode",
  "pretty_assertions",
  "rayon",
@@ -686,6 +688,7 @@ dependencies = [
  "cassiopeia-geometry",
  "cassiopeia-mapping",
  "cassiopeia-ngsi-ld",
+ "chrono",
  "derive_more",
  "foldhash",
  "getset",
@@ -865,6 +868,7 @@ dependencies = [
  "cassiopeia-ir",
  "cassiopeia-mapping",
  "cassiopeia-ngsi-ld",
+ "chrono",
  "dashmap",
  "derive_more",
  "foldhash",
@@ -979,6 +983,8 @@ dependencies = [
  "indexmap 2.14.2",
  "parking_lot 0.13.0",
  "pretty_assertions",
+ "serde_json",
+ "urn-rs",
 ]
 
 [[package]]

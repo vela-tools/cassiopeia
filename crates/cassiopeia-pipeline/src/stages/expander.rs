@@ -1,7 +1,7 @@
 use crate::{
     error::PipelineError,
     pipeline_stage::PipelineStage,
-    stages::{skipped_records::SkippedRecords, stage_env::StageEnv},
+    stages::{skipped_records::SkippedRecords, stage_env::StageEnv, unreadable_expiry_report::report_unreadable_expiries},
 };
 use cassiopeia_common::{
     batch::Batch,
@@ -14,6 +14,7 @@ use cassiopeia_diagnostic::severity::Severity;
 use cassiopeia_expander::{error::ExpanderError, expander::Expander};
 use cassiopeia_ir::{fragment::Fragment, mapped::Mapped, record::Record};
 use cassiopeia_reporter::guard::StageGuard;
+use cassiopeia_unreadable_timestamps::unreadable_expiries::UnreadableExpiries;
 use execution_time::ExecutionTime;
 use std::{mem, ops::ControlFlow, thread::spawn};
 
@@ -76,8 +77,10 @@ impl<'a> FragmentEmitter<'a> {
 ///
 /// A record that fails to expand is registered as a stage warning and skipped, so one bad record
 /// does not abort the lane. The refusals are grouped by reason and reported once each with a count,
-/// rather than surfacing as an anonymous tally. Cancellation, upstream termination, or a lost
-/// downstream channel stops processing.
+/// rather than surfacing as an anonymous tally. An entity `expiresAt` that resolves to text no
+/// instant reads is dropped from the fragments and named beside the refusals, counted the same way:
+/// the entity still publishes, so nothing downstream can tell the member was ever meant to be there.
+/// Cancellation, upstream termination, or a lost downstream channel stops processing.
 pub(crate) fn spawn_expander_thread(
     expander: Box<dyn Expander>,
     receiver: ChannelReceiver<Signal<Batch<Record>, PipelineError>>,
@@ -121,7 +124,8 @@ pub(crate) fn spawn_expander_thread(
                     // The service span covers expansion only; the handoff onto the resolver intake
                     // is output wait, measured inside the emitter.
                     let service = expander_stage.service_span();
-                    let results = expander.expand_batch(Vec::from(records));
+                    let unreadable_expiries = UnreadableExpiries::new();
+                    let results = expander.expand_batch(Vec::from(records), &unreadable_expiries);
                     drop(service);
 
                     let mut skipped = SkippedRecords::<_, ExpanderError>::new();
@@ -137,11 +141,14 @@ pub(crate) fn spawn_expander_thread(
                             Err(error) => skipped.record(error),
                         }
                     }
+                    let mut warnings = skipped.total();
                     if !skipped.is_empty() {
-                        let failed = skipped.total();
-                        expander_stage.warn_inc_by(failed);
-                        telemetry.add_warnings(failed);
                         skipped.report(reporter, Severity::Warning);
+                    }
+                    warnings += report_unreadable_expiries(reporter, unreadable_expiries);
+                    if warnings > 0 {
+                        expander_stage.warn_inc_by(warnings);
+                        telemetry.add_warnings(warnings);
                     }
                     if broken {
                         return;

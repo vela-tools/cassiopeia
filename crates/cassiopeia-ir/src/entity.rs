@@ -6,6 +6,7 @@ use cassiopeia_ngsi_ld::{
     entity::{name::NameBuf, scope::NgsiLdScope},
     value::types::Value as NgsiValue,
 };
+use chrono::{DateTime, Utc};
 use foldhash::fast::RandomState;
 use getset::{Getters, Setters};
 use indexmap::IndexMap;
@@ -25,6 +26,7 @@ pub type EntityParts = (
     Urn,
     JsonValue,
     Option<NgsiLdScope>,
+    Option<DateTime<Utc>>,
     Relationships,
     Option<AttributeValues>,
     Option<EntityMetadata>,
@@ -42,6 +44,9 @@ pub struct Entity {
     data: JsonValue,
     /// The scope of the entity.
     scope: Option<NgsiLdScope>,
+    /// The entity `expiresAt`, the instant after which the entity ceases to hold (ETSI GS CIM 009
+    /// v1.9.1 clause 4.5.1).
+    expires_at: Option<DateTime<Utc>>,
     /// Relationships mapped by their attribute name.
     relationships: Relationships,
     /// High-level values mapped by their attribute name.
@@ -66,15 +71,24 @@ pub struct Entity {
 }
 
 impl Entity {
-    /// Builds an entity from its resolved identity, data, scope, relationships, and values.
+    /// Builds an entity from its resolved identity, data, scope, entity `expiresAt`, relationships,
+    /// and values.
     ///
     /// Metadata starts empty and is attached later by the extractor stage.
     #[must_use]
-    pub const fn new(id: Urn, data: JsonValue, scope: Option<NgsiLdScope>, relationships: Relationships, values: Option<AttributeValues>) -> Entity {
+    pub const fn new(
+        id: Urn,
+        data: JsonValue,
+        scope: Option<NgsiLdScope>,
+        expires_at: Option<DateTime<Utc>>,
+        relationships: Relationships,
+        values: Option<AttributeValues>,
+    ) -> Entity {
         Entity {
             id,
             data,
             scope,
+            expires_at,
             relationships,
             values,
             metadata: None,
@@ -90,6 +104,7 @@ impl Entity {
             self.id,
             self.data,
             self.scope,
+            self.expires_at,
             self.relationships,
             self.values,
             self.metadata,
@@ -116,12 +131,13 @@ mod tests {
     fn new_leaves_metadata_empty_and_preserves_the_other_parts() {
         let mut relationships = IndexMap::default();
         relationships.insert(NameBuf::new("refRoad").expect("valid"), vec![urn()]);
-        let entity = Entity::new(urn(), json!({"id": "1"}), None, relationships.clone(), None);
+        let entity = Entity::new(urn(), json!({"id": "1"}), None, None, relationships.clone(), None);
         assert_eq!(entity.metadata(), &None);
         assert_eq!(entity.relationships(), &relationships);
-        let (id, _data, scope, rels, values, metadata, instance_relationships, nested_relationships) = entity.into_parts();
+        let (id, _data, scope, expires_at, rels, values, metadata, instance_relationships, nested_relationships) = entity.into_parts();
         assert_eq!(id, urn());
         assert_eq!(scope, None);
+        assert_eq!(expires_at, None);
         assert_eq!(rels, relationships);
         assert_eq!(values, None);
         assert_eq!(metadata, None);
@@ -131,7 +147,7 @@ mod tests {
 
     #[test]
     fn set_values_and_metadata_are_reflected_by_the_getters() {
-        let mut entity = Entity::new(urn(), json!({}), None, IndexMap::default(), None);
+        let mut entity = Entity::new(urn(), json!({}), None, None, IndexMap::default(), None);
         let mut values = IndexMap::default();
         values.insert(NameBuf::new("temperature").expect("valid"), NgsiValue::Boolean(true));
         entity.set_values(Some(values.clone()));
@@ -140,7 +156,7 @@ mod tests {
 
     #[test]
     fn nested_relationships_default_to_none_and_are_reflected_once_set() {
-        let mut entity = Entity::new(urn(), json!({}), None, IndexMap::default(), None);
+        let mut entity = Entity::new(urn(), json!({}), None, None, IndexMap::default(), None);
         assert_eq!(entity.nested_relationships(), &None);
 
         let mut nested = IndexMap::default();

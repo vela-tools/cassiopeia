@@ -7,7 +7,7 @@ use cassiopeia_ngsi_ld::{
     entity::{attribute::NestedAttributes, name::NameBuf},
     value::types::Value,
 };
-use cassiopeia_unreadable_timestamps::{timestamp_loss::TimestampLoss, unreadable_timestamps::UnreadableTimestamps};
+use cassiopeia_unreadable_timestamps::{timestamp_loss::TimestampLoss, unreadable_timestamp::unreadable_text, unreadable_timestamps::UnreadableTimestamps};
 use cefact_units::UnitCode;
 use chrono::{DateTime, Utc};
 use urn_rs::Urn;
@@ -63,22 +63,12 @@ pub fn transform_metadata(
 /// An attribute whose qualifier is dropped is still published, so nothing downstream can tell the
 /// qualifier was ever meant to be there: a temporal series built from `observedAt` has no instant to
 /// fold on (ETSI GS CIM 009 v1.9.1 clause 4.5.2.2), and an `expiresAt` that would have bounded the
-/// value's validity is gone (clause 4.22). A null or blank qualifier is one the record does not
-/// carry and is not recorded; text is quoted as written, and any other value (a number too small to
-/// be an epoch, a boolean, an object) as its rendering, so a mapping mistake is named rather than
-/// lost.
+/// value's validity is gone (clause 4.22). Which values are "not carried" rather than unreadable is
+/// the shared rule in
+/// [`unreadable_text`](cassiopeia_unreadable_timestamps::unreadable_timestamp::unreadable_text).
 fn record_unreadable(loss: TimestampLoss, attribute: &NameBuf, value: &Value, unreadable: &UnreadableTimestamps) {
-    match value {
-        Value::Null => {}
-        Value::String(text) => {
-            let text = text.trim();
-            if !text.is_empty() {
-                unreadable.record(loss, attribute, text);
-            }
-        }
-        Value::Boolean(_) | Value::Number(_) | Value::Temporal(_) | Value::Geospatial(_) | Value::Array(_) | Value::Object(_) => {
-            unreadable.record(loss, attribute, &value.to_string());
-        }
+    if let Some(text) = unreadable_text(value) {
+        unreadable.record(loss, attribute, text.as_ref());
     }
 }
 

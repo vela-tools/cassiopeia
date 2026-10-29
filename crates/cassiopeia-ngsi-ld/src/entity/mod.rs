@@ -20,6 +20,7 @@ use crate::entity::{
     scope::NgsiLdScope,
 };
 use cassiopeia_common::{representation::NgsiLdRepresentation, skip_null::NgsiLdSkipNull};
+use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize, Serializer, ser::SerializeMap};
 use serde_json::Value as JsonValue;
 use urn_rs::Urn;
@@ -40,6 +41,12 @@ pub struct NgsiLdEntity {
     /// Written by [`SerializeRepr`] rather than the derived serializer, which skips it.
     #[serde(skip)]
     pub scope: Option<NgsiLdScope>,
+    /// The instant after which the entity ceases to hold (ETSI GS CIM 009 v1.9.1 clause 4.5.1),
+    /// absent when no mapping resolved one.
+    ///
+    /// Written by [`SerializeRepr`] rather than the derived serializer, which skips it.
+    #[serde(skip)]
+    pub expires_at: Option<DateTime<Utc>>,
     /// The entity's attributes, flattened into the top-level object on serialization.
     #[serde(flatten)]
     pub attributes: Attributes,
@@ -54,6 +61,7 @@ impl NgsiLdEntity {
             id,
             entity_type,
             scope: None,
+            expires_at: None,
             attributes: Attributes::default(),
         }
     }
@@ -70,6 +78,9 @@ impl SerializeRepr for NgsiLdEntity {
         map.serialize_entry("type", &DisplayStr(&self.entity_type))?;
         if let Some(scope) = &self.scope {
             map.serialize_entry("scope", scope)?;
+        }
+        if let Some(expires_at) = &self.expires_at {
+            map.serialize_entry("expiresAt", expires_at)?;
         }
 
         for (name, wrapper) in &self.attributes {

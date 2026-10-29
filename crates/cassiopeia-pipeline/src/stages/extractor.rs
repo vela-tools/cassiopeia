@@ -311,7 +311,7 @@ mod tests {
             .into_iter()
             .map(|(id, record)| {
                 let urn: Urn = id.parse().unwrap();
-                let entity = Entity::new(urn, record, None, Relationships::default(), None);
+                let entity = Entity::new(urn, record, None, None, Relationships::default(), None);
                 AssembledEntity::from_single(entity, Arc::clone(mapping))
             })
             .collect();

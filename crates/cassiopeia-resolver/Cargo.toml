@@ -13,6 +13,7 @@ cassiopeia-common.workspace = true
 cassiopeia-ir.workspace = true
 cassiopeia-mapping.workspace = true
 cassiopeia-ngsi-ld.workspace = true
+chrono = { version = "0.4.45", features = ["serde"] }
 dashmap = "6.2.1"
 derive_more = { version = "2.1.1", features = ["display"] }
 foldhash = "0.2.0"

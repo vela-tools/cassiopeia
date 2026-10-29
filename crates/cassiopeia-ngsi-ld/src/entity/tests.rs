@@ -16,6 +16,7 @@ use crate::{
         context::{NgsiLdContext, NgsiLdContextEntry},
         name::NameBuf,
         representation::{JsonLayout, NgsiLdSerializable},
+        scope::{NgsiLdScope, ScopeBuf},
     },
     value::types::Value,
 };
@@ -43,6 +44,7 @@ fn create_test_entity(id: &str, entity_type: &str, key: &str, attr: NgsiLdAttrib
         entity_type: NameBuf::new(entity_type).unwrap(),
         context: Some(url_ctx("https://uri.etsi.org/ngsi-ld/v1/ngsi-ld-core-context-v1.8.jsonld")),
         scope: None,
+        expires_at: None,
         attributes,
     }
 }
@@ -591,6 +593,7 @@ mod multi_attribute_tests {
             entity_type: NameBuf::new("Sensor").unwrap(),
             context: Some(url_ctx("https://uri.etsi.org/ngsi-ld/v1/ngsi-ld-core-context-v1.8.jsonld")),
             scope: None,
+            expires_at: None,
             attributes: multi_attrs,
         };
 
@@ -642,6 +645,7 @@ mod multi_attribute_tests {
             entity_type: NameBuf::new("Person").unwrap(),
             context: Some(url_ctx("https://uri.etsi.org/ngsi-ld/v1/ngsi-ld-core-context-v1.8.jsonld")),
             scope: None,
+            expires_at: None,
             attributes: multi_attrs,
         };
 
@@ -687,6 +691,7 @@ mod multi_attribute_tests {
             entity_type: NameBuf::new("Flight").unwrap(),
             context: Some(url_ctx("https://uri.etsi.org/ngsi-ld/v1/ngsi-ld-core-context-v1.8.jsonld")),
             scope: None,
+            expires_at: None,
             attributes: multi_attrs,
         };
 
@@ -735,6 +740,7 @@ mod multi_attribute_tests {
             entity_type: NameBuf::new("Route").unwrap(),
             context: Some(url_ctx("https://uri.etsi.org/ngsi-ld/v1/ngsi-ld-core-context-v1.8.jsonld")),
             scope: None,
+            expires_at: None,
             attributes: multi_attrs,
         };
 
@@ -864,6 +870,7 @@ mod edge_case_tests {
             entity_type: NameBuf::new("Empty").unwrap(),
             context: None,
             scope: None,
+            expires_at: None,
             attributes: IndexMap::default(),
         };
 
@@ -934,6 +941,7 @@ mod edge_case_tests {
             entity_type: NameBuf::new("AllTypes").unwrap(),
             context: Some(url_ctx("https://uri.etsi.org/ngsi-ld/v1/ngsi-ld-core-context-v1.8.jsonld")),
             scope: None,
+            expires_at: None,
             attributes,
         };
 
@@ -1246,6 +1254,7 @@ mod edge_case_tests {
             entity_type: NameBuf::new("Test").unwrap(),
             context: None,
             scope: None,
+            expires_at: None,
             attributes: attrs,
         };
 
@@ -1288,6 +1297,7 @@ mod edge_case_tests {
                 entity_type: NameBuf::new("Test").unwrap(),
                 context: Some(string_context),
                 scope: None,
+                expires_at: None,
                 attributes: IndexMap::default(),
             };
 
@@ -1296,6 +1306,7 @@ mod edge_case_tests {
                 entity_type: NameBuf::new("Test").unwrap(),
                 context: Some(list_context),
                 scope: None,
+                expires_at: None,
                 attributes: IndexMap::default(),
             };
 
@@ -1304,6 +1315,7 @@ mod edge_case_tests {
                 entity_type: NameBuf::new("Test").unwrap(),
                 context: Some(NgsiLdContext::Single(NgsiLdContextEntry::Inline(map_context))),
                 scope: None,
+                expires_at: None,
                 attributes: IndexMap::default(),
             };
 
@@ -1312,6 +1324,7 @@ mod edge_case_tests {
                 entity_type: NameBuf::new("Test").unwrap(),
                 context: None,
                 scope: None,
+                expires_at: None,
                 attributes: IndexMap::default(),
             };
 
@@ -1420,6 +1433,7 @@ mod edge_case_tests {
                 entity_type: NameBuf::new("TestEntity").unwrap(),
                 context: Some(url_ctx("https://schema.org")),
                 scope: None,
+                expires_at: None,
                 attributes,
             };
 
@@ -1569,6 +1583,7 @@ fn an_entity_round_trips_through_serde_keeping_its_attributes_in_declaration_ord
         id: "urn:ngsi-ld:Sensor:1".parse::<Urn>().unwrap(),
         entity_type: NameBuf::new("Sensor").unwrap(),
         scope: None,
+        expires_at: None,
         attributes,
     };
 
@@ -1595,4 +1610,53 @@ fn attributes_are_reachable_and_removable_by_a_plain_string_key() {
     assert!(attributes.get("observedAt").is_some());
     assert!(attributes.swap_remove("observedAt").is_some());
     assert!(attributes.get("observedAt").is_none());
+}
+
+#[test]
+fn an_entity_expires_at_serializes_after_the_scope_in_every_representation() {
+    // The optional reserved members of clause 4.5.1 keep one fixed order in the entity map: `scope`,
+    // then `expiresAt`, then the attributes. This is also the only test that serializes a non-empty
+    // entity `scope`.
+    let mut attributes = Attributes::default();
+    attributes.insert(
+        NameBuf::new("temperature").unwrap(),
+        NgsiLdAttributeWrapper::single(NgsiLdAttribute::Property(NgsiLdProperty::new(Value::from(json!(21.5))))),
+    );
+    let entity = NgsiLdEntity {
+        context: None,
+        id: "urn:ngsi-ld:Sensor:1".parse::<Urn>().unwrap(),
+        entity_type: NameBuf::new("Sensor").unwrap(),
+        scope: NgsiLdScope::from_scopes(vec![ScopeBuf::new("/Ljubljana").unwrap()]),
+        expires_at: Some(Utc.with_ymd_and_hms(2026, 10, 25, 13, 0, 0).unwrap()),
+        attributes,
+    };
+
+    for representation in [
+        NgsiLdRepresentation::Normalized,
+        NgsiLdRepresentation::Concise,
+        NgsiLdRepresentation::Simplified,
+    ] {
+        let serialized = serialize_entity(&entity, representation, NgsiLdSkipNull::Skip);
+        let keys: Vec<&str> = serialized.as_object().unwrap().keys().map(String::as_str).collect();
+
+        assert_eq!(keys, ["id", "type", "scope", "expiresAt", "temperature"], "in {representation:?}");
+        assert_eq!(serialized["scope"], json!("/Ljubljana"));
+        assert_eq!(serialized["expiresAt"], "2026-10-25T13:00:00Z");
+    }
+}
+
+#[test]
+fn an_entity_without_a_scope_or_an_expiry_emits_neither_member() {
+    let entity = NgsiLdEntity::new("urn:ngsi-ld:Sensor:1".parse::<Urn>().unwrap(), NameBuf::new("Sensor").unwrap());
+
+    for representation in [
+        NgsiLdRepresentation::Normalized,
+        NgsiLdRepresentation::Concise,
+        NgsiLdRepresentation::Simplified,
+    ] {
+        let serialized = serialize_entity(&entity, representation, NgsiLdSkipNull::Skip);
+
+        assert!(serialized.get("scope").is_none(), "in {representation:?}");
+        assert!(serialized.get("expiresAt").is_none(), "in {representation:?}");
+    }
 }

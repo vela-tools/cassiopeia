@@ -250,7 +250,7 @@ impl FragmentResolver {
         let (fragment, mapping) = fragment.into_parts();
         let observed_at = mapping.extract_observed_at(&self.resolver, fragment.source_data());
         let temporal = mapping.is_temporal();
-        let (source_data, base_id, scope, parent_context) = fragment.into_parts();
+        let (source_data, base_id, scope, expires_at, parent_context) = fragment.into_parts();
 
         for (parent, property, child) in self.build_edges(&base_id, parent_context.as_ref(), temporal) {
             self.relationship_store.add_child(&parent, &property, &child)?;
@@ -263,6 +263,7 @@ impl FragmentResolver {
             temporal,
             observed_at,
             scope,
+            expires_at,
             reads: mapping.source_reads(),
         })?;
         Ok(())
@@ -365,7 +366,13 @@ mod tests {
             );
             resolver
                 .resolve(Mapped::new(
-                    Fragment::new(json!({"temperature": 20, "timestamp": timestamp}), station.clone(), None, Some(vec![context])),
+                    Fragment::new(
+                        json!({"temperature": 20, "timestamp": timestamp}),
+                        station.clone(),
+                        None,
+                        None,
+                        Some(vec![context]),
+                    ),
                     Arc::clone(&mappings[0]),
                 ))
                 .unwrap();
@@ -384,11 +391,11 @@ mod tests {
         let (resolver, mappings) = latest_resolver(&[SIMPLE]);
         let batch = vec![
             Mapped::new(
-                Fragment::new(json!({"t": 1}), urn("urn:ngsi-ld:Station:1"), None, None),
+                Fragment::new(json!({"t": 1}), urn("urn:ngsi-ld:Station:1"), None, None, None),
                 Arc::clone(&mappings[0]),
             ),
             Mapped::new(
-                Fragment::new(json!({"t": 2}), urn("urn:ngsi-ld:Station:2"), None, None),
+                Fragment::new(json!({"t": 2}), urn("urn:ngsi-ld:Station:2"), None, None, None),
                 Arc::clone(&mappings[0]),
             ),
         ];
@@ -404,7 +411,7 @@ mod tests {
         let batch: Vec<Mapped<Fragment>> = (0..16)
             .map(|index| {
                 Mapped::new(
-                    Fragment::new(json!({"t": index}), urn(&format!("urn:ngsi-ld:Station:{index}")), None, None),
+                    Fragment::new(json!({"t": index}), urn(&format!("urn:ngsi-ld:Station:{index}")), None, None, None),
                     Arc::clone(&mappings[0]),
                 )
             })
@@ -426,9 +433,9 @@ mod tests {
         let air = urn("urn:ngsi-ld:AirQualityObserved:1");
         let weather = urn("urn:ngsi-ld:WeatherObserved:1");
         let batch = vec![
-            Mapped::new(Fragment::new(json!({"t": 1}), air.clone(), None, None), Arc::clone(&mappings[0])),
-            Mapped::new(Fragment::new(json!({"h": 2}), weather.clone(), None, None), Arc::clone(&mappings[1])),
-            Mapped::new(Fragment::new(json!({"t": 3}), air.clone(), None, None), Arc::clone(&mappings[0])),
+            Mapped::new(Fragment::new(json!({"t": 1}), air.clone(), None, None, None), Arc::clone(&mappings[0])),
+            Mapped::new(Fragment::new(json!({"h": 2}), weather.clone(), None, None, None), Arc::clone(&mappings[1])),
+            Mapped::new(Fragment::new(json!({"t": 3}), air.clone(), None, None, None), Arc::clone(&mappings[0])),
         ];
 
         let results = resolver.resolve_batch(batch);
@@ -450,7 +457,7 @@ mod tests {
             (offset..offset + 4)
                 .map(|index| {
                     Mapped::new(
-                        Fragment::new(json!({"t": index}), urn(&format!("urn:ngsi-ld:Station:{index}")), None, None),
+                        Fragment::new(json!({"t": index}), urn(&format!("urn:ngsi-ld:Station:{index}")), None, None, None),
                         Arc::clone(&mappings[0]),
                     )
                 })
@@ -474,7 +481,7 @@ mod tests {
         let batch: Vec<Mapped<Fragment>> = (0..64)
             .map(|index| {
                 Mapped::new(
-                    Fragment::new(json!({"t": index}), urn(&format!("urn:ngsi-ld:Station:{index}")), None, None),
+                    Fragment::new(json!({"t": index}), urn(&format!("urn:ngsi-ld:Station:{index}")), None, None, None),
                     Arc::clone(&mappings[0]),
                 )
             })

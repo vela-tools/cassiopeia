@@ -12,6 +12,7 @@ use cassiopeia_common::parallelism::Parallelism;
 use cassiopeia_ir::{fragment::Fragment, mapped::Mapped};
 use cassiopeia_mapping::{mapping::Mapping, observed_at::ObservedAt};
 use cassiopeia_ngsi_ld::entity::scope::NgsiLdScope;
+use chrono::{DateTime, Utc};
 use rayon::prelude::*;
 use serde_json::Value;
 use std::{
@@ -28,6 +29,7 @@ pub(crate) struct PreparedFragment {
     base_id: Urn,
     source_data: Value,
     scope: Option<NgsiLdScope>,
+    expires_at: Option<DateTime<Utc>>,
     mapping: Arc<Mapping>,
     observed_at: Option<ObservedAt>,
     temporal: bool,
@@ -43,6 +45,7 @@ struct OwnedWrite {
     temporal: bool,
     observed_at: Option<ObservedAt>,
     scope: Option<NgsiLdScope>,
+    expires_at: Option<DateTime<Utc>>,
 }
 
 /// A prepared fragment paired with its interned mapping id, carried from preparation through both
@@ -58,13 +61,14 @@ impl FragmentResolver {
             let (fragment, mapping) = fragment.into_parts();
             let observed_at = mapping.extract_observed_at(&self.resolver, fragment.source_data());
             let temporal = mapping.is_temporal();
-            let (source_data, base_id, scope, parent_context) = fragment.into_parts();
+            let (source_data, base_id, scope, expires_at, parent_context) = fragment.into_parts();
             let edges = self.build_edges(&base_id, parent_context.as_ref(), temporal);
 
             PreparedFragment {
                 base_id,
                 source_data,
                 scope,
+                expires_at,
                 mapping,
                 observed_at,
                 temporal,
@@ -125,6 +129,7 @@ impl FragmentResolver {
                     base_id,
                     source_data,
                     scope,
+                    expires_at,
                     mapping,
                     observed_at,
                     temporal,
@@ -138,6 +143,7 @@ impl FragmentResolver {
                         temporal,
                         observed_at,
                         scope,
+                        expires_at,
                     },
                     mapping,
                 )
@@ -153,6 +159,7 @@ impl FragmentResolver {
                 temporal: write.temporal,
                 observed_at: write.observed_at,
                 scope: write.scope,
+                expires_at: write.expires_at,
                 reads: mapping.source_reads(),
             })
             .collect();
@@ -212,7 +219,7 @@ mod tests {
             (&loud, json!({"level": 2, "temperature": 21})),
         ]
         .into_iter()
-        .map(|(id, record)| Mapped::new(Fragment::new(record, id.clone(), None, None), Arc::clone(&reading)))
+        .map(|(id, record)| Mapped::new(Fragment::new(record, id.clone(), None, None, None), Arc::clone(&reading)))
         .collect();
 
         let (results, _timing) = resolver.resolve_batch_timed(batch);

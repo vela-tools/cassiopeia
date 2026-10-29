@@ -191,7 +191,7 @@ mod tests {
         )]);
         let metadata = IndexMap::from_iter([(name("temperature"), MetadataStorage::shared(shared))]);
 
-        let mut entity = Entity::new(urn, json!({}), None, IndexMap::default(), Some(values));
+        let mut entity = Entity::new(urn, json!({}), None, None, IndexMap::default(), Some(values));
         entity.set_metadata(Some(metadata));
 
         Mapped::new(entity, Arc::clone(mapping))

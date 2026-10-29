@@ -154,7 +154,7 @@ impl FragmentResolver {
 
 impl EntitySource for FragmentResolver {
     fn assemble(&self, base_id: &Urn) -> Result<IdAssembly> {
-        let StoredUnits { scope, units } = self.entity_store.assemble_entity(base_id)?;
+        let StoredUnits { scope, expires_at, units } = self.entity_store.assemble_entity(base_id)?;
         if units.is_empty() {
             return Err(ResolverError::MissingConfigForEntity { entity: base_id.clone() });
         }
@@ -196,7 +196,7 @@ impl EntitySource for FragmentResolver {
                 fragments.push((stored.data, mapping));
             }
 
-            // Relationships and scope render on every unit; a unit's mappings pick up only the
+            // Relationships, scope, and expiry render on every unit; a unit's mappings pick up only the
             // relationships they declare, so a static relationship renders on the mapping's own unit and
             // observation units of a temporal mapping ignore it. The last unit moves them rather than
             // cloning; earlier ones clone.
@@ -207,7 +207,7 @@ impl EntitySource for FragmentResolver {
                 (relationships.clone(), scope.clone())
             };
 
-            entities.push(AssembledEntity::new(base_id.clone(), unit_scope, unit_relationships, fragments));
+            entities.push(AssembledEntity::new(base_id.clone(), unit_scope, expires_at, unit_relationships, fragments));
         }
 
         trace!("Assembled entity {} into {} unit(s)", base_id, entities.len());
@@ -321,6 +321,7 @@ mod tests {
         template::runner::TemplateRunner,
     };
     use cassiopeia_ngsi_ld::entity::name::NameBuf;
+    use chrono::{TimeZone, Utc};
     use pretty_assertions::assert_eq;
     use serde_json::json;
     use std::{num::NonZeroU64, ops::ControlFlow, path::Path, sync::Arc, time::Duration};
@@ -369,7 +370,8 @@ mod tests {
             for observation in 0..observations {
                 let urn: Urn = format!("urn:ngsi-ld:Station:{id}").parse().unwrap();
                 let record = json!({ "temperature": observation, "timestamp": format!("2026-04-03T22:{observation:02}:00Z") });
-                sink.resolve(Mapped::new(Fragment::new(record, urn, None, None), Arc::clone(&mapping))).unwrap();
+                sink.resolve(Mapped::new(Fragment::new(record, urn, None, None, None), Arc::clone(&mapping)))
+                    .unwrap();
             }
         }
 
@@ -412,7 +414,8 @@ mod tests {
             for observation in 0..100 {
                 let urn: Urn = format!("urn:ngsi-ld:Station:{id}").parse().unwrap();
                 let record = json!({ "temperature": observation, "timestamp": format!("2026-04-03T22:{observation:02}:00Z") });
-                sink.resolve(Mapped::new(Fragment::new(record, urn, None, None), Arc::clone(&mapping))).unwrap();
+                sink.resolve(Mapped::new(Fragment::new(record, urn, None, None, None), Arc::clone(&mapping)))
+                    .unwrap();
             }
         }
 
@@ -427,8 +430,11 @@ mod tests {
         let sink: &dyn FragmentSink = &resolver;
         for id in 0..5 {
             let urn: Urn = format!("urn:ngsi-ld:Station:{id}").parse().unwrap();
-            sink.resolve(Mapped::new(Fragment::new(json!({ "temperature": 20 }), urn, None, None), Arc::clone(&mapping)))
-                .unwrap();
+            sink.resolve(Mapped::new(
+                Fragment::new(json!({ "temperature": 20 }), urn, None, None, None),
+                Arc::clone(&mapping),
+            ))
+            .unwrap();
         }
 
         assert_eq!(resolver.id_chunk_size(10_000), 10_000);
@@ -456,7 +462,8 @@ mod tests {
         for observation in 0..20 {
             let urn: Urn = "urn:ngsi-ld:Station:1".parse().unwrap();
             let record = json!({ "temperature": observation, "timestamp": format!("2026-04-03T22:{observation:02}:00Z") });
-            sink.resolve(Mapped::new(Fragment::new(record, urn, None, None), Arc::clone(&mapping))).unwrap();
+            sink.resolve(Mapped::new(Fragment::new(record, urn, None, None, None), Arc::clone(&mapping)))
+                .unwrap();
         }
 
         let timing = resolver
@@ -497,7 +504,7 @@ mod tests {
     fn resolve_then_assemble_returns_the_stored_data() {
         let (resolver, mappings) = resolver_with(Box::new(DashMapLatestEntityStore::new()), &[SIMPLE]);
         let station = urn("urn:ngsi-ld:Station:1");
-        let fragment = Fragment::new(json!({"temperature": 21.5}), station.clone(), None, None);
+        let fragment = Fragment::new(json!({"temperature": 21.5}), station.clone(), None, None, None);
 
         resolver.resolve(Mapped::new(fragment, Arc::clone(&mappings[0]))).unwrap();
 
@@ -505,6 +512,20 @@ mod tests {
         assert_eq!(unit.id().to_string(), "urn:ngsi-ld:Station:1");
         assert_eq!(unit.fragments().len(), 1);
         assert_eq!(unit.fragments()[0].0, json!({"temperature": 21.5}));
+    }
+
+    #[test]
+    fn the_greatest_expiry_of_one_id_s_fragments_travels_on_every_assembled_unit() {
+        let (resolver, mappings) = resolver_with(Box::new(DashMapLatestEntityStore::new()), &[SIMPLE]);
+        let station = urn("urn:ngsi-ld:Station:1");
+        let instant = |seconds: i64| Utc.timestamp_opt(seconds, 0).single().unwrap();
+        let first = Fragment::new(json!({"temperature": 20}), station.clone(), None, Some(instant(100)), None);
+        let second = Fragment::new(json!({"temperature": 21}), station.clone(), None, Some(instant(300)), None);
+
+        resolver.resolve(Mapped::new(first, Arc::clone(&mappings[0]))).unwrap();
+        resolver.resolve(Mapped::new(second, Arc::clone(&mappings[0]))).unwrap();
+
+        assert_eq!(only_unit(&resolver, &station).expires_at(), &Some(instant(300)));
     }
 
     #[test]
@@ -516,7 +537,7 @@ mod tests {
             ParentContextType::Child(road.clone()),
             RelationshipKey::Path(RelationshipPath::flat(name("refRoad"))),
         );
-        let fragment = Fragment::new(json!({"t": 1}), station.clone(), None, Some(vec![context]));
+        let fragment = Fragment::new(json!({"t": 1}), station.clone(), None, None, Some(vec![context]));
 
         resolver.resolve(Mapped::new(fragment, Arc::clone(&mappings[0]))).unwrap();
 
@@ -533,7 +554,7 @@ mod tests {
         let character = urn("urn:ngsi-ld:Character:JackSparrow");
         let path = RelationshipPath::flat(name("hasLeadActor")).push(name("playsCharacter"));
         let context = ParentContext::new(ParentContextType::Child(character.clone()), RelationshipKey::Path(path.clone()));
-        let fragment = Fragment::new(json!({"t": 1}), movie.clone(), None, Some(vec![context]));
+        let fragment = Fragment::new(json!({"t": 1}), movie.clone(), None, None, Some(vec![context]));
 
         resolver.resolve(Mapped::new(fragment, Arc::clone(&mappings[0]))).unwrap();
 
@@ -559,7 +580,7 @@ mod tests {
             ParentContext::new(ParentContextType::Child(urn("urn:ngsi-ld:Airport:3")), instance(2)),
             ParentContext::new(ParentContextType::Child(urn("urn:ngsi-ld:Airport:4")), instance(2)),
         ];
-        let fragment = Fragment::new(json!({"t": 1}), route.clone(), None, Some(contexts));
+        let fragment = Fragment::new(json!({"t": 1}), route.clone(), None, None, Some(contexts));
 
         resolver.resolve(Mapped::new(fragment, Arc::clone(&mappings[0]))).unwrap();
 
@@ -586,7 +607,7 @@ mod tests {
         let station = urn("urn:ngsi-ld:Station:1");
         resolver
             .resolve(Mapped::new(
-                Fragment::new(json!({"t": 1}), station.clone(), None, None),
+                Fragment::new(json!({"t": 1}), station.clone(), None, None, None),
                 Arc::clone(&mappings[0]),
             ))
             .unwrap();
@@ -607,13 +628,13 @@ mod tests {
 
         resolver
             .resolve(Mapped::new(
-                Fragment::new(json!({"temperature": 1}), station.clone(), None, None),
+                Fragment::new(json!({"temperature": 1}), station.clone(), None, None, None),
                 Arc::clone(&mappings[0]),
             ))
             .unwrap();
         resolver
             .resolve(Mapped::new(
-                Fragment::new(json!({"name": "s"}), station.clone(), None, None),
+                Fragment::new(json!({"name": "s"}), station.clone(), None, None, None),
                 Arc::clone(&mappings[1]),
             ))
             .unwrap();
@@ -633,7 +654,7 @@ mod tests {
         for (temperature, timestamp) in [(20, "2026-04-03T22:00:20Z"), (21, "2026-04-03T22:05:20Z")] {
             resolver
                 .resolve(Mapped::new(
-                    Fragment::new(json!({"temperature": temperature, "timestamp": timestamp}), base.clone(), None, None),
+                    Fragment::new(json!({"temperature": temperature, "timestamp": timestamp}), base.clone(), None, None, None),
                     Arc::clone(&mappings[0]),
                 ))
                 .unwrap();
@@ -652,7 +673,7 @@ mod tests {
         for (temperature, timestamp) in [(20, "2026-04-03T22:00:20Z"), (21, "2026-04-03T22:05:20Z"), (22, "2026-04-03T22:10:20Z")] {
             resolver
                 .resolve(Mapped::new(
-                    Fragment::new(json!({"temperature": temperature, "timestamp": timestamp}), base.clone(), None, None),
+                    Fragment::new(json!({"temperature": temperature, "timestamp": timestamp}), base.clone(), None, None, None),
                     Arc::clone(&mappings[0]),
                 ))
                 .unwrap();
@@ -675,7 +696,7 @@ mod tests {
         for (temperature, timestamp) in [(20, "2026-04-03T22:00:20Z"), (21, "2026-04-03T22:05:20Z"), (22, "2026-04-03T22:10:20Z")] {
             resolver
                 .resolve(Mapped::new(
-                    Fragment::new(json!({"temperature": temperature, "timestamp": timestamp}), base.clone(), None, None),
+                    Fragment::new(json!({"temperature": temperature, "timestamp": timestamp}), base.clone(), None, None, None),
                     Arc::clone(&mappings[0]),
                 ))
                 .unwrap();
@@ -698,13 +719,13 @@ mod tests {
         let station = urn("urn:ngsi-ld:Station:1");
         resolver
             .resolve(Mapped::new(
-                Fragment::new(json!({"temperature": 1}), station.clone(), None, None),
+                Fragment::new(json!({"temperature": 1}), station.clone(), None, None, None),
                 Arc::clone(&mappings[0]),
             ))
             .unwrap();
         resolver
             .resolve(Mapped::new(
-                Fragment::new(json!({"name": "s"}), station.clone(), None, None),
+                Fragment::new(json!({"name": "s"}), station.clone(), None, None, None),
                 Arc::clone(&mappings[1]),
             ))
             .unwrap();
@@ -732,6 +753,7 @@ mod tests {
                 temporal: false,
                 observed_at: None,
                 scope: None,
+                expires_at: None,
                 reads: &READS_EVERYTHING,
             })
             .unwrap();
@@ -764,7 +786,7 @@ mod tests {
     /// Resolves each `(mapping, id, record)` as its own batch, the way separate resolver batches land.
     fn resolve_each(resolver: &FragmentResolver, fragments: &[(&Arc<Mapping>, &Urn, serde_json::Value)]) {
         for (mapping, id, record) in fragments {
-            let batch = vec![Mapped::new(Fragment::new(record.clone(), (*id).clone(), None, None), Arc::clone(mapping))];
+            let batch = vec![Mapped::new(Fragment::new(record.clone(), (*id).clone(), None, None, None), Arc::clone(mapping))];
             assert!(resolver.resolve_batch(batch).iter().all(Result::is_ok));
         }
     }
@@ -901,7 +923,7 @@ mod tests {
             let batch = (0..3)
                 .map(|temperature| {
                     Mapped::new(
-                        Fragment::new(json!({ "temperature": temperature }), station.clone(), None, None),
+                        Fragment::new(json!({ "temperature": temperature }), station.clone(), None, None, None),
                         Arc::clone(&mappings[0]),
                     )
                 })

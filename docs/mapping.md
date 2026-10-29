@@ -130,6 +130,23 @@ Cassiopeia resolves scopes per record. A scope of literal text and plain referen
 
 When several mappings, or several records, contribute to the same entity, the entity receives every distinct scope any of them declared, as NGSI-LD requires when representations of one entity are combined. Duplicates are dropped and the scopes are written sorted by Unicode code point, so the output is the same on every run. An entity with one scope has a string `scope`; an entity with several has an array.
 
+## Set an expiry
+
+An `expiresAt` on the entity itself marks the instant after which the entity ceases to hold (ETSI GS CIM 009 v1.9.1 clause 4.5.1; the value is an NGSI-LD `DateTime`, clause 4.6.3). Declare it at the top level of the mapping, next to `identity`, reading the source field that says when the record lapses:
+
+~~~json5
+identity: {
+    entityName: "Ticket-{{ ticket_id }}",
+},
+expiresAt: "{{ valid_until }}",
+~~~
+
+The template resolves per record. Its value follows the same rules as a `datetime` transformation: see [Convert values](#convert-values) for the spellings Cassiopeia reads, including RFC 3339 text, space-separated stamps, and Unix epochs written as a number or as text. A template of literal text and plain references that reads a missing, null, or empty field resolves to nothing (see [Source values](#source-values)), so the entity carries no `expiresAt` and the run stays quiet: an absent expiry is one the record does not declare. Text that is present but reads as no instant costs the entity its expiry without failing the record; the entity is still published, and the run warns with the entity id and the text it could not read, under the `expander-expiry-unreadable` code.
+
+Like `scope`, the expiry is an entity member, not part of the entity's identity, so it does not belong inside `identity`: a mapping that declares `identity.expiresAt` does not load. And like `scope`, it is merged when several records contribute to the same entity, but an instant can only bound from one side: of every instant the entity's records declare, the greatest wins, and a record that declares no expiry clears nothing. The member is written in every representation Cassiopeia emits.
+
+An entity `expiresAt` does not make the entity temporal. Temporality is declared by an attribute's `observedAt` (ETSI GS CIM 009 v1.9.1 clause 4.5.5), which is what turns current-state entities into a kept series; an expiry only bounds how long each state holds, so a mapping that declares only `expiresAt` still produces current-state entities that overwrite one another.
+
 ## Map an attribute
 
 An attribute declaration normally starts with a `source` field:

@@ -12,6 +12,7 @@ cassiopeia-common.workspace = true
 cassiopeia-data-profiler.workspace = true
 cassiopeia-mapping.workspace = true
 cassiopeia-ngsi-ld.workspace = true
+chrono = { version = "0.4.45", features = ["serde"] }
 derive_more = { version = "2.1.1", features = ["display", "from", "from_str", "into"] }
 foldhash = "0.2.0"
 getset = "0.1.7"
