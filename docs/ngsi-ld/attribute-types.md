@@ -10,7 +10,7 @@ The payloads here use the **normalized** form, where each attribute's type token
 
 ## The eight types at a glance
 
-`type` is optional in a mapping and defaults to `Property`. The ETSI representation rules allow `datasetId` on Property and Relationship attributes, including their specialized types. That covers all eight types listed here. `observedAt` can also accompany each of these attribute types.
+`type` is optional in a mapping and defaults to `Property`. The ETSI representation rules allow `datasetId` on Property and Relationship attributes, including their specialized types. That covers all eight types listed here. `observedAt` and `expiresAt` can also accompany each of these attribute types.
 
 | Type | Clause | Value member | Holds |
 | --- | --- | --- | --- |
@@ -249,7 +249,7 @@ Produce it with Cassiopeia: `type: "JsonProperty"` with no transformation; see t
 
 ## Attribute metadata
 
-An attribute may also carry qualifiers that describe its value. NGSI-LD reserves several names for these qualifiers, and Cassiopeia writes them next to the value rather than as nested attributes.
+An attribute may also carry qualifiers that describe its value. NGSI-LD reserves several names for these qualifiers, and Cassiopeia writes them next to the value rather than as nested attributes. This page covers `observedAt`, `expiresAt`, `unitCode`, and `datasetId`.
 
 ### observedAt
 
@@ -265,6 +265,20 @@ An attribute may also carry qualifiers that describe its value. NGSI-LD reserves
 ```
 
 An `observedAt` anywhere in an entity marks the entity as temporal. Successive readings with the same identity are then kept as separate observations instead of overwriting one another. A mapping declares it under an attribute's `properties`; because the name is reserved, Cassiopeia emits it as a qualifier rather than a nested Property.
+
+### expiresAt
+
+`expiresAt` records the instant after which a value ceases to hold (ETSI GS CIM 009 v1.9.1 clause 4.22). Its value is an NGSI-LD `DateTime` (clause 4.6.3), written like `observedAt` next to the value it bounds, on the same attribute types. Unlike `observedAt`, it does not mark an entity as temporal: an expiring value is not an observation, so a mapping that declares only `expiresAt` still produces current-state entities that overwrite one another. A mapping declares it under an attribute's `properties`, usually with a `datetime` transformation reading the source field that says when the value lapses; because the name is reserved, Cassiopeia emits it as a qualifier rather than a nested Property:
+
+```json
+"category": {
+    "type": "Property",
+    "value": "ok",
+    "expiresAt": "2026-10-25T13:00:00Z"
+}
+```
+
+Source text that reads as no date-time is not emitted as a malformed qualifier: the attribute is still published without `expiresAt`, and the run warns with the attribute name and the text it could not read, under its own `expires-at-unreadable` code.
 
 ### unitCode
 
@@ -302,7 +316,7 @@ From the `WeatherForecast` of [example 21](https://github.com/vela-tools/cassiop
 ]
 ```
 
-A mapping creates this shape with an `instances` block. Each entry reads its own value and declares its own `datasetId`, while the attribute supplies the shared `type`, `transformation`, and qualifiers. The mechanism applies to Property and Relationship attributes, including specialized types: [example 21](https://github.com/vela-tools/cassiopeia-examples/blob/main/examples/21-json-dataset-id/example.md) works it on a Property and [example 29](https://github.com/vela-tools/cassiopeia-examples/blob/main/examples/29-csv-multi-attribute-relationship/example.md) on a Relationship, where each instance's `source` is an object id rather than a value. Use `ListRelationship` when several links belong to one ordered list, and use separate dataset-specific instances when the lists represent different versions or roles. Clause 4.5.5 does not allow `observedAt` or `unitCode` themselves to be multi-attributes.
+A mapping creates this shape with an `instances` block. Each entry reads its own value and declares its own `datasetId`, while the attribute supplies the shared `type`, `transformation`, and qualifiers. The mechanism applies to Property and Relationship attributes, including specialized types: [example 21](https://github.com/vela-tools/cassiopeia-examples/blob/main/examples/21-json-dataset-id/example.md) works it on a Property and [example 29](https://github.com/vela-tools/cassiopeia-examples/blob/main/examples/29-csv-multi-attribute-relationship/example.md) on a Relationship, where each instance's `source` is an object id rather than a value. Use `ListRelationship` when several links belong to one ordered list, and use separate dataset-specific instances when the lists represent different versions or roles. Clause 4.5.5 does not allow `observedAt`, `expiresAt`, or `unitCode` themselves to be multi-attributes.
 
 ### instanceId, createdAt, and modifiedAt
 

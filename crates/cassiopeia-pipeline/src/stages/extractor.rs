@@ -7,7 +7,7 @@ use crate::{
         pump::{BatchSender, PumpConfig, PumpProcessor, run_pump_stage},
         skipped_records::SkippedRecords,
         stage_env::StageEnv,
-        unreadable_timestamp_report::{TimestampLoss, report_unreadable_timestamps},
+        unreadable_timestamp_report::report_unreadable_timestamps,
         unresolved_template_report::report_unresolved_templates,
     },
 };
@@ -109,7 +109,7 @@ impl PumpProcessor for ExtractorProcessor {
         } = dropped;
         let warnings = failed
             + self.report_dropped_geometries(geometries)
-            + report_unreadable_timestamps(self.reporter, TimestampLoss::AttributeValue, timestamps)
+            + report_unreadable_timestamps(self.reporter, timestamps)
             + report_unresolved_templates(self.reporter, templates);
         if warnings > 0 {
             stage.warn_inc_by(warnings);

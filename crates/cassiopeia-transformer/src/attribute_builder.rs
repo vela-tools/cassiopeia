@@ -29,6 +29,9 @@ pub fn build_property(value: Value, meta: MetadataSummary) -> NgsiLdAttributeWra
     if let Some(observed_at) = meta.observed_at {
         builder = builder.observed_at(observed_at);
     }
+    if let Some(expires_at) = meta.expires_at {
+        builder = builder.expires_at(expires_at);
+    }
     if let Some(unit_code) = meta.unit_code {
         builder = builder.unit_code(unit_code);
     }
@@ -51,6 +54,9 @@ pub fn build_relationship(object: Urn, object_type: Option<NameBuf>, meta: Metad
     }
     if let Some(observed_at) = meta.observed_at {
         builder = builder.observed_at(observed_at);
+    }
+    if let Some(expires_at) = meta.expires_at {
+        builder = builder.expires_at(expires_at);
     }
     if let Some(dataset_id) = meta.dataset_id {
         builder = builder.dataset_id(dataset_id);
@@ -76,6 +82,7 @@ pub fn build_relationship(object: Urn, object_type: Option<NameBuf>, meta: Metad
 pub fn build_geo_property(geometry: NgsiLdGeometry, meta: MetadataSummary) -> NgsiLdAttributeWrapper {
     let mut geo = NgsiLdGeoProperty::new(geometry);
     geo.observed_at = meta.observed_at;
+    geo.expires_at = meta.expires_at;
     geo.dataset_id = meta.dataset_id;
 
     geo.into_wrapper()
@@ -104,6 +111,7 @@ pub fn build_language_property(value: Value, meta: MetadataSummary) -> Option<Ng
 
     let mut property = NgsiLdLanguageProperty::new(language_map);
     property.observed_at = meta.observed_at;
+    property.expires_at = meta.expires_at;
     property.dataset_id = meta.dataset_id;
     property.attributes = meta.custom_attributes;
 
@@ -119,6 +127,7 @@ pub fn build_vocab_property(value: &Value, meta: MetadataSummary) -> Option<Ngsi
     let has_vocab = IriBuf::new(value.to_string()).ok()?;
     let mut property = NgsiLdVocabProperty::new(has_vocab);
     property.observed_at = meta.observed_at;
+    property.expires_at = meta.expires_at;
     property.dataset_id = meta.dataset_id;
     property.attributes = meta.custom_attributes;
 
@@ -136,6 +145,7 @@ pub fn build_list_property(value: Value, meta: MetadataSummary) -> NgsiLdAttribu
 
     let mut property = NgsiLdListProperty::new(has_value_list);
     property.observed_at = meta.observed_at;
+    property.expires_at = meta.expires_at;
     property.dataset_id = meta.dataset_id;
     property.attributes = meta.custom_attributes;
 
@@ -147,6 +157,7 @@ pub fn build_list_property(value: Value, meta: MetadataSummary) -> NgsiLdAttribu
 pub fn build_json_property(value: Value, meta: MetadataSummary) -> NgsiLdAttributeWrapper {
     let mut property = NgsiLdJsonProperty::new(value);
     property.observed_at = meta.observed_at;
+    property.expires_at = meta.expires_at;
     property.dataset_id = meta.dataset_id;
     property.attributes = meta.custom_attributes;
 
@@ -160,6 +171,7 @@ pub fn build_list_relationship(objects: Vec<Urn>, object_type: Option<NameBuf>, 
     let mut relationship = NgsiLdListRelationship::new(objects);
     relationship.object_type = object_type;
     relationship.observed_at = meta.observed_at;
+    relationship.expires_at = meta.expires_at;
     relationship.attributes = meta.custom_attributes;
 
     NgsiLdAttributeWrapper::single(NgsiLdAttribute::ListRelationship(relationship))
@@ -225,6 +237,7 @@ mod tests {
     fn empty_meta() -> MetadataSummary {
         MetadataSummary {
             observed_at: None,
+            expires_at: None,
             unit_code: None,
             dataset_id: None,
             custom_attributes: IndexMap::default(),
@@ -233,6 +246,70 @@ mod tests {
 
     fn name(value: &str) -> NameBuf {
         NameBuf::new(value).unwrap()
+    }
+
+    #[test]
+    fn a_property_and_a_relationship_carry_their_expires_at_qualifier() {
+        use crate::attribute_builder::{build_property, build_relationship};
+        use chrono::{TimeZone, Utc};
+        use urn_rs::Urn;
+
+        let expires_at = Utc.with_ymd_and_hms(2026, 10, 25, 13, 0, 0).unwrap();
+        let meta = MetadataSummary {
+            observed_at: None,
+            expires_at: Some(expires_at),
+            unit_code: None,
+            dataset_id: None,
+            custom_attributes: IndexMap::default(),
+        };
+
+        let NgsiLdAttributeWrapper::Single(property) = build_property(
+            Value::from(json!("ok")),
+            MetadataSummary {
+                observed_at: None,
+                expires_at: Some(expires_at),
+                unit_code: None,
+                dataset_id: None,
+                custom_attributes: IndexMap::default(),
+            },
+        ) else {
+            panic!("expected a single property");
+        };
+        let NgsiLdAttribute::Property(property) = property.as_ref() else {
+            panic!("expected a property");
+        };
+        assert_eq!(property.expires_at, Some(expires_at));
+
+        let object = "urn:ngsi-ld:Vehicle:car123".parse::<Urn>().unwrap();
+        let NgsiLdAttributeWrapper::Single(relationship) = build_relationship(object, None, meta) else {
+            panic!("expected a single relationship");
+        };
+        let NgsiLdAttribute::Relationship(relationship) = relationship.as_ref() else {
+            panic!("expected a relationship");
+        };
+        assert_eq!(relationship.expires_at, Some(expires_at));
+    }
+
+    #[test]
+    fn a_geo_property_carries_its_expires_at_qualifier() {
+        use chrono::{TimeZone, Utc};
+
+        let expires_at = Utc.with_ymd_and_hms(2026, 10, 25, 13, 0, 0).unwrap();
+        let meta = MetadataSummary {
+            observed_at: None,
+            expires_at: Some(expires_at),
+            unit_code: None,
+            dataset_id: None,
+            custom_attributes: IndexMap::default(),
+        };
+
+        let NgsiLdAttributeWrapper::Single(attr) = build_geo_property(clockwise_square(), meta) else {
+            panic!("expected a single geo property");
+        };
+        let NgsiLdAttribute::GeoProperty(geo) = attr.as_ref() else {
+            panic!("expected a geo property");
+        };
+        assert_eq!(geo.expires_at, Some(expires_at));
     }
 
     #[test]
@@ -352,6 +429,7 @@ mod tests {
         );
         let meta = MetadataSummary {
             observed_at: None,
+            expires_at: None,
             unit_code: None,
             dataset_id: None,
             custom_attributes: custom,

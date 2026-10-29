@@ -134,6 +134,7 @@ mod tests {
         entity::{attribute::NgsiLdAttributeKind, name::NameBuf},
         value::types::{Number, TemporalValue, Value},
     };
+    use cassiopeia_unreadable_timestamps::timestamp_loss::TimestampLoss;
     use chrono::{TimeZone, Utc};
     use pretty_assertions::assert_eq;
     use serde_json::{Value as JsonValue, json};
@@ -321,7 +322,7 @@ mod tests {
 
         let entries = dropped.timestamps.into_entries();
         assert_eq!(entries.len(), 1);
-        assert_eq!(entries[0].0, name("reading"));
+        assert_eq!(entries[0].0, (TimestampLoss::AttributeValue, name("reading")));
         assert_eq!(entries[0].1.example.as_ref(), "the third of March");
         assert_eq!(entries[0].1.occurrences.get(), 1);
     }

@@ -9,6 +9,10 @@ pub enum TransformCode {
     /// An attribute's `observedAt` carried text that reads as no supported spelling of a date-time,
     /// so the attribute was emitted without the qualifier (ETSI GS CIM 009 v1.9.1 clause 4.5.2.2).
     ObservedAtUnreadable,
+    /// An attribute's `expiresAt` carried text that reads as no supported spelling of a date-time,
+    /// so the attribute was emitted without the qualifier, whose value must be an NGSI-LD
+    /// `DateTime` (ETSI GS CIM 009 v1.9.1 clauses 4.22 and 4.6.3).
+    ExpiresAtUnreadable,
 }
 
 #[cfg(test)]
@@ -20,5 +24,6 @@ mod tests {
     fn a_transform_code_renders_a_kebab_case_token() {
         assert_eq!(TransformCode::EntityUnbuildable.to_string(), "entity-unbuildable");
         assert_eq!(TransformCode::ObservedAtUnreadable.to_string(), "observed-at-unreadable");
+        assert_eq!(TransformCode::ExpiresAtUnreadable.to_string(), "expires-at-unreadable");
     }
 }

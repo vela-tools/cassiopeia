@@ -14,6 +14,7 @@ use cassiopeia_ngsi_ld::{
     entity::{attribute::NgsiLdAttributeKind, name::NameBuf},
     value::types::{Value, ValueObject},
 };
+use cassiopeia_unreadable_timestamps::timestamp_loss::TimestampLoss;
 use compact_str::CompactString;
 use serde_json::Value as JsonValue;
 use smallvec::smallvec;
@@ -173,7 +174,7 @@ fn bind_refusal(ctx: &ResolutionContext, attr_name: &NameBuf, outcome: result::R
             Value::Null
         }
         Err(AttributeRefusal::UnreadableTimestamp { text }) => {
-            ctx.unreadable_timestamps.record(attr_name, &text);
+            ctx.unreadable_timestamps.record(TimestampLoss::AttributeValue, attr_name, &text);
             Value::Null
         }
     }

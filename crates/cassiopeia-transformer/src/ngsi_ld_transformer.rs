@@ -2,7 +2,7 @@ use crate::{
     attribute_dispatch::build_attribute,
     attribute_store::AttributeStore,
     error::Result,
-    observed_at_cache::ObservedAtCache,
+    instant_cache::InstantCache,
     qualifier_cache::QualifierCache,
     transformer::Transformer,
     unit_code_cache::UnitCodeCache,
@@ -59,13 +59,13 @@ fn transform_entity(mapped: Mapped<Entity>, unit_codes: &mut UnitCodeCache, unre
         builder = builder.scope(scope);
     }
 
-    // One `observedAt` memo per entity: a mapping repeats the same template across its
-    // attributes, so each distinct text is parsed once per entity instead of once per attribute.
-    // It cannot outlive the entity: an `observedAt` is record data, so a longer-lived linear-scan
-    // memo would grow without bound. That is why the unit codes are memoised separately and
-    // borrowed in beside it.
-    let mut observed_at = ObservedAtCache::new();
-    let mut cache = QualifierCache::new(&mut observed_at, unit_codes);
+    // One instant memo per entity: a mapping repeats the same `observedAt` and `expiresAt`
+    // templates across its attributes, so each distinct text is parsed once per entity instead of
+    // once per attribute. It cannot outlive the entity: an instant qualifier is record data, so a
+    // longer-lived linear-scan memo would grow without bound. That is why the unit codes are
+    // memoised separately and borrowed in beside it.
+    let mut instants = InstantCache::new();
+    let mut cache = QualifierCache::new(&mut instants, unit_codes);
 
     let mut store = AttributeStore {
         values: &mut values,
@@ -140,7 +140,7 @@ mod tests {
         },
         value::types::{Number, Value},
     };
-    use cassiopeia_unreadable_timestamps::unreadable_timestamps::UnreadableTimestamps;
+    use cassiopeia_unreadable_timestamps::{timestamp_loss::TimestampLoss, unreadable_timestamps::UnreadableTimestamps};
     use cefact_units::UnitCode;
     use chrono::{DateTime, TimeZone, Utc};
     use indexmap::IndexMap;
@@ -357,6 +357,32 @@ mod tests {
         property.observed_at
     }
 
+    /// An entity whose `temperature` carries `expires_at` as its `expiresAt` text.
+    fn entity_expires_at(expires_at: &str) -> (Entity, Arc<Mapping>) {
+        let mapping = mapping(
+            r#"{ version: "v4", dataModel: "Sensor", identity: { entityName: "S-{{ id }}" }, attributes: { temperature: { source: "{{ t }}", transformation: "float", properties: { expiresAt: { source: "{{ until }}" } } } } }"#,
+        );
+        let value_map = values(vec![("temperature", Value::Number(Number::Float(20.0)))]);
+        let mut metadata = IndexMap::default();
+        let mut shared = IndexMap::default();
+        shared.insert(name("expiresAt"), qualifier(json!(expires_at)));
+        metadata.insert(name("temperature"), MetadataStorage::shared(shared));
+        let mut entity = Entity::new(urn("urn:ngsi-ld:Sensor:1"), json!({}), None, IndexMap::default(), Some(value_map));
+        entity.set_metadata(Some(metadata));
+
+        (entity, mapping)
+    }
+
+    fn expires_at_of(result: &NgsiLdEntity) -> Option<DateTime<Utc>> {
+        let Some(NgsiLdAttributeWrapper::Single(attr)) = result.attributes.get(&name("temperature")) else {
+            panic!("expected a single property");
+        };
+        let NgsiLdAttribute::Property(property) = attr.as_ref() else {
+            panic!("expected a property");
+        };
+        property.expires_at
+    }
+
     /// A sensor entity whose temperature carries `observed_at` as its `observedAt` qualifier.
     fn entity_observed_at(observed_at: &str) -> (Entity, Arc<Mapping>) {
         let mapping = mapping(
@@ -396,6 +422,31 @@ mod tests {
     }
 
     #[test]
+    fn an_expires_at_qualifier_is_lifted_onto_the_attribute_it_declares() {
+        let (entity, mapping) = entity_expires_at("2026-10-25T13:00:00Z");
+
+        let result = NgsiLdTransformer::new()
+            .transform(Mapped::new(entity, mapping), &UnreadableTimestamps::new())
+            .unwrap();
+
+        assert_eq!(expires_at_of(&result), Some(Utc.with_ymd_and_hms(2026, 10, 25, 13, 0, 0).unwrap()));
+    }
+
+    #[test]
+    fn an_unreadable_expires_at_is_recorded_and_the_attribute_publishes_without_it() {
+        let unreadable = UnreadableTimestamps::new();
+        let (entity, mapping) = entity_expires_at("the day after tomorrow");
+
+        let result = NgsiLdTransformer::new().transform(Mapped::new(entity, mapping), &unreadable).unwrap();
+
+        assert_eq!(expires_at_of(&result), None);
+        let entries = unreadable.into_entries();
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].0, (TimestampLoss::ExpiresAt, name("temperature")));
+        assert_eq!(entries[0].1.example.as_ref(), "the day after tomorrow");
+    }
+
+    #[test]
     fn an_unreadable_observed_at_is_recorded_against_the_attribute_that_still_publishes() {
         let unreadable = UnreadableTimestamps::new();
         let (entity, mapping) = entity_observed_at("the third of March");
@@ -409,7 +460,7 @@ mod tests {
 
         let entries = unreadable.into_entries();
         assert_eq!(entries.len(), 1);
-        assert_eq!(entries[0].0, name("temperature"));
+        assert_eq!(entries[0].0, (TimestampLoss::ObservedAt, name("temperature")));
         assert_eq!(entries[0].1.example.as_ref(), "the third of March");
     }
 

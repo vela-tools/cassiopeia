@@ -79,6 +79,9 @@ fn build_relationship_instance(object: Urn, object_type: Option<&NameBuf>, meta:
     if let Some(observed_at) = meta.observed_at {
         builder = builder.observed_at(observed_at);
     }
+    if let Some(expires_at) = meta.expires_at {
+        builder = builder.expires_at(expires_at);
+    }
     if let Some(dataset_id) = meta.dataset_id {
         builder = builder.dataset_id(dataset_id);
     }
@@ -150,6 +153,7 @@ pub(crate) fn build_multi_instance_list_relationship(
                 object_list,
                 object_type: object_type.clone(),
                 observed_at: meta.observed_at,
+                expires_at: meta.expires_at,
                 dataset_id: meta.dataset_id,
                 attributes: meta.custom_attributes,
             })

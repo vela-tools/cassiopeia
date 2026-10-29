@@ -20,6 +20,9 @@ pub struct NgsiLdProperty {
     /// When the value was observed, if temporal.
     #[serde(rename = "observedAt", skip_serializing_if = "Option::is_none")]
     pub observed_at: Option<DateTime<Utc>>,
+    /// When the value ceases to hold (ETSI GS CIM 009 v1.9.1 clause 4.22).
+    #[serde(rename = "expiresAt", skip_serializing_if = "Option::is_none")]
+    pub expires_at: Option<DateTime<Utc>>,
     /// The UN/CEFACT unit code the value is expressed in.
     #[serde(rename = "unitCode", skip_serializing_if = "Option::is_none")]
     pub unit_code: Option<UnitCode>,
@@ -39,6 +42,7 @@ impl NgsiLdProperty {
         Self {
             value: value.into(),
             observed_at: None,
+            expires_at: None,
             unit_code: None,
             dataset_id: None,
             instance_id: None,
@@ -67,6 +71,7 @@ mod tests {
     fn a_new_property_holds_its_value_and_no_qualifiers() {
         let property = NgsiLdProperty::new(Value::from(json!(42)));
         assert_eq!(property.observed_at, None);
+        assert_eq!(property.expires_at, None);
         assert_eq!(property.unit_code, None);
         assert!(property.attributes.is_empty());
     }

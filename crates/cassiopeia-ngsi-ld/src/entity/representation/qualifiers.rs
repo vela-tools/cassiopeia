@@ -1,7 +1,7 @@
 //! Shared streaming writers for the common attribute qualifiers, so every representation serializes
-//! `observedAt` / `unitCode` / `datasetId` / `instanceId` / `objectType` and nested attributes the
-//! same way instead of repeating the insertion blocks. Each writes straight into an open
-//! [`SerializeMap`] with no intermediate `serde_json::Value`.
+//! `observedAt` / `expiresAt` / `unitCode` / `datasetId` / `instanceId` / `objectType` and nested
+//! attributes the same way instead of repeating the insertion blocks. Each writes straight into an
+//! open [`SerializeMap`] with no intermediate `serde_json::Value`.
 
 use crate::entity::{
     attribute::NestedAttributes,
@@ -21,6 +21,17 @@ use urn_rs::Urn;
 pub(crate) fn serialize_observed_at<M: SerializeMap>(map: &mut M, observed_at: Option<&DateTime<Utc>>) -> Result<(), M::Error> {
     if let Some(observed_at) = observed_at {
         map.serialize_entry("observedAt", observed_at)?;
+    }
+    Ok(())
+}
+
+/// Writes `expiresAt` when present.
+///
+/// # Errors
+/// Returns the serializer's error if the timestamp cannot be serialized.
+pub(crate) fn serialize_expires_at<M: SerializeMap>(map: &mut M, expires_at: Option<&DateTime<Utc>>) -> Result<(), M::Error> {
+    if let Some(expires_at) = expires_at {
+        map.serialize_entry("expiresAt", expires_at)?;
     }
     Ok(())
 }
