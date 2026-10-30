@@ -1,7 +1,8 @@
 use crate::inspectors::csv::{
     dialect::{Dialect, LineTerminator},
     error::CsvInspectError,
-    header::{header_quality, looks_like_header_row},
+    header::{continuation_rows, header_quality, looks_like_header_row},
+    header_rows::HeaderRows,
     preamble::Preamble,
     table::Table,
 };
@@ -12,6 +13,7 @@ pub mod data_type;
 pub mod dialect;
 pub mod error;
 mod header;
+pub mod header_rows;
 pub mod preamble;
 mod table;
 
@@ -107,7 +109,7 @@ impl CsvInspector {
                     delimiter,
                     quote_char: quote,
                     preamble: Preamble::NONE,
-                    has_headers: false,
+                    header_rows: HeaderRows::NONE,
                     escape: None,
                     terminator,
                     encoding: encoding.name().to_owned(),
@@ -120,7 +122,7 @@ impl CsvInspector {
 
                 let header_signal = header_quality(&full);
                 let headed = Dialect {
-                    has_headers: true,
+                    header_rows: HeaderRows::ONE,
                     encoding: encoding.name().to_owned(),
                     ..headerless
                 };
@@ -142,16 +144,25 @@ impl CsvInspector {
             }
         }
 
-        // Safety net: if the winner picked `has_headers = false` but row 0 looks
-        // like a header, force headers on so the header row is not ingested.
-        if let Some((dialect, table)) = best.as_mut()
-            && !dialect.has_headers
-            && looks_like_header_row(table)
-        {
-            dialect.has_headers = true;
-        }
+        let (dialect, table) = best.ok_or(CsvInspectError::NoDialectDetected)?;
+        Ok(Self::with_stacked_header(dialect, &table))
+    }
 
-        best.map(|(dialect, _)| dialect).ok_or(CsvInspectError::NoDialectDetected)
+    /// Settles how many records form the winning dialect's header, given the table it was scored on.
+    ///
+    /// A headerless winner whose row 0 still looks like a header gets one header record, so the
+    /// header row is not ingested as data. A header is then extended by the records directly below
+    /// it that continue it, such as aggregation and unit rows.
+    fn with_stacked_header(mut dialect: Dialect, table: &Table) -> Dialect {
+        let below_header = if dialect.header_rows.is_present() {
+            table.records.as_slice()
+        } else if looks_like_header_row(table) {
+            table.records.get(1..).unwrap_or_default()
+        } else {
+            return dialect;
+        };
+        dialect.header_rows = HeaderRows::new(1 + continuation_rows(below_header));
+        dialect
     }
 
     /// Finds where the table in `sample` starts under `dialect`'s delimiter and quote, returning the
@@ -226,7 +237,7 @@ impl CsvInspector {
 
 #[cfg(test)]
 mod tests {
-    use crate::inspectors::csv::{CsvInspector, dialect::LineTerminator, preamble::Preamble};
+    use crate::inspectors::csv::{CsvInspector, dialect::LineTerminator, header_rows::HeaderRows, preamble::Preamble};
     use pretty_assertions::assert_eq;
 
     #[test]
@@ -235,7 +246,7 @@ mod tests {
         let dialect = CsvInspector::new().inspect(sample.as_bytes()).unwrap();
 
         assert_eq!(dialect.delimiter, b',');
-        assert!(dialect.has_headers);
+        assert_eq!(dialect.header_rows, HeaderRows::ONE);
         assert_eq!(dialect.terminator, LineTerminator::Lf);
     }
 
@@ -261,7 +272,7 @@ mod tests {
         let dialect = CsvInspector::new().inspect(sample.as_bytes()).unwrap();
 
         assert_eq!(dialect.delimiter, b',');
-        assert!(!dialect.has_headers);
+        assert_eq!(dialect.header_rows, HeaderRows::NONE);
     }
 
     #[test]
@@ -272,7 +283,7 @@ mod tests {
         let dialect = CsvInspector::new().inspect(sample.as_bytes()).unwrap();
 
         assert_eq!(dialect.delimiter, b',');
-        assert!(!dialect.has_headers);
+        assert_eq!(dialect.header_rows, HeaderRows::NONE);
     }
 
     #[test]
@@ -281,7 +292,7 @@ mod tests {
         let sample = "name,iso_code,dafif_code\nAruba,AW,AA\nAntigua and Barbuda,AG,AC\n";
         let dialect = CsvInspector::new().inspect(sample.as_bytes()).unwrap();
 
-        assert!(dialect.has_headers);
+        assert_eq!(dialect.header_rows, HeaderRows::ONE);
     }
 
     #[test]
@@ -296,7 +307,7 @@ mod tests {
         let dialect = CsvInspector::new().inspect(sample.as_bytes()).unwrap();
 
         assert_eq!(dialect.delimiter, b',');
-        assert!(dialect.has_headers);
+        assert_eq!(dialect.header_rows, HeaderRows::ONE);
     }
 
     #[test]
@@ -308,7 +319,7 @@ mod tests {
         let sample = "device_code,timestamp,on\nCA001,2026-09-09T13:10:00Z,true\nCA002,2026-09-09T13:11:00Z,false\n";
         let dialect = CsvInspector::new().inspect(sample.as_bytes()).unwrap();
 
-        assert!(dialect.has_headers);
+        assert_eq!(dialect.header_rows, HeaderRows::ONE);
     }
 
     #[test]
@@ -318,7 +329,7 @@ mod tests {
             let sample = format!("device_code,{label}\nCA001,true\nCA002,false\n");
             let dialect = CsvInspector::new().inspect(sample.as_bytes()).unwrap();
 
-            assert!(dialect.has_headers, "header with a `{label}` column was read as data");
+            assert_eq!(dialect.header_rows, HeaderRows::ONE, "header with a `{label}` column was read as data");
         }
     }
 
@@ -331,7 +342,7 @@ mod tests {
 
         assert_eq!(dialect.delimiter, b';');
         assert_eq!(dialect.quote_char, Some(b'"'));
-        assert!(dialect.has_headers);
+        assert_eq!(dialect.header_rows, HeaderRows::ONE);
     }
 
     /// The reproduction from the issue: a three-field title line above a five-column table.
@@ -344,7 +355,7 @@ mod tests {
         assert_eq!(dialect.delimiter, b';');
         assert_eq!(dialect.quote_char, Some(b'"'));
         assert_eq!(dialect.preamble, Preamble::new(1));
-        assert!(dialect.has_headers);
+        assert_eq!(dialect.header_rows, HeaderRows::ONE);
         assert_eq!(dialect.terminator, LineTerminator::Lf);
     }
 
@@ -355,7 +366,7 @@ mod tests {
 
         assert_eq!(dialect.delimiter, b';');
         assert_eq!(dialect.preamble, Preamble::NONE);
-        assert!(dialect.has_headers);
+        assert_eq!(dialect.header_rows, HeaderRows::ONE);
     }
 
     #[test]
@@ -377,7 +388,7 @@ mod tests {
         let dialect = CsvInspector::new().inspect(sample.as_bytes()).unwrap();
 
         assert_eq!(dialect.preamble, Preamble::new(2));
-        assert!(dialect.has_headers);
+        assert_eq!(dialect.header_rows, HeaderRows::ONE);
     }
 
     #[test]
@@ -397,5 +408,24 @@ mod tests {
         let sample = "id;name\n1;alpha\n2;beta\n3;gamma;extra\n4;delta\n5;epsilon\n";
 
         assert!(CsvInspector::new().inspect(sample.as_bytes()).is_err());
+    }
+
+    #[test]
+    fn a_stacked_name_aggregation_and_unit_header_is_detected_as_three_header_rows() {
+        // The shape of Vienna's live air-quality table: a title line, then a name row, an
+        // aggregation row, and a unit row over the data. Every data cell is text to the type
+        // detector (decimal commas, `NE` for missing), so the extra header rows are recognised by
+        // their shape: all labels, and blank in the station column every data row fills.
+        let sample = "Lumes;v2.10;30.10.26-10:00:00\n;Zeit-NO2;NO2;Zeit-PM10;PM10;PM10\n;;HMW;;MW24;HMW\n;MESZ;µg/m³;MESZ;µg/m³;µg/m³\nSTEF;30.10.2026, 10:00;18,48;30.10.2026, 10:00;NE;NE\nTAB;30.10.2026, 10:00;NE;30.10.2026, 10:00;14,03;14,44\nKE;30.10.2026, 10:00;15,17;30.10.2026, 10:00;12,49;18,80\n";
+        let dialect = CsvInspector::new().inspect(sample.as_bytes()).unwrap();
+        let mut reader = dialect.reader(sample.as_bytes()).unwrap();
+
+        assert_eq!(dialect.preamble, Preamble::new(1));
+        assert_eq!(dialect.header_rows, HeaderRows::new(3));
+        assert_eq!(
+            reader.headers().unwrap(),
+            vec!["", "Zeit-NO2 MESZ", "NO2 HMW µg/m³", "Zeit-PM10 MESZ", "PM10 MW24 µg/m³", "PM10 HMW µg/m³"]
+        );
+        assert_eq!(reader.records().next().unwrap().unwrap()[0], *"STEF");
     }
 }

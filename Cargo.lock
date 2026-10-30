@@ -678,7 +678,6 @@ dependencies = [
  "mediatype",
  "pretty_assertions",
  "quick-xml 0.42.0",
- "rustc-hash",
  "serde",
  "serde_json",
  "shapefile",

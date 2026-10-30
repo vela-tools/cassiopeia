@@ -1,7 +1,8 @@
-use crate::inspectors::csv::preamble::Preamble;
-use ::csv::{Reader, ReaderBuilder, Terminator};
+use crate::inspectors::csv::{header_rows::HeaderRows, preamble::Preamble};
+use ::csv::{Reader, ReaderBuilder, StringRecord, Terminator};
+use encoding_rs::{Encoding, UTF_8};
 use serde::Serialize;
-use std::io::{self, BufRead};
+use std::io::{BufRead, Read};
 
 /// Line terminators supported by the CSV profiler.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -40,8 +41,8 @@ pub struct Dialect {
     pub quote_char: Option<u8>,
     /// The records above the table, skipped before the header row is read.
     pub preamble: Preamble,
-    /// Whether the first row after the preamble is a header row.
-    pub has_headers: bool,
+    /// The records after the preamble that form the header, joined per column into field names.
+    pub header_rows: HeaderRows,
     /// The escape byte, if any.
     pub escape: Option<u8>,
     /// The line terminator.
@@ -53,19 +54,56 @@ pub struct Dialect {
 }
 
 impl Dialect {
-    /// Opens UTF-8 `input` as CSV under this dialect: skips the preamble, then returns a reader
-    /// positioned on the header row, or on the first data row of a headerless table.
+    /// The character encoding the source is decoded from, resolved from its label. A label
+    /// `encoding_rs` does not know falls back to UTF-8, the encoding every parse below expects.
+    #[must_use]
+    pub fn character_encoding(&self) -> &'static Encoding {
+        Encoding::for_label(self.encoding.as_bytes()).unwrap_or(UTF_8)
+    }
+
+    /// Opens `input`, already decoded to UTF-8 with [`Self::character_encoding`], as CSV under this dialect: skips the preamble, joins a stacked header into
+    /// one row of field names, and returns a reader whose next record is the first data row.
     ///
     /// Every parse of a profiled CSV goes through here, the dialect inspector's candidate scoring,
-    /// the detector, and the ingestor alike, so they all agree on where the table starts and how its
-    /// records split.
+    /// the detector, and the ingestor alike, so they all agree on where the table starts, what its
+    /// field names are, and how its records split.
     ///
     /// # Errors
     ///
-    /// Returns the underlying [`io::Error`] when `input` cannot be read while skipping the preamble.
-    pub fn reader<R: BufRead>(&self, mut input: R) -> io::Result<Reader<R>> {
+    /// Returns a [`csv::Error`] when `input` cannot be read while skipping the preamble or when a
+    /// header record cannot be parsed.
+    pub fn reader<R: BufRead>(&self, mut input: R) -> csv::Result<Reader<R>> {
         self.preamble.skip(&mut self.core_reader(), &mut input)?;
-        Ok(self.reader_builder().from_reader(input))
+        let mut reader = self.reader_builder().from_reader(input);
+        if self.header_rows.records() > 1 {
+            let names = self.joined_header(&mut reader)?;
+            reader.set_headers(names);
+        }
+        Ok(reader)
+    }
+
+    /// Reads the header records and joins each column's non-blank cells, top to bottom, with a
+    /// space: a name row `NO2`, an aggregation row `HMW`, and a unit row `µg/m³` give the field name
+    /// `NO2 HMW µg/m³`. A column whose header cells are all blank gets an empty name.
+    fn joined_header<R: Read>(&self, reader: &mut Reader<R>) -> csv::Result<StringRecord> {
+        let mut names: Vec<String> = reader.headers()?.iter().map(|cell| cell.trim().to_owned()).collect();
+        let mut row = StringRecord::new();
+        for _ in 1..self.header_rows.records() {
+            if !reader.read_record(&mut row)? {
+                break;
+            }
+            for (name, cell) in names.iter_mut().zip(row.iter()) {
+                let cell = cell.trim();
+                if cell.is_empty() {
+                    continue;
+                }
+                if !name.is_empty() {
+                    name.push(' ');
+                }
+                name.push_str(cell);
+            }
+        }
+        Ok(StringRecord::from(names))
     }
 
     /// The table reader configuration: non-flexible, so a record whose field count differs from the
@@ -74,7 +112,7 @@ impl Dialect {
         let mut builder = ReaderBuilder::new();
         builder
             .delimiter(self.delimiter)
-            .has_headers(self.has_headers)
+            .has_headers(self.header_rows.is_present())
             .terminator(self.terminator.as_csv())
             .escape(self.escape);
         match self.quote_char {
@@ -101,6 +139,7 @@ impl Dialect {
 mod tests {
     use crate::inspectors::csv::{
         dialect::{Dialect, LineTerminator},
+        header_rows::HeaderRows,
         preamble::Preamble,
     };
     use pretty_assertions::assert_eq;
@@ -110,7 +149,7 @@ mod tests {
             delimiter: b';',
             quote_char: Some(b'"'),
             preamble,
-            has_headers: true,
+            header_rows: HeaderRows::ONE,
             escape: None,
             terminator: LineTerminator::Lf,
             encoding: "UTF-8".to_owned(),
@@ -156,5 +195,35 @@ mod tests {
         let json = serde_json::to_value(semicolon_dialect(Preamble::new(1))).unwrap();
 
         assert_eq!(json["preamble"], 1);
+    }
+
+    #[test]
+    fn a_stacked_header_is_joined_per_column_with_spaces() {
+        let input = "Lumes;v2.10\n;Zeit-NO2;NO2;PM10;PM10\n;;HMW;MW24;HMW\n;MESZ;µg/m³;µg/m³;µg/m³\nSTEF;30.10.2026, 10:00;18,48;12,48;12,27\n";
+        let dialect = Dialect {
+            header_rows: HeaderRows::new(3),
+            ..semicolon_dialect(Preamble::new(1))
+        };
+        let mut reader = dialect.reader(input.as_bytes()).unwrap();
+
+        assert_eq!(
+            reader.headers().unwrap(),
+            vec!["", "Zeit-NO2 MESZ", "NO2 HMW µg/m³", "PM10 MW24 µg/m³", "PM10 HMW µg/m³"]
+        );
+        assert_eq!(
+            reader.records().next().unwrap().unwrap(),
+            vec!["STEF", "30.10.2026, 10:00", "18,48", "12,48", "12,27"]
+        );
+    }
+
+    #[test]
+    fn a_headerless_dialect_reads_the_first_record_as_data() {
+        let dialect = Dialect {
+            header_rows: HeaderRows::NONE,
+            ..semicolon_dialect(Preamble::NONE)
+        };
+        let mut reader = dialect.reader(&b"1;2\n3;4\n"[..]).unwrap();
+
+        assert_eq!(reader.records().next().unwrap().unwrap(), vec!["1", "2"]);
     }
 }

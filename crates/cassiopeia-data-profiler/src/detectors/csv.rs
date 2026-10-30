@@ -16,7 +16,7 @@ pub struct CsvDetector;
 impl Detector for CsvDetector {
     fn detect(&self, bytes: &[u8]) -> Option<Profile> {
         let dialect = CsvInspector::new().inspect(bytes).ok()?;
-        if !dialect.has_headers || !Self::has_header_and_record(bytes, &dialect) {
+        if !dialect.header_rows.is_present() || !Self::has_header_and_record(bytes, &dialect) {
             return None;
         }
         Some(Profile::new(DataFormat::Csv, media_type!(TEXT / CSV), 0.9).with_metadata(FormatMetadata::Csv(CsvMetadata::new(dialect))))
@@ -25,7 +25,9 @@ impl Detector for CsvDetector {
 
 impl CsvDetector {
     fn has_header_and_record(bytes: &[u8], dialect: &Dialect) -> bool {
-        let Ok(mut reader) = dialect.reader(bytes) else {
+        // Decoded as the ingestor decodes the file, so a non-UTF-8 header does not fail the check.
+        let decoded = dialect.character_encoding().decode(bytes).0;
+        let Ok(mut reader) = dialect.reader(decoded.as_bytes()) else {
             return false;
         };
         let Ok(headers) = reader.headers() else {
@@ -39,7 +41,7 @@ impl CsvDetector {
 mod tests {
     use crate::{
         detectors::{Detector, csv::CsvDetector},
-        inspectors::csv::preamble::Preamble,
+        inspectors::csv::{header_rows::HeaderRows, preamble::Preamble},
         metadata::FormatMetadata,
     };
     use cassiopeia_common::format::DataFormat;
@@ -65,11 +67,21 @@ mod tests {
     }
 
     #[test]
+    fn a_windows_1252_stacked_header_is_detected_as_csv() {
+        let mut bytes = b"Lumes;v2.10\n;NO2;O3\n;HMW;HMW\n;\xb5g/m\xb3;\xb5g/m\xb3\n".to_vec();
+        bytes.extend_from_slice(b"STEF;18,48;50,74\nTAB;NE;10,37\nKE;15,17;8,48\n");
+        let profile = CsvDetector.detect(&bytes).unwrap();
+        let metadata = profile.metadata().as_ref().and_then(FormatMetadata::as_csv).unwrap();
+
+        assert_eq!(metadata.dialect().header_rows, HeaderRows::new(3));
+    }
+
+    #[test]
     fn a_titled_table_is_detected_as_csv_with_its_preamble() {
         let profile = CsvDetector.detect(b"Lumes;v2.10\nStation;NO2;O3\nSTEF;12;54\nAKA;9;40\n").unwrap();
         let metadata = profile.metadata().as_ref().and_then(FormatMetadata::as_csv).unwrap();
 
         assert_eq!(metadata.dialect().preamble, Preamble::new(1));
-        assert!(metadata.dialect().has_headers);
+        assert_eq!(metadata.dialect().header_rows, HeaderRows::ONE);
     }
 }

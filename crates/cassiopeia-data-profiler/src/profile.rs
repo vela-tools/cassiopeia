@@ -47,6 +47,7 @@ mod tests {
     use crate::{
         inspectors::csv::{
             dialect::{Dialect, LineTerminator},
+            header_rows::HeaderRows,
             preamble::Preamble,
         },
         metadata::{CsvMetadata, FormatMetadata},
@@ -80,7 +81,7 @@ mod tests {
             delimiter: b';',
             quote_char: Some(b'"'),
             preamble: Preamble::NONE,
-            has_headers: true,
+            header_rows: HeaderRows::ONE,
             escape: None,
             terminator: LineTerminator::Lf,
             encoding: "UTF-8".to_string(),

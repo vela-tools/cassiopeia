@@ -142,6 +142,7 @@ fn is_enclosed_in_quotes(field: &str) -> bool {
 mod tests {
     use crate::inspectors::csv::{
         dialect::{Dialect, LineTerminator},
+        header_rows::HeaderRows,
         preamble::Preamble,
         table::{Table, is_enclosed_in_quotes},
     };
@@ -152,7 +153,7 @@ mod tests {
             delimiter: b';',
             quote_char: Some(b'"'),
             preamble,
-            has_headers: false,
+            header_rows: HeaderRows::NONE,
             escape: None,
             terminator: LineTerminator::Lf,
             encoding: "UTF-8".to_owned(),

@@ -42,7 +42,7 @@ CSV · text/csv · 90% confidence
 delimiter , · quote " · header row · CRLF · UTF-8
 ~~~
 
-The report has at most three lines. The first names the file and gives its size. The second shows the detection result: the format, its media type, and a confidence score. The third appears only when the format has detectable parsing details. For CSV, it shows the dialect above, including the delimiter, quoting, header presence, line terminator, and character encoding. For GRIB, it shows the edition. Formats that need no such parameters, including JSON, GeoJSON, KML, XML, and Shapefile, print only the first two lines.
+The report has at most three lines. The first names the file and gives its size. The second shows the detection result: the format, its media type, and a confidence score. The third appears only when the format has detectable parsing details. For CSV, it shows the dialect above, including the delimiter, quoting, any preamble, the header, the line terminator, and the character encoding. For GRIB, it shows the edition. Formats that need no such parameters, including JSON, GeoJSON, KML, XML, and Shapefile, print only the first two lines.
 
 ~~~text
 stations.geojson · 4.2 KiB
@@ -57,9 +57,15 @@ Cassiopeia treats a CSV source as a table. The header row supplies the field nam
 
 ### Dialect detection
 
-Cassiopeia profiles the CSV before reading it. It detects the delimiter, whether a header is present, the quote character, and whether lines end with LF or CRLF. The profiler considers comma, tab, semicolon, pipe, and space delimiters, along with double quotes, single quotes, or no quoting.
+Cassiopeia profiles the CSV before reading it. It detects the delimiter, the quote character, any preamble above the table, how many rows the header spans, and whether lines end with LF or CRLF. The profiler considers comma, tab, semicolon, pipe, and space delimiters, along with double quotes, single quotes, or no quoting. The ingestor reads the file with exactly the dialect the profiler reports, so the preamble it skips and the field names it uses are the ones `cassiopeia profile` shows.
 
-If a header contains accented characters, Cassiopeia transliterates them when building the field name. It replaces newlines in a header with spaces. Because this cleanup changes the original header, do not assume it is a reliable template path. Inspect the profiled record shape when the source uses unusual headers.
+Cassiopeia keeps a header's text as written, accented characters and punctuation included, and replaces a newline inside a quoted header with a space. A field name that is not an identifier is read with bracket notation, as in `{{ this['NO2 HMW µg/m³'] }}`. A column whose header is blank is keyed by its zero-based position, as in a headerless file, so it is read as `{{ this['0'] }}`.
+
+### Preamble and stacked headers
+
+Some feeds put a title line above the table. Cassiopeia skips such leading rows as a preamble when each of them has a different number of fields from the table below. A title row with as many fields as the table cannot be told apart from it and is read as part of the table. The preamble is counted in CSV records, not lines, so a quoted title that spans two lines is one record and the header below it is read intact. The profile report shows it as `preamble 1 record`.
+
+A header can also span several rows, such as a name row, an aggregation row, and a unit row. Cassiopeia treats a row directly below the header as part of it when every non-blank cell is a short label with no number or date in it, and the row leaves blank a column that every data row fills, as a stacked header usually leaves its station or key column unlabelled. Each column's non-blank header cells are joined from top to bottom with a space, so `NO2` over `HMW` over `µg/m³` becomes the field `NO2 HMW µg/m³`. Two columns that share a name but differ in a lower row, such as `PM10 MW24 µg/m³` and `PM10 HMW µg/m³`, become distinct fields. The profile report shows the header as `3 header rows`. A header spans at most four rows.
 
 ### Value inference
 

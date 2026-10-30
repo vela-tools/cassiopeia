@@ -1,14 +1,13 @@
 use crate::{csv::error::CsvIngestError, error::IngestorError, ingestor::Ingestor};
 use ::csv::{Reader, StringRecord};
 use cassiopeia_common::{channel::ChannelSender, signal::Signal};
-use cassiopeia_data_profiler::metadata::FormatMetadata;
+use cassiopeia_data_profiler::{inspectors::csv::dialect::Dialect, metadata::FormatMetadata};
 use cassiopeia_ir::{
     payload::{CollectedPayload, ProfiledPayload},
     record::Record,
 };
-use encoding_rs::{Encoding, UTF_8};
+use encoding_rs::UTF_8;
 use encoding_rs_io::{DecodeReaderBytes, DecodeReaderBytesBuilder};
-use rustc_hash::FxHashMap;
 use serde_json::{Map, Number, Value};
 use std::{fs::File, io::BufReader, mem};
 use tracing::{info, warn};
@@ -22,8 +21,9 @@ type DecodedFileReader = Reader<BufReader<DecodeReaderBytes<File, Vec<u8>>>>;
 /// smart value inference.
 pub struct CsvIngestor {
     reader: Option<DecodedFileReader>,
-    header_mapping: FxHashMap<String, String>,
-    has_headers: bool,
+    /// The record key of each column, from the header; `None` for a headerless source, whose
+    /// columns are keyed by position.
+    column_keys: Option<Vec<String>>,
     batch_size: usize,
 }
 
@@ -47,9 +47,7 @@ impl CsvIngestor {
             CollectedPayload::Bytes(_) => return Err(CsvIngestError::RequiresFile.into()),
         };
 
-        let encoding = dialect
-            .as_ref()
-            .map_or(UTF_8, |dialect| Encoding::for_label(dialect.encoding.as_bytes()).unwrap_or(UTF_8));
+        let encoding = dialect.as_ref().map_or(UTF_8, Dialect::character_encoding);
 
         // Decode the file to UTF-8 with the profiled encoding, so a non-UTF-8 source (Windows-1252,
         // Latin-1, ...) is read correctly instead of failing on its first non-UTF-8 byte.
@@ -61,11 +59,12 @@ impl CsvIngestor {
         let decoded = BufReader::new(DecodeReaderBytesBuilder::new().encoding(Some(encoding)).build(file));
 
         // The profiled dialect opens the file exactly as the inspector parsed its sample, preamble
-        // skip included, so the header read below is the one the inspector detected.
+        // skip and stacked-header join included, so the header read below is the one the inspector
+        // detected.
         let mut reader = match &dialect {
             Some(dialect) => {
                 info!("Using profiled CSV dialect: {:#?}", dialect);
-                dialect.reader(decoded).map_err(|source| CsvIngestError::Preamble {
+                dialect.reader(decoded).map_err(|source| CsvIngestError::TableStart {
                     source,
                     // The error owns the path after this borrow ends.
                     path: path.clone(),
@@ -76,21 +75,18 @@ impl CsvIngestor {
 
         // A headerless source has no names to key its columns by; its records are keyed by position
         // instead, so the first row is not consumed as a header and nothing is lost.
-        let has_headers = dialect.as_ref().is_none_or(|dialect| dialect.has_headers);
-        let header_mapping = if has_headers {
-            let headers = reader.headers().map_err(CsvIngestError::Reader)?.iter().map(str::to_string).collect::<Vec<_>>();
-            let mapping = Self::create_header_mapping(&headers);
-            info!("Header mapping: {:#?}", mapping);
-            mapping
+        let column_keys = if dialect.as_ref().is_none_or(|dialect| dialect.header_rows.is_present()) {
+            let keys = Self::column_keys(reader.headers().map_err(CsvIngestError::Reader)?);
+            info!("Column keys: {:#?}", keys);
+            Some(keys)
         } else {
             info!("Headerless CSV: columns keyed by position");
-            FxHashMap::default()
+            None
         };
 
         Ok(CsvIngestor {
             reader: Some(reader),
-            header_mapping,
-            has_headers,
+            column_keys,
             batch_size,
         })
     }
@@ -104,8 +100,20 @@ impl CsvIngestor {
         header.replace('\n', " ")
     }
 
-    fn create_header_mapping(headers: &[String]) -> FxHashMap<String, String> {
-        headers.iter().map(|original| (original.clone(), Self::clean_header(original))).collect()
+    /// The record key of each column: its cleaned header, or its zero-based position when the header
+    /// is blank, as for a headerless source. A stacked header's key column often has no label at all.
+    fn column_keys(headers: &StringRecord) -> Vec<String> {
+        headers
+            .iter()
+            .enumerate()
+            .map(|(index, header)| {
+                if header.trim().is_empty() {
+                    index.to_string()
+                } else {
+                    Self::clean_header(header)
+                }
+            })
+            .collect()
     }
 
     /// Smart value inference for a CSV field.
@@ -153,12 +161,12 @@ impl CsvIngestor {
         }
     }
 
-    /// Builds a record's data map from a header row, keying each value by its header name.
-    fn keyed_by_header(headers: &StringRecord, header_mapping: &FxHashMap<String, String>, record: &StringRecord) -> Map<String, Value> {
+    /// Builds a record's data map from the header, keying each value by its column's key.
+    fn keyed_by_header(column_keys: &[String], record: &StringRecord) -> Map<String, Value> {
         let mut data = Map::with_capacity(record.len());
-        for (header, value) in headers.iter().zip(record.iter()) {
-            let cleaned = header_mapping.get(header).map_or(header, String::as_str);
-            data.insert(cleaned.to_string(), Self::infer_value(value));
+        for (key, value) in column_keys.iter().zip(record.iter()) {
+            // Every record owns its keys, since the map is handed downstream with the record.
+            data.insert(key.clone(), Self::infer_value(value));
         }
         data
     }
@@ -177,22 +185,13 @@ impl CsvIngestor {
 impl Ingestor for CsvIngestor {
     fn ingest(mut self: Box<Self>, sender: ChannelSender<Signal<Vec<Record>, IngestorError>>) -> Result<(), IngestorError> {
         let mut reader = self.reader.take().ok_or(IngestorError::CannotBeStreamedTwice)?;
-        let header_mapping = self.header_mapping;
         let batch_size = self.batch_size;
         let mut batch_buffer: Vec<Record> = Vec::new();
 
-        // A headerless source keys its columns by position; otherwise the header row names them. The
-        // header row is read once here so it is not treated as data.
-        let headers = if self.has_headers {
-            Some(reader.headers().map_err(CsvIngestError::Reader)?.clone())
-        } else {
-            None
-        };
-
         for result in reader.records() {
             let record = result.map_err(CsvIngestError::Reader)?;
-            let data = match &headers {
-                Some(headers) => Self::keyed_by_header(headers, &header_mapping, &record),
+            let data = match &self.column_keys {
+                Some(column_keys) => Self::keyed_by_header(column_keys, &record),
                 None => Self::keyed_by_position(&record),
             };
 
@@ -226,6 +225,7 @@ mod tests {
         inspectors::csv::{
             CsvInspector,
             dialect::{Dialect, LineTerminator},
+            header_rows::HeaderRows,
             preamble::Preamble,
         },
         metadata::{CsvMetadata, FormatMetadata},
@@ -306,7 +306,7 @@ mod tests {
             delimiter: b',',
             quote_char: Some(b'"'),
             preamble: Preamble::NONE,
-            has_headers: false,
+            header_rows: HeaderRows::NONE,
             escape: None,
             terminator: LineTerminator::Lf,
             encoding: "UTF-8".to_string(),
@@ -340,7 +340,7 @@ mod tests {
             delimiter: b';',
             quote_char: Some(b'"'),
             preamble: Preamble::new(1),
-            has_headers: true,
+            header_rows: HeaderRows::ONE,
             escape: None,
             terminator: LineTerminator::Lf,
             encoding: "UTF-8".to_string(),
@@ -368,12 +368,29 @@ mod tests {
     }
 
     #[test]
+    fn a_stacked_header_keys_columns_by_joined_names_and_a_blank_one_by_position() {
+        let contents = "Lumes;v2.10;30.10.26-10:00:00\n;Zeit-NO2;NO2;Zeit-PM10;PM10;PM10\n;;HMW;;MW24;HMW\n;MESZ;µg/m³;MESZ;µg/m³;µg/m³\nSTEF;30.10.2026, 10:00;18,48;30.10.2026, 10:00;NE;NE\nTAB;30.10.2026, 10:00;NE;30.10.2026, 10:00;14,03;14,44\nKE;30.10.2026, 10:00;15,17;30.10.2026, 10:00;12,49;18,80\n";
+        let dialect = CsvInspector::new().inspect(contents.as_bytes()).unwrap();
+        let (_dir, payload) = profiled_csv(contents, Some(FormatMetadata::Csv(CsvMetadata::new(dialect))));
+        let records = ingest_all(payload);
+        let tab = records[1].data();
+
+        // Only data rows become records: the aggregation and unit rows are part of the header.
+        assert_eq!(records.len(), 3);
+        assert_eq!(tab.get("0"), Some(&Value::String("TAB".to_string())));
+        assert_eq!(tab.get("Zeit-NO2 MESZ"), Some(&Value::String("30.10.2026, 10:00".to_string())));
+        assert_eq!(tab.get("PM10 MW24 µg/m³"), Some(&Value::String("14,03".to_string())));
+        assert_eq!(tab.get("PM10 HMW µg/m³"), Some(&Value::String("14,44".to_string())));
+        assert_eq!(tab.len(), 6);
+    }
+
+    #[test]
     fn profiled_dialect_is_used_for_non_default_csv() {
         let metadata = FormatMetadata::Csv(CsvMetadata::new(Dialect {
             delimiter: b';',
             quote_char: Some(b'"'),
             preamble: Preamble::NONE,
-            has_headers: true,
+            header_rows: HeaderRows::ONE,
             escape: None,
             terminator: LineTerminator::Lf,
             encoding: "UTF-8".to_string(),
