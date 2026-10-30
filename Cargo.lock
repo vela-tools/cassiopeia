@@ -662,6 +662,7 @@ dependencies = [
 name = "cassiopeia-ingestor"
 version = "1.1.1"
 dependencies = [
+ "bytecount",
  "cassiopeia-common",
  "cassiopeia-crs",
  "cassiopeia-data-profiler",
@@ -671,7 +672,7 @@ dependencies = [
  "dbase",
  "eccodes",
  "encoding_rs",
- "encoding_rs_io",
+ "encoding_rs_rw",
  "geo-types",
  "geojson",
  "grib",
@@ -1864,10 +1865,10 @@ dependencies = [
 ]
 
 [[package]]
-name = "encoding_rs_io"
-version = "0.1.8"
+name = "encoding_rs_rw"
+version = "0.4.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fba3fe847045ecff794b9c138293a80db914678c453ad63fbf0c6a9eb6e00b22"
+checksum = "c5aab15dedf14ff0b6f0a599b40d73a514016d4419e7c270d06549170be7a217"
 dependencies = [
  "encoding_rs",
 ]

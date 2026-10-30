@@ -1,3 +1,6 @@
+use crate::csv::line_counting_reader::MalformedLine;
+use ::csv::ErrorKind;
+use encoding_rs::Encoding;
 use std::{io, path::PathBuf};
 
 /// Errors that can occur while parsing CSV input.
@@ -27,16 +30,51 @@ pub enum CsvIngestError {
         path: PathBuf,
     },
 
+    /// A line of the file holds a byte sequence that is not valid in the encoding the file is read
+    /// as, so the file is not in the encoding it was declared or detected as.
+    #[error("line {line} of the CSV file is not valid {}", encoding.name())]
+    Malformed {
+        /// The one-based line of the file holding the malformed byte sequence.
+        line: usize,
+        /// The encoding the file is read as.
+        encoding: &'static Encoding,
+        /// The underlying CSV read error.
+        #[source]
+        source: ::csv::Error,
+    },
+
     /// The underlying CSV reader failed to build or parse a record.
     #[error(transparent)]
     Reader(#[from] ::csv::Error),
 }
 
+impl CsvIngestError {
+    /// The error for a read of a file in `encoding` that failed with `source`: a malformed byte
+    /// sequence names its line and the encoding, and any other failure becomes `otherwise(source)`.
+    pub fn reading(source: ::csv::Error, encoding: &'static Encoding, otherwise: impl FnOnce(::csv::Error) -> CsvIngestError) -> CsvIngestError {
+        if let ErrorKind::Io(error) = source.kind()
+            && let Some(malformed) = error.get_ref().and_then(|inner| inner.downcast_ref::<MalformedLine>())
+        {
+            let line = malformed.line;
+            return CsvIngestError::Malformed { line, encoding, source };
+        }
+        otherwise(source)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use crate::csv::error::CsvIngestError;
+    use encoding_rs::UTF_8;
     use pretty_assertions::assert_eq;
     use std::{error::Error, io, path::PathBuf};
+
+    #[test]
+    fn a_read_failure_that_is_not_a_malformed_sequence_takes_the_fallback_error() {
+        let error = CsvIngestError::reading(::csv::Error::from(io::Error::other("disk gone")), UTF_8, CsvIngestError::Reader);
+
+        assert!(matches!(error, CsvIngestError::Reader(_)));
+    }
 
     #[test]
     fn an_open_failure_names_the_file_and_keeps_the_operating_system_reason() {

@@ -1,4 +1,8 @@
-use crate::{csv::error::CsvIngestError, error::IngestorError, ingestor::Ingestor};
+use crate::{
+    csv::{error::CsvIngestError, line_counting_reader::LineCountingReader},
+    error::IngestorError,
+    ingestor::Ingestor,
+};
 use ::csv::{Reader, StringRecord};
 use cassiopeia_common::{channel::ChannelSender, signal::Signal};
 use cassiopeia_data_profiler::{inspectors::csv::dialect::Dialect, metadata::FormatMetadata};
@@ -6,14 +10,14 @@ use cassiopeia_ir::{
     payload::{CollectedPayload, ProfiledPayload},
     record::Record,
 };
-use encoding_rs::UTF_8;
-use encoding_rs_io::{DecodeReaderBytes, DecodeReaderBytesBuilder};
+use encoding_rs::{Encoding, UTF_8};
+use encoding_rs_rw::DecodingReader;
 use serde_json::{Map, Number, Value};
 use std::{fs::File, io::BufReader, mem};
 use tracing::{info, warn};
 
 /// A CSV reader over a file decoded to UTF-8 with its profiled encoding.
-type DecodedFileReader = Reader<BufReader<DecodeReaderBytes<File, Vec<u8>>>>;
+type DecodedFileReader = Reader<BufReader<LineCountingReader<DecodingReader<BufReader<File>>>>>;
 
 /// Ingestor for CSV data.
 ///
@@ -24,6 +28,8 @@ pub struct CsvIngestor {
     /// The record key of each column, from the header; `None` for a headerless source, whose
     /// columns are keyed by position.
     column_keys: Option<Vec<String>>,
+    /// The encoding the file is decoded from, named when a line of the file is not valid in it.
+    encoding: &'static Encoding,
     batch_size: usize,
 }
 
@@ -49,14 +55,15 @@ impl CsvIngestor {
 
         let encoding = dialect.as_ref().map_or(UTF_8, Dialect::character_encoding);
 
-        // Decode the file to UTF-8 with the profiled encoding, so a non-UTF-8 source (Windows-1252,
-        // Latin-1, ...) is read correctly instead of failing on its first non-UTF-8 byte.
         let file = File::open(&path).map_err(|source| CsvIngestError::Open {
             source,
             // The error owns the path after this borrow ends.
             path: path.clone(),
         })?;
-        let decoded = BufReader::new(DecodeReaderBytesBuilder::new().encoding(Some(encoding)).build(file));
+        // The file is decoded strictly: a byte sequence that is not valid in its encoding fails the
+        // run on its line, rather than reaching the mapped values as `U+FFFD`. A byte order mark
+        // names the encoding over the profiled one, as for any decoder of the web's encodings.
+        let decoded = BufReader::new(LineCountingReader::new(DecodingReader::new(BufReader::new(file), encoding.new_decoder())));
 
         // The profiled dialect opens the file exactly as the inspector parsed its sample, preamble
         // skip and stacked-header join included, so the header read below is the one the inspector
@@ -64,10 +71,12 @@ impl CsvIngestor {
         let mut reader = match &dialect {
             Some(dialect) => {
                 info!("Using profiled CSV dialect: {:#?}", dialect);
-                dialect.reader(decoded).map_err(|source| CsvIngestError::TableStart {
-                    source,
-                    // The error owns the path after this borrow ends.
-                    path: path.clone(),
+                dialect.reader(decoded).map_err(|source| {
+                    CsvIngestError::reading(source, encoding, |source| CsvIngestError::TableStart {
+                        source,
+                        // The error owns the path after this borrow ends.
+                        path: path.clone(),
+                    })
                 })?
             }
             None => Reader::from_reader(decoded),
@@ -76,7 +85,11 @@ impl CsvIngestor {
         // A headerless source has no names to key its columns by; its records are keyed by position
         // instead, so the first row is not consumed as a header and nothing is lost.
         let column_keys = if dialect.as_ref().is_none_or(|dialect| dialect.header_rows.is_present()) {
-            let keys = Self::column_keys(reader.headers().map_err(CsvIngestError::Reader)?);
+            let keys = Self::column_keys(
+                reader
+                    .headers()
+                    .map_err(|source| CsvIngestError::reading(source, encoding, CsvIngestError::Reader))?,
+            );
             info!("Column keys: {:#?}", keys);
             Some(keys)
         } else {
@@ -87,6 +100,7 @@ impl CsvIngestor {
         Ok(CsvIngestor {
             reader: Some(reader),
             column_keys,
+            encoding,
             batch_size,
         })
     }
@@ -188,8 +202,9 @@ impl Ingestor for CsvIngestor {
         let batch_size = self.batch_size;
         let mut batch_buffer: Vec<Record> = Vec::new();
 
+        let encoding = self.encoding;
         for result in reader.records() {
-            let record = result.map_err(CsvIngestError::Reader)?;
+            let record = result.map_err(|source| CsvIngestError::reading(source, encoding, CsvIngestError::Reader))?;
             let data = match &self.column_keys {
                 Some(column_keys) => Self::keyed_by_header(column_keys, &record),
                 None => Self::keyed_by_position(&record),
@@ -222,6 +237,7 @@ mod tests {
     use crate::{csv::ingestor::CsvIngestor, ingestor::Ingestor};
     use cassiopeia_common::{channel::ChannelSender, format::DataFormat, signal::Signal};
     use cassiopeia_data_profiler::{
+        content::Content,
         encoding_hint::EncodingHint,
         inspectors::csv::{
             CsvInspector,
@@ -242,11 +258,11 @@ mod tests {
     use std::{fs::File, io::Write, sync::mpsc::sync_channel, thread};
     use temp_dir::TempDir;
 
-    fn profiled_csv(contents: &str, metadata: Option<FormatMetadata>) -> (TempDir, ProfiledPayload) {
+    fn profiled_csv(contents: impl AsRef<[u8]>, metadata: Option<FormatMetadata>) -> (TempDir, ProfiledPayload) {
         let dir = TempDir::new().unwrap();
         let path = dir.path().join("data.csv");
         let mut file = File::create(&path).unwrap();
-        file.write_all(contents.as_bytes()).unwrap();
+        file.write_all(contents.as_ref()).unwrap();
         let mut profile = Profile::new(DataFormat::Csv, media_type!(TEXT / CSV), 1.0);
         if let Some(metadata) = metadata {
             profile = profile.with_metadata(metadata);
@@ -361,7 +377,7 @@ mod tests {
     #[test]
     fn the_inspected_dialect_ingests_a_titled_table_from_its_header() {
         let contents = "Lumes;v2.10;25.10.26-08:00:00\nStation;Zeit-NO2;NO2;O3\nSTEF;25.10.2026, 08:00;12;54\nTAB;25.10.2026, 08:00;NE;38\n";
-        let dialect = CsvInspector::new().inspect(contents.as_bytes(), &EncodingHint::NONE).unwrap();
+        let dialect = CsvInspector::new().inspect(&Content::new(contents.as_bytes())).unwrap();
         let (_dir, payload) = profiled_csv(contents, Some(FormatMetadata::Csv(CsvMetadata::new(dialect))));
         let records = ingest_all(payload);
 
@@ -374,7 +390,7 @@ mod tests {
     #[test]
     fn a_stacked_header_keys_columns_by_joined_names_and_a_blank_one_by_position() {
         let contents = "Lumes;v2.10;30.10.26-10:00:00\n;Zeit-NO2;NO2;Zeit-PM10;PM10;PM10\n;;HMW;;MW24;HMW\n;MESZ;µg/m³;MESZ;µg/m³;µg/m³\nSTEF;30.10.2026, 10:00;18,48;30.10.2026, 10:00;NE;NE\nTAB;30.10.2026, 10:00;NE;30.10.2026, 10:00;14,03;14,44\nKE;30.10.2026, 10:00;15,17;30.10.2026, 10:00;12,49;18,80\n";
-        let dialect = CsvInspector::new().inspect(contents.as_bytes(), &EncodingHint::NONE).unwrap();
+        let dialect = CsvInspector::new().inspect(&Content::new(contents.as_bytes())).unwrap();
         let (_dir, payload) = profiled_csv(contents, Some(FormatMetadata::Csv(CsvMetadata::new(dialect))));
         let records = ingest_all(payload);
         let tab = records[1].data();
@@ -386,6 +402,77 @@ mod tests {
         assert_eq!(tab.get("PM10 MW24 µg/m³"), Some(&Value::String("14,03".to_string())));
         assert_eq!(tab.get("PM10 HMW µg/m³"), Some(&Value::String("14,44".to_string())));
         assert_eq!(tab.len(), 6);
+    }
+
+    fn dialect_in(encoding: &str) -> FormatMetadata {
+        FormatMetadata::Csv(CsvMetadata::new(Dialect {
+            delimiter: b';',
+            quote_char: Some(b'"'),
+            preamble: Preamble::NONE,
+            header_rows: HeaderRows::ONE,
+            escape: None,
+            terminator: LineTerminator::Lf,
+            encoding: encoding.to_string(),
+        }))
+    }
+
+    fn ingest_error(payload: ProfiledPayload) -> String {
+        let ingestor = CsvIngestor::from_payload(payload, 8).unwrap();
+        let (tx, rx) = sync_channel(4);
+        let ingest = thread::spawn(move || Box::new(ingestor).ingest(ChannelSender::bounded(tx)));
+        rx.iter().for_each(drop);
+        ingest.join().unwrap().unwrap_err().to_string()
+    }
+
+    #[test]
+    fn a_utf_8_file_with_a_byte_that_is_not_utf_8_fails_naming_its_line() {
+        let (_dir, payload) = profiled_csv(b"Station;Name\nSTEF;Cafe\nAKA;M\xfcller\n", Some(dialect_in("UTF-8")));
+
+        assert_eq!(ingest_error(payload), "line 3 of the CSV file is not valid UTF-8");
+    }
+
+    #[test]
+    fn a_byte_with_no_character_in_a_single_byte_encoding_fails_naming_its_line() {
+        // 0xD2 has no character in windows-1253.
+        let (_dir, payload) = profiled_csv(b"Station;Name\nSTEF;\xd2\n", Some(dialect_in("windows-1253")));
+
+        assert_eq!(ingest_error(payload), "line 2 of the CSV file is not valid windows-1253");
+    }
+
+    #[test]
+    fn a_header_below_a_title_with_a_byte_that_is_not_utf_8_fails_naming_its_file_line() {
+        let metadata = FormatMetadata::Csv(CsvMetadata::new(Dialect {
+            delimiter: b';',
+            quote_char: Some(b'"'),
+            preamble: Preamble::new(1),
+            header_rows: HeaderRows::ONE,
+            escape: None,
+            terminator: LineTerminator::Lf,
+            encoding: "UTF-8".to_string(),
+        }));
+        let (_dir, payload) = profiled_csv(b"\"Lumes\nreport\";v2\nStation;\xb5g\nSTEF;12\n", Some(metadata));
+        let Err(error) = CsvIngestor::from_payload(payload, 8) else {
+            panic!("expected the header to fail");
+        };
+
+        assert_eq!(error.to_string(), "line 3 of the CSV file is not valid UTF-8");
+    }
+
+    #[test]
+    fn a_windows_1252_file_is_transcoded_to_utf_8() {
+        let (_dir, payload) = profiled_csv(b"Station;Unit\nSTEF;\xb5g/m\xb3\n", Some(dialect_in("windows-1252")));
+        let records = ingest_all(payload);
+
+        assert_eq!(records[0].data().get("Unit"), Some(&Value::String("µg/m³".to_string())));
+    }
+
+    #[test]
+    fn a_utf_8_byte_order_mark_is_not_part_of_the_first_column_key() {
+        let (_dir, payload) = profiled_csv(b"\xef\xbb\xbfStation;Name\nSTEF;Caf\xc3\xa9\n", Some(dialect_in("UTF-8")));
+        let records = ingest_all(payload);
+
+        assert_eq!(records[0].data().get("Station"), Some(&Value::String("STEF".to_string())));
+        assert_eq!(records[0].data().get("Name"), Some(&Value::String("Café".to_string())));
     }
 
     #[test]

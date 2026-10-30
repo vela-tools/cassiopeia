@@ -1,6 +1,6 @@
-use crate::top_level_domain::TopLevelDomain;
+use crate::{encoding_evidence::evidence_lines, top_level_domain::TopLevelDomain};
 use chardetng::{EncodingDetector, Iso2022JpDetection, Utf8Detection};
-use encoding_rs::Encoding;
+use encoding_rs::{Encoding, UTF_8};
 use mediatype::{MediaTypeBuf, ReadParams, names::CHARSET};
 use url::Url;
 
@@ -40,21 +40,34 @@ impl EncodingHint {
         }
     }
 
-    /// The encoding of a source whose leading bytes are `sample`.
+    /// The encoding of a source whose content is `bytes`, all of it.
     ///
     /// A declared `charset` wins outright: the `Content-Type` parameter defines the encoding of a
-    /// `text/csv` body (RFC 4180 clause 3, RFC 9110 clause 8.3.2). Otherwise the encoding is detected
-    /// from the sample, with the top-level domain weighing the guess toward the encodings native to
-    /// its region, as a browser weighs an undeclared page. ISO-2022-JP detection is denied, since it is
-    /// only reliable in a browser context, and a UTF-8 guess is allowed.
+    /// `text/csv` body (RFC 4180 clause 3, RFC 9110 clause 8.3.2). Content that is valid UTF-8
+    /// throughout is UTF-8, pure ASCII included. Otherwise the encoding is detected from the content,
+    /// with the top-level domain weighing the guess toward the encodings native to its region, as a
+    /// browser weighs an undeclared page. ISO-2022-JP detection is denied, since it is only reliable
+    /// in a browser context.
+    ///
+    /// The whole content is weighed, never a leading sample: a file whose first rows are plain ASCII
+    /// often carries its only accented names further down, and a guess from the ASCII alone would
+    /// misread every one of them. The detector is fed the content's [`evidence_lines`], the lines
+    /// holding a non-ASCII byte, drawn from across the whole file and capped, which keeps detection
+    /// to well under a second however large the file.
     #[must_use]
-    pub fn encoding_of(&self, sample: &[u8]) -> &'static Encoding {
+    pub fn encoding_of(&self, bytes: &[u8]) -> &'static Encoding {
         if let Some(declared) = self.declared {
             return declared;
         }
+        if str::from_utf8(bytes).is_ok() {
+            return UTF_8;
+        }
         let mut detector = EncodingDetector::new(Iso2022JpDetection::Deny);
-        detector.feed(sample, true);
-        detector.guess(self.top_level_domain.as_ref().map(TopLevelDomain::as_bytes), Utf8Detection::Allow)
+        evidence_lines(bytes).for_each(|line| {
+            detector.feed(line, false);
+        });
+        detector.feed(&[], true);
+        detector.guess(self.top_level_domain.as_ref().map(TopLevelDomain::as_bytes), Utf8Detection::Deny)
     }
 }
 

@@ -18,6 +18,7 @@ use std::{fs::File, path::Path};
 
 pub mod content;
 pub mod detectors;
+mod encoding_evidence;
 pub mod encoding_hint;
 pub mod error;
 pub mod inspectors;
