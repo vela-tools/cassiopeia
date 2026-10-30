@@ -3,7 +3,7 @@
 //! disk-backed store needs to stay at one round-trip per batch.
 
 use crate::{
-    entity_store::{error::EntityStoreError, store::FragmentWrite},
+    entity_store::{error::EntityStoreError, record_timestamp::RecordTimestamp, store::FragmentWrite},
     fragment_resolver::FragmentResolver,
     mapping_id::MappingId,
     relationship_store::error::RelationshipStoreError,
@@ -13,7 +13,7 @@ use cassiopeia_ir::{
     fragment::{Fragment, FragmentParts},
     mapped::Mapped,
 };
-use cassiopeia_mapping::{mapping::Mapping, observed_at::ObservedAt};
+use cassiopeia_mapping::{mapping::Mapping, observed_at::ObservedAt, template::error::TemplateError};
 use cassiopeia_ngsi_ld::entity::scope::NgsiLdScope;
 use chrono::{DateTime, Utc};
 use rayon::prelude::*;
@@ -34,7 +34,9 @@ pub(crate) struct PreparedFragment {
     scope: Option<NgsiLdScope>,
     expires_at: Option<DateTime<Utc>>,
     mapping: Arc<Mapping>,
-    observed_at: Option<ObservedAt>,
+    /// What the record-level `observedAt` template yielded; read as a ranking timestamp only once the
+    /// mapping is interned, since a failure is kept against the mapping's id.
+    observed_at: Result<Option<ObservedAt>, TemplateError>,
     temporal: bool,
     edges: Vec<(Urn, String, Urn)>,
 }
@@ -46,7 +48,7 @@ struct OwnedWrite {
     source_data: Value,
     mapping_id: MappingId,
     temporal: bool,
-    observed_at: Option<ObservedAt>,
+    timestamp: RecordTimestamp,
     scope: Option<NgsiLdScope>,
     expires_at: Option<DateTime<Utc>>,
 }
@@ -150,7 +152,7 @@ impl FragmentResolver {
                         source_data,
                         mapping_id,
                         temporal,
-                        observed_at,
+                        timestamp: self.record_timestamp(mapping_id, observed_at),
                         scope,
                         expires_at,
                     },
@@ -166,7 +168,7 @@ impl FragmentResolver {
                 source_data: write.source_data,
                 mapping_id: write.mapping_id,
                 temporal: write.temporal,
-                observed_at: write.observed_at,
+                timestamp: write.timestamp,
                 scope: write.scope,
                 expires_at: write.expires_at,
                 reads: mapping.source_reads(),

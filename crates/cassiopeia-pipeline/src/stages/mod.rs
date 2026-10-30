@@ -9,6 +9,7 @@ pub(crate) mod assembler;
 pub(crate) mod batch_sink_report;
 pub(crate) mod coded_error;
 pub(crate) mod collector;
+pub(crate) mod discarded_observation_report;
 pub(crate) mod dropped_geometry_report;
 pub(crate) mod expander;
 pub(crate) mod extractor;

@@ -1,4 +1,4 @@
-use crate::{entity_assembly::AssemblyTiming, error::Result, id_assembly::IdAssembly, merged_records::MergedRecords};
+use crate::{assembly_losses::AssemblyLosses, entity_assembly::AssemblyTiming, error::Result, id_assembly::IdAssembly};
 use cassiopeia_ir::assembled_entity::AssembledEntity;
 use std::ops::ControlFlow;
 use urn_rs::Urn;
@@ -68,8 +68,9 @@ pub trait EntitySource: Send + Sync {
     /// one chunk yields roughly that many units, which is what keeps an id carrying many units from
     /// materialising the whole store before anything is emitted.
     ///
-    /// Every id whose stored contributions reveal a [`RecordMerge`](crate::record_merge::RecordMerge)
-    /// is recorded into `merged`, on the calling thread, for the caller to report once the scan ends.
+    /// Every id whose stored contributions reveal a [`RecordMerge`](crate::record_merge::RecordMerge),
+    /// or records discarded for a failing `observedAt` template, is recorded into `losses`, on the
+    /// calling thread, for the caller to report once the scan ends.
     ///
     /// Returns the [`AssemblyTiming`] the scan accumulated, so the caller (which owns the stage this
     /// work is measured as) can attribute it without timing the scan from outside.
@@ -80,7 +81,7 @@ pub trait EntitySource: Send + Sync {
     fn drive_assembly(
         &self,
         batch_size: usize,
-        merged: &mut MergedRecords,
+        losses: &mut AssemblyLosses,
         emit: &mut dyn FnMut(Result<AssembledEntity>) -> ControlFlow<()>,
     ) -> Result<AssemblyTiming>;
 

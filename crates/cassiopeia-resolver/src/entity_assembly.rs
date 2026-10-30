@@ -5,6 +5,7 @@
 //! are separate concerns that change for unrelated reasons, so they live apart.
 
 use crate::{
+    assembly_losses::AssemblyLosses,
     entity_source::EntitySource,
     entity_store::{
         merge::first_conflict,
@@ -13,9 +14,8 @@ use crate::{
     error::{ResolverError, Result},
     field_path::FieldPath,
     fragment_resolver::FragmentResolver,
-    id_assembly::IdAssembly,
+    id_assembly::{DiscardedRecords, IdAssembly},
     mapping_id::MappingId,
-    merged_records::MergedRecords,
     record_merge::RecordMerge,
 };
 use cassiopeia_ir::{
@@ -183,6 +183,14 @@ impl EntitySource for FragmentResolver {
             }),
         );
 
+        // Read before the fragments move into their emit-units: the store counted each discard on the
+        // slot of the mapping that discarded it.
+        let discarded: DiscardedRecords = units
+            .iter()
+            .flatten()
+            .filter_map(|stored| NonZeroU64::new(stored.unresolvable_discards).map(|records| (stored.mapping_id, records)))
+            .collect();
+
         let unit_count = units.len();
         let mut entities = Vec::with_capacity(unit_count);
         for (index, unit) in units.into_iter().enumerate() {
@@ -211,7 +219,11 @@ impl EntitySource for FragmentResolver {
         }
 
         trace!("Assembled entity {} into {} unit(s)", base_id, entities.len());
-        Ok(IdAssembly { units: entities, merge })
+        Ok(IdAssembly {
+            units: entities,
+            merge,
+            discarded,
+        })
     }
 
     fn get_entity_ids(&self) -> Result<Vec<Urn>> {
@@ -231,12 +243,12 @@ impl EntitySource for FragmentResolver {
     /// full downstream channel saturate the global pool and starve the next stage's own `par_iter`.
     /// Collecting each chunk first keeps the workers pure-CPU and confines any back-pressure blocking
     /// to the driving thread. Each base id's units are emitted contiguously so the aggregator can
-    /// group by id while holding one id at a time. Merges are recorded on the driving thread too, so
-    /// the tally needs no lock.
+    /// group by id while holding one id at a time. Losses are recorded on the driving thread too, so
+    /// the tallies need no lock.
     fn drive_assembly(
         &self,
         batch_size: usize,
-        merged: &mut MergedRecords,
+        losses: &mut AssemblyLosses,
         emit: &mut dyn FnMut(Result<AssembledEntity>) -> ControlFlow<()>,
     ) -> Result<AssemblyTiming> {
         let id_chunk = self.id_chunk_size(batch_size);
@@ -251,11 +263,14 @@ impl EntitySource for FragmentResolver {
             let assembled: Vec<Result<IdAssembly>> = chunk.par_iter().map(|urn| self.assemble(urn)).collect();
             assembly = assembly.saturating_add(started.elapsed());
 
-            'chunk: for result in assembled {
+            'chunk: for (base_id, result) in chunk.iter().zip(assembled) {
                 match result {
-                    Ok(IdAssembly { units, merge }) => {
+                    Ok(IdAssembly { units, merge, discarded }) => {
                         if let Some(merge) = merge {
-                            merged.record(merge);
+                            losses.merged.record(merge);
+                        }
+                        for (mapping_id, records) in discarded {
+                            losses.discarded.record(mapping_id, base_id, records, &self.observed_at_failures);
                         }
                         for entity in units {
                             if emit(Ok(entity)).is_break() {
@@ -287,10 +302,12 @@ impl EntitySource for FragmentResolver {
 #[cfg(test)]
 mod tests {
     use crate::{
+        assembly_losses::AssemblyLosses,
         entity_source::EntitySource,
         entity_store::{
             dashmap_latest_store::DashMapLatestEntityStore,
             dashmap_series_store::DashMapSeriesEntityStore,
+            record_timestamp::RecordTimestamp,
             redb_latest_store::RedbLatestEntityStore,
             redb_series_store::RedbSeriesEntityStore,
             store::{EntityStore, FragmentWrite, tests::READS_EVERYTHING},
@@ -300,7 +317,6 @@ mod tests {
         fragment_resolver::FragmentResolver,
         fragment_sink::FragmentSink,
         mapping_id::MappingId,
-        merged_records::MergedRecords,
         record_merge::RecordMerge,
         relationship_store::dashmap_store::DashMapRelationshipStore,
     };
@@ -319,12 +335,13 @@ mod tests {
         mapping::Mapping,
         source_reads::{SourceKey, SourceReads},
         template::runner::TemplateRunner,
+        template_site::TemplateSite,
     };
     use cassiopeia_ngsi_ld::entity::name::NameBuf;
     use chrono::{TimeZone, Utc};
     use pretty_assertions::assert_eq;
     use serde_json::json;
-    use std::{num::NonZeroU64, ops::ControlFlow, path::Path, sync::Arc, time::Duration};
+    use std::{num::NonZeroU64, ops::ControlFlow, path::Path, slice, sync::Arc, time::Duration};
     use urn_rs::Urn;
 
     const TEMPORAL: &str = r#"{
@@ -381,7 +398,7 @@ mod tests {
         let mut seen = 0;
         let mut last_id: Option<Urn> = None;
         resolver
-            .drive_assembly(batch_size, &mut MergedRecords::new(), &mut |result| {
+            .drive_assembly(batch_size, &mut AssemblyLosses::new(), &mut |result| {
                 let entity = result.unwrap();
                 if last_id.as_ref() != Some(entity.id()) {
                     last_id = Some(entity.id().clone());
@@ -447,7 +464,7 @@ mod tests {
         assert!(resolver.id_chunk_size(10_000) >= 1);
         let mut emitted = 0;
         resolver
-            .drive_assembly(10_000, &mut MergedRecords::new(), &mut |_result| {
+            .drive_assembly(10_000, &mut AssemblyLosses::new(), &mut |_result| {
                 emitted += 1;
                 ControlFlow::Continue(())
             })
@@ -467,7 +484,7 @@ mod tests {
         }
 
         let timing = resolver
-            .drive_assembly(8, &mut MergedRecords::new(), &mut |_result| ControlFlow::Continue(()))
+            .drive_assembly(8, &mut AssemblyLosses::new(), &mut |_result| ControlFlow::Continue(()))
             .unwrap();
 
         assert!(timing.assembly > Duration::ZERO);
@@ -765,7 +782,7 @@ mod tests {
                 source_data: json!({"temperature": 1}),
                 mapping_id: MappingId::new(9999),
                 temporal: false,
-                observed_at: None,
+                timestamp: RecordTimestamp::Absent,
                 scope: None,
                 expires_at: None,
                 reads: &READS_EVERYTHING,
@@ -1054,10 +1071,10 @@ mod tests {
                 ],
             );
 
-            let mut merged = MergedRecords::new();
-            resolver.drive_assembly(1, &mut merged, &mut |_result| ControlFlow::Continue(())).unwrap();
+            let mut losses = AssemblyLosses::new();
+            resolver.drive_assembly(1, &mut losses, &mut |_result| ControlFlow::Continue(())).unwrap();
 
-            let entries = merged.into_entries();
+            let entries = losses.merged.into_entries();
             assert_eq!(entries.len(), 1, "{:?}", resolver.entity_store);
             assert_eq!(entries[0].ids.get(), 1, "{:?}", resolver.entity_store);
             assert_eq!(entries[0].exemplar.id, a, "{:?}", resolver.entity_store);
@@ -1129,6 +1146,95 @@ mod tests {
 
                 assert_eq!(merge.map(|merge| merge.field.to_string()), Some("c".to_string()), "{debug} {order:?}");
             }
+        }
+    }
+
+    /// A temporal mapping whose `observedAt` template fails on a record with a null `ts`.
+    const TRIMMED_TIMESTAMP: &str = r#"{
+        version: "v4",
+        dataModel: "Thing",
+        identity: { entityName: "{{ id }}" },
+        attributes: {
+            temperature: {
+                source: "{{ t }}",
+                properties: { observedAt: { source: "{{ ts | trim }}" } },
+            },
+        },
+    }"#;
+
+    /// Resolves `records` of [`TRIMMED_TIMESTAMP`] onto one id in `store`, each as its own batch, then
+    /// drives assembly, returning the records the id kept and what the scan found lost.
+    fn discards_of(store: Box<dyn EntityStore>, records: &[serde_json::Value]) -> (Vec<serde_json::Value>, AssemblyLosses) {
+        let (resolver, mappings) = resolver_with(store, &[TRIMMED_TIMESTAMP]);
+        let thing = urn("urn:ngsi-ld:Thing:A");
+        let fragments: Vec<(&Arc<Mapping>, &Urn, serde_json::Value)> = records.iter().map(|record| (&mappings[0], &thing, record.clone())).collect();
+        resolve_each(&resolver, &fragments);
+
+        let mut kept = Vec::new();
+        let mut losses = AssemblyLosses::new();
+        resolver
+            .drive_assembly(8, &mut losses, &mut |result| {
+                kept.extend(result.unwrap().into_parts().fragments.into_iter().map(|(data, _)| data));
+                ControlFlow::Continue(())
+            })
+            .unwrap();
+        (kept, losses)
+    }
+
+    fn current_state_stores() -> [Box<dyn EntityStore>; 2] {
+        [Box::new(DashMapLatestEntityStore::new()), Box::new(RedbLatestEntityStore::new().unwrap())]
+    }
+
+    #[test]
+    fn a_record_whose_observed_at_template_fails_after_a_timestamped_one_is_reported_as_discarded() {
+        let timestamped = json!({"id": "A", "t": 20, "ts": "2026-10-25T08:00:00Z"});
+        let failing = json!({"id": "A", "t": 21, "ts": null});
+        for store in current_state_stores() {
+            let (kept, losses) = discards_of(store, &[timestamped.clone(), failing.clone()]);
+
+            assert_eq!(kept, slice::from_ref(&timestamped));
+            let entries = losses.discarded.into_entries();
+            assert_eq!(entries.len(), 1);
+            assert_eq!(entries[0].entity, urn("urn:ngsi-ld:Thing:A"));
+            assert_eq!(entries[0].records, records(1));
+            assert_eq!(entries[0].error.location.site, TemplateSite::ObservedAt);
+        }
+    }
+
+    #[test]
+    fn a_record_whose_observed_at_template_fails_before_a_timestamped_one_is_reported_as_discarded() {
+        let failing = json!({"id": "A", "t": 21, "ts": null});
+        let timestamped = json!({"id": "A", "t": 20, "ts": "2026-10-25T08:00:00Z"});
+        for store in current_state_stores() {
+            let (kept, losses) = discards_of(store, &[failing.clone(), timestamped.clone()]);
+
+            assert_eq!(kept, slice::from_ref(&timestamped));
+            let entries = losses.discarded.into_entries();
+            assert_eq!(entries.len(), 1);
+            assert_eq!(entries[0].records, records(1));
+        }
+    }
+
+    #[test]
+    fn a_failing_record_that_keeps_the_slot_is_left_for_the_extractor_to_report() {
+        let failing = json!({"id": "A", "t": 21, "ts": null});
+        for store in current_state_stores() {
+            let (kept, losses) = discards_of(store, slice::from_ref(&failing));
+
+            assert_eq!(kept, slice::from_ref(&failing));
+            assert!(losses.discarded.is_empty());
+        }
+    }
+
+    #[test]
+    fn records_without_a_failing_template_report_no_discards() {
+        let earlier = json!({"id": "A", "t": 20, "ts": "2026-10-25T08:00:00Z"});
+        let later = json!({"id": "A", "t": 21, "ts": "2026-10-25T09:00:00Z"});
+        for store in current_state_stores() {
+            let (kept, losses) = discards_of(store, &[earlier.clone(), later.clone()]);
+
+            assert_eq!(kept, slice::from_ref(&later));
+            assert!(losses.discarded.is_empty());
         }
     }
 }

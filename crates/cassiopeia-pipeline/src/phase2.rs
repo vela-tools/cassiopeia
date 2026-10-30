@@ -96,11 +96,11 @@ mod tests {
         representation::NgsiLdSerializable,
     };
     use cassiopeia_resolver::{
+        assembly_losses::AssemblyLosses,
         entity_source::EntitySource,
         entity_store::dashmap_latest_store::DashMapLatestEntityStore,
         fragment_resolver::FragmentResolver,
         fragment_sink::FragmentSink,
-        merged_records::MergedRecords,
         relationship_store::dashmap_store::DashMapRelationshipStore,
     };
     use cassiopeia_transformer::{ngsi_ld_transformer::NgsiLdTransformer, transformer::Transformer};
@@ -133,7 +133,7 @@ mod tests {
 
         let mut ids: Vec<String> = Vec::new();
         source
-            .drive_assembly(8, &mut MergedRecords::new(), &mut |result| {
+            .drive_assembly(8, &mut AssemblyLosses::new(), &mut |result| {
                 ids.push(result.unwrap().id().to_string());
                 ControlFlow::Continue(())
             })

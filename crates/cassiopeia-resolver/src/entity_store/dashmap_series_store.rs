@@ -63,6 +63,7 @@ impl EntityStore for DashMapSeriesEntityStore {
                 data: source_data,
                 records: NonZeroU64::MIN,
                 conflict: None,
+                unresolvable_discards: 0,
             },
             expires_at: MappingExpiry::first(expires_at),
         };
@@ -131,6 +132,7 @@ mod tests {
     use crate::{
         entity_store::{
             dashmap_series_store::DashMapSeriesEntityStore,
+            record_timestamp::RecordTimestamp,
             store::{
                 EntityStore,
                 FragmentWrite,
@@ -174,7 +176,7 @@ mod tests {
             source_data: data,
             mapping_id: MappingId::new(1),
             temporal: true,
-            observed_at: Some(ObservedAt::new(observed_at)),
+            timestamp: RecordTimestamp::Declared(ObservedAt::new(observed_at)),
             scope: None,
             expires_at: None,
             reads: &READS_EVERYTHING,

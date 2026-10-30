@@ -4,15 +4,16 @@ use crate::{
         error::Result,
         mapping_expiry::{MappingExpiry, join},
         merge::deep_merge,
+        record_timestamp::RecordTimestamp,
         store::{AssembledFragment, AssembledFragments, EntityStore, FragmentWrite, StoredUnit},
-        supersession::supersedes,
+        supersession::{SlotRanking, Supersession},
     },
     field_path::FieldPath,
     mapping_id::MappingId,
     store_write_strategy::StoreWriteStrategy,
 };
 use ahash::{AHashMap, RandomState};
-use cassiopeia_mapping::{observed_at::ObservedAt, source_reads::SourceReads};
+use cassiopeia_mapping::source_reads::SourceReads;
 use chrono::{DateTime, Utc};
 use dashmap::DashMap;
 use serde_json::Value;
@@ -24,8 +25,8 @@ use urn_rs::Urn;
 struct LatestFragment {
     /// The retained source record.
     data: Value,
-    /// The record-level `observedAt` of the retained record, for ranking a temporal mapping's records.
-    observed_at: Option<ObservedAt>,
+    /// How the slot ranks a temporal mapping's records by their record-level `observedAt`.
+    ranking: SlotRanking,
     /// How many of the mapping's records resolved to the id, whether merged in, superseding, or
     /// discarded as stale.
     records: NonZeroU64,
@@ -39,8 +40,8 @@ struct LatestFragment {
 struct IncomingRecord {
     /// The source record.
     data: Value,
-    /// The record-level `observedAt`, for ranking it against the retained record.
-    observed_at: Option<ObservedAt>,
+    /// What the record-level `observedAt` template yielded, for ranking it against the retained record.
+    timestamp: RecordTimestamp,
     /// The entity `expiresAt` the record declares.
     expires_at: Option<DateTime<Utc>>,
 }
@@ -78,7 +79,7 @@ impl EntityStore for DashMapLatestEntityStore {
             source_data,
             mapping_id,
             temporal,
-            observed_at,
+            timestamp,
             scope,
             expires_at,
             reads,
@@ -89,7 +90,7 @@ impl EntityStore for DashMapLatestEntityStore {
         // only the first record of an id pays for an owned key.
         let incoming = IncomingRecord {
             data: source_data,
-            observed_at,
+            timestamp,
             expires_at,
         };
         let unplaced = match self.data.get_mut(&base_id) {
@@ -105,7 +106,7 @@ impl EntityStore for DashMapLatestEntityStore {
                     mapping_id,
                     LatestFragment {
                         data: incoming.data,
-                        observed_at: incoming.observed_at,
+                        ranking: SlotRanking::first(incoming.timestamp),
                         records: NonZeroU64::MIN,
                         conflict: None,
                         expires_at: MappingExpiry::first(incoming.expires_at),
@@ -137,6 +138,7 @@ impl EntityStore for DashMapLatestEntityStore {
                         data: fragment.data,
                         records: fragment.records,
                         conflict: fragment.conflict,
+                        unresolvable_discards: fragment.ranking.unresolvable_discards(),
                     })
                     .collect();
                 // A stable join order keeps the assembled entity deterministic across runs.
@@ -194,11 +196,12 @@ fn merge_fragment(
     existing.records = existing.records.saturating_add(1);
     if temporal {
         // A temporal mapping's records are observations of one id: keep the latest, expiry and all.
-        let new = incoming.observed_at.as_ref().map(ObservedAt::as_str);
-        if supersedes(new, existing.observed_at.as_ref().map(ObservedAt::as_str)) {
-            existing.data = incoming.data;
-            existing.observed_at = incoming.observed_at;
-            existing.expires_at.supersede(incoming.expires_at);
+        match existing.ranking.rank(incoming.timestamp) {
+            Supersession::Supersedes => {
+                existing.data = incoming.data;
+                existing.expires_at.supersede(incoming.expires_at);
+            }
+            Supersession::Stale => {}
         }
     } else {
         // A static mapping's records refine one entity: merge them, remembering where they disagreed.
@@ -214,6 +217,7 @@ mod tests {
     use crate::{
         entity_store::{
             dashmap_latest_store::DashMapLatestEntityStore,
+            record_timestamp::RecordTimestamp,
             store::{
                 EntityStore,
                 FragmentWrite,
@@ -252,7 +256,7 @@ mod tests {
             source_data: data,
             mapping_id: MappingId::new(mapping),
             temporal,
-            observed_at: observed_at.map(ObservedAt::new),
+            timestamp: RecordTimestamp::from(observed_at.map(ObservedAt::new)),
             scope: None,
             expires_at: None,
             reads: &READS_EVERYTHING,

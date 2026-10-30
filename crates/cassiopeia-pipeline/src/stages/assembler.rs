@@ -1,7 +1,7 @@
 use crate::{
     error::PipelineError,
     pipeline_stage::PipelineStage,
-    stages::{merged_records_report::report_merged_records, stage_env::StageEnv},
+    stages::{discarded_observation_report::report_discarded_observations, merged_records_report::report_merged_records, stage_env::StageEnv},
 };
 use cassiopeia_common::{
     batch::Batch,
@@ -12,7 +12,7 @@ use cassiopeia_common::{
 };
 use cassiopeia_ir::assembled_entity::AssembledEntity;
 use cassiopeia_reporter::guard::StageGuard;
-use cassiopeia_resolver::{entity_source::EntitySource, error::ResolverError, merged_records::MergedRecords};
+use cassiopeia_resolver::{assembly_losses::AssemblyLosses, entity_source::EntitySource, error::ResolverError};
 use execution_time::ExecutionTime;
 use std::{mem, ops::ControlFlow, thread::spawn};
 
@@ -73,7 +73,8 @@ impl<'a> BatchEmitter<'a> {
 /// parallel per chunk inside the resolver, but the thread and the channel plumbing live here so the
 /// work is measured as its own stage. Each base id's units are emitted contiguously, and the stores
 /// are destroyed once the scan finishes. Records of one mapping the scan found merged into one id are
-/// reported once the scan ends, one warning per merged id, grouped by entity type.
+/// reported once the scan ends, one warning per merged id, grouped by entity type, and so are the
+/// records a current-state store discarded for a failing `observedAt` template, grouped by mapping.
 pub(crate) fn spawn_assembler_thread(
     resolver: Box<dyn EntitySource>,
     entity_count: u64,
@@ -95,7 +96,7 @@ pub(crate) fn spawn_assembler_thread(
 
         // The `emit` closure borrows `tx`, so the scan runs in a block that ends the borrow before the
         // closing `Stop` is sent.
-        let mut merged = MergedRecords::new();
+        let mut losses = AssemblyLosses::new();
         let assembly = {
             let mut emitter = BatchEmitter::new(&tx, batch_size);
             let assembly = {
@@ -114,7 +115,7 @@ pub(crate) fn spawn_assembler_thread(
                         }
                     }
                 };
-                resolver.drive_assembly(batch_size, &mut merged, &mut emit)
+                resolver.drive_assembly(batch_size, &mut losses, &mut emit)
             };
             // The scan ends mid-batch whenever the unit count is not a multiple of the batch size.
             let _ = emitter.flush(&stage);
@@ -128,7 +129,8 @@ pub(crate) fn spawn_assembler_thread(
                 let _ = tx.send(Signal::Error(PipelineError::from(error)));
             }
         }
-        let warnings = report_merged_records(reporter, merged);
+        let AssemblyLosses { merged, discarded } = losses;
+        let warnings = report_merged_records(reporter, merged) + report_discarded_observations(reporter, discarded);
         if warnings > 0 {
             stage.warn_inc_by(warnings);
             run_telemetry.add_warnings(warnings);

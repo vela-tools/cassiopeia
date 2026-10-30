@@ -1,5 +1,10 @@
-use crate::{entity_store::error::Result, field_path::FieldPath, mapping_id::MappingId, store_write_strategy::StoreWriteStrategy};
-use cassiopeia_mapping::{observed_at::ObservedAt, source_reads::SourceReads};
+use crate::{
+    entity_store::{error::Result, record_timestamp::RecordTimestamp},
+    field_path::FieldPath,
+    mapping_id::MappingId,
+    store_write_strategy::StoreWriteStrategy,
+};
+use cassiopeia_mapping::source_reads::SourceReads;
 use cassiopeia_ngsi_ld::entity::scope::NgsiLdScope;
 use chrono::{DateTime, Utc};
 use serde_json::Value;
@@ -11,7 +16,7 @@ use urn_rs::Urn;
 ///
 /// Temporality is an attribute concern (ETSI GS CIM 009 v1.9.1 clause 4.5.5), so the store keys by
 /// the base id and every mapping and every observation of that id accumulates together. `temporal`
-/// and `observed_at` let a current-state store rank a temporal mapping's records by their record-level
+/// and `timestamp` let a current-state store rank a temporal mapping's records by their record-level
 /// `observedAt`; a series store ignores them and keeps every observation.
 ///
 /// The write owns the record it carries. The resolver already owns the fragment it is storing and
@@ -27,9 +32,9 @@ pub struct FragmentWrite<'a> {
     pub mapping_id: MappingId,
     /// Whether the producing mapping is temporal (declares an `observedAt`).
     pub temporal: bool,
-    /// The record-level `observedAt`, verbatim; monotonic under string compare for a fixed format.
-    /// `None` when the mapping is not temporal or the record carries no timestamp.
-    pub observed_at: Option<ObservedAt>,
+    /// What the record-level `observedAt` template yielded for the record: its timestamp verbatim,
+    /// monotonic under string compare for a fixed format, no timestamp, or a failure.
+    pub timestamp: RecordTimestamp,
     /// The entity's scope, when one was resolved.
     pub scope: Option<NgsiLdScope>,
     /// The entity's `expiresAt`, when one was resolved (ETSI GS CIM 009 v1.9.1 clause 4.5.1).
@@ -57,6 +62,10 @@ pub struct AssembledFragment {
     /// discarded a value (see [`deep_merge`](crate::entity_store::merge::deep_merge)). Always `None`
     /// for a series observation, which is never merged in the store.
     pub conflict: Option<FieldPath>,
+    /// How many of the mapping's records whose `observedAt` template failed the slot discarded for a
+    /// later one (see [`SlotRanking`](crate::entity_store::supersession::SlotRanking)). Always zero
+    /// for a series observation, which discards nothing.
+    pub unresolvable_discards: u64,
 }
 
 /// The fragments contributing to one emit-unit.
@@ -200,7 +209,10 @@ impl Clone for Box<dyn EntityStore> {
 #[cfg(test)]
 pub(crate) mod tests {
     use crate::{
-        entity_store::store::{EntityStore, FragmentWrite},
+        entity_store::{
+            record_timestamp::RecordTimestamp,
+            store::{EntityStore, FragmentWrite},
+        },
         mapping_id::MappingId,
     };
     use cassiopeia_mapping::{observed_at::ObservedAt, source_reads::SourceReads};
@@ -220,7 +232,7 @@ pub(crate) mod tests {
             source_data: json!({ "mapping": mapping }),
             mapping_id: MappingId::new(mapping),
             temporal: false,
-            observed_at: None,
+            timestamp: RecordTimestamp::Absent,
             scope: NgsiLdScope::from_scopes(scopes.iter().map(|scope| ScopeBuf::new(*scope).unwrap())),
             expires_at: None,
             reads: &READS_EVERYTHING,
@@ -240,7 +252,7 @@ pub(crate) mod tests {
     fn write_observed(base_id: &Urn, mapping: u32, observed_at: &str, epoch_seconds: Option<i64>) -> FragmentWrite<'static> {
         FragmentWrite {
             temporal: true,
-            observed_at: Some(ObservedAt::new(observed_at)),
+            timestamp: RecordTimestamp::Declared(ObservedAt::new(observed_at)),
             ..write_expiring(base_id, mapping, epoch_seconds)
         }
     }

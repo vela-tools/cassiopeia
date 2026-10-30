@@ -7,6 +7,7 @@ use crate::{
         redb_scope::{PendingScopes, SCOPES_TABLE, read_scope},
         store::{AssembledFragment, AssembledFragments, EntityStore, FragmentWrite, StoredUnit},
         stored_fragment::StoredFragment,
+        supersession::SlotRanking,
     },
     mapping_id::MappingId,
     store_action::StoreAction,
@@ -98,7 +99,7 @@ impl EntityStore for RedbSeriesEntityStore {
                     base_id,
                     source_data,
                     mapping_id,
-                    observed_at,
+                    timestamp,
                     scope,
                     expires_at,
                     ..
@@ -110,7 +111,7 @@ impl EntityStore for RedbSeriesEntityStore {
                 let stored = StoredFragment {
                     mapping_id,
                     data: source_data,
-                    observed_at: observed_at.map(String::from),
+                    ranking: SlotRanking::first(timestamp),
                     records: NonZeroU64::MIN,
                     conflict: None,
                     expires_at: MappingExpiry::first(expires_at),
@@ -166,6 +167,7 @@ impl EntityStore for RedbSeriesEntityStore {
                 data: stored.data,
                 records: stored.records,
                 conflict: stored.conflict,
+                unresolvable_discards: 0,
             }]);
         }
 
@@ -234,6 +236,7 @@ impl Drop for RedbSeriesEntityStore {
 mod tests {
     use crate::{
         entity_store::{
+            record_timestamp::RecordTimestamp,
             redb_series_store::RedbSeriesEntityStore,
             store::{
                 EntityStore,
@@ -278,7 +281,7 @@ mod tests {
             source_data: data,
             mapping_id: MappingId::new(1),
             temporal: true,
-            observed_at: Some(ObservedAt::new(observed_at)),
+            timestamp: RecordTimestamp::Declared(ObservedAt::new(observed_at)),
             scope: None,
             expires_at: None,
             reads: &READS_EVERYTHING,
