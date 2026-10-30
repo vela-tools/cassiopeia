@@ -6,8 +6,10 @@
 
 pub(crate) mod aggregator;
 pub(crate) mod assembler;
+pub(crate) mod batch_sink_report;
 pub(crate) mod coded_error;
 pub(crate) mod collector;
+pub(crate) mod dropped_geometry_report;
 pub(crate) mod expander;
 pub(crate) mod extractor;
 pub(crate) mod ingestor;

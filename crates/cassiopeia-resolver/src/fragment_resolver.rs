@@ -11,7 +11,7 @@ use crate::{
 use ahash::RandomState;
 use cassiopeia_common::parallelism::Parallelism;
 use cassiopeia_ir::{
-    fragment::Fragment,
+    fragment::{Fragment, FragmentParts},
     mapped::Mapped,
     parent_context::{ParentContext, ParentContextType},
 };
@@ -250,7 +250,13 @@ impl FragmentResolver {
         let (fragment, mapping) = fragment.into_parts();
         let observed_at = mapping.extract_observed_at(&self.resolver, fragment.source_data());
         let temporal = mapping.is_temporal();
-        let (source_data, base_id, scope, expires_at, parent_context) = fragment.into_parts();
+        let FragmentParts {
+            source_data,
+            target_urn: base_id,
+            scope,
+            expires_at,
+            parent_context,
+        } = fragment.into_parts();
 
         for (parent, property, child) in self.build_edges(&base_id, parent_context.as_ref(), temporal) {
             self.relationship_store.add_child(&parent, &property, &child)?;

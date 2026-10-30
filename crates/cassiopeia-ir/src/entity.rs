@@ -22,17 +22,29 @@ use urn_rs::Urn;
 pub type AttributeValues = IndexMap<NameBuf, NgsiValue, RandomState>;
 
 /// The owned constituent parts of an [`Entity`], produced by [`Entity::into_parts`].
-pub type EntityParts = (
-    Urn,
-    JsonValue,
-    Option<NgsiLdScope>,
-    Option<DateTime<Utc>>,
-    Relationships,
-    Option<AttributeValues>,
-    Option<EntityMetadata>,
-    Option<InstanceRelationships>,
-    Option<NestedRelationships>,
-);
+///
+/// Each field is the [`Entity`] field of the same name.
+#[derive(Debug)]
+pub struct EntityParts {
+    /// The unique URN of the entity.
+    pub id: Urn,
+    /// The data payload.
+    pub data: JsonValue,
+    /// The scope of the entity.
+    pub scope: Option<NgsiLdScope>,
+    /// The entity `expiresAt` (ETSI GS CIM 009 v1.9.1 clause 4.22).
+    pub expires_at: Option<DateTime<Utc>>,
+    /// Relationships mapped by their attribute name.
+    pub relationships: Relationships,
+    /// High-level values mapped by their attribute name.
+    pub values: Option<AttributeValues>,
+    /// Metadata storage for attributes, keyed by attribute name.
+    pub metadata: Option<EntityMetadata>,
+    /// Per-instance objects of multi-attribute relationships, keyed by attribute name.
+    pub instance_relationships: Option<InstanceRelationships>,
+    /// Objects of relationships declared as sub-attributes, keyed by their path from the entity.
+    pub nested_relationships: Option<NestedRelationships>,
+}
 
 /// The final intermediate representation of an entity, ready for NGSI-LD serialization once resolved.
 #[derive(Debug, Clone, Serialize, Deserialize, Getters, Setters)]
@@ -100,23 +112,26 @@ impl Entity {
     /// Deconstructs the entity into its owned constituent parts, consuming it.
     #[must_use]
     pub fn into_parts(self) -> EntityParts {
-        (
-            self.id,
-            self.data,
-            self.scope,
-            self.expires_at,
-            self.relationships,
-            self.values,
-            self.metadata,
-            self.instance_relationships,
-            self.nested_relationships,
-        )
+        EntityParts {
+            id: self.id,
+            data: self.data,
+            scope: self.scope,
+            expires_at: self.expires_at,
+            relationships: self.relationships,
+            values: self.values,
+            metadata: self.metadata,
+            instance_relationships: self.instance_relationships,
+            nested_relationships: self.nested_relationships,
+        }
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use crate::{entity::Entity, relationship_path::RelationshipPath};
+    use crate::{
+        entity::{Entity, EntityParts},
+        relationship_path::RelationshipPath,
+    };
     use cassiopeia_ngsi_ld::{entity::name::NameBuf, value::types::Value as NgsiValue};
     use indexmap::IndexMap;
     use pretty_assertions::assert_eq;
@@ -134,7 +149,17 @@ mod tests {
         let entity = Entity::new(urn(), json!({"id": "1"}), None, None, relationships.clone(), None);
         assert_eq!(entity.metadata(), &None);
         assert_eq!(entity.relationships(), &relationships);
-        let (id, _data, scope, expires_at, rels, values, metadata, instance_relationships, nested_relationships) = entity.into_parts();
+        let EntityParts {
+            id,
+            scope,
+            expires_at,
+            relationships: rels,
+            values,
+            metadata,
+            instance_relationships,
+            nested_relationships,
+            ..
+        } = entity.into_parts();
         assert_eq!(id, urn());
         assert_eq!(scope, None);
         assert_eq!(expires_at, None);

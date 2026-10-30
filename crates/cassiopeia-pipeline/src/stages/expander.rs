@@ -1,7 +1,7 @@
 use crate::{
     error::PipelineError,
     pipeline_stage::PipelineStage,
-    stages::{skipped_records::SkippedRecords, stage_env::StageEnv, unreadable_expiry_report::report_unreadable_expiries},
+    stages::{batch_sink_report::report_sink, skipped_records::SkippedRecords, stage_env::StageEnv, unreadable_expiry_report::unreadable_expiry_diagnostic},
 };
 use cassiopeia_common::{
     batch::Batch,
@@ -145,7 +145,7 @@ pub(crate) fn spawn_expander_thread(
                     if !skipped.is_empty() {
                         skipped.report(reporter, Severity::Warning);
                     }
-                    warnings += report_unreadable_expiries(reporter, unreadable_expiries);
+                    warnings += report_sink(reporter, unreadable_expiries, unreadable_expiry_diagnostic);
                     if warnings > 0 {
                         expander_stage.warn_inc_by(warnings);
                         telemetry.add_warnings(warnings);

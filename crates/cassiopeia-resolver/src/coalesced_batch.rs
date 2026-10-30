@@ -9,7 +9,10 @@ use crate::{
     relationship_store::error::RelationshipStoreError,
 };
 use cassiopeia_common::parallelism::Parallelism;
-use cassiopeia_ir::{fragment::Fragment, mapped::Mapped};
+use cassiopeia_ir::{
+    fragment::{Fragment, FragmentParts},
+    mapped::Mapped,
+};
 use cassiopeia_mapping::{mapping::Mapping, observed_at::ObservedAt};
 use cassiopeia_ngsi_ld::entity::scope::NgsiLdScope;
 use chrono::{DateTime, Utc};
@@ -61,7 +64,13 @@ impl FragmentResolver {
             let (fragment, mapping) = fragment.into_parts();
             let observed_at = mapping.extract_observed_at(&self.resolver, fragment.source_data());
             let temporal = mapping.is_temporal();
-            let (source_data, base_id, scope, expires_at, parent_context) = fragment.into_parts();
+            let FragmentParts {
+                source_data,
+                target_urn: base_id,
+                scope,
+                expires_at,
+                parent_context,
+            } = fragment.into_parts();
             let edges = self.build_edges(&base_id, parent_context.as_ref(), temporal);
 
             PreparedFragment {

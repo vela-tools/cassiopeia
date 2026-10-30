@@ -110,7 +110,7 @@ mod tests {
     use cassiopeia_common::{representation::NgsiLdRepresentation, skip_null::NgsiLdSkipNull};
     use indexmap::IndexMap;
     use pretty_assertions::assert_eq;
-    use serde::{Serialize, Serializer};
+    use serde::{Serialize, Serializer, ser::SerializeMap};
     use serde_json::Value;
 
     // Serializes a single nested attribute through `serialize_nested` and returns the resulting map.
@@ -118,7 +118,6 @@ mod tests {
 
     impl Serialize for NestedOnly {
         fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-            use serde::ser::SerializeMap;
             let mut map = serializer.serialize_map(None)?;
             serialize_nested(&mut map, &self.0, NgsiLdRepresentation::Simplified, NgsiLdSkipNull::Include)?;
             map.end()

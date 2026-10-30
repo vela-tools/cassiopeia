@@ -8,7 +8,10 @@ use crate::{
     unit_code_cache::UnitCodeCache,
 };
 use cassiopeia_common::parallelism::Parallelism;
-use cassiopeia_ir::{entity::Entity, mapped::Mapped};
+use cassiopeia_ir::{
+    entity::{Entity, EntityParts},
+    mapped::Mapped,
+};
 use cassiopeia_ngsi_ld::entity::{NgsiLdEntity, builder::NgsiLdEntityBuilder};
 use cassiopeia_unreadable_timestamps::unreadable_timestamps::UnreadableTimestamps;
 use rayon::prelude::*;
@@ -45,7 +48,16 @@ fn transform_entity(mapped: Mapped<Entity>, unit_codes: &mut UnitCodeCache, unre
     let (entity, mappings) = mapped.into_mappings();
     // Nested relationships were folded into `metadata` as sub-attributes by the extractor, so the
     // transformer reads them from there and ignores the raw nested-relationship map here.
-    let (id, _data, scope, expires_at, mut relationships, values, metadata, instance_relationships, _nested_relationships) = entity.into_parts();
+    let EntityParts {
+        id,
+        scope,
+        expires_at,
+        mut relationships,
+        values,
+        metadata,
+        instance_relationships,
+        ..
+    } = entity.into_parts();
     let mut values = values.unwrap_or_default();
     // Empty in the common case: `IndexMap::default()` allocates nothing until first insert, so an
     // entity with no instance list relationships pays no allocation here.
@@ -117,6 +129,7 @@ impl Transformer for NgsiLdTransformer {
 #[cfg(test)]
 mod tests {
     use crate::{ngsi_ld_transformer::NgsiLdTransformer, transformer::Transformer};
+    use cassiopeia_batch_sink::batch_sink::BatchSink;
     use cassiopeia_common::parallelism::Parallelism;
     use cassiopeia_geometry::geometry::NgsiLdGeometry;
     use cassiopeia_ir::{
@@ -144,7 +157,7 @@ mod tests {
         },
         value::types::{Number, Value},
     };
-    use cassiopeia_unreadable_timestamps::{timestamp_loss::TimestampLoss, unreadable_timestamps::UnreadableTimestamps};
+    use cassiopeia_unreadable_timestamps::{attribute_loss::AttributeLoss, timestamp_loss::TimestampLoss, unreadable_timestamps::UnreadableTimestamps};
     use cefact_units::UnitCode;
     use chrono::{DateTime, TimeZone, Utc};
     use indexmap::IndexMap;
@@ -459,9 +472,15 @@ mod tests {
         let result = NgsiLdTransformer::new().transform(Mapped::new(entity, mapping), &unreadable).unwrap();
 
         assert_eq!(expires_at_of(&result), None);
-        let entries = unreadable.into_entries();
+        let entries = BatchSink::from(unreadable).into_entries().collect::<Vec<_>>();
         assert_eq!(entries.len(), 1);
-        assert_eq!(entries[0].0, (TimestampLoss::ExpiresAt, name("temperature")));
+        assert_eq!(
+            entries[0].0,
+            AttributeLoss {
+                loss: TimestampLoss::ExpiresAt,
+                attribute: name("temperature")
+            }
+        );
         assert_eq!(entries[0].1.example.as_ref(), "the day after tomorrow");
     }
 
@@ -477,9 +496,15 @@ mod tests {
         assert!(result.attributes.contains_key(&name("temperature")));
         assert_eq!(observed_at_of(&result), None);
 
-        let entries = unreadable.into_entries();
+        let entries = BatchSink::from(unreadable).into_entries().collect::<Vec<_>>();
         assert_eq!(entries.len(), 1);
-        assert_eq!(entries[0].0, (TimestampLoss::ObservedAt, name("temperature")));
+        assert_eq!(
+            entries[0].0,
+            AttributeLoss {
+                loss: TimestampLoss::ObservedAt,
+                attribute: name("temperature")
+            }
+        );
         assert_eq!(entries[0].1.example.as_ref(), "the third of March");
     }
 

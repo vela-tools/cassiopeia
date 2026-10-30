@@ -1,12 +1,13 @@
+use cassiopeia_batch_sink::recurring::Recurring;
 use cassiopeia_diagnostic::{
     code::{diagnostic_code::DiagnosticCode, expander_code::ExpanderCode},
     context_field::{ContextField, minted_id},
+    diagnostic::Diagnostic,
     diagnostic_builder::DiagnosticBuilder,
     severity::Severity,
 };
 use cassiopeia_ngsi_ld::entity::name::NameBuf;
-use cassiopeia_reporter::reporter::DiagnosticSink;
-use cassiopeia_unreadable_timestamps::{unreadable_expiries::UnreadableExpiries, unreadable_expiry::UnreadableExpiry};
+use cassiopeia_unreadable_timestamps::unreadable_expiry::UnreadableExpiry;
 
 /// The one-line summary, naming the entity type, how many records lost their expiry, the first
 /// entity that did, and the text it was lost to.
@@ -17,11 +18,13 @@ use cassiopeia_unreadable_timestamps::{unreadable_expiries::UnreadableExpiries, 
 fn headline(entity_type: &NameBuf, record: &UnreadableExpiry) -> String {
     format!(
         "{} `{entity_type}` records publish without `expiresAt` (first: `{}`): `{}` is not a date-time in any spelling Cassiopeia reads",
-        record.unreadable.occurrences, record.exemplar, record.unreadable.example
+        record.occurrences(),
+        record.exemplar,
+        record.unreadable.example
     )
 }
 
-/// Names each entity type's unreadable expiries once and returns how many records lost one.
+/// The diagnostic naming one entity type's unreadable expiries.
 ///
 /// One diagnostic per entity type whose `expiresAt` was lost, however many entities lost it and
 /// however many distinct spellings they carried: the type and the code are the failure, the first
@@ -29,44 +32,35 @@ fn headline(entity_type: &NameBuf, record: &UnreadableExpiry) -> String {
 /// on the headline, which stays outside the diagnostic's identity so it cannot split one group into
 /// a line per batch. The member an entity loses is the one its records declared at the top level
 /// (ETSI GS CIM 009 v1.9.1 clause 4.5.1), so the code is the expander's, the stage that resolves it.
-pub(crate) fn report_unreadable_expiries(sink: &dyn DiagnosticSink, unreadable: UnreadableExpiries) -> u64 {
-    if unreadable.is_empty() {
-        return 0;
-    }
+pub(crate) fn unreadable_expiry_diagnostic(entity_type: NameBuf, record: &UnreadableExpiry) -> Diagnostic {
+    let occurrences = record.occurrences();
+    let entities = minted_id(&record.exemplar).map(|first| ContextField::Entities {
+        first,
+        additional: occurrences.get() - 1,
+    });
 
-    let mut total: u64 = 0;
-    for (entity_type, record) in unreadable.into_entries() {
-        let occurrences = record.unreadable.occurrences;
-        let entities = minted_id(&record.exemplar).map(|first| ContextField::Entities {
-            first,
-            additional: occurrences.get() - 1,
-        });
-        sink.report(
-            &DiagnosticBuilder::new(
-                Severity::Warning,
-                DiagnosticCode::Expander(ExpanderCode::ExpiryUnreadable),
-                headline(&entity_type, &record),
-            )
-            .with_context(ContextField::EntityType(entity_type))
-            .with_optional_context(entities)
-            .with_occurrences(occurrences)
-            .build(),
-        );
-        total = total.saturating_add(occurrences.get());
-    }
-
-    total
+    DiagnosticBuilder::new(
+        Severity::Warning,
+        DiagnosticCode::Expander(ExpanderCode::ExpiryUnreadable),
+        headline(&entity_type, record),
+    )
+    .with_context(ContextField::EntityType(entity_type))
+    .with_optional_context(entities)
+    .with_occurrences(occurrences)
+    .build()
 }
 
 #[cfg(test)]
 mod tests {
-    use crate::{stages::unreadable_expiry_report::report_unreadable_expiries, test_reporter::RecordingReporter};
+    use crate::{
+        stages::{batch_sink_report::report_sink, unreadable_expiry_report::unreadable_expiry_diagnostic},
+        test_reporter::RecordingReporter,
+    };
     use cassiopeia_diagnostic::{
         code::{diagnostic_code::DiagnosticCode, expander_code::ExpanderCode},
         context_field::ContextField,
     };
     use cassiopeia_ngsi_ld::entity::name::NameBuf;
-    use cassiopeia_reporter::backend::noop::NoopReporter;
     use cassiopeia_unreadable_timestamps::unreadable_expiries::UnreadableExpiries;
     use pretty_assertions::assert_eq;
     use urn_rs::Urn;
@@ -80,11 +74,6 @@ mod tests {
     }
 
     #[test]
-    fn an_empty_sink_says_nothing_and_counts_nothing() {
-        assert_eq!(report_unreadable_expiries(&NoopReporter::new(), UnreadableExpiries::new()), 0);
-    }
-
-    #[test]
     fn every_entity_of_one_type_is_named_by_one_diagnostic_with_the_first_as_exemplar() {
         let sink = RecordingReporter::new();
         let unreadable = UnreadableExpiries::new();
@@ -92,7 +81,7 @@ mod tests {
         unreadable.record(&name("Sensor"), &urn("urn:ngsi-ld:Sensor:2"), "sometime next week");
         unreadable.record(&name("Sensor"), &urn("urn:ngsi-ld:Sensor:3"), "never");
 
-        let total = report_unreadable_expiries(&sink, unreadable);
+        let total = report_sink(&sink, unreadable, unreadable_expiry_diagnostic);
 
         let reported = sink.diagnostics();
         assert_eq!(total, 3);
@@ -120,7 +109,7 @@ mod tests {
         unreadable.record(&name("Station"), &urn("urn:ngsi-ld:Station:1"), "later");
         unreadable.record(&name("Sensor"), &urn("urn:ngsi-ld:Sensor:1"), "earlier");
 
-        let total = report_unreadable_expiries(&sink, unreadable);
+        let total = report_sink(&sink, unreadable, unreadable_expiry_diagnostic);
 
         let reported = sink.diagnostics();
         assert_eq!(total, 2);

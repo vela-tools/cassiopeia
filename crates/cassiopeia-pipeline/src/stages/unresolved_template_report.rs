@@ -2,12 +2,12 @@ use cassiopeia_diagnostic::{
     cause::causes_of,
     code::{diagnostic_code::DiagnosticCode, extractor_code::ExtractorCode},
     context_field::{ContextField, minted_id},
+    diagnostic::Diagnostic,
     diagnostic_builder::DiagnosticBuilder,
     severity::Severity,
 };
-use cassiopeia_extractor::{unresolved_template::UnresolvedTemplate, unresolved_templates::UnresolvedTemplates};
+use cassiopeia_extractor::unresolved_template::UnresolvedTemplate;
 use cassiopeia_ngsi_ld::entity::name::NameBuf;
-use cassiopeia_reporter::reporter::DiagnosticSink;
 
 /// The one-line summary: which template failed and where it is declared, an entity it failed for,
 /// the attribute that was dropped, and that the entity was kept.
@@ -23,44 +23,36 @@ fn headline(attribute: &NameBuf, record: &UnresolvedTemplate) -> String {
     )
 }
 
-/// Names each attribute a template failure dropped, once, and returns how many entities lost one.
+/// The diagnostic naming one attribute a template failure dropped.
 ///
 /// One diagnostic per attribute, however many entities lost it: the attribute and the code are the
 /// failure, the first entity rides on the headline and as an incidental context field, and the
 /// first failure's cause chain names the template as written with what to change, then what Tera
 /// objected to.
-pub(crate) fn report_unresolved_templates(sink: &dyn DiagnosticSink, unresolved: UnresolvedTemplates) -> u64 {
-    if unresolved.is_empty() {
-        return 0;
-    }
+pub(crate) fn unresolved_template_diagnostic(attribute: NameBuf, record: &UnresolvedTemplate) -> Diagnostic {
+    let entities = minted_id(&record.entity).map(|first| ContextField::Entities {
+        first,
+        additional: record.occurrences.get() - 1,
+    });
 
-    let mut total: u64 = 0;
-    for (attribute, record) in unresolved.into_entries() {
-        let entities = minted_id(&record.entity).map(|first| ContextField::Entities {
-            first,
-            additional: record.occurrences.get() - 1,
-        });
-        sink.report(
-            &DiagnosticBuilder::new(
-                Severity::Warning,
-                DiagnosticCode::Extractor(ExtractorCode::TemplateUnresolvable),
-                headline(&attribute, &record),
-            )
-            .with_causes(causes_of(&record.error))
-            .with_context(ContextField::Attribute(attribute))
-            .with_optional_context(entities)
-            .with_occurrences(record.occurrences)
-            .build(),
-        );
-        total = total.saturating_add(record.occurrences.get());
-    }
-
-    total
+    DiagnosticBuilder::new(
+        Severity::Warning,
+        DiagnosticCode::Extractor(ExtractorCode::TemplateUnresolvable),
+        headline(&attribute, record),
+    )
+    .with_causes(causes_of(&record.error))
+    .with_context(ContextField::Attribute(attribute))
+    .with_optional_context(entities)
+    .with_occurrences(record.occurrences)
+    .build()
 }
 
 #[cfg(test)]
 mod tests {
-    use crate::{stages::unresolved_template_report::report_unresolved_templates, test_reporter::RecordingReporter};
+    use crate::{
+        stages::{batch_sink_report::report_sink, unresolved_template_report::unresolved_template_diagnostic},
+        test_reporter::RecordingReporter,
+    };
     use cassiopeia_diagnostic::code::{diagnostic_code::DiagnosticCode, extractor_code::ExtractorCode};
     use cassiopeia_extractor::unresolved_templates::UnresolvedTemplates;
     use cassiopeia_mapping::{
@@ -72,7 +64,6 @@ mod tests {
         template_site::TemplateSite,
     };
     use cassiopeia_ngsi_ld::entity::name::NameBuf;
-    use cassiopeia_reporter::backend::noop::NoopReporter;
     use pretty_assertions::assert_eq;
     use std::{path::Path, sync::Arc};
     use urn_rs::Urn;
@@ -96,18 +87,13 @@ mod tests {
     }
 
     #[test]
-    fn an_empty_sink_says_nothing_and_counts_nothing() {
-        assert_eq!(report_unresolved_templates(&NoopReporter::new(), UnresolvedTemplates::new()), 0);
-    }
-
-    #[test]
     fn one_attribute_is_named_once_with_its_first_entity_however_many_lost_it() {
         let sink = RecordingReporter::new();
         let unresolved = UnresolvedTemplates::new();
         unresolved.record(&name("dafifCode"), &urn("urn:ngsi-ld:Country:Bonaire"), failure());
         unresolved.record(&name("dafifCode"), &urn("urn:ngsi-ld:Country:Curacao"), failure());
 
-        let total = report_unresolved_templates(&sink, unresolved);
+        let total = report_sink(&sink, unresolved, unresolved_template_diagnostic);
 
         let reported = sink.diagnostics();
         assert_eq!(total, 2);
@@ -125,7 +111,7 @@ mod tests {
         let unresolved = UnresolvedTemplates::new();
         unresolved.record(&name("codes"), &urn("urn:ngsi-ld:Sensor:a"), failure());
 
-        report_unresolved_templates(&sink, unresolved);
+        report_sink(&sink, unresolved, unresolved_template_diagnostic);
 
         let reported = sink.diagnostics();
         assert_eq!(

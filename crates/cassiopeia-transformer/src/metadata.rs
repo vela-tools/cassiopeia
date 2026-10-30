@@ -140,6 +140,7 @@ mod tests {
         qualifier_cache::QualifierCache,
         unit_code_cache::UnitCodeCache,
     };
+    use cassiopeia_batch_sink::batch_sink::BatchSink;
     use cassiopeia_geometry::geometry::NgsiLdGeometry;
     use cassiopeia_ir::{metadata::MetadataStorage, sub_attribute::SubAttribute};
     use cassiopeia_ngsi_ld::{
@@ -149,7 +150,7 @@ mod tests {
         },
         value::types::{TemporalValue, Value},
     };
-    use cassiopeia_unreadable_timestamps::{timestamp_loss::TimestampLoss, unreadable_timestamps::UnreadableTimestamps};
+    use cassiopeia_unreadable_timestamps::{attribute_loss::AttributeLoss, timestamp_loss::TimestampLoss, unreadable_timestamps::UnreadableTimestamps};
     use chrono::{TimeZone, Utc};
     use indexmap::IndexMap;
     use pretty_assertions::{assert_eq, assert_ne};
@@ -242,9 +243,15 @@ mod tests {
         let summary = summary_with_observed_at(Value::from(2026_i64), &unreadable);
 
         assert_eq!(summary.observed_at, None);
-        let entries = unreadable.into_entries();
+        let entries = BatchSink::from(unreadable).into_entries().collect::<Vec<_>>();
         assert_eq!(entries.len(), 1);
-        assert_eq!(entries[0].0, (TimestampLoss::ObservedAt, name("temperature")));
+        assert_eq!(
+            entries[0].0,
+            AttributeLoss {
+                loss: TimestampLoss::ObservedAt,
+                attribute: name("temperature")
+            }
+        );
         assert_eq!(entries[0].1.example.as_ref(), "2026");
     }
 
@@ -315,9 +322,15 @@ mod tests {
 
         assert_eq!(summary.expires_at, None);
         assert!(summary.custom_attributes.is_empty());
-        let entries = unreadable.into_entries();
+        let entries = BatchSink::from(unreadable).into_entries().collect::<Vec<_>>();
         assert_eq!(entries.len(), 1);
-        assert_eq!(entries[0].0, (TimestampLoss::ExpiresAt, name("temperature")));
+        assert_eq!(
+            entries[0].0,
+            AttributeLoss {
+                loss: TimestampLoss::ExpiresAt,
+                attribute: name("temperature")
+            }
+        );
         assert_eq!(entries[0].1.example.as_ref(), "tomorrow");
     }
 
@@ -350,10 +363,22 @@ mod tests {
 
         assert_eq!(summary.observed_at, None);
         assert_eq!(summary.expires_at, None);
-        let entries = unreadable.into_entries();
+        let entries = BatchSink::from(unreadable).into_entries().collect::<Vec<_>>();
         assert_eq!(entries.len(), 2);
-        assert_eq!(entries[0].0, (TimestampLoss::ObservedAt, name("temperature")));
-        assert_eq!(entries[1].0, (TimestampLoss::ExpiresAt, name("temperature")));
+        assert_eq!(
+            entries[0].0,
+            AttributeLoss {
+                loss: TimestampLoss::ObservedAt,
+                attribute: name("temperature")
+            }
+        );
+        assert_eq!(
+            entries[1].0,
+            AttributeLoss {
+                loss: TimestampLoss::ExpiresAt,
+                attribute: name("temperature")
+            }
+        );
     }
 
     #[test]

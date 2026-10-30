@@ -1,6 +1,7 @@
 use crate::{
     error::ExpanderError,
     expander::Expander,
+    expiry_resolver::ExpiryResolver,
     router::MappingRouter,
     urn::{error::UrnError, generator::UrnGenerator},
 };
@@ -33,6 +34,7 @@ use urn_rs::Urn;
 pub struct GenericExpander {
     router: MappingRouter,
     urn_generator: UrnGenerator,
+    expiry_resolver: ExpiryResolver,
     parallelism: Parallelism,
     /// The run-level variables injected into every record this lane expands, under the reserved
     /// top-level `vars` key, so a mapping reads them as `{{ vars.<name> }}`. Empty when the run
@@ -46,9 +48,11 @@ impl GenericExpander {
     /// `vars` is this lane's effective run-level variables (manifest-global overlaid by CLI `--var`
     /// and this input's own `vars`), injected into each record under the reserved `vars` key.
     #[must_use]
-    pub const fn new(router: MappingRouter, resolver: TemplateResolver, vars: Map<String, Value>) -> GenericExpander {
+    pub fn new(router: MappingRouter, resolver: TemplateResolver, vars: Map<String, Value>) -> GenericExpander {
         GenericExpander {
             router,
+            // Cloning the resolver shares its engine through an `Arc`, so both hold the same one.
+            expiry_resolver: ExpiryResolver::new(resolver.clone()),
             urn_generator: UrnGenerator::new(resolver),
             parallelism: Parallelism::Parallel,
             vars,
@@ -78,7 +82,7 @@ impl GenericExpander {
 
         let main_urn = self.urn_generator.generate_id(mapping, &data)?;
         let main_scope = self.urn_generator.generate_scope(mapping, &data)?;
-        let main_expires_at = self.urn_generator.generate_expires_at(mapping, &main_urn, &data, unreadable_expiries)?;
+        let main_expires_at = self.expiry_resolver.resolve(mapping, &main_urn, &data, unreadable_expiries)?;
 
         for (attribute_name, attribute) in mapping.attributes() {
             if let Some(synthetic) = attribute.synthetic_entity() {
@@ -186,9 +190,7 @@ impl GenericExpander {
                 Err(other) => return Err(other.into()),
             };
             let synthetic_scope = self.urn_generator.generate_scope(synthetic, &token_data)?;
-            let synthetic_expires_at = self
-                .urn_generator
-                .generate_expires_at(synthetic, &synthetic_urn, &token_data, unreadable_expiries)?;
+            let synthetic_expires_at = self.expiry_resolver.resolve(synthetic, &synthetic_urn, &token_data, unreadable_expiries)?;
 
             child_contexts.push(ParentContext::new(
                 ParentContextType::Child(synthetic_urn.clone()),
@@ -236,7 +238,7 @@ impl GenericExpander {
             Err(other) => return Err(other.into()),
         };
         let synthetic_scope = self.urn_generator.generate_scope(synthetic, data)?;
-        let synthetic_expires_at = self.urn_generator.generate_expires_at(synthetic, &synthetic_urn, data, unreadable_expiries)?;
+        let synthetic_expires_at = self.expiry_resolver.resolve(synthetic, &synthetic_urn, data, unreadable_expiries)?;
 
         // The parent context owns its URN and path, while the main entity keeps its own for its fragment.
         let parent = ParentContext::new(ParentContextType::Parent(main_urn.clone()), Self::top_level_key(attribute_name));
@@ -350,6 +352,7 @@ mod tests {
         router::{CollectionRoutes, MappingRouter},
         urn::error::UrnError,
     };
+    use cassiopeia_batch_sink::batch_sink::BatchSink;
     use cassiopeia_common::collection::CollectionName;
     use cassiopeia_ir::{fragment::Fragment, mapped::Mapped, parent_context::ParentContextType, record::Record};
     use cassiopeia_mapping::{mapping::Mapping, template::runner::TemplateRunner};
@@ -733,12 +736,30 @@ mod tests {
 
         assert_eq!(fragments[0].inner().expires_at(), &None);
         assert_eq!(fragments[0].inner().target_urn().to_string(), "urn:ngsi-ld:AirQualityObserved:S-1");
-        let entries = expander.unreadable_expiries.into_entries();
+        let entries = BatchSink::from(expander.unreadable_expiries).into_entries().collect::<Vec<_>>();
         assert_eq!(entries.len(), 1);
         assert_eq!(entries[0].0.as_str(), "AirQualityObserved");
         assert_eq!(entries[0].1.exemplar.to_string(), "urn:ngsi-ld:AirQualityObserved:S-1");
         assert_eq!(entries[0].1.unreadable.example.as_ref(), "the day after tomorrow");
         assert_eq!(entries[0].1.unreadable.occurrences.get(), 1);
+    }
+
+    #[test]
+    fn an_expires_at_template_that_fails_to_render_skips_the_record_as_an_expiry_failure() {
+        let expander = expander(
+            r#"{
+                version: "v4",
+                dataModel: "Sensor",
+                identity: { entityName: "S-{{ id }}" },
+                expiresAt: "{{ until + 1 }}",
+                attributes: { temperature: { source: "{{ temperature }}" } },
+            }"#,
+        );
+
+        let result = expander.expand(record(json!({"id": 1})));
+
+        assert!(matches!(result, Err(ExpanderError::Expiry(_))), "{result:?}");
+        assert!(expander.unreadable_expiries.is_empty());
     }
 
     #[test]

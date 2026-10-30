@@ -54,6 +54,8 @@ mod tests {
     use crate::detectors::{Detector, kml::KmlDetector};
     use cassiopeia_common::format::DataFormat;
     use pretty_assertions::assert_eq;
+    use std::io::{Cursor, Write};
+    use zip::{ZipWriter, write::SimpleFileOptions};
 
     #[test]
     fn kml_is_detected_by_its_root_element_and_ogc_namespace() {
@@ -70,9 +72,6 @@ mod tests {
 
     #[test]
     fn kmz_is_detected_by_a_valid_kml_entry() {
-        use std::io::{Cursor, Write};
-        use zip::{ZipWriter, write::SimpleFileOptions};
-
         let mut bytes = Cursor::new(Vec::new());
         {
             let mut archive = ZipWriter::new(&mut bytes);

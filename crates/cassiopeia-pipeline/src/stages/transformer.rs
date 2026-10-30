@@ -2,10 +2,11 @@ use crate::{
     error::PipelineError,
     pipeline_stage::PipelineStage,
     stages::{
+        batch_sink_report::report_sink,
         pump::{BatchSender, PumpConfig, PumpProcessor, run_pump_stage},
         skipped_records::SkippedRecords,
         stage_env::StageEnv,
-        unreadable_timestamp_report::report_unreadable_timestamps,
+        unreadable_timestamp_report::unreadable_timestamp_diagnostic,
     },
 };
 use cassiopeia_common::{
@@ -67,7 +68,7 @@ impl PumpProcessor for TransformerProcessor {
         if !skipped.is_empty() {
             skipped.report(self.reporter, Severity::Warning);
         }
-        let warnings = failed + report_unreadable_timestamps(self.reporter, unreadable);
+        let warnings = failed + report_sink(self.reporter, unreadable, unreadable_timestamp_diagnostic);
         if warnings > 0 {
             stage.warn_inc_by(warnings);
             self.telemetry.add_warnings(warnings);

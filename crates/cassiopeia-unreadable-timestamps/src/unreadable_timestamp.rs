@@ -1,3 +1,4 @@
+use cassiopeia_batch_sink::recurring::Recurring;
 use cassiopeia_ngsi_ld::value::types::Value;
 use std::num::NonZeroU64;
 
@@ -26,10 +27,15 @@ impl UnreadableTimestamp {
             occurrences: NonZeroU64::MIN,
         }
     }
+}
 
-    /// Counts one more occurrence, keeping the example already held.
-    pub const fn count_another(&mut self) {
+impl Recurring for UnreadableTimestamp {
+    fn count_another(&mut self) {
         self.occurrences = self.occurrences.saturating_add(1);
+    }
+
+    fn occurrences(&self) -> NonZeroU64 {
+        self.occurrences
     }
 }
 
@@ -55,6 +61,7 @@ pub fn unreadable_text(value: &Value) -> Option<Box<str>> {
 #[cfg(test)]
 mod tests {
     use crate::unreadable_timestamp::{UnreadableTimestamp, unreadable_text};
+    use cassiopeia_batch_sink::recurring::Recurring;
     use cassiopeia_ngsi_ld::value::types::Value;
     use pretty_assertions::assert_eq;
     use serde_json::json;

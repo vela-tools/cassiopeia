@@ -90,6 +90,7 @@ wildcard_imports = "deny"
 
 [workspace.dependencies]
 cassiopeia-aggregator = { path = "crates/cassiopeia-aggregator" }
+cassiopeia-batch-sink = { path = "crates/cassiopeia-batch-sink" }
 cassiopeia-cli = { path = "crates/cassiopeia-cli" }
 cassiopeia-collector = { path = "crates/cassiopeia-collector" }
 cassiopeia-common = { path = "crates/cassiopeia-common" }

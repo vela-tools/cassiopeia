@@ -46,7 +46,8 @@ impl InstantCache {
 #[cfg(test)]
 mod tests {
     use crate::instant_cache::InstantCache;
-    use cassiopeia_ngsi_ld::value::types::Value;
+    use cassiopeia_ngsi_ld::value::types::{TemporalValue, Value};
+    use chrono::{TimeZone, Utc};
     use pretty_assertions::{assert_eq, assert_ne};
     use serde_json::{Value as JsonValue, json};
 
@@ -105,9 +106,6 @@ mod tests {
 
     #[test]
     fn an_instant_the_extraction_already_read_is_taken_as_it_is() {
-        use cassiopeia_ngsi_ld::value::types::TemporalValue;
-        use chrono::{TimeZone, Utc};
-
         let mut cache = InstantCache::new();
         let instant = Utc.with_ymd_and_hms(2026, 4, 3, 22, 0, 20).unwrap();
 

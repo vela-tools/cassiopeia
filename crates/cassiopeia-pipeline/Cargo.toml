@@ -9,6 +9,7 @@ repository.workspace = true
 
 [dependencies]
 cassiopeia-aggregator.workspace = true
+cassiopeia-batch-sink.workspace = true
 cassiopeia-collector.workspace = true
 cassiopeia-common.workspace = true
 cassiopeia-diagnostic.workspace = true

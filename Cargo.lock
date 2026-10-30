@@ -443,6 +443,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "cassiopeia-batch-sink"
+version = "1.1.1"
+dependencies = [
+ "derive-where",
+ "indexmap 2.14.2",
+ "parking_lot 0.13.0",
+ "pretty_assertions",
+]
+
+[[package]]
 name = "cassiopeia-cli"
 version = "1.1.1"
 dependencies = [
@@ -587,6 +597,7 @@ name = "cassiopeia-expander"
 version = "1.1.1"
 dependencies = [
  "ahash",
+ "cassiopeia-batch-sink",
  "cassiopeia-common",
  "cassiopeia-ir",
  "cassiopeia-mapping",
@@ -606,6 +617,7 @@ dependencies = [
 name = "cassiopeia-extractor"
 version = "1.1.1"
 dependencies = [
+ "cassiopeia-batch-sink",
  "cassiopeia-common",
  "cassiopeia-expander",
  "cassiopeia-geometry",
@@ -616,8 +628,6 @@ dependencies = [
  "chrono",
  "compact_str 0.10.0",
  "derive_more",
- "indexmap 2.14.2",
- "parking_lot 0.13.0",
  "pretty_assertions",
  "rayon",
  "serde_json",
@@ -783,6 +793,7 @@ name = "cassiopeia-pipeline"
 version = "1.1.1"
 dependencies = [
  "cassiopeia-aggregator",
+ "cassiopeia-batch-sink",
  "cassiopeia-collector",
  "cassiopeia-common",
  "cassiopeia-diagnostic",
@@ -938,6 +949,7 @@ dependencies = [
 name = "cassiopeia-transformer"
 version = "1.1.1"
 dependencies = [
+ "cassiopeia-batch-sink",
  "cassiopeia-common",
  "cassiopeia-geometry",
  "cassiopeia-ir",
@@ -979,9 +991,10 @@ dependencies = [
 name = "cassiopeia-unreadable-timestamps"
 version = "1.1.1"
 dependencies = [
+ "cassiopeia-batch-sink",
  "cassiopeia-ngsi-ld",
+ "derive_more",
  "indexmap 2.14.2",
- "parking_lot 0.13.0",
  "pretty_assertions",
  "serde_json",
  "urn-rs",

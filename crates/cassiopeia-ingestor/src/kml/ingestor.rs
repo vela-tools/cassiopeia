@@ -226,6 +226,7 @@ mod tests {
     use serde_json::{Value, json};
     use std::{collections::HashMap, fs::File, io::Write, sync::mpsc::sync_channel, thread};
     use temp_dir::TempDir;
+    use zip::{ZipWriter, write::SimpleFileOptions};
 
     const SAMPLE: &str = r#"<?xml version="1.0" encoding="UTF-8"?>
 <kml xmlns="http://www.opengis.net/kml/2.2">
@@ -249,8 +250,6 @@ mod tests {
     }
 
     fn profiled_kmz(contents: &str) -> (TempDir, ProfiledPayload) {
-        use zip::{ZipWriter, write::SimpleFileOptions};
-
         let dir = TempDir::new().unwrap();
         let path = dir.path().join("data.kmz");
         let file = File::create(&path).unwrap();

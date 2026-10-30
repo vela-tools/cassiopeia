@@ -1,12 +1,13 @@
+use cassiopeia_batch_sink::recurring::Recurring;
 use cassiopeia_diagnostic::{
     code::{diagnostic_code::DiagnosticCode, extractor_code::ExtractorCode, transform_code::TransformCode},
     context_field::ContextField,
+    diagnostic::Diagnostic,
     diagnostic_builder::DiagnosticBuilder,
     severity::Severity,
 };
 use cassiopeia_ngsi_ld::entity::name::NameBuf;
-use cassiopeia_reporter::reporter::DiagnosticSink;
-use cassiopeia_unreadable_timestamps::{timestamp_loss::TimestampLoss, unreadable_timestamp::UnreadableTimestamp, unreadable_timestamps::UnreadableTimestamps};
+use cassiopeia_unreadable_timestamps::{attribute_loss::AttributeLoss, timestamp_loss::TimestampLoss, unreadable_timestamp::UnreadableTimestamp};
 
 /// The code the loss of one attribute timestamp is published under.
 ///
@@ -38,47 +39,32 @@ fn headline(loss: TimestampLoss, attribute: &NameBuf, record: &UnreadableTimesta
     )
 }
 
-/// Names each attribute's unreadable timestamps once and returns how many records lost one.
+/// The diagnostic naming one attribute timestamp's losses.
 ///
 /// One diagnostic per attribute timestamp lost, however many records lost it and however many
 /// distinct spellings they carried: the attribute, the loss, and the code are the failure, and the
 /// example spelling rides on the headline, which stays outside the diagnostic's identity so it
 /// cannot split one group into a line per batch.
-pub(crate) fn report_unreadable_timestamps(sink: &dyn DiagnosticSink, unreadable: UnreadableTimestamps) -> u64 {
-    if unreadable.is_empty() {
-        return 0;
-    }
-
-    let mut total: u64 = 0;
-    for ((loss, attribute), record) in unreadable.into_entries() {
-        sink.report(
-            &DiagnosticBuilder::new(Severity::Warning, code(loss), headline(loss, &attribute, &record))
-                .with_context(ContextField::Attribute(attribute))
-                .with_occurrences(record.occurrences)
-                .build(),
-        );
-        total = total.saturating_add(record.occurrences.get());
-    }
-
-    total
+pub(crate) fn unreadable_timestamp_diagnostic(AttributeLoss { loss, attribute }: AttributeLoss, record: &UnreadableTimestamp) -> Diagnostic {
+    DiagnosticBuilder::new(Severity::Warning, code(loss), headline(loss, &attribute, record))
+        .with_context(ContextField::Attribute(attribute))
+        .with_occurrences(record.occurrences())
+        .build()
 }
 
 #[cfg(test)]
 mod tests {
-    use crate::{stages::unreadable_timestamp_report::report_unreadable_timestamps, test_reporter::RecordingReporter};
+    use crate::{
+        stages::{batch_sink_report::report_sink, unreadable_timestamp_report::unreadable_timestamp_diagnostic},
+        test_reporter::RecordingReporter,
+    };
     use cassiopeia_diagnostic::code::{diagnostic_code::DiagnosticCode, extractor_code::ExtractorCode, transform_code::TransformCode};
     use cassiopeia_ngsi_ld::entity::name::NameBuf;
-    use cassiopeia_reporter::backend::noop::NoopReporter;
     use cassiopeia_unreadable_timestamps::{timestamp_loss::TimestampLoss, unreadable_timestamps::UnreadableTimestamps};
     use pretty_assertions::assert_eq;
 
     fn name(value: &str) -> NameBuf {
         NameBuf::new(value).expect("valid name")
-    }
-
-    #[test]
-    fn an_empty_sink_says_nothing_and_counts_nothing() {
-        assert_eq!(report_unreadable_timestamps(&NoopReporter::new(), UnreadableTimestamps::new()), 0);
     }
 
     #[test]
@@ -89,7 +75,7 @@ mod tests {
         unreadable.record(TimestampLoss::AttributeValue, &name("dateObserved"), "2026-03-01 11:04:36+00:00");
         unreadable.record(TimestampLoss::AttributeValue, &name("dateObserved"), "2026-03-01 11:04:37+00:00");
 
-        let total = report_unreadable_timestamps(&sink, unreadable);
+        let total = report_sink(&sink, unreadable, unreadable_timestamp_diagnostic);
 
         let reported = sink.diagnostics();
         assert_eq!(total, 3);
@@ -106,7 +92,7 @@ mod tests {
         let unreadable = UnreadableTimestamps::new();
         unreadable.record(TimestampLoss::ObservedAt, &name("temperature"), "not a timestamp");
 
-        report_unreadable_timestamps(&sink, unreadable);
+        report_sink(&sink, unreadable, unreadable_timestamp_diagnostic);
 
         let reported = sink.diagnostics();
         assert_eq!(reported[0].code, DiagnosticCode::Transform(TransformCode::ObservedAtUnreadable));
@@ -119,7 +105,7 @@ mod tests {
         let unreadable = UnreadableTimestamps::new();
         unreadable.record(TimestampLoss::ExpiresAt, &name("until"), "the day after tomorrow");
 
-        report_unreadable_timestamps(&sink, unreadable);
+        report_sink(&sink, unreadable, unreadable_timestamp_diagnostic);
 
         let reported = sink.diagnostics();
         assert_eq!(reported[0].code, DiagnosticCode::Transform(TransformCode::ExpiresAtUnreadable));
@@ -134,7 +120,7 @@ mod tests {
         unreadable.record(TimestampLoss::ExpiresAt, &name("temperature"), "later");
         unreadable.record(TimestampLoss::ObservedAt, &name("temperature"), "earlier");
 
-        report_unreadable_timestamps(&sink, unreadable);
+        report_sink(&sink, unreadable, unreadable_timestamp_diagnostic);
 
         let reported = sink.diagnostics();
         assert_eq!(reported.len(), 2);
@@ -149,7 +135,7 @@ mod tests {
         unreadable.record(TimestampLoss::AttributeValue, &name("dateObservedTo"), "later");
         unreadable.record(TimestampLoss::AttributeValue, &name("dateObserved"), "earlier");
 
-        let total = report_unreadable_timestamps(&sink, unreadable);
+        let total = report_sink(&sink, unreadable, unreadable_timestamp_diagnostic);
 
         let reported = sink.diagnostics();
         assert_eq!(total, 2);

@@ -23,7 +23,21 @@ pub struct Fragment {
 }
 
 /// The owned constituent parts of a [`Fragment`], produced by [`Fragment::into_parts`].
-pub type FragmentParts = (Value, Urn, Option<NgsiLdScope>, Option<DateTime<Utc>>, Option<Vec<ParentContext>>);
+///
+/// Each field is the [`Fragment`] field of the same name.
+#[derive(Debug)]
+pub struct FragmentParts {
+    /// The source data used to derive the fragment.
+    pub source_data: Value,
+    /// The pre-calculated target URN.
+    pub target_urn: Urn,
+    /// The resolved scope of the entity.
+    pub scope: Option<NgsiLdScope>,
+    /// The resolved entity `expiresAt` (ETSI GS CIM 009 v1.9.1 clause 4.5.1).
+    pub expires_at: Option<DateTime<Utc>>,
+    /// Relationship context for child entities.
+    pub parent_context: Option<Vec<ParentContext>>,
+}
 
 impl Fragment {
     /// Builds a fragment from its source data, target URN, scope, entity `expiresAt`, and optional
@@ -52,7 +66,13 @@ impl Fragment {
     /// from being deep copied on its way in.
     #[must_use]
     pub fn into_parts(self) -> FragmentParts {
-        (self.source_data, self.target_urn, self.scope, self.expires_at, self.parent_context)
+        FragmentParts {
+            source_data: self.source_data,
+            target_urn: self.target_urn,
+            scope: self.scope,
+            expires_at: self.expires_at,
+            parent_context: self.parent_context,
+        }
     }
 }
 

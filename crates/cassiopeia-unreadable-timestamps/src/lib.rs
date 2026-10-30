@@ -8,9 +8,12 @@
 //! gathered here and named once the batch is through.
 //!
 //! The extract, expand, and transform stages each meet one of those losses, which is why the record
-//! lives in a crate of its own rather than inside any of them. It knows nothing about diagnostics:
-//! it gathers what was lost, and the stage that owns the loss decides what to call it.
+//! lives in a crate of its own rather than inside any of them. Both sinks are a
+//! [`BatchSink`](cassiopeia_batch_sink::batch_sink::BatchSink) keyed by what failed; they know
+//! nothing about diagnostics: they gather what was lost, and the stage that owns the loss decides
+//! what to call it.
 
+pub mod attribute_loss;
 pub mod timestamp_loss;
 pub mod unreadable_expiries;
 pub mod unreadable_expiry;

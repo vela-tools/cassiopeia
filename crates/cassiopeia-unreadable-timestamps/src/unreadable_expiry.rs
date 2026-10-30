@@ -1,4 +1,6 @@
 use crate::unreadable_timestamp::UnreadableTimestamp;
+use cassiopeia_batch_sink::recurring::Recurring;
+use std::num::NonZeroU64;
 use urn_rs::Urn;
 
 /// What one entity type lost to entity `expiresAt` text that is not a timestamp, over one batch.
@@ -27,16 +29,22 @@ impl UnreadableExpiry {
             unreadable: UnreadableTimestamp::first(example),
         }
     }
+}
 
-    /// Counts one more occurrence, keeping the exemplar and example already held.
-    pub const fn count_another(&mut self) {
+impl Recurring for UnreadableExpiry {
+    fn count_another(&mut self) {
         self.unreadable.count_another();
+    }
+
+    fn occurrences(&self) -> NonZeroU64 {
+        self.unreadable.occurrences()
     }
 }
 
 #[cfg(test)]
 mod tests {
     use crate::unreadable_expiry::UnreadableExpiry;
+    use cassiopeia_batch_sink::recurring::Recurring;
     use pretty_assertions::assert_eq;
     use urn_rs::Urn;
 
@@ -52,6 +60,6 @@ mod tests {
 
         assert_eq!(record.exemplar, urn("urn:ngsi-ld:Sensor:1"));
         assert_eq!(record.unreadable.example.as_ref(), "tomorrow");
-        assert_eq!(record.unreadable.occurrences.get(), 3);
+        assert_eq!(record.occurrences().get(), 3);
     }
 }

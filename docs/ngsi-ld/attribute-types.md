@@ -278,7 +278,7 @@ An `observedAt` anywhere in an entity marks the entity as temporal. Successive r
 }
 ```
 
-Source text that reads as no date-time is not emitted as a malformed qualifier: the attribute is still published without `expiresAt`, and the run warns with the attribute name and the text it could not read, under its own `expires-at-unreadable` code.
+Source text that reads as no date-time is not emitted as a malformed qualifier: the attribute is still published without `expiresAt`, and the run warns with the attribute name and the text it could not read, under its own `transform-expires-at-unreadable` code.
 
 `expiresAt` is also an optional reserved member of the entity itself (ETSI GS CIM 009 v1.9.1 clause 4.5.1, defined by clause 4.22): one `DateTime` bounding the whole entity, not one of its values. A mapping declares it at the top level, beside `identity` (see [Set an expiry](mapping.md#set-an-expiry)), and Cassiopeia writes it as a direct member of the entity object, right after `scope`, in the normalized and concise representations (the simplified representation of clause 4.5.4 carries neither member):
 

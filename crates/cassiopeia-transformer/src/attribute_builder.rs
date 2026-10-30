@@ -219,7 +219,15 @@ pub fn build_sub_attribute(kind: NgsiLdAttributeKind, value: Value, object_type:
 #[cfg(test)]
 mod tests {
     use crate::{
-        attribute_builder::{build_geo_property, build_language_property, build_list_property, build_sub_attribute, build_vocab_property},
+        attribute_builder::{
+            build_geo_property,
+            build_language_property,
+            build_list_property,
+            build_property,
+            build_relationship,
+            build_sub_attribute,
+            build_vocab_property,
+        },
         metadata::MetadataSummary,
     };
     use cassiopeia_geometry::geometry::NgsiLdGeometry;
@@ -230,9 +238,11 @@ mod tests {
         },
         value::types::{Number, Value},
     };
+    use chrono::{TimeZone, Utc};
     use indexmap::IndexMap;
     use pretty_assertions::assert_eq;
     use serde_json::json;
+    use urn_rs::Urn;
 
     fn empty_meta() -> MetadataSummary {
         MetadataSummary {
@@ -250,10 +260,6 @@ mod tests {
 
     #[test]
     fn a_property_and_a_relationship_carry_their_expires_at_qualifier() {
-        use crate::attribute_builder::{build_property, build_relationship};
-        use chrono::{TimeZone, Utc};
-        use urn_rs::Urn;
-
         let expires_at = Utc.with_ymd_and_hms(2026, 10, 25, 13, 0, 0).unwrap();
         let meta = MetadataSummary {
             observed_at: None,
@@ -292,8 +298,6 @@ mod tests {
 
     #[test]
     fn a_geo_property_carries_its_expires_at_qualifier() {
-        use chrono::{TimeZone, Utc};
-
         let expires_at = Utc.with_ymd_and_hms(2026, 10, 25, 13, 0, 0).unwrap();
         let meta = MetadataSummary {
             observed_at: None,

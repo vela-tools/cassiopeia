@@ -3,12 +3,13 @@ use crate::{
     pipeline_config::ExtractionParallelism,
     pipeline_stage::PipelineStage,
     stages::{
-        coded_error::CodedError,
+        batch_sink_report::report_sink,
+        dropped_geometry_report::dropped_geometry_diagnostic,
         pump::{BatchSender, PumpConfig, PumpProcessor, run_pump_stage},
         skipped_records::SkippedRecords,
         stage_env::StageEnv,
-        unreadable_timestamp_report::report_unreadable_timestamps,
-        unresolved_template_report::report_unresolved_templates,
+        unreadable_timestamp_report::unreadable_timestamp_diagnostic,
+        unresolved_template_report::unresolved_template_diagnostic,
     },
 };
 use cassiopeia_common::{
@@ -20,18 +21,12 @@ use cassiopeia_common::{
     stage::Stage,
     telemetry::{channel_boundary::ChannelBoundary, run::RunTelemetry},
 };
-use cassiopeia_diagnostic::{code::diagnostic_code::DiagnosticCode, context_field::ContextField, diagnostic_builder::from_error, severity::Severity};
-use cassiopeia_extractor::{
-    dropped_attributes::DroppedAttributes,
-    dropped_geometries::DroppedGeometries,
-    entity_extractor::EntityExtractor,
-    error::ExtractionError,
-    extractor::Extractor,
-};
+use cassiopeia_diagnostic::severity::Severity;
+use cassiopeia_extractor::{dropped_attributes::DroppedAttributes, entity_extractor::EntityExtractor, error::ExtractionError, extractor::Extractor};
 use cassiopeia_ir::{assembled_entity::AssembledEntity, entity::Entity, mapped::Mapped};
 use cassiopeia_mapping::template::resolver::TemplateResolver;
 use cassiopeia_reporter::{guard::StageGuard, reporter::Reporter};
-use std::{num::NonZeroU64, ops::ControlFlow, sync::Arc};
+use std::{ops::ControlFlow, sync::Arc};
 
 /// Resolves each assembled entity's attribute values from its source data.
 ///
@@ -49,34 +44,6 @@ struct ExtractorProcessor {
     /// The run telemetry warnings are counted into, so the run summary's warning total matches what
     /// the stage reported.
     telemetry: Arc<RunTelemetry>,
-}
-
-impl ExtractorProcessor {
-    /// Names each distinct refusal once and returns how many attributes were dropped in total.
-    ///
-    /// The reporter collapses a repeated diagnostic into one line plus a count, so the per-batch sink
-    /// only has to avoid repeating itself within its own batch. Each refusal carries the attribute it
-    /// cost and its own geometry code, so the run summary can say which structural rule the source
-    /// data broke.
-    fn report_dropped_geometries(&self, dropped: DroppedGeometries) -> u64 {
-        if dropped.is_empty() {
-            return 0;
-        }
-
-        let mut total: u64 = 0;
-        for (entry, count) in dropped.into_entries() {
-            let occurrences = NonZeroU64::new(count).unwrap_or(NonZeroU64::MIN);
-            self.reporter.report(
-                &from_error(Severity::Warning, DiagnosticCode::Geometry(entry.refusal.code()), &entry.refusal)
-                    .with_context(ContextField::Attribute(entry.attribute))
-                    .with_occurrences(occurrences)
-                    .build(),
-            );
-            total = total.saturating_add(count);
-        }
-
-        total
-    }
 }
 
 impl PumpProcessor for ExtractorProcessor {
@@ -108,9 +75,9 @@ impl PumpProcessor for ExtractorProcessor {
             templates,
         } = dropped;
         let warnings = failed
-            + self.report_dropped_geometries(geometries)
-            + report_unreadable_timestamps(self.reporter, timestamps)
-            + report_unresolved_templates(self.reporter, templates);
+            + report_sink(self.reporter, geometries, dropped_geometry_diagnostic)
+            + report_sink(self.reporter, timestamps, unreadable_timestamp_diagnostic)
+            + report_sink(self.reporter, templates, unresolved_template_diagnostic);
         if warnings > 0 {
             stage.warn_inc_by(warnings);
             self.telemetry.add_warnings(warnings);
