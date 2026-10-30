@@ -1,5 +1,5 @@
 use crate::{
-    csv::{error::CsvIngestError, line_counting_reader::LineCountingReader},
+    csv::{column_key::ColumnKey, column_keys::ColumnKeys, error::CsvIngestError, line_counting_reader::LineCountingReader, renamed_column::RenamedColumn},
     error::IngestorError,
     ingestor::Ingestor,
 };
@@ -14,7 +14,13 @@ use cassiopeia_ir::{
 use encoding_rs::{Encoding, UTF_8};
 use encoding_rs_rw::DecodingReader;
 use serde_json::{Map, Number, Value};
-use std::{borrow::Cow, fs::File, io::BufReader, mem};
+use std::{
+    borrow::Cow,
+    fs::File,
+    io::BufReader,
+    mem,
+    path::{Path, PathBuf},
+};
 use tracing::{info, warn};
 
 /// A CSV reader over a file decoded to UTF-8 with its profiled encoding.
@@ -26,9 +32,11 @@ type DecodedFileReader = Reader<BufReader<LineCountingReader<DecodingReader<BufR
 /// smart value inference.
 pub struct CsvIngestor {
     reader: Option<DecodedFileReader>,
+    /// The file the records are read from.
+    path: PathBuf,
     /// The record key of each column, from the header; `None` for a headerless source, whose
     /// columns are keyed by position.
-    column_keys: Option<Vec<String>>,
+    column_keys: Option<ColumnKeys>,
     /// The encoding the file is decoded from, named when a line of the file is not valid in it.
     encoding: &'static Encoding,
     /// How the file writes its values: its decimal separator and null tokens.
@@ -88,7 +96,7 @@ impl CsvIngestor {
         // A headerless source has no names to key its columns by; its records are keyed by position
         // instead, so the first row is not consumed as a header and nothing is lost.
         let column_keys = if dialect.as_ref().is_none_or(|dialect| dialect.header_rows.is_present()) {
-            let keys = Self::column_keys(
+            let keys = ColumnKeys::from_headers(
                 reader
                     .headers()
                     .map_err(|source| CsvIngestError::reading(source, encoding, CsvIngestError::Reader))?,
@@ -105,6 +113,7 @@ impl CsvIngestor {
 
         Ok(CsvIngestor {
             reader: Some(reader),
+            path,
             column_keys,
             encoding,
             notation,
@@ -112,29 +121,18 @@ impl CsvIngestor {
         })
     }
 
-    /// Normalizes a header for use as a record key.
-    ///
-    /// A quoted header field may hold an embedded newline (RFC 4180 clause 2.6); folding it to a
-    /// space keeps the key on one line. The header is otherwise preserved verbatim: its Unicode
-    /// and punctuation are addressable directly from a mapping, so no transliteration is applied.
-    fn clean_header(header: &str) -> String {
-        header.replace('\n', " ")
+    /// The file the records are read from.
+    #[must_use]
+    pub fn path(&self) -> &Path {
+        &self.path
     }
 
-    /// The record key of each column: its cleaned header, or its zero-based position when the header
-    /// is blank, as for a headerless source. A stacked header's key column often has no label at all.
-    fn column_keys(headers: &StringRecord) -> Vec<String> {
-        headers
-            .iter()
-            .enumerate()
-            .map(|(index, header)| {
-                if header.trim().is_empty() {
-                    index.to_string()
-                } else {
-                    Self::clean_header(header)
-                }
-            })
-            .collect()
+    /// The columns whose header asks for a key another column holds, each read by a generated key
+    /// instead so its values are not lost. Empty for a header without repeats and for a headerless
+    /// source.
+    #[must_use]
+    pub fn renamed_columns(&self) -> &[RenamedColumn] {
+        self.column_keys.as_ref().map_or(&[], ColumnKeys::renamed)
     }
 
     /// Smart value inference for a CSV field, under the file's value notation.
@@ -196,11 +194,12 @@ impl CsvIngestor {
     }
 
     /// Builds a record's data map from the header, keying each value by its column's key.
-    fn keyed_by_header(column_keys: &[String], record: &StringRecord, notation: &ValueNotation) -> Map<String, Value> {
+    fn keyed_by_header(column_keys: &[ColumnKey], record: &StringRecord, notation: &ValueNotation) -> Map<String, Value> {
         let mut data = Map::with_capacity(record.len());
         for (key, value) in column_keys.iter().zip(record.iter()) {
+            let key: &str = key.as_ref();
             // Every record owns its keys, since the map is handed downstream with the record.
-            data.insert(key.clone(), Self::infer_value(value, notation));
+            data.insert(key.to_owned(), Self::infer_value(value, notation));
         }
         data
     }
@@ -226,7 +225,7 @@ impl Ingestor for CsvIngestor {
         for result in reader.records() {
             let record = result.map_err(|source| CsvIngestError::reading(source, encoding, CsvIngestError::Reader))?;
             let data = match &self.column_keys {
-                Some(column_keys) => Self::keyed_by_header(column_keys, &record, &self.notation),
+                Some(column_keys) => Self::keyed_by_header(column_keys.keys(), &record, &self.notation),
                 None => Self::keyed_by_position(&record, &self.notation),
             };
 
@@ -254,7 +253,10 @@ impl Ingestor for CsvIngestor {
 
 #[cfg(test)]
 mod tests {
-    use crate::{csv::ingestor::CsvIngestor, ingestor::Ingestor};
+    use crate::{
+        csv::{column_key::ColumnKey, column_number::ColumnNumber, ingestor::CsvIngestor, renamed_column::RenamedColumn},
+        ingestor::Ingestor,
+    };
     use cassiopeia_common::{channel::ChannelSender, format::DataFormat, signal::Signal};
     use cassiopeia_csv_dialect::{
         character_encoding::CharacterEncoding,
@@ -304,7 +306,10 @@ mod tests {
     }
 
     fn ingest_all(payload: ProfiledPayload) -> Vec<Record> {
-        let ingestor = CsvIngestor::from_payload(payload, 8).unwrap();
+        ingest(CsvIngestor::from_payload(payload, 8).unwrap())
+    }
+
+    fn ingest(ingestor: CsvIngestor) -> Vec<Record> {
         let (tx, rx) = sync_channel(4);
         thread::spawn(move || Box::new(ingestor).ingest(ChannelSender::bounded(tx)));
         rx.iter()
@@ -595,6 +600,98 @@ mod tests {
         assert_eq!(records[0].data().get("NO2"), Some(&Value::Null));
         assert_eq!(records[0].data().get("O3"), Some(&Value::Null));
         assert_eq!(records[1].data().get("NO2"), Some(&Value::String("NEU".to_string())));
+    }
+
+    fn renamed(wanted: &str, holder: usize, column: usize, key: &str) -> RenamedColumn {
+        RenamedColumn {
+            wanted: ColumnKey::from(wanted.to_owned()),
+            holder: ColumnNumber::of_index(holder),
+            column: ColumnNumber::of_index(column),
+            key: ColumnKey::from(key.to_owned()),
+        }
+    }
+
+    fn data_keys(record: &Record) -> Vec<&str> {
+        record.data().keys().map(String::as_str).collect()
+    }
+
+    #[test]
+    fn a_repeated_header_keeps_both_columns_and_reports_the_renamed_one() {
+        let (_dir, payload) = profiled_csv("id;value;value\n1;10;11\n2;20;21\n3;30;31\n", Some(dialect_in(UTF_8)));
+        let ingestor = CsvIngestor::from_payload(payload, 8).unwrap();
+        assert_eq!(ingestor.renamed_columns(), [renamed("value", 1, 2, "value@3")]);
+
+        let records = ingest(ingestor);
+        assert_eq!(records.len(), 3);
+        assert_eq!(data_keys(&records[0]), ["id", "value", "value@3"]);
+        let values: Vec<(&Value, &Value)> = records.iter().map(|record| (&record.data()["value"], &record.data()["value@3"])).collect();
+        assert_eq!(
+            values,
+            [
+                (&Value::Number(10.into()), &Value::Number(11.into())),
+                (&Value::Number(20.into()), &Value::Number(21.into())),
+                (&Value::Number(30.into()), &Value::Number(31.into())),
+            ]
+        );
+    }
+
+    #[test]
+    fn a_blank_header_keyed_by_the_position_a_named_column_holds_is_renamed() {
+        let (_dir, payload) = profiled_csv("2;name;\nSTEF;Stefansplatz;12\n", Some(dialect_in(UTF_8)));
+        let ingestor = CsvIngestor::from_payload(payload, 8).unwrap();
+        assert_eq!(ingestor.renamed_columns(), [renamed("2", 0, 2, "2@3")]);
+
+        let records = ingest(ingestor);
+        assert_eq!(data_keys(&records[0]), ["2", "name", "2@3"]);
+        assert_eq!(records[0].data().get("2"), Some(&Value::String("STEF".to_string())));
+        assert_eq!(records[0].data().get("2@3"), Some(&Value::Number(12.into())));
+    }
+
+    #[test]
+    fn a_stacked_header_joining_two_columns_to_one_name_keeps_both_columns() {
+        let contents = ";NO2;NO2\n;HMW;HMW\n;µg/m³;µg/m³\nSTEF;12;13\n";
+        let statement: DialectStatement = serde_json::from_value(serde_json::json!({
+            "delimiter": ";",
+            "skipRows": 0,
+            "headerRows": 3,
+        }))
+        .unwrap();
+        let dialect = CsvInspector::new(&statement).inspect(&Content::new(contents.as_bytes())).unwrap();
+        let (_dir, payload) = profiled_csv(contents, Some(FormatMetadata::Csv(CsvMetadata::new(dialect))));
+        let ingestor = CsvIngestor::from_payload(payload, 8).unwrap();
+        assert_eq!(ingestor.renamed_columns(), [renamed("NO2 HMW µg/m³", 1, 2, "NO2 HMW µg/m³@3")]);
+
+        let records = ingest(ingestor);
+        assert_eq!(data_keys(&records[0]), ["0", "NO2 HMW µg/m³", "NO2 HMW µg/m³@3"]);
+        assert_eq!(records[0].data().get("NO2 HMW µg/m³"), Some(&Value::Number(12.into())));
+        assert_eq!(records[0].data().get("NO2 HMW µg/m³@3"), Some(&Value::Number(13.into())));
+    }
+
+    #[test]
+    fn a_header_without_repeats_keeps_its_keys_and_renames_nothing() {
+        let (_dir, payload) = profiled_csv("id;name;\n1;Ada;x\n", Some(dialect_in(UTF_8)));
+        let ingestor = CsvIngestor::from_payload(payload, 8).unwrap();
+        assert_eq!(ingestor.renamed_columns(), []);
+
+        let records = ingest(ingestor);
+        assert_eq!(data_keys(&records[0]), ["id", "name", "2"]);
+    }
+
+    #[test]
+    fn a_headerless_source_with_repeated_values_renames_nothing() {
+        let metadata = FormatMetadata::Csv(CsvMetadata::new(Dialect {
+            delimiter: DialectByte::SEMICOLON,
+            quote_char: Quote::Char(DialectByte::DOUBLE_QUOTE),
+            preamble: Preamble::NONE,
+            header_rows: HeaderRows::NONE,
+            escape: None,
+            terminator: LineTerminator::Lf,
+            encoding: CharacterEncoding::new(UTF_8),
+            notation: ValueNotation::PLAIN,
+        }));
+        let (_dir, payload) = profiled_csv("value;value\n1;2\n", Some(metadata));
+
+        assert_eq!(CsvIngestor::from_payload(payload, 8).unwrap().renamed_columns(), []);
     }
 
     #[test]

@@ -169,6 +169,8 @@ Problems that depend on one record's data do not stop the run. Each is a warning
 | `transform-expires-at-unreadable` | An attribute's `expiresAt` could not be read as a date and time, so the attribute is written without it. |
 | `transform-observed-at-unreadable` | An `observedAt` declared without a transformation could not be read as a date and time, so the attribute is written without it. |
 
+A CSV file whose header gives two columns the same field name is still read in full. Each repeat is renamed, and the run counts one `ingest-columns-renamed` warning for the file. The warning names every renamed column and the field name to read it by. See [CSV](source-formats.md#csv).
+
 With `--verbose`, each of these also lists its causes, including Tera's own message when Tera reported one. For a template rejected at load time, that message gives the column where Tera stopped. The [templates reference](templates.md#when-a-template-fails) lists what fails at load time and how to guard a template against a missing field.
 
 ## Control how the run behaves

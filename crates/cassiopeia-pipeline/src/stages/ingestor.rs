@@ -1,4 +1,4 @@
-use crate::{error::PipelineError, pipeline_stage::PipelineStage};
+use crate::{error::PipelineError, pipeline_stage::PipelineStage, stages::renamed_columns_report::report_renamed_columns};
 use cassiopeia_common::{
     batch::Batch,
     channel::{ChannelPolicy, ChannelReceiver, ChannelSender, channel_with_telemetry},
@@ -20,14 +20,29 @@ use cassiopeia_ingestor::{
 };
 use cassiopeia_ir::{payload::ProfiledPayload, record::Record};
 use cassiopeia_profiler::{error::ProfilerError, profiler::ProfilerRoutes};
-use cassiopeia_reporter::reporter::Reporter;
+use cassiopeia_reporter::reporter::{DiagnosticSink, Reporter};
 use execution_time::ExecutionTime;
 use std::{collections::HashMap, sync::Arc, thread::spawn};
 
-/// Builds a boxed ingestor for one profiled payload. One factory exists per concrete format, which
-/// is why `DataFormat::Auto` (resolved away by the profiler before this point) has no entry and
-/// cannot reach an ingestor.
-type IngestorFactory = fn(ProfiledPayload, usize) -> Result<Box<dyn Ingestor>, IngestorError>;
+/// Builds a boxed ingestor for one profiled payload, reporting to the sink what building it found
+/// about the source. One factory exists per concrete format, which is why `DataFormat::Auto`
+/// (resolved away by the profiler before this point) has no entry and cannot reach an ingestor.
+type IngestorFactory = fn(ProfiledPayload, usize, &dyn DiagnosticSink) -> Result<PreparedIngestor, IngestorError>;
+
+/// An ingestor ready to run, and how many warnings building it reported.
+struct PreparedIngestor {
+    /// The ingestor.
+    ingestor: Box<dyn Ingestor>,
+    /// How many warnings building it reported.
+    warnings: u64,
+}
+
+impl PreparedIngestor {
+    /// An ingestor whose building reported nothing.
+    fn quiet(ingestor: Box<dyn Ingestor>) -> PreparedIngestor {
+        PreparedIngestor { ingestor, warnings: 0 }
+    }
+}
 
 /// The pre-spawned bank of ingestor threads, one waiting on each format's input channel, all writing
 /// records to one shared output channel.
@@ -53,18 +68,35 @@ pub(crate) fn spawn_ingestor_bank(
     let mut routes: ProfilerRoutes = HashMap::new();
 
     let factories: [(DataFormat, IngestorFactory); 8] = [
-        (DataFormat::Csv, |payload, batch| Ok(Box::new(CsvIngestor::from_payload(payload, batch)?))),
-        (DataFormat::Json, |payload, batch| Ok(Box::new(JsonIngestor::from_payload(payload, batch)?))),
-        (DataFormat::GeoJson, |payload, batch| {
-            Ok(Box::new(GeoJsonIngestor::from_payload(payload, batch)?))
+        (DataFormat::Csv, |payload, batch, sink| {
+            let ingestor = CsvIngestor::from_payload(payload, batch)?;
+            let warnings = report_renamed_columns(sink, ingestor.path(), ingestor.renamed_columns());
+            Ok(PreparedIngestor {
+                ingestor: Box::new(ingestor),
+                warnings,
+            })
         }),
-        (DataFormat::Kml, |payload, batch| Ok(Box::new(KmlIngestor::from_payload(payload, batch)?))),
-        (DataFormat::Kmz, |payload, batch| Ok(Box::new(KmlIngestor::from_payload(payload, batch)?))),
-        (DataFormat::Grib, |payload, batch| Ok(Box::new(GribIngestor::from_payload(payload, batch)?))),
-        (DataFormat::Shapefile, |payload, batch| {
-            Ok(Box::new(ShapefileIngestor::from_payload(payload, batch)?))
+        (DataFormat::Json, |payload, batch, _| {
+            Ok(PreparedIngestor::quiet(Box::new(JsonIngestor::from_payload(payload, batch)?)))
         }),
-        (DataFormat::Xml, |payload, batch| Ok(Box::new(XmlIngestor::from_payload(payload, batch)?))),
+        (DataFormat::GeoJson, |payload, batch, _| {
+            Ok(PreparedIngestor::quiet(Box::new(GeoJsonIngestor::from_payload(payload, batch)?)))
+        }),
+        (DataFormat::Kml, |payload, batch, _| {
+            Ok(PreparedIngestor::quiet(Box::new(KmlIngestor::from_payload(payload, batch)?)))
+        }),
+        (DataFormat::Kmz, |payload, batch, _| {
+            Ok(PreparedIngestor::quiet(Box::new(KmlIngestor::from_payload(payload, batch)?)))
+        }),
+        (DataFormat::Grib, |payload, batch, _| {
+            Ok(PreparedIngestor::quiet(Box::new(GribIngestor::from_payload(payload, batch)?)))
+        }),
+        (DataFormat::Shapefile, |payload, batch, _| {
+            Ok(PreparedIngestor::quiet(Box::new(ShapefileIngestor::from_payload(payload, batch)?)))
+        }),
+        (DataFormat::Xml, |payload, batch, _| {
+            Ok(PreparedIngestor::quiet(Box::new(XmlIngestor::from_payload(payload, batch)?)))
+        }),
     ];
 
     for (format, factory) in factories {
@@ -109,8 +141,12 @@ fn run_ingestor_lane(
         match signal {
             Signal::Data(profiled) => {
                 profiler_stage.inc_by(1);
-                match factory(profiled, batch_size) {
-                    Ok(ingestor) => {
+                match factory(profiled, batch_size, reporter) {
+                    Ok(PreparedIngestor { ingestor, warnings }) => {
+                        if warnings > 0 {
+                            ingestor_telemetry.warning(warnings);
+                            telemetry.add_warnings(warnings);
+                        }
                         let service = ingestor_telemetry.service_span();
                         ingest_one(ingestor, channel_policy, shared_tx, telemetry);
                         drop(service);

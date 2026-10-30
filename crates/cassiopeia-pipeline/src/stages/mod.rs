@@ -18,6 +18,7 @@ pub(crate) mod merged_records_report;
 pub(crate) mod nonconformant_types;
 pub(crate) mod profiler;
 pub(crate) mod pump;
+pub(crate) mod renamed_columns_report;
 pub(crate) mod resolver;
 pub(crate) mod skipped_records;
 pub(crate) mod stage_env;
