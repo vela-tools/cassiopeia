@@ -11,6 +11,10 @@ const MAX_LABEL_LENGTH: usize = 40;
 /// The most whitespace-separated words a field label carries; more reads as prose, i.e. a value.
 const MAX_LABEL_WORDS: usize = 3;
 
+/// The most records a stacked header may add below its first record. Real stacked headers carry a
+/// qualifier or two, such as an aggregation and a unit.
+const MAX_CONTINUATION_ROWS: usize = 3;
+
 /// Scores how much row 0 of `table` looks like a header, as a signed value in `[-1, 1]`: positive
 /// is header-like, negative is data-like.
 ///
@@ -107,6 +111,38 @@ pub fn looks_like_header_row(table: &Table) -> bool {
         .any(|col| col.iter().skip(1).any(|t| !matches!(t, DataType::Text | DataType::Empty)))
 }
 
+/// Counts the records directly below a header that continue it rather than start the data, in
+/// `rows`, the records after the first header record.
+///
+/// A continuation record qualifies the header's columns, such as an aggregation (`HMW`) or a unit
+/// (`µg/m³`). Two traits separate it from data. Every non-blank cell reads as a label, and no cell
+/// carries a typed value. And it is sparse where the data is dense: it leaves blank at least one
+/// column that every data record below the header fills, as a stacked header leaves its key
+/// column's label blank. An all-text table of short values has no such column, so its first data
+/// records are never taken for header. At least one data record must remain below the header.
+pub fn continuation_rows(rows: &[StringRecord]) -> usize {
+    let labelled = rows.iter().take(MAX_CONTINUATION_ROWS).take_while(|row| is_label_row(row)).count();
+    let Some(data) = rows.get(labelled..).filter(|data| !data.is_empty()) else {
+        return 0;
+    };
+
+    rows[..labelled].iter().take_while(|row| leaves_dense_column_blank(row, data)).count()
+}
+
+/// Whether every non-blank cell of `row` is a field label and none carries a typed value.
+fn is_label_row(row: &StringRecord) -> bool {
+    row.iter()
+        .map(str::trim)
+        .all(|cell| cell.is_empty() || (is_field_label(cell) && matches!(DataType::detect(cell), DataType::Text | DataType::Boolean)))
+}
+
+/// Whether `row` is blank in some column that every record of `data` fills.
+fn leaves_dense_column_blank(row: &StringRecord, data: &[StringRecord]) -> bool {
+    row.iter()
+        .enumerate()
+        .any(|(column, cell)| cell.trim().is_empty() && data.iter().all(|record| record.get(column).is_some_and(|value| !value.trim().is_empty())))
+}
+
 /// The dominant type of a column's data cells, but only when that type is a strong, non-textual
 /// pattern the header check can measure row 0 against.
 ///
@@ -179,7 +215,7 @@ fn is_field_label(cell: &str) -> bool {
 mod tests {
     use crate::inspectors::csv::{
         data_type::DataType,
-        header::{dominant_typed_pattern, header_shape, is_field_label},
+        header::{continuation_rows, dominant_typed_pattern, header_shape, is_field_label},
     };
     use ::csv::StringRecord;
     use pretty_assertions::assert_eq;
@@ -211,5 +247,47 @@ mod tests {
     #[test]
     fn a_row_holding_a_value_scores_as_data_shape() {
         assert!((header_shape(&StringRecord::from(vec!["Aruba, island", "AW"])) + 1.0).abs() < f64::EPSILON);
+    }
+
+    fn records(rows: &[&str]) -> Vec<StringRecord> {
+        rows.iter().map(|row| StringRecord::from(row.split(';').collect::<Vec<_>>())).collect()
+    }
+
+    #[test]
+    fn aggregation_and_unit_rows_below_a_header_are_continuation_rows() {
+        let rows = records(&[
+            ";;HMW;MW24",
+            ";MESZ;µg/m³;µg/m³",
+            "STEF;30.10.2026, 10:00;18,48;12,48",
+            "TAB;30.10.2026, 10:00;NE;14,03",
+        ]);
+
+        assert_eq!(continuation_rows(&rows), 2);
+    }
+
+    #[test]
+    fn an_all_text_table_of_short_values_has_no_continuation_rows() {
+        let rows = records(&["Aruba;AW;AA", "Antigua;AG;AC", "Albania;AL;"]);
+
+        assert_eq!(continuation_rows(&rows), 0);
+    }
+
+    #[test]
+    fn a_label_row_that_leaves_no_dense_column_blank_is_data() {
+        let rows = records(&["STEF;MESZ;NE", "TAB;30.10.2026, 10:00;12,5", "AKA;30.10.2026, 10:00;9,8"]);
+
+        assert_eq!(continuation_rows(&rows), 0);
+    }
+
+    #[test]
+    fn a_row_holding_a_number_is_not_a_continuation_row() {
+        let rows = records(&[";12;HMW", "STEF;30.10.2026, 10:00;18,48"]);
+
+        assert_eq!(continuation_rows(&rows), 0);
+    }
+
+    #[test]
+    fn label_rows_with_no_data_below_are_not_continuation_rows() {
+        assert_eq!(continuation_rows(&records(&[";HMW", ";MESZ"])), 0);
     }
 }

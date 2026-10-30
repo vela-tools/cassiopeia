@@ -17,13 +17,13 @@ pub enum CsvIngestError {
         path: PathBuf,
     },
 
-    /// The profiled preamble above the CSV table could not be read past.
-    #[error("could not skip the preamble of the CSV file at '{}'", path.display())]
-    Preamble {
-        /// The underlying read error.
+    /// The preamble or header above the CSV table's first data row could not be read.
+    #[error("could not read the preamble and header of the CSV file at '{}'", path.display())]
+    TableStart {
+        /// The underlying CSV read error.
         #[source]
-        source: io::Error,
-        /// The file whose preamble could not be skipped.
+        source: ::csv::Error,
+        /// The file whose table start could not be read.
         path: PathBuf,
     },
 

@@ -1,6 +1,7 @@
 use cassiopeia_data_profiler::{
     inspectors::csv::{
         dialect::{Dialect, LineTerminator},
+        header_rows::HeaderRows,
         preamble::Preamble,
     },
     metadata::{FormatMetadata, GribEdition},
@@ -66,7 +67,7 @@ fn csv_line(dialect: &Dialect, rendering: Rendering) -> String {
     if dialect.preamble != Preamble::NONE {
         fields.push(field("preamble", &preamble_token(dialect.preamble), rendering));
     }
-    fields.push(paint(HIGHLIGHT, header_token(dialect.has_headers), rendering));
+    fields.push(paint(HIGHLIGHT, &header_token(dialect.header_rows), rendering));
     fields.push(paint(MUTED, terminator_token(dialect.terminator), rendering));
     fields.push(paint(MUTED, &dialect.encoding, rendering));
     join(&fields, rendering)
@@ -107,9 +108,13 @@ fn preamble_token(preamble: Preamble) -> String {
     }
 }
 
-/// The header token for a dialect.
-const fn header_token(has_headers: bool) -> &'static str {
-    if has_headers { "header row" } else { "no header" }
+/// The header token for a dialect: absent, one row, or the row count of a stacked header.
+fn header_token(header_rows: HeaderRows) -> String {
+    match header_rows.records() {
+        0 => "no header".to_owned(),
+        1 => "header row".to_owned(),
+        records => format!("{records} header rows"),
+    }
 }
 
 /// The line-terminator token for a dialect.
@@ -122,10 +127,11 @@ const fn terminator_token(terminator: LineTerminator) -> &'static str {
 
 #[cfg(test)]
 mod tests {
-    use crate::profile_report::{byte_token, csv_line, grib_line, metadata_line, optional_byte_token, preamble_token, render_profile};
+    use crate::profile_report::{byte_token, csv_line, grib_line, header_token, metadata_line, optional_byte_token, preamble_token, render_profile};
     use cassiopeia_data_profiler::{
         inspectors::csv::{
             dialect::{Dialect, LineTerminator},
+            header_rows::HeaderRows,
             preamble::Preamble,
         },
         metadata::{CsvMetadata, FormatMetadata, GribEdition, GribMetadata},
@@ -141,7 +147,7 @@ mod tests {
             delimiter: b',',
             quote_char: Some(b'"'),
             preamble: Preamble::NONE,
-            has_headers: true,
+            header_rows: HeaderRows::ONE,
             escape: None,
             terminator: LineTerminator::Lf,
             encoding: "UTF-8".to_owned(),
@@ -175,7 +181,7 @@ mod tests {
             delimiter: b'\t',
             quote_char: None,
             preamble: Preamble::NONE,
-            has_headers: false,
+            header_rows: HeaderRows::NONE,
             escape: None,
             terminator: LineTerminator::CrLf,
             encoding: "windows-1252".to_owned(),
@@ -204,6 +210,13 @@ mod tests {
     fn a_preamble_token_pluralises_its_record_count() {
         assert_eq!(preamble_token(Preamble::new(1)), "1 record");
         assert_eq!(preamble_token(Preamble::new(3)), "3 records");
+    }
+
+    #[test]
+    fn a_header_token_states_absent_single_and_stacked_headers() {
+        assert_eq!(header_token(HeaderRows::NONE), "no header");
+        assert_eq!(header_token(HeaderRows::ONE), "header row");
+        assert_eq!(header_token(HeaderRows::new(3)), "3 header rows");
     }
 
     #[test]
