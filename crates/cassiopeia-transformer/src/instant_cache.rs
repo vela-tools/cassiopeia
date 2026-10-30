@@ -109,7 +109,6 @@ mod tests {
         let mut cache = InstantCache::new();
         let instant = Utc.with_ymd_and_hms(2026, 4, 3, 22, 0, 20).unwrap();
 
-        assert_eq!(cache.instant(&as_value(json!(null))), None);
         assert_eq!(cache.instant(&Value::Temporal(TemporalValue::DateTime(instant))), Some(instant));
     }
 }

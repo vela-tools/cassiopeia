@@ -370,27 +370,27 @@ mod tests {
 
     /// An expander bundled with the fresh expiry-warning sink its expansions record into, so a test
     /// that cares about the sink can read it and every other test passes it through untouched.
-    struct Lane {
+    struct ExpanderUnderTest {
         expander: GenericExpander,
         unreadable_expiries: UnreadableExpiries,
     }
 
-    impl Lane {
+    impl ExpanderUnderTest {
         fn expand(&self, record: Record) -> Result<Vec<Mapped<Fragment>>, ExpanderError> {
             Expander::expand(&self.expander, record, &self.unreadable_expiries)
         }
     }
 
-    fn expander(document: &str) -> Lane {
+    fn expander(document: &str) -> ExpanderUnderTest {
         expander_with_vars(document, Map::new())
     }
 
-    fn expander_with_vars(document: &str, vars: Map<String, Value>) -> Lane {
+    fn expander_with_vars(document: &str, vars: Map<String, Value>) -> ExpanderUnderTest {
         let mut runner = TemplateRunner::new();
         let mapping = compiled(document, &mut runner);
         let resolver = runner.resolver();
 
-        Lane {
+        ExpanderUnderTest {
             expander: GenericExpander::new(MappingRouter::Single(mapping), resolver, vars),
             unreadable_expiries: UnreadableExpiries::new(),
         }
@@ -707,7 +707,7 @@ mod tests {
                 version: "v4",
                 dataModel: "AirQualityObserved",
                 identity: { entityName: "S-{{ id }}" },
-                expiresAt: "/{{ until }}",
+                expiresAt: "{{ until }}",
                 attributes: { temperature: { source: "{{ temperature }}" } },
             }"#,
         );
@@ -866,7 +866,7 @@ mod tests {
     }
 
     /// An `AirQualityObserved` mapping whose `refRoad` Relationship reads its target from `source`.
-    fn road_expander(source: &str) -> Lane {
+    fn road_expander(source: &str) -> ExpanderUnderTest {
         expander(
             &r#"{
                 version: "v4",
@@ -996,7 +996,7 @@ mod tests {
     /// An `AircraftModel` mapping over a headerless `planes.dat` record whose single
     /// `belongsToAircraftType` Relationship materialises its target as a synthetic `AircraftType`
     /// named by `synthetic_identity`.
-    fn aircraft_expander(synthetic_identity: &str) -> Lane {
+    fn aircraft_expander(synthetic_identity: &str) -> ExpanderUnderTest {
         let document = r#"{
             version: "v4",
             dataModel: "AircraftModel",
@@ -1242,7 +1242,7 @@ mod tests {
 
     /// A `Route` whose `servesAirports` `ListRelationship` declares a departure instance read from `a`
     /// and an arrival instance read from `b` (ETSI GS CIM 009 v1.9.1 clause 4.5.5, EXAMPLE 19).
-    fn route_instances_expander(source_a: &str) -> Lane {
+    fn route_instances_expander(source_a: &str) -> ExpanderUnderTest {
         let document = r#"{
             version: "v4",
             dataModel: "Route",
@@ -1342,7 +1342,7 @@ mod tests {
     }
 
     /// A `Route` mapping whose `usesEquipment` `ListRelationship` reads its targets from `equipment`.
-    fn route_equipment_expander() -> Lane {
+    fn route_equipment_expander() -> ExpanderUnderTest {
         expander(
             r#"{
                 version: "v4",
@@ -1446,7 +1446,7 @@ mod tests {
         assert_eq!(urn(&second[0]), "urn:ngsi-ld:Sensor:Sensor");
     }
 
-    fn collections_expander() -> Lane {
+    fn collections_expander() -> ExpanderUnderTest {
         let mut runner = TemplateRunner::new();
         let camera = compiled(
             r#"{ version: "v4", dataModel: "Camera", identity: { entityName: "Cam-{{ id }}" }, attributes: { v: { source: "{{ v }}" } } }"#,
@@ -1461,7 +1461,7 @@ mod tests {
         let mut mappings = CollectionRoutes::default();
         mappings.insert(CollectionName::from("Camera"), camera);
         mappings.insert(CollectionName::from("Flowcount"), sensor);
-        Lane {
+        ExpanderUnderTest {
             expander: GenericExpander::new(MappingRouter::Collections(mappings), resolver, Map::new()),
             unreadable_expiries: UnreadableExpiries::new(),
         }
@@ -1697,7 +1697,7 @@ mod tests {
         );
         assert!(!mapping.has_nested_relationships());
         let resolver = runner.resolver();
-        let expander = Lane {
+        let expander = ExpanderUnderTest {
             expander: GenericExpander::new(MappingRouter::Single(mapping), resolver, Map::new()),
             unreadable_expiries: UnreadableExpiries::new(),
         };

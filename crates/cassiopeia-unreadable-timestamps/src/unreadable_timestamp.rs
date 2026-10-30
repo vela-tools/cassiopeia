@@ -1,6 +1,6 @@
 use cassiopeia_batch_sink::recurring::Recurring;
 use cassiopeia_ngsi_ld::value::types::Value;
-use std::num::NonZeroU64;
+use std::{borrow::Cow, num::NonZeroU64};
 
 /// What one attribute lost to text that is not a timestamp, over one batch.
 ///
@@ -43,17 +43,18 @@ impl Recurring for UnreadableTimestamp {
 ///
 /// A null or blank value is one the record does not carry and is not recorded; text is quoted as
 /// written, and any other value (a number too small to be an epoch, a boolean, an object) as its
-/// rendering, so a mapping mistake is named rather than lost.
+/// rendering, so a mapping mistake is named rather than lost. Text is borrowed from the value: a
+/// sink copies it only when it opens a record, so a repeat of a known failure allocates nothing.
 #[must_use]
-pub fn unreadable_text(value: &Value) -> Option<Box<str>> {
+pub fn unreadable_text(value: &Value) -> Option<Cow<'_, str>> {
     match value {
         Value::Null => None,
         Value::String(text) => {
             let text = text.trim();
-            if text.is_empty() { None } else { Some(Box::from(text)) }
+            if text.is_empty() { None } else { Some(Cow::Borrowed(text)) }
         }
         Value::Boolean(_) | Value::Number(_) | Value::Temporal(_) | Value::Geospatial(_) | Value::Array(_) | Value::Object(_) => {
-            Some(Box::from(value.to_string().as_str()))
+            Some(Cow::Owned(value.to_string()))
         }
     }
 }

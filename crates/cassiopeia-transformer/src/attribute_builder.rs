@@ -238,7 +238,7 @@ mod tests {
         },
         value::types::{Number, Value},
     };
-    use chrono::{TimeZone, Utc};
+    use chrono::{DateTime, TimeZone, Utc};
     use indexmap::IndexMap;
     use pretty_assertions::assert_eq;
     use serde_json::json;
@@ -254,6 +254,13 @@ mod tests {
         }
     }
 
+    fn expiring_meta(expires_at: DateTime<Utc>) -> MetadataSummary {
+        MetadataSummary {
+            expires_at: Some(expires_at),
+            ..empty_meta()
+        }
+    }
+
     fn name(value: &str) -> NameBuf {
         NameBuf::new(value).unwrap()
     }
@@ -261,24 +268,8 @@ mod tests {
     #[test]
     fn a_property_and_a_relationship_carry_their_expires_at_qualifier() {
         let expires_at = Utc.with_ymd_and_hms(2026, 10, 25, 13, 0, 0).unwrap();
-        let meta = MetadataSummary {
-            observed_at: None,
-            expires_at: Some(expires_at),
-            unit_code: None,
-            dataset_id: None,
-            custom_attributes: IndexMap::default(),
-        };
 
-        let NgsiLdAttributeWrapper::Single(property) = build_property(
-            Value::from(json!("ok")),
-            MetadataSummary {
-                observed_at: None,
-                expires_at: Some(expires_at),
-                unit_code: None,
-                dataset_id: None,
-                custom_attributes: IndexMap::default(),
-            },
-        ) else {
+        let NgsiLdAttributeWrapper::Single(property) = build_property(Value::from(json!("ok")), expiring_meta(expires_at)) else {
             panic!("expected a single property");
         };
         let NgsiLdAttribute::Property(property) = property.as_ref() else {
@@ -287,7 +278,7 @@ mod tests {
         assert_eq!(property.expires_at, Some(expires_at));
 
         let object = "urn:ngsi-ld:Vehicle:car123".parse::<Urn>().unwrap();
-        let NgsiLdAttributeWrapper::Single(relationship) = build_relationship(object, None, meta) else {
+        let NgsiLdAttributeWrapper::Single(relationship) = build_relationship(object, None, expiring_meta(expires_at)) else {
             panic!("expected a single relationship");
         };
         let NgsiLdAttribute::Relationship(relationship) = relationship.as_ref() else {
@@ -299,15 +290,8 @@ mod tests {
     #[test]
     fn a_geo_property_carries_its_expires_at_qualifier() {
         let expires_at = Utc.with_ymd_and_hms(2026, 10, 25, 13, 0, 0).unwrap();
-        let meta = MetadataSummary {
-            observed_at: None,
-            expires_at: Some(expires_at),
-            unit_code: None,
-            dataset_id: None,
-            custom_attributes: IndexMap::default(),
-        };
 
-        let NgsiLdAttributeWrapper::Single(attr) = build_geo_property(clockwise_square(), meta) else {
+        let NgsiLdAttributeWrapper::Single(attr) = build_geo_property(clockwise_square(), expiring_meta(expires_at)) else {
             panic!("expected a single geo property");
         };
         let NgsiLdAttribute::GeoProperty(geo) = attr.as_ref() else {

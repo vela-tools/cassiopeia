@@ -24,7 +24,7 @@ impl CodedError for ExpanderError {
     fn code(&self) -> ExpanderCode {
         match self {
             ExpanderError::Urn(_) => ExpanderCode::UrnUngeneratable,
-            ExpanderError::Expiry(_) => ExpanderCode::ExpiryUnresolvable,
+            ExpanderError::Expiry(_) => ExpanderCode::ExpiresAtUnresolvable,
             ExpanderError::UnmatchedCollection(_) => ExpanderCode::CollectionUnmatched,
             ExpanderError::CollectionMissing => ExpanderCode::CollectionMissing,
         }

@@ -41,7 +41,7 @@ pub(crate) fn unreadable_expiry_diagnostic(entity_type: NameBuf, record: &Unread
 
     DiagnosticBuilder::new(
         Severity::Warning,
-        DiagnosticCode::Expander(ExpanderCode::ExpiryUnreadable),
+        DiagnosticCode::Expander(ExpanderCode::ExpiresAtUnreadable),
         headline(&entity_type, record),
     )
     .with_context(ContextField::EntityType(entity_type))
@@ -87,7 +87,7 @@ mod tests {
         assert_eq!(total, 3);
         assert_eq!(reported.len(), 1);
         assert_eq!(reported[0].occurrences, 3);
-        assert_eq!(reported[0].code, DiagnosticCode::Expander(ExpanderCode::ExpiryUnreadable));
+        assert_eq!(reported[0].code, DiagnosticCode::Expander(ExpanderCode::ExpiresAtUnreadable));
         assert_eq!(reported[0].defining, [ContextField::EntityType(name("Sensor"))]);
         assert!(
             matches!(

@@ -8,9 +8,9 @@ pub enum ExpanderCode {
     UrnUngeneratable,
     /// The entity `expiresAt` a record resolved to reads as no instant, so the entity publishes
     /// without the member (ETSI GS CIM 009 v1.9.1 clause 4.5.1).
-    ExpiryUnreadable,
+    ExpiresAtUnreadable,
     /// The entity `expiresAt` template failed to render for a record, so the record was skipped.
-    ExpiryUnresolvable,
+    ExpiresAtUnresolvable,
     /// The record's source collection is bound to no mapping.
     CollectionUnmatched,
     /// The record carries no source collection, which a collections binding requires.
@@ -25,7 +25,7 @@ mod tests {
     #[test]
     fn an_expander_code_renders_a_kebab_case_token() {
         assert_eq!(ExpanderCode::CollectionUnmatched.to_string(), "collection-unmatched");
-        assert_eq!(ExpanderCode::ExpiryUnreadable.to_string(), "expiry-unreadable");
-        assert_eq!(ExpanderCode::ExpiryUnresolvable.to_string(), "expiry-unresolvable");
+        assert_eq!(ExpanderCode::ExpiresAtUnreadable.to_string(), "expires-at-unreadable");
+        assert_eq!(ExpanderCode::ExpiresAtUnresolvable.to_string(), "expires-at-unresolvable");
     }
 }

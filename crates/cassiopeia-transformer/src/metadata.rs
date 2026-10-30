@@ -97,13 +97,13 @@ fn summary_from(props: &SubAttributes, attribute: &NameBuf, cache: &mut Qualifie
     let mut summary = empty_summary();
 
     if let Some(observed_at) = props.get("observedAt").map(SubAttribute::value) {
-        match cache.observed_at(observed_at) {
+        match cache.instant(observed_at) {
             Some(datetime) => summary.observed_at = Some(datetime),
             None => record_unreadable(TimestampLoss::ObservedAt, attribute, observed_at, unreadable),
         }
     }
     if let Some(expires_at) = props.get("expiresAt").map(SubAttribute::value) {
-        match cache.expires_at(expires_at) {
+        match cache.instant(expires_at) {
             Some(datetime) => summary.expires_at = Some(datetime),
             None => record_unreadable(TimestampLoss::ExpiresAt, attribute, expires_at, unreadable),
         }

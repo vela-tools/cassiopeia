@@ -24,13 +24,9 @@ impl<'a> QualifierCache<'a> {
         QualifierCache { instants, unit_codes }
     }
 
-    /// The instant the `observedAt` `value` denotes, parsed once per distinct text within this entity.
-    pub fn observed_at(&mut self, value: &Value) -> Option<DateTime<Utc>> {
-        self.instants.instant(value)
-    }
-
-    /// The instant the `expiresAt` `value` denotes, parsed once per distinct text within this entity.
-    pub fn expires_at(&mut self, value: &Value) -> Option<DateTime<Utc>> {
+    /// The instant an `observedAt` or `expiresAt` `value` denotes, parsed once per distinct text
+    /// within this entity.
+    pub fn instant(&mut self, value: &Value) -> Option<DateTime<Utc>> {
         self.instants.instant(value)
     }
 
@@ -48,25 +44,13 @@ mod tests {
     use pretty_assertions::{assert_eq, assert_ne};
 
     #[test]
-    fn both_qualifiers_resolve_through_one_borrowed_pair() {
+    fn an_instant_and_a_unit_code_resolve_through_one_borrowed_pair() {
         let mut instants = InstantCache::new();
         let mut unit_codes = UnitCodeCache::new();
         let mut cache = QualifierCache::new(&mut instants, &mut unit_codes);
 
-        assert!(cache.observed_at(&Value::String("2026-04-03T22:00:20Z".into())).is_some());
+        assert!(cache.instant(&Value::String("2026-04-03T22:00:20Z".into())).is_some());
         assert_eq!(cache.unit_code("KWH"), Some(UnitCode::Kwh));
-    }
-
-    #[test]
-    fn an_expires_at_resolves_through_the_same_instant_memo_as_an_observed_at() {
-        let mut instants = InstantCache::new();
-        let mut unit_codes = UnitCodeCache::new();
-        let mut cache = QualifierCache::new(&mut instants, &mut unit_codes);
-
-        let observed = cache.observed_at(&Value::String("2026-04-03T22:00:20Z".into()));
-        let expires = cache.expires_at(&Value::String("2026-04-03T22:00:20Z".into()));
-
-        assert_eq!(observed, expires);
     }
 
     #[test]
@@ -79,12 +63,12 @@ mod tests {
             let mut instants = InstantCache::new();
             let mut cache = QualifierCache::new(&mut instants, &mut unit_codes);
             assert_eq!(cache.unit_code("CEL"), Some(UnitCode::Cel));
-            cache.observed_at(&Value::String("2026-04-03T22:00:20Z".into()))
+            cache.instant(&Value::String("2026-04-03T22:00:20Z".into()))
         };
 
         let mut instants = InstantCache::new();
         let mut cache = QualifierCache::new(&mut instants, &mut unit_codes);
-        let second = cache.expires_at(&Value::String("2026-04-03T23:15:00Z".into()));
+        let second = cache.instant(&Value::String("2026-04-03T23:15:00Z".into()));
 
         assert!(first.is_some());
         assert!(second.is_some());
