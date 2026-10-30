@@ -5,6 +5,7 @@ use crate::{
     line_terminator::LineTerminator,
     preamble::Preamble,
     quote::Quote,
+    record_end::{RecordEnd, skip_record},
     value_notation::ValueNotation,
 };
 use csv::{Reader, ReaderBuilder, StringRecord};
@@ -86,6 +87,26 @@ impl Dialect {
             }
         }
         Ok(StringRecord::from(names))
+    }
+
+    /// The leading part of `sample` that holds only whole records under this dialect: everything up
+    /// to the terminator of its last complete record. A record the end of `sample` cuts off, such as
+    /// one cut inside a quoted line break, is left out, as is a last record without a terminator.
+    ///
+    /// Where a sample of a file is cut depends on the dialect, since a quote decides which line
+    /// breaks end a record; cutting it here keeps a candidate dialect from being scored on a
+    /// truncated last record.
+    #[must_use]
+    pub fn complete_records<'a>(&self, sample: &'a [u8]) -> &'a [u8] {
+        let mut core = self.core_reader();
+        let mut rest = sample;
+        let mut complete = 0;
+        // Reading a byte slice cannot fail, so the scan ends only at the first record the end of
+        // `sample` cuts off.
+        while let Ok(RecordEnd::Terminated) = skip_record(&mut core, &mut rest) {
+            complete = sample.len() - rest.len();
+        }
+        &sample[..complete]
     }
 
     /// The table reader configuration: non-flexible, so a record whose field count differs from the
@@ -207,6 +228,36 @@ mod tests {
             reader.records().next().unwrap().unwrap(),
             vec!["STEF", "30.10.2026, 10:00", "18,48", "12,48", "12,27"]
         );
+    }
+
+    #[test]
+    fn a_sample_cut_inside_a_quoted_line_break_keeps_only_its_complete_records() {
+        let sample = b"a;b\n1;\"x\ny\"\n2;\"x\n";
+
+        assert_eq!(semicolon_dialect(Preamble::NONE).complete_records(sample), b"a;b\n1;\"x\ny\"\n");
+    }
+
+    #[test]
+    fn a_sample_ending_on_a_terminator_is_complete() {
+        let sample = b"a;b\n1;\"x\ny\"\n";
+
+        assert_eq!(semicolon_dialect(Preamble::NONE).complete_records(sample), sample);
+    }
+
+    #[test]
+    fn a_last_record_without_a_terminator_is_not_complete() {
+        assert_eq!(semicolon_dialect(Preamble::NONE).complete_records(b"a;b\n1;2"), b"a;b\n");
+    }
+
+    #[test]
+    fn without_quoting_every_line_break_ends_a_record() {
+        let dialect = Dialect {
+            quote_char: Quote::Disabled,
+            ..semicolon_dialect(Preamble::NONE)
+        };
+        let sample = b"a;b\n1;\"x\n";
+
+        assert_eq!(dialect.complete_records(sample), sample);
     }
 
     #[test]

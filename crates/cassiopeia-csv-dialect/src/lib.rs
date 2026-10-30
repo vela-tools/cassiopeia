@@ -12,5 +12,6 @@ pub mod line_terminator;
 pub mod null_token;
 pub mod preamble;
 pub mod quote;
+mod record_end;
 pub mod statement;
 pub mod value_notation;
