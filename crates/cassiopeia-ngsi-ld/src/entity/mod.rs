@@ -41,8 +41,8 @@ pub struct NgsiLdEntity {
     /// Written by [`SerializeRepr`] rather than the derived serializer, which skips it.
     #[serde(skip)]
     pub scope: Option<NgsiLdScope>,
-    /// The instant after which the entity ceases to hold (ETSI GS CIM 009 v1.9.1 clause 4.5.1),
-    /// absent when no mapping resolved one.
+    /// The instant after which the entity ceases to hold (ETSI GS CIM 009 v1.9.1 clause 4.22), an
+    /// optional member of the entity (clause 4.5.1), absent when no mapping resolved one.
     ///
     /// Written by [`SerializeRepr`] rather than the derived serializer, which skips it.
     #[serde(skip)]

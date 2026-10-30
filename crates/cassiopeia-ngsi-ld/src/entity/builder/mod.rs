@@ -48,7 +48,8 @@ impl NgsiLdEntityBuilder {
         self
     }
 
-    /// Sets the instant after which the entity ceases to hold (ETSI GS CIM 009 v1.9.1 clause 4.5.1).
+    /// Sets the instant after which the entity ceases to hold (ETSI GS CIM 009 v1.9.1 clause 4.22),
+    /// written as an optional member of the entity (clause 4.5.1).
     #[must_use]
     pub const fn expires_at(mut self, expires_at: DateTime<Utc>) -> Self {
         self.expires_at = Some(expires_at);

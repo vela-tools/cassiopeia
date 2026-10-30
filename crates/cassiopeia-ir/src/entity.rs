@@ -45,7 +45,7 @@ pub struct Entity {
     /// The scope of the entity.
     scope: Option<NgsiLdScope>,
     /// The entity `expiresAt`, the instant after which the entity ceases to hold (ETSI GS CIM 009
-    /// v1.9.1 clause 4.5.1).
+    /// v1.9.1 clause 4.22), written as an optional member of the entity (clause 4.5.1).
     expires_at: Option<DateTime<Utc>>,
     /// Relationships mapped by their attribute name.
     relationships: Relationships,

@@ -132,7 +132,7 @@ When several mappings, or several records, contribute to the same entity, the en
 
 ## Set an expiry
 
-An `expiresAt` on the entity itself marks the instant after which the entity ceases to hold (ETSI GS CIM 009 v1.9.1 clause 4.5.1; the value is an NGSI-LD `DateTime`, clause 4.6.3). Declare it at the top level of the mapping, next to `identity`, reading the source field that says when the record lapses:
+An `expiresAt` on the entity itself marks the instant after which the entity ceases to hold (ETSI GS CIM 009 v1.9.1 clause 4.22, written as an optional entity member per clause 4.5.1; the value is an NGSI-LD `DateTime`, clause 4.6.3). Declare it at the top level of the mapping, next to `identity`, reading the source field that says when the record lapses:
 
 ~~~json5
 identity: {
@@ -145,7 +145,7 @@ The template resolves per record. Its value follows the same rules as a `datetim
 
 Like `scope`, the expiry is an entity member, not part of the entity's identity, so it does not belong inside `identity`: a mapping that declares `identity.expiresAt` does not load. And like `scope`, it is merged when several records contribute to the same entity, but by the rules for the stored record rather than by a union, because `expiresAt` says when the stored entity is to be deleted (ETSI GS CIM 009 v1.9.1 clause 4.22). Within one mapping, the expiry follows the record Cassiopeia keeps: when a temporal mapping's newer observation replaces an older one, its expiry replaces the older expiry too, a shorter one or none at all; when a static mapping's records are merged, a later record that declares an expiry overrides the earlier one, and a record that declares none clears nothing. When a run keeps the whole series instead, each mapping keeps the expiry furthest in the future among its observations. Across the mappings that contribute to one entity, the expiries are joined as clause 4.5.5.3 joins several versions of one entity: if any mapping contributes no expiry the entity has none, because expiring it would delete that mapping's data too, and otherwise the instant furthest in the future wins. The member is written in every representation Cassiopeia emits.
 
-An entity `expiresAt` does not make the entity temporal. Temporality is declared by an attribute's `observedAt` (ETSI GS CIM 009 v1.9.1 clause 4.5.5), which is what turns current-state entities into a kept series; an expiry only bounds how long each state holds, so a mapping that declares only `expiresAt` still produces current-state entities that overwrite one another.
+An entity `expiresAt` does not make the entity temporal. Temporality is declared by an attribute's `observedAt` (ETSI GS CIM 009 v1.9.1 clause 4.8), which is what turns current-state entities into a kept series; an expiry only bounds how long each state holds, so a mapping that declares only `expiresAt` still produces current-state entities that overwrite one another.
 
 ## Map an attribute
 
