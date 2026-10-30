@@ -3,7 +3,7 @@ use crate::value::{
     types::{Number, TemporalValue},
 };
 use chrono::{DateTime, NaiveDate, NaiveDateTime, TimeZone, Utc};
-use jiff::Zoned;
+use jiff::{Timestamp, Zoned};
 use num_traits::ToPrimitive;
 
 /// The unit a Unix epoch number is counted in, read off its magnitude.
@@ -115,10 +115,17 @@ impl TemporalValue {
                 .and_then(|zoned| Self::from_epoch_nanoseconds(zoned.timestamp().as_nanosecond()));
         }
 
-        // RFC 3339 is the only supported shape with a 'T'/'t' date-time separator; once one is
-        // present, nothing else can match, so dispatch straight to it.
+        // ISO 8601 is the only supported shape with a 'T'/'t' date-time separator; once one is
+        // present, nothing else can match, so dispatch straight to it. RFC 3339 alone requires an
+        // extended `+02:00` offset, but ISO 8601 also allows the basic `+0200` that Java's
+        // `SimpleDateFormat` writes, the hour-only `+02`, and the basic `20261024T223259+0200`, so
+        // the instant is read through the ISO 8601 grammar. A value without an offset or `Z` names
+        // no instant and is not read.
         if bytes.contains(&b'T') || bytes.contains(&b't') {
-            return DateTime::parse_from_rfc3339(s).ok().map(|dt| TemporalValue::DateTime(dt.with_timezone(&Utc)));
+            return s
+                .parse::<Timestamp>()
+                .ok()
+                .and_then(|timestamp| Self::from_epoch_nanoseconds(timestamp.as_nanosecond()));
         }
 
         if bytes.contains(&b' ') {
@@ -282,6 +289,38 @@ mod tests {
     fn a_day_first_space_separated_timestamp_carries_an_offset_too() {
         assert_eq!(instant("01/03/2026 11:04:35+02:00"), Some(Utc.with_ymd_and_hms(2026, 3, 1, 9, 4, 35).unwrap()));
         assert_eq!(instant("01/03/2026 11:04:35"), Some(eleven_oh_four()));
+    }
+
+    #[test]
+    fn a_t_separated_timestamp_reads_a_basic_format_offset() {
+        let expected = Utc.with_ymd_and_hms(2026, 10, 24, 20, 32, 59).unwrap();
+
+        for input in [
+            "2026-10-24T22:32:59+0200",
+            "2026-10-24T22:32:59.000+0200",
+            "2026-10-24T22:32:59+02",
+            "2026-10-24T22:32:59.000+02",
+            "20261024T223259+0200",
+            "2026-10-24T22:32:59+02:00",
+            "2026-10-24T20:32:59Z",
+        ] {
+            assert_eq!(instant(input), Some(expected), "mismatch for {input:?}");
+        }
+        assert_eq!(instant("2026-10-24T17:32:59-0300"), Some(expected));
+        assert_eq!(instant("2026-10-24T22:32:59.250+0200"), Some(expected + Duration::milliseconds(250)));
+    }
+
+    #[test]
+    fn a_t_separated_timestamp_without_an_offset_or_with_a_malformed_one_does_not_parse() {
+        for input in [
+            "2026-10-24T22:32:59",
+            "2026-10-24T22:32:59+",
+            "2026-10-24T22:32:59+2",
+            "2026-10-24T22:32:59+02000",
+            "2026-10-24T22:32:59+02:0",
+        ] {
+            assert_eq!(instant(input), None, "expected {input:?} to parse to nothing");
+        }
     }
 
     #[test]
