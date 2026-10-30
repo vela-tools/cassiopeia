@@ -458,6 +458,7 @@ version = "1.1.1"
 dependencies = [
  "anstyle",
  "cassiopeia-configuration",
+ "cassiopeia-csv-dialect",
  "cassiopeia-data-profiler",
  "cassiopeia-diagnostic",
  "cassiopeia-mapping",
@@ -468,6 +469,7 @@ dependencies = [
  "cassiopeia-tui",
  "clap",
  "clap-markdown",
+ "encoding_rs",
  "json5format",
  "pretty_assertions",
  "serde_json",
@@ -549,14 +551,28 @@ dependencies = [
 ]
 
 [[package]]
+name = "cassiopeia-csv-dialect"
+version = "1.1.1"
+dependencies = [
+ "csv",
+ "csv-core",
+ "derive_more",
+ "encoding_rs",
+ "pretty_assertions",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.21",
+]
+
+[[package]]
 name = "cassiopeia-data-profiler"
 version = "1.1.1"
 dependencies = [
  "bytecount",
  "cassiopeia-common",
+ "cassiopeia-csv-dialect",
  "chardetng",
  "csv",
- "csv-core",
  "encoding_rs",
  "getset",
  "lazy-regex",
@@ -665,6 +681,7 @@ dependencies = [
  "bytecount",
  "cassiopeia-common",
  "cassiopeia-crs",
+ "cassiopeia-csv-dialect",
  "cassiopeia-data-profiler",
  "cassiopeia-ir",
  "convert_case 0.12.0",
@@ -722,6 +739,7 @@ name = "cassiopeia-manifest"
 version = "1.1.1"
 dependencies = [
  "cassiopeia-common",
+ "cassiopeia-csv-dialect",
  "chrono",
  "cron",
  "derive_more",
@@ -802,6 +820,7 @@ dependencies = [
  "cassiopeia-batch-sink",
  "cassiopeia-collector",
  "cassiopeia-common",
+ "cassiopeia-csv-dialect",
  "cassiopeia-diagnostic",
  "cassiopeia-expander",
  "cassiopeia-extractor",
@@ -839,10 +858,12 @@ name = "cassiopeia-profiler"
 version = "1.1.1"
 dependencies = [
  "cassiopeia-common",
+ "cassiopeia-csv-dialect",
  "cassiopeia-data-profiler",
  "cassiopeia-ir",
  "mediatype",
  "pretty_assertions",
+ "serde_json",
  "thiserror 2.0.21",
 ]
 

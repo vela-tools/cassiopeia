@@ -1,9 +1,5 @@
+use cassiopeia_csv_dialect::{dialect::Dialect, statement::DialectStatement};
 use cassiopeia_data_profiler::{
-    inspectors::csv::{
-        dialect::{Dialect, LineTerminator},
-        header_rows::HeaderRows,
-        preamble::Preamble,
-    },
     metadata::{FormatMetadata, GribEdition},
     profile::Profile,
 };
@@ -11,9 +7,10 @@ use cassiopeia_terminal_style::{
     byte_size::human_size,
     field::field,
     paint::{join, paint},
-    palette::{ACCENT, HIGHLIGHT, MUTED, PRIMARY},
+    palette::{ACCENT, MUTED, PRIMARY},
     rendering::Rendering,
 };
+use serde_json::Value;
 
 /// Renders a compact, `--version`-style profile report: an identity line (file and size), a format
 /// line (format, media type, confidence), and one format-specific metadata line when the profile
@@ -49,28 +46,20 @@ pub fn render_profile(name: &str, size: Option<u64>, profile: &Profile, renderin
 /// Renders the format-specific metadata line, or `None` for a format that carries no metadata.
 fn metadata_line(metadata: Option<&FormatMetadata>, rendering: Rendering) -> Option<String> {
     match metadata? {
-        FormatMetadata::Csv(csv) => Some(csv_line(csv.dialect(), rendering)),
+        FormatMetadata::Csv(csv) => csv_line(csv.dialect(), rendering),
         FormatMetadata::Grib(grib) => Some(grib_line(grib.edition(), rendering)),
     }
 }
 
-/// Renders the CSV dialect line: delimiter, quoting, optional escape, optional preamble, header,
-/// terminator, encoding.
-fn csv_line(dialect: &Dialect, rendering: Rendering) -> String {
-    let mut fields = vec![
-        field("delimiter", &byte_token(dialect.delimiter), rendering),
-        field("quote", &optional_byte_token(dialect.quote_char), rendering),
-    ];
-    if let Some(escape) = dialect.escape {
-        fields.push(field("escape", &byte_token(escape), rendering));
-    }
-    if dialect.preamble != Preamble::NONE {
-        fields.push(field("preamble", &preamble_token(dialect.preamble), rendering));
-    }
-    fields.push(paint(HIGHLIGHT, &header_token(dialect.header_rows), rendering));
-    fields.push(paint(MUTED, terminator_token(dialect.terminator), rendering));
-    fields.push(paint(MUTED, &dialect.encoding, rendering));
-    join(&fields, rendering)
+/// Renders the CSV dialect line in the member names and value syntax of a manifest input's
+/// `dialect`, so a member detection got wrong can be copied into a manifest and corrected there.
+/// `None` only if the dialect cannot be written as a statement.
+fn csv_line(dialect: &Dialect, rendering: Rendering) -> Option<String> {
+    let Value::Object(members) = serde_json::to_value(DialectStatement::from(dialect)).ok()? else {
+        return None;
+    };
+    let fields: Vec<String> = members.iter().map(|(name, value)| field(name, &value.to_string(), rendering)).collect();
+    Some(join(&fields, rendering))
 }
 
 /// Renders the GRIB metadata line: the edition read from the Indicator Section.
@@ -82,142 +71,97 @@ fn grib_line(edition: GribEdition, rendering: Rendering) -> String {
     field("edition", number, rendering)
 }
 
-/// Renders a delimiter, quote, or escape byte as a readable token: the literal character, or a word
-/// for a whitespace byte that would otherwise be invisible.
-fn byte_token(byte: u8) -> String {
-    match byte {
-        b'\t' => "tab".to_owned(),
-        b' ' => "space".to_owned(),
-        other => char::from(other).to_string(),
-    }
-}
-
-/// Renders an optional byte as its token, or `none` when the dialect disables it.
-fn optional_byte_token(byte: Option<u8>) -> String {
-    match byte {
-        Some(byte) => byte_token(byte),
-        None => "none".to_owned(),
-    }
-}
-
-/// The preamble token for a dialect: how many CSV records sit above the table.
-fn preamble_token(preamble: Preamble) -> String {
-    match preamble.records() {
-        1 => "1 record".to_owned(),
-        records => format!("{records} records"),
-    }
-}
-
-/// The header token for a dialect: absent, one row, or the row count of a stacked header.
-fn header_token(header_rows: HeaderRows) -> String {
-    match header_rows.records() {
-        0 => "no header".to_owned(),
-        1 => "header row".to_owned(),
-        records => format!("{records} header rows"),
-    }
-}
-
-/// The line-terminator token for a dialect.
-const fn terminator_token(terminator: LineTerminator) -> &'static str {
-    match terminator {
-        LineTerminator::Lf => "LF",
-        LineTerminator::CrLf => "CRLF",
-    }
-}
-
 #[cfg(test)]
 mod tests {
-    use crate::profile_report::{byte_token, csv_line, grib_line, header_token, metadata_line, optional_byte_token, preamble_token, render_profile};
+    use crate::profile_report::{csv_line, grib_line, metadata_line, render_profile};
+    use cassiopeia_csv_dialect::{
+        character_encoding::CharacterEncoding,
+        decimal_separator::DecimalSeparator,
+        dialect::Dialect,
+        dialect_byte::DialectByte,
+        header_rows::HeaderRows,
+        line_terminator::LineTerminator,
+        preamble::Preamble,
+        quote::Quote,
+        value_notation::ValueNotation,
+    };
     use cassiopeia_data_profiler::{
         encoding_hint::EncodingHint,
-        inspectors::csv::{
-            dialect::{Dialect, LineTerminator},
-            header_rows::HeaderRows,
-            preamble::Preamble,
-        },
         metadata::{CsvMetadata, FormatMetadata, GribEdition, GribMetadata},
         profile_bytes,
     };
     use cassiopeia_terminal_style::rendering::Rendering;
+    use encoding_rs::{UTF_8, WINDOWS_1252};
     use pretty_assertions::assert_eq;
 
     const ESCAPE: char = '\u{1b}';
 
     fn comma_dialect() -> Dialect {
         Dialect {
-            delimiter: b',',
-            quote_char: Some(b'"'),
+            delimiter: DialectByte::COMMA,
+            quote_char: Quote::Char(DialectByte::DOUBLE_QUOTE),
             preamble: Preamble::NONE,
             header_rows: HeaderRows::ONE,
             escape: None,
             terminator: LineTerminator::Lf,
-            encoding: "UTF-8".to_owned(),
+            encoding: CharacterEncoding::new(UTF_8),
+            notation: ValueNotation::PLAIN,
         }
     }
 
     #[test]
-    fn a_byte_token_names_whitespace_and_prints_other_bytes() {
-        assert_eq!(byte_token(b','), ",");
-        assert_eq!(byte_token(b';'), ";");
-        assert_eq!(byte_token(b'\t'), "tab");
-        assert_eq!(byte_token(b' '), "space");
-    }
-
-    #[test]
-    fn an_optional_byte_token_reports_none_when_disabled() {
-        assert_eq!(optional_byte_token(Some(b'"')), "\"");
-        assert_eq!(optional_byte_token(None), "none");
-    }
-
-    #[test]
-    fn a_csv_line_states_the_dialect() {
-        let line = csv_line(&comma_dialect(), Rendering::Plain);
-
-        assert_eq!(line, "delimiter , \u{b7} quote \" \u{b7} header row \u{b7} LF \u{b7} UTF-8");
-    }
-
-    #[test]
-    fn a_headerless_tab_csv_line_reflects_the_dialect() {
-        let dialect = Dialect {
-            delimiter: b'\t',
-            quote_char: None,
-            preamble: Preamble::NONE,
-            header_rows: HeaderRows::NONE,
-            escape: None,
-            terminator: LineTerminator::CrLf,
-            encoding: "windows-1252".to_owned(),
-        };
-        let line = csv_line(&dialect, Rendering::Plain);
-
-        assert_eq!(line, "delimiter tab \u{b7} quote none \u{b7} no header \u{b7} CRLF \u{b7} windows-1252");
-    }
-
-    #[test]
-    fn a_csv_line_states_a_preamble_above_the_header() {
-        let dialect = Dialect {
-            delimiter: b';',
-            preamble: Preamble::new(1),
-            ..comma_dialect()
-        };
-        let line = csv_line(&dialect, Rendering::Plain);
+    fn a_csv_line_states_the_dialect_in_manifest_member_names() {
+        let line = csv_line(&comma_dialect(), Rendering::Plain).unwrap();
 
         assert_eq!(
             line,
-            "delimiter ; \u{b7} quote \" \u{b7} preamble 1 record \u{b7} header row \u{b7} LF \u{b7} UTF-8"
+            "delimiter \",\" \u{b7} quote \"\\\"\" \u{b7} skipRows 0 \u{b7} headerRows 1 \u{b7} terminator \"lf\" \u{b7} encoding \"UTF-8\""
         );
     }
 
     #[test]
-    fn a_preamble_token_pluralises_its_record_count() {
-        assert_eq!(preamble_token(Preamble::new(1)), "1 record");
-        assert_eq!(preamble_token(Preamble::new(3)), "3 records");
+    fn a_headerless_tab_csv_line_states_header_false_and_no_quoting() {
+        let dialect = Dialect {
+            delimiter: DialectByte::TAB,
+            quote_char: Quote::Disabled,
+            header_rows: HeaderRows::NONE,
+            terminator: LineTerminator::Crlf,
+            encoding: CharacterEncoding::new(WINDOWS_1252),
+            ..comma_dialect()
+        };
+        let line = csv_line(&dialect, Rendering::Plain).unwrap();
+
+        assert_eq!(
+            line,
+            "delimiter \"\\t\" \u{b7} quote \"none\" \u{b7} skipRows 0 \u{b7} header false \u{b7} terminator \"crlf\" \u{b7} encoding \"windows-1252\""
+        );
     }
 
     #[test]
-    fn a_header_token_states_absent_single_and_stacked_headers() {
-        assert_eq!(header_token(HeaderRows::NONE), "no header");
-        assert_eq!(header_token(HeaderRows::ONE), "header row");
-        assert_eq!(header_token(HeaderRows::new(3)), "3 header rows");
+    fn a_csv_line_states_a_preamble_and_a_stacked_header() {
+        let dialect = Dialect {
+            delimiter: DialectByte::SEMICOLON,
+            preamble: Preamble::new(1),
+            header_rows: HeaderRows::new(3),
+            ..comma_dialect()
+        };
+        let line = csv_line(&dialect, Rendering::Plain).unwrap();
+
+        assert!(line.contains("skipRows 1 \u{b7} headerRows 3"), "{line}");
+    }
+
+    #[test]
+    fn a_csv_line_states_a_value_notation_only_when_it_is_not_plain() {
+        let dialect = Dialect {
+            notation: ValueNotation {
+                decimal_separator: DecimalSeparator::Comma,
+                ..ValueNotation::PLAIN
+            },
+            ..comma_dialect()
+        };
+
+        assert!(csv_line(&dialect, Rendering::Plain).unwrap().ends_with("decimalSeparator \",\""));
+        assert!(!csv_line(&comma_dialect(), Rendering::Plain).unwrap().contains("decimalSeparator"));
     }
 
     #[test]

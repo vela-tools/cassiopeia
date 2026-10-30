@@ -1,5 +1,6 @@
-use crate::inspectors::csv::{data_type::DataType, dialect::Dialect};
+use crate::inspectors::csv::data_type::DataType;
 use ::csv::StringRecord;
+use cassiopeia_csv_dialect::dialect::Dialect;
 use std::collections::HashMap;
 
 /// A sample parsed under one candidate dialect, with every cell typed for uniformity scoring.
@@ -140,23 +141,30 @@ fn is_enclosed_in_quotes(field: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use crate::inspectors::csv::{
-        dialect::{Dialect, LineTerminator},
+    use crate::inspectors::csv::table::{Table, is_enclosed_in_quotes};
+    use cassiopeia_csv_dialect::{
+        character_encoding::CharacterEncoding,
+        dialect::Dialect,
+        dialect_byte::DialectByte,
         header_rows::HeaderRows,
+        line_terminator::LineTerminator,
         preamble::Preamble,
-        table::{Table, is_enclosed_in_quotes},
+        quote::Quote,
+        value_notation::ValueNotation,
     };
+    use encoding_rs::UTF_8;
     use pretty_assertions::assert_eq;
 
     fn semicolon_dialect(preamble: Preamble) -> Dialect {
         Dialect {
-            delimiter: b';',
-            quote_char: Some(b'"'),
+            delimiter: DialectByte::SEMICOLON,
+            quote_char: Quote::Char(DialectByte::DOUBLE_QUOTE),
             preamble,
             header_rows: HeaderRows::NONE,
             escape: None,
             terminator: LineTerminator::Lf,
-            encoding: "UTF-8".to_owned(),
+            encoding: CharacterEncoding::new(UTF_8),
+            notation: ValueNotation::PLAIN,
         }
     }
 
@@ -202,7 +210,7 @@ mod tests {
         let quoted = Table::parse(
             b"\"1\";\"2\"\n\"3\";\"4\"\n",
             &Dialect {
-                quote_char: None,
+                quote_char: Quote::Disabled,
                 ..semicolon_dialect(Preamble::NONE)
             },
         )

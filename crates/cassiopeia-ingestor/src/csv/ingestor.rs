@@ -5,7 +5,8 @@ use crate::{
 };
 use ::csv::{Reader, StringRecord};
 use cassiopeia_common::{channel::ChannelSender, signal::Signal};
-use cassiopeia_data_profiler::{inspectors::csv::dialect::Dialect, metadata::FormatMetadata};
+use cassiopeia_csv_dialect::{decimal_separator::DecimalSeparator, dialect::Dialect, value_notation::ValueNotation};
+use cassiopeia_data_profiler::metadata::FormatMetadata;
 use cassiopeia_ir::{
     payload::{CollectedPayload, ProfiledPayload},
     record::Record,
@@ -13,7 +14,7 @@ use cassiopeia_ir::{
 use encoding_rs::{Encoding, UTF_8};
 use encoding_rs_rw::DecodingReader;
 use serde_json::{Map, Number, Value};
-use std::{fs::File, io::BufReader, mem};
+use std::{borrow::Cow, fs::File, io::BufReader, mem};
 use tracing::{info, warn};
 
 /// A CSV reader over a file decoded to UTF-8 with its profiled encoding.
@@ -30,6 +31,8 @@ pub struct CsvIngestor {
     column_keys: Option<Vec<String>>,
     /// The encoding the file is decoded from, named when a line of the file is not valid in it.
     encoding: &'static Encoding,
+    /// How the file writes its values: its decimal separator and null tokens.
+    notation: ValueNotation,
     batch_size: usize,
 }
 
@@ -97,10 +100,14 @@ impl CsvIngestor {
             None
         };
 
+        // An unprofiled file states no notation, so its values are read in the plain one.
+        let notation = dialect.map_or(ValueNotation::PLAIN, |dialect| dialect.notation);
+
         Ok(CsvIngestor {
             reader: Some(reader),
             column_keys,
             encoding,
+            notation,
             batch_size,
         })
     }
@@ -130,40 +137,36 @@ impl CsvIngestor {
             .collect()
     }
 
-    /// Smart value inference for a CSV field.
+    /// Smart value inference for a CSV field, under the file's value notation.
     ///
-    /// Leading-zero numbers are kept as strings (identifiers such as postal
-    /// codes), otherwise integers, floats, and booleans are parsed out.
-    fn infer_value(field: &str) -> Value {
+    /// A blank field and a null token are a missing value. Leading-zero numbers are kept as strings
+    /// (identifiers such as postal codes), otherwise integers, floats written with the notation's
+    /// decimal separator, and booleans are parsed out.
+    fn infer_value(field: &str, notation: &ValueNotation) -> Value {
         let field = field.trim();
         if field.is_empty() {
             return Value::Null;
         }
 
         // `\N` is the null token emitted by SQL/`COPY`-style CSV dumps (OpenFlights among them); it
-        // is an absent value, not the literal two-character string.
-        if field == r"\N" {
+        // is an absent value, not the literal two-character string. A file states its own tokens.
+        if field == r"\N" || notation.is_null_token(field) {
             return Value::Null;
         }
 
         let bytes = field.as_bytes();
+        let separator = notation.decimal_separator.byte();
 
-        if bytes.len() > 1 && bytes[0] == b'0' && !field.starts_with("0.") {
+        if bytes.len() > 1 && bytes[0] == b'0' && bytes[1] != separator {
             return Value::String(field.to_string());
         }
 
-        if (bytes[0] == b'+' || bytes[0] == b'-') && bytes.len() > 2 && bytes[1] == b'0' && bytes[2] != b'.' {
+        if (bytes[0] == b'+' || bytes[0] == b'-') && bytes.len() > 2 && bytes[1] == b'0' && bytes[2] != separator {
             return Value::String(field.to_string());
         }
 
-        if let Ok(i) = field.parse::<i64>() {
-            return Value::Number(i.into());
-        }
-
-        if let Ok(f) = field.parse::<f64>()
-            && let Some(n) = Number::from_f64(f)
-        {
-            return Value::Number(n);
+        if let Some(number) = Self::number(field, notation.decimal_separator) {
+            return Value::Number(number);
         }
 
         if field.eq_ignore_ascii_case("true") || field.eq_ignore_ascii_case("yes") || field.eq_ignore_ascii_case("on") {
@@ -175,22 +178,39 @@ impl CsvIngestor {
         }
     }
 
+    /// Parses `field` as an integer, or as a float written with `separator`.
+    ///
+    /// Under a comma separator a full stop belongs to no number, so a field holding one, such as the
+    /// date `25.10.2026` or the grouped `1.234`, stays text rather than misreading as a fraction.
+    fn number(field: &str, separator: DecimalSeparator) -> Option<Number> {
+        let text = match separator {
+            DecimalSeparator::Comma if field.contains('.') => return None,
+            DecimalSeparator::Comma if field.contains(',') => Cow::Owned(field.replacen(',', ".", 1)),
+            DecimalSeparator::Dot | DecimalSeparator::Comma => Cow::Borrowed(field),
+        };
+
+        if let Ok(integer) = text.parse::<i64>() {
+            return Some(integer.into());
+        }
+        text.parse::<f64>().ok().and_then(Number::from_f64)
+    }
+
     /// Builds a record's data map from the header, keying each value by its column's key.
-    fn keyed_by_header(column_keys: &[String], record: &StringRecord) -> Map<String, Value> {
+    fn keyed_by_header(column_keys: &[String], record: &StringRecord, notation: &ValueNotation) -> Map<String, Value> {
         let mut data = Map::with_capacity(record.len());
         for (key, value) in column_keys.iter().zip(record.iter()) {
             // Every record owns its keys, since the map is handed downstream with the record.
-            data.insert(key.clone(), Self::infer_value(value));
+            data.insert(key.clone(), Self::infer_value(value, notation));
         }
         data
     }
 
     /// Builds a record's data map for a headerless source, keying each value by its zero-based
     /// column position, so a mapping reads column `n` as `this[n]`.
-    fn keyed_by_position(record: &StringRecord) -> Map<String, Value> {
+    fn keyed_by_position(record: &StringRecord, notation: &ValueNotation) -> Map<String, Value> {
         let mut data = Map::with_capacity(record.len());
         for (index, value) in record.iter().enumerate() {
-            data.insert(index.to_string(), Self::infer_value(value));
+            data.insert(index.to_string(), Self::infer_value(value, notation));
         }
         data
     }
@@ -206,8 +226,8 @@ impl Ingestor for CsvIngestor {
         for result in reader.records() {
             let record = result.map_err(|source| CsvIngestError::reading(source, encoding, CsvIngestError::Reader))?;
             let data = match &self.column_keys {
-                Some(column_keys) => Self::keyed_by_header(column_keys, &record),
-                None => Self::keyed_by_position(&record),
+                Some(column_keys) => Self::keyed_by_header(column_keys, &record, &self.notation),
+                None => Self::keyed_by_position(&record, &self.notation),
             };
 
             batch_buffer.push(Record::new(None, data));
@@ -236,15 +256,23 @@ impl Ingestor for CsvIngestor {
 mod tests {
     use crate::{csv::ingestor::CsvIngestor, ingestor::Ingestor};
     use cassiopeia_common::{channel::ChannelSender, format::DataFormat, signal::Signal};
+    use cassiopeia_csv_dialect::{
+        character_encoding::CharacterEncoding,
+        decimal_separator::DecimalSeparator,
+        dialect::Dialect,
+        dialect_byte::DialectByte,
+        header_rows::HeaderRows,
+        line_terminator::LineTerminator,
+        null_token::NullToken,
+        preamble::Preamble,
+        quote::Quote,
+        statement::DialectStatement,
+        value_notation::ValueNotation,
+    };
     use cassiopeia_data_profiler::{
         content::Content,
         encoding_hint::EncodingHint,
-        inspectors::csv::{
-            CsvInspector,
-            dialect::{Dialect, LineTerminator},
-            header_rows::HeaderRows,
-            preamble::Preamble,
-        },
+        inspectors::csv::CsvInspector,
         metadata::{CsvMetadata, FormatMetadata},
         profile::Profile,
     };
@@ -252,6 +280,7 @@ mod tests {
         payload::{CollectedPayload, FilePayload, ProfiledPayload},
         record::Record,
     };
+    use encoding_rs::{Encoding, UTF_8, WINDOWS_1252, WINDOWS_1253};
     use mediatype::media_type;
     use pretty_assertions::assert_eq;
     use serde_json::Value;
@@ -323,13 +352,14 @@ mod tests {
     #[test]
     fn a_headerless_source_keys_columns_by_position() {
         let metadata = FormatMetadata::Csv(CsvMetadata::new(Dialect {
-            delimiter: b',',
-            quote_char: Some(b'"'),
+            delimiter: DialectByte::COMMA,
+            quote_char: Quote::Char(DialectByte::DOUBLE_QUOTE),
             preamble: Preamble::NONE,
             header_rows: HeaderRows::NONE,
             escape: None,
             terminator: LineTerminator::Lf,
-            encoding: "UTF-8".to_string(),
+            encoding: CharacterEncoding::new(UTF_8),
+            notation: ValueNotation::PLAIN,
         }));
         let (_dir, payload) = profiled_csv("1,\"Goroka\",\\N\n2,\"Madang\",\"POM\"\n", Some(metadata));
         let records = ingest_all(payload);
@@ -357,13 +387,14 @@ mod tests {
         // the first data row arrives intact.
         let contents = "\"Lumes report\ngenerated 25.10.26\";v2.10\nStation;NO2\nSTEF;12,45\nAKA;9,80\n";
         let metadata = FormatMetadata::Csv(CsvMetadata::new(Dialect {
-            delimiter: b';',
-            quote_char: Some(b'"'),
+            delimiter: DialectByte::SEMICOLON,
+            quote_char: Quote::Char(DialectByte::DOUBLE_QUOTE),
             preamble: Preamble::new(1),
             header_rows: HeaderRows::ONE,
             escape: None,
             terminator: LineTerminator::Lf,
-            encoding: "UTF-8".to_string(),
+            encoding: CharacterEncoding::new(UTF_8),
+            notation: ValueNotation::PLAIN,
         }));
         let (_dir, payload) = profiled_csv(contents, Some(metadata));
         let records = ingest_all(payload);
@@ -377,7 +408,9 @@ mod tests {
     #[test]
     fn the_inspected_dialect_ingests_a_titled_table_from_its_header() {
         let contents = "Lumes;v2.10;25.10.26-08:00:00\nStation;Zeit-NO2;NO2;O3\nSTEF;25.10.2026, 08:00;12;54\nTAB;25.10.2026, 08:00;NE;38\n";
-        let dialect = CsvInspector::new().inspect(&Content::new(contents.as_bytes())).unwrap();
+        let dialect = CsvInspector::new(&DialectStatement::NOTHING)
+            .inspect(&Content::new(contents.as_bytes()))
+            .unwrap();
         let (_dir, payload) = profiled_csv(contents, Some(FormatMetadata::Csv(CsvMetadata::new(dialect))));
         let records = ingest_all(payload);
 
@@ -392,7 +425,9 @@ mod tests {
         // Five line feeds but four CSV records: the inspector and the ingestor must both count the
         // quoted title as one record, or the header or the first data row is lost.
         let contents = "\"Lumes report\ngenerated 25.10.26\";v2.10\nStation;NO2;O3\nSTEF;12,45;54,55\nAKA;9,80;40,10\n";
-        let dialect = CsvInspector::new().inspect(&Content::new(contents.as_bytes())).unwrap();
+        let dialect = CsvInspector::new(&DialectStatement::NOTHING)
+            .inspect(&Content::new(contents.as_bytes()))
+            .unwrap();
         assert_eq!(dialect.preamble, Preamble::new(1));
         let (_dir, payload) = profiled_csv(contents, Some(FormatMetadata::Csv(CsvMetadata::new(dialect))));
         let records = ingest_all(payload);
@@ -407,7 +442,9 @@ mod tests {
     #[test]
     fn a_stacked_header_keys_columns_by_joined_names_and_a_blank_one_by_position() {
         let contents = "Lumes;v2.10;30.10.26-10:00:00\n;Zeit-NO2;NO2;Zeit-PM10;PM10;PM10\n;;HMW;;MW24;HMW\n;MESZ;µg/m³;MESZ;µg/m³;µg/m³\nSTEF;30.10.2026, 10:00;18,48;30.10.2026, 10:00;NE;NE\nTAB;30.10.2026, 10:00;NE;30.10.2026, 10:00;14,03;14,44\nKE;30.10.2026, 10:00;15,17;30.10.2026, 10:00;12,49;18,80\n";
-        let dialect = CsvInspector::new().inspect(&Content::new(contents.as_bytes())).unwrap();
+        let dialect = CsvInspector::new(&DialectStatement::NOTHING)
+            .inspect(&Content::new(contents.as_bytes()))
+            .unwrap();
         let (_dir, payload) = profiled_csv(contents, Some(FormatMetadata::Csv(CsvMetadata::new(dialect))));
         let records = ingest_all(payload);
         let tab = records[1].data();
@@ -421,15 +458,16 @@ mod tests {
         assert_eq!(tab.len(), 6);
     }
 
-    fn dialect_in(encoding: &str) -> FormatMetadata {
+    fn dialect_in(encoding: &'static Encoding) -> FormatMetadata {
         FormatMetadata::Csv(CsvMetadata::new(Dialect {
-            delimiter: b';',
-            quote_char: Some(b'"'),
+            delimiter: DialectByte::SEMICOLON,
+            quote_char: Quote::Char(DialectByte::DOUBLE_QUOTE),
             preamble: Preamble::NONE,
             header_rows: HeaderRows::ONE,
             escape: None,
             terminator: LineTerminator::Lf,
-            encoding: encoding.to_string(),
+            encoding: CharacterEncoding::new(encoding),
+            notation: ValueNotation::PLAIN,
         }))
     }
 
@@ -443,7 +481,7 @@ mod tests {
 
     #[test]
     fn a_utf_8_file_with_a_byte_that_is_not_utf_8_fails_naming_its_line() {
-        let (_dir, payload) = profiled_csv(b"Station;Name\nSTEF;Cafe\nAKA;M\xfcller\n", Some(dialect_in("UTF-8")));
+        let (_dir, payload) = profiled_csv(b"Station;Name\nSTEF;Cafe\nAKA;M\xfcller\n", Some(dialect_in(UTF_8)));
 
         assert_eq!(ingest_error(payload), "line 3 of the CSV file is not valid UTF-8");
     }
@@ -451,7 +489,7 @@ mod tests {
     #[test]
     fn a_byte_with_no_character_in_a_single_byte_encoding_fails_naming_its_line() {
         // 0xD2 has no character in windows-1253.
-        let (_dir, payload) = profiled_csv(b"Station;Name\nSTEF;\xd2\n", Some(dialect_in("windows-1253")));
+        let (_dir, payload) = profiled_csv(b"Station;Name\nSTEF;\xd2\n", Some(dialect_in(WINDOWS_1253)));
 
         assert_eq!(ingest_error(payload), "line 2 of the CSV file is not valid windows-1253");
     }
@@ -459,13 +497,14 @@ mod tests {
     #[test]
     fn a_header_below_a_title_with_a_byte_that_is_not_utf_8_fails_naming_its_file_line() {
         let metadata = FormatMetadata::Csv(CsvMetadata::new(Dialect {
-            delimiter: b';',
-            quote_char: Some(b'"'),
+            delimiter: DialectByte::SEMICOLON,
+            quote_char: Quote::Char(DialectByte::DOUBLE_QUOTE),
             preamble: Preamble::new(1),
             header_rows: HeaderRows::ONE,
             escape: None,
             terminator: LineTerminator::Lf,
-            encoding: "UTF-8".to_string(),
+            encoding: CharacterEncoding::new(UTF_8),
+            notation: ValueNotation::PLAIN,
         }));
         let (_dir, payload) = profiled_csv(b"\"Lumes\nreport\";v2\nStation;\xb5g\nSTEF;12\n", Some(metadata));
         let Err(error) = CsvIngestor::from_payload(payload, 8) else {
@@ -477,7 +516,7 @@ mod tests {
 
     #[test]
     fn a_windows_1252_file_is_transcoded_to_utf_8() {
-        let (_dir, payload) = profiled_csv(b"Station;Unit\nSTEF;\xb5g/m\xb3\n", Some(dialect_in("windows-1252")));
+        let (_dir, payload) = profiled_csv(b"Station;Unit\nSTEF;\xb5g/m\xb3\n", Some(dialect_in(WINDOWS_1252)));
         let records = ingest_all(payload);
 
         assert_eq!(records[0].data().get("Unit"), Some(&Value::String("µg/m³".to_string())));
@@ -485,7 +524,7 @@ mod tests {
 
     #[test]
     fn a_utf_8_byte_order_mark_is_not_part_of_the_first_column_key() {
-        let (_dir, payload) = profiled_csv(b"\xef\xbb\xbfStation;Name\nSTEF;Caf\xc3\xa9\n", Some(dialect_in("UTF-8")));
+        let (_dir, payload) = profiled_csv(b"\xef\xbb\xbfStation;Name\nSTEF;Caf\xc3\xa9\n", Some(dialect_in(UTF_8)));
         let records = ingest_all(payload);
 
         assert_eq!(records[0].data().get("Station"), Some(&Value::String("STEF".to_string())));
@@ -495,18 +534,89 @@ mod tests {
     #[test]
     fn profiled_dialect_is_used_for_non_default_csv() {
         let metadata = FormatMetadata::Csv(CsvMetadata::new(Dialect {
-            delimiter: b';',
-            quote_char: Some(b'"'),
+            delimiter: DialectByte::SEMICOLON,
+            quote_char: Quote::Char(DialectByte::DOUBLE_QUOTE),
             preamble: Preamble::NONE,
             header_rows: HeaderRows::ONE,
             escape: None,
             terminator: LineTerminator::Lf,
-            encoding: "UTF-8".to_string(),
+            encoding: CharacterEncoding::new(UTF_8),
+            notation: ValueNotation::PLAIN,
         }));
         let (_dir, payload) = profiled_csv("name;age\nAda;36\nGrace;45\n", Some(metadata));
         let records = ingest_all(payload);
 
         assert_eq!(records.len(), 2);
         assert_eq!(records[0].data().get("age"), Some(&Value::Number(36.into())));
+    }
+
+    fn semicolon_dialect_with(notation: ValueNotation) -> FormatMetadata {
+        FormatMetadata::Csv(CsvMetadata::new(Dialect {
+            delimiter: DialectByte::SEMICOLON,
+            quote_char: Quote::Char(DialectByte::DOUBLE_QUOTE),
+            preamble: Preamble::NONE,
+            header_rows: HeaderRows::ONE,
+            escape: None,
+            terminator: LineTerminator::Lf,
+            encoding: CharacterEncoding::new(UTF_8),
+            notation,
+        }))
+    }
+
+    #[test]
+    fn a_stated_comma_decimal_reads_as_a_number_and_a_dotted_date_stays_text() {
+        let notation = ValueNotation {
+            decimal_separator: DecimalSeparator::Comma,
+            ..ValueNotation::PLAIN
+        };
+        let (_dir, payload) = profiled_csv(
+            "Station;NO2;Zip;Date\nSTEF;12,45;0123;25.10.2026\nAKA;0,5;1010;25.10\n",
+            Some(semicolon_dialect_with(notation)),
+        );
+        let records = ingest_all(payload);
+
+        assert_eq!(records[0].data().get("NO2"), Some(&serde_json::json!(12.45)));
+        assert_eq!(records[1].data().get("NO2"), Some(&serde_json::json!(0.5)));
+        assert_eq!(records[0].data().get("Zip"), Some(&Value::String("0123".to_string())));
+        assert_eq!(records[1].data().get("Zip"), Some(&Value::Number(1010.into())));
+        assert_eq!(records[0].data().get("Date"), Some(&Value::String("25.10.2026".to_string())));
+        assert_eq!(records[1].data().get("Date"), Some(&Value::String("25.10".to_string())));
+    }
+
+    #[test]
+    fn a_stated_null_token_reads_as_null_and_any_other_text_stays_text() {
+        let notation = ValueNotation {
+            null_values: vec![NullToken::try_from("NE".to_owned()).unwrap(), NullToken::try_from("---".to_owned()).unwrap()],
+            ..ValueNotation::PLAIN
+        };
+        let (_dir, payload) = profiled_csv("Station;NO2;O3\nTAB; NE ;---\nAKA;NEU;12\n", Some(semicolon_dialect_with(notation)));
+        let records = ingest_all(payload);
+
+        assert_eq!(records[0].data().get("NO2"), Some(&Value::Null));
+        assert_eq!(records[0].data().get("O3"), Some(&Value::Null));
+        assert_eq!(records[1].data().get("NO2"), Some(&Value::String("NEU".to_string())));
+    }
+
+    #[test]
+    fn a_stated_dialect_ingests_a_titled_stacked_table_with_comma_decimals_and_null_tokens() {
+        let contents = "Lumes;v2.10;30.10.26-10:00:00\n;Zeit-NO2;NO2;PM10\n;;HMW;MW24\n;MESZ;µg/m³;µg/m³\nSTEF;30.10.2026, 10:00;18,48;NE\nTAB;30.10.2026, 10:00;---;14,03\n";
+        let statement: DialectStatement = serde_json::from_value(serde_json::json!({
+            "delimiter": ";",
+            "skipRows": 1,
+            "headerRows": 3,
+            "decimalSeparator": ",",
+            "nullValues": ["NE", "---"],
+        }))
+        .unwrap();
+        let dialect = CsvInspector::new(&statement).inspect(&Content::new(contents.as_bytes())).unwrap();
+        let (_dir, payload) = profiled_csv(contents, Some(FormatMetadata::Csv(CsvMetadata::new(dialect))));
+        let records = ingest_all(payload);
+
+        assert_eq!(records.len(), 2);
+        assert_eq!(records[0].data().get("0"), Some(&Value::String("STEF".to_string())));
+        assert_eq!(records[0].data().get("NO2 HMW µg/m³"), Some(&serde_json::json!(18.48)));
+        assert_eq!(records[0].data().get("PM10 MW24 µg/m³"), Some(&Value::Null));
+        assert_eq!(records[1].data().get("NO2 HMW µg/m³"), Some(&Value::Null));
+        assert_eq!(records[1].data().get("PM10 MW24 µg/m³"), Some(&serde_json::json!(14.03)));
     }
 }

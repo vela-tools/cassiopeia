@@ -5,6 +5,7 @@ use crate::{
     metadata::{CsvMetadata, FormatMetadata},
 };
 use cassiopeia_common::format::DataFormat;
+use cassiopeia_csv_dialect::statement::DialectStatement;
 
 pub mod csv;
 pub mod grib;
@@ -19,13 +20,16 @@ pub mod grib;
 /// Shapefile, XML) has no structural inspector and yields `None`, its record shape deferred to the
 /// ingestor.
 ///
+/// `statement` is what the source's manifest input states about a CSV dialect: the inspector takes the
+/// stated members and detects the rest. It describes a CSV alone, so every other format ignores it.
+///
 /// # Errors
 ///
 /// Returns [`crate::error::DataProfilerError`] when the CSV dialect cannot be inspected.
-pub fn inspect(format: DataFormat, content: &Content<'_>) -> Result<Option<FormatMetadata>> {
+pub fn inspect(format: DataFormat, content: &Content<'_>, statement: &DialectStatement) -> Result<Option<FormatMetadata>> {
     match format {
         DataFormat::Csv => {
-            let dialect = CsvInspector::new().inspect(content)?;
+            let dialect = CsvInspector::new(statement).inspect(content)?;
             Ok(Some(FormatMetadata::Csv(CsvMetadata::new(dialect))))
         }
         DataFormat::Grib => Ok(GribInspector::inspect(content.bytes()).map(FormatMetadata::Grib)),
@@ -37,30 +41,41 @@ pub fn inspect(format: DataFormat, content: &Content<'_>) -> Result<Option<Forma
 mod tests {
     use crate::{content::Content, inspectors::inspect};
     use cassiopeia_common::format::DataFormat;
+    use cassiopeia_csv_dialect::{dialect_byte::DialectByte, statement::DialectStatement};
     use pretty_assertions::assert_eq;
 
     #[test]
     fn a_declared_csv_is_inspected_for_its_dialect() {
-        let metadata = inspect(DataFormat::Csv, &Content::new(b"id;name\n1;alpha\n2;beta\n")).unwrap().unwrap();
-        assert_eq!(metadata.as_csv().unwrap().dialect().delimiter, b';');
+        let metadata = inspect(DataFormat::Csv, &Content::new(b"id;name\n1;alpha\n2;beta\n"), &DialectStatement::NOTHING)
+            .unwrap()
+            .unwrap();
+        assert_eq!(metadata.as_csv().unwrap().dialect().delimiter, DialectByte::SEMICOLON);
     }
 
     #[test]
     fn a_declared_grib_is_inspected_for_its_edition() {
-        let metadata = inspect(DataFormat::Grib, &Content::new(b"GRIB\x00\x00\x00\x02\x00\x00\x00\x00"))
-            .unwrap()
-            .unwrap();
+        let metadata = inspect(
+            DataFormat::Grib,
+            &Content::new(b"GRIB\x00\x00\x00\x02\x00\x00\x00\x00"),
+            &DialectStatement::NOTHING,
+        )
+        .unwrap()
+        .unwrap();
         assert!(metadata.as_grib().is_some());
     }
 
     #[test]
     fn a_self_describing_format_has_no_inspector() {
-        assert!(inspect(DataFormat::Json, &Content::new(b"{}")).unwrap().is_none());
-        assert!(inspect(DataFormat::Shapefile, &Content::new(b"anything")).unwrap().is_none());
+        assert!(inspect(DataFormat::Json, &Content::new(b"{}"), &DialectStatement::NOTHING).unwrap().is_none());
+        assert!(
+            inspect(DataFormat::Shapefile, &Content::new(b"anything"), &DialectStatement::NOTHING)
+                .unwrap()
+                .is_none()
+        );
     }
 
     #[test]
     fn an_empty_declared_csv_surfaces_the_inspection_error() {
-        assert!(inspect(DataFormat::Csv, &Content::new(b"")).is_err());
+        assert!(inspect(DataFormat::Csv, &Content::new(b""), &DialectStatement::NOTHING).is_err());
     }
 }

@@ -1,6 +1,7 @@
 use crate::error::Result;
 use cassiopeia_collector::{file_extension::FileExtension, source::CollectorSource};
 use cassiopeia_common::{context::mode::AtContextMode, format::DataFormat, schema_source::SchemaSource};
+use cassiopeia_csv_dialect::statement::DialectStatement;
 use cassiopeia_manifest::{input::ManifestInput, mapping_binding::MappingBinding};
 use serde_json::{Map, Value};
 
@@ -18,6 +19,8 @@ pub(crate) struct InputConfig {
     pub(crate) collector_source: CollectorSource,
     /// The declared format, or `None` to auto-detect.
     pub(crate) format_override: Option<DataFormat>,
+    /// What the input states about a CSV source's dialect; nothing when it states no `dialect`.
+    pub(crate) dialect: DialectStatement,
     /// How this lane's records are routed to mappings.
     pub(crate) mapping_binding: MappingBinding,
     /// A per-input `@context` mode overriding the manifest-wide one.
@@ -51,6 +54,8 @@ pub(crate) fn build_input_config(input: &ManifestInput, effective_global: &Map<S
     Ok(InputConfig {
         collector_source,
         format_override,
+        // The lane owns its statement, while the manifest keeps its own.
+        dialect: input.dialect().clone().unwrap_or_default(),
         mapping_binding: input.mapping_binding().clone(),
         context_mode: input.context().clone(),
         schema: input.schema().clone(),
@@ -74,6 +79,7 @@ fn merge_vars(effective_global: &Map<String, Value>, per_input: Option<&Map<Stri
 mod tests {
     use crate::input_config::build_input_config;
     use cassiopeia_common::{format::DataFormat, input::Input};
+    use cassiopeia_csv_dialect::{dialect_byte::DialectByte, statement::DialectStatement};
     use cassiopeia_manifest::{input::ManifestInput, mapping_binding::MappingBinding};
     use pretty_assertions::assert_eq;
     use serde_json::{Map, json};
@@ -101,6 +107,29 @@ mod tests {
                 mapping: PathBuf::from("mapping.json5")
             }
         );
+    }
+
+    #[test]
+    fn a_stated_dialect_carries_through_to_the_lane() {
+        let input = ManifestInput::builder()
+            .source(Input::from_str("data.csv").unwrap())
+            .mapping_binding(MappingBinding::Single {
+                mapping: PathBuf::from("mapping.json5"),
+            })
+            .format(Some(DataFormat::Csv))
+            .dialect(Some(serde_json::from_str(r#"{"delimiter": ";"}"#).unwrap()))
+            .build();
+
+        let config = build_input_config(&input, &Map::new()).unwrap();
+
+        assert_eq!(config.dialect.delimiter(), Some(DialectByte::SEMICOLON));
+    }
+
+    #[test]
+    fn an_input_without_a_dialect_states_nothing_to_its_lane() {
+        let config = build_input_config(&manifest_input(DataFormat::Csv), &Map::new()).unwrap();
+
+        assert_eq!(config.dialect, DialectStatement::NOTHING);
     }
 
     #[test]

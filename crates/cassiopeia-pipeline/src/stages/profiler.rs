@@ -8,6 +8,7 @@ use cassiopeia_common::{
     stage::Stage,
     telemetry::{channel_boundary::ChannelBoundary, run::RunTelemetry},
 };
+use cassiopeia_csv_dialect::statement::DialectStatement;
 use cassiopeia_ir::{fragment::Fragment, mapped::Mapped, payload::CollectedPayload};
 use cassiopeia_profiler::{
     auto_profiler::AutoProfiler,
@@ -45,12 +46,14 @@ pub(crate) fn spawn_profiler_thread(
 
 /// Builds the profiler for one lane, splitting the collector's stream onto the profiler's channel.
 ///
-/// A declared format takes the passthrough profiler; an undeclared one takes the auto-detector. Data
+/// A declared format takes the passthrough profiler, which inspects a CSV under the input's stated
+/// `dialect`; an undeclared one takes the auto-detector. Data
 /// payloads flow to the profiler on a policy-controlled channel; a collector failure is the lane's failure, so
 /// it is forwarded straight to the shared error path (`error_sink`) and the lane is torn down,
 /// rather than routed through the profiler as a re-typed error.
 pub(crate) fn create_profiler(
     format_override: Option<DataFormat>,
+    dialect: DialectStatement,
     collector_rx: ChannelReceiver<Signal<CollectedPayload, CollectorError>>,
     channel_policy: ChannelPolicy,
     error_sink: ChannelSender<Signal<Batch<Mapped<Fragment>>, PipelineError>>,
@@ -102,7 +105,7 @@ pub(crate) fn create_profiler(
     });
 
     match format_override {
-        Some(format) => Box::new(PassthroughProfiler::new(format, profiler_rx, telemetry)),
+        Some(format) => Box::new(PassthroughProfiler::new(format, dialect, profiler_rx, telemetry)),
         None => Box::new(AutoProfiler::new(profiler_rx, telemetry)),
     }
 }

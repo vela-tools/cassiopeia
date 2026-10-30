@@ -10,6 +10,7 @@ repository.workspace = true
 [dependencies]
 anstyle = "1.0.14"
 cassiopeia-configuration.workspace = true
+cassiopeia-csv-dialect.workspace = true
 cassiopeia-data-profiler.workspace = true
 cassiopeia-diagnostic.workspace = true
 cassiopeia-mapping.workspace = true
@@ -29,6 +30,7 @@ tokio = { version = "1.54.1", features = ["net", "rt", "sync", "time"] }
 toml = "1.1.8"
 
 [dev-dependencies]
+encoding_rs = "0.8.42"
 pretty_assertions = "1.4.1"
 tempfile = "3.27.0"
 

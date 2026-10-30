@@ -52,6 +52,7 @@ mod tests {
         signal::Signal,
         telemetry::run::RunTelemetry,
     };
+    use cassiopeia_csv_dialect::dialect_byte::DialectByte;
     use cassiopeia_data_profiler::{encoding_hint::EncodingHint, metadata::FormatMetadata};
     use cassiopeia_ir::payload::{BytesPayload, CollectedPayload};
     use pretty_assertions::assert_eq;
@@ -78,7 +79,7 @@ mod tests {
             Signal::Data(profiled) => {
                 assert_eq!(*profiled.profile().format(), DataFormat::Csv);
                 let metadata = profiled.profile().metadata().as_ref().and_then(FormatMetadata::as_csv).unwrap();
-                assert_eq!(metadata.dialect().delimiter, b',');
+                assert_eq!(metadata.dialect().delimiter, DialectByte::COMMA);
             }
             other @ (Signal::Start | Signal::Stop | Signal::Error(_) | Signal::Meta(_)) => {
                 panic!("expected a data signal, got {other:?}")

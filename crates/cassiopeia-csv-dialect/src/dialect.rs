@@ -1,44 +1,25 @@
-use crate::inspectors::csv::{header_rows::HeaderRows, preamble::Preamble};
-use ::csv::{Reader, ReaderBuilder, StringRecord, Terminator};
-use encoding_rs::{Encoding, UTF_8};
+use crate::{
+    character_encoding::CharacterEncoding,
+    dialect_byte::DialectByte,
+    header_rows::HeaderRows,
+    line_terminator::LineTerminator,
+    preamble::Preamble,
+    quote::Quote,
+    value_notation::ValueNotation,
+};
+use csv::{Reader, ReaderBuilder, StringRecord};
+use encoding_rs::Encoding;
 use serde::Serialize;
 use std::io::{BufRead, Read};
 
-/// Line terminators supported by the CSV profiler.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
-pub enum LineTerminator {
-    /// A line terminated by `\n`.
-    Lf,
-    /// A line terminated by `\r\n`.
-    CrLf,
-}
-
-impl LineTerminator {
-    /// Converts the profiler representation to the CSV parser representation.
-    #[must_use]
-    pub const fn as_csv(self) -> Terminator {
-        match self {
-            Self::Lf => Terminator::Any(b'\n'),
-            Self::CrLf => Terminator::CRLF,
-        }
-    }
-
-    /// Converts the profiler representation to the low-level CSV state machine representation.
-    const fn as_csv_core(self) -> csv_core::Terminator {
-        match self {
-            Self::Lf => csv_core::Terminator::Any(b'\n'),
-            Self::CrLf => csv_core::Terminator::CRLF,
-        }
-    }
-}
-
-/// A detected CSV dialect: the parameters needed to parse a specific CSV file.
-#[derive(Debug, Clone, Serialize)]
+/// A CSV dialect: the parameters needed to parse a specific CSV file, detected, stated in a
+/// manifest, or both.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct Dialect {
-    /// The field delimiter byte (comma, tab, semicolon, ...).
-    pub delimiter: u8,
-    /// The quote byte, or `None` when quoting is disabled.
-    pub quote_char: Option<u8>,
+    /// The field delimiter (comma, tab, semicolon, ...).
+    pub delimiter: DialectByte,
+    /// The quote character, or none when quoting is disabled.
+    pub quote_char: Quote,
     /// The records above the table, skipped before the header row is read.
     pub preamble: Preamble,
     /// The records after the preamble that form the header, joined per column into field names.
@@ -47,22 +28,23 @@ pub struct Dialect {
     pub escape: Option<u8>,
     /// The line terminator.
     pub terminator: LineTerminator,
-    /// The detected character encoding, as its canonical `encoding_rs` label (`UTF-8`,
-    /// `windows-1252`, ...). The ingestor decodes the file with it so a non-UTF-8 source is read
+    /// The character encoding. The ingestor decodes the file with it so a non-UTF-8 source is read
     /// correctly rather than rejected on its first non-UTF-8 byte.
-    pub encoding: String,
+    pub encoding: CharacterEncoding,
+    /// How the values in the fields are written: their decimal separator and null tokens.
+    pub notation: ValueNotation,
 }
 
 impl Dialect {
-    /// The character encoding the source is decoded from, resolved from its label. A label
-    /// `encoding_rs` does not know falls back to UTF-8, the encoding every parse below expects.
+    /// The character encoding the source is decoded from.
     #[must_use]
-    pub fn character_encoding(&self) -> &'static Encoding {
-        Encoding::for_label(self.encoding.as_bytes()).unwrap_or(UTF_8)
+    pub const fn character_encoding(&self) -> &'static Encoding {
+        self.encoding.encoding()
     }
 
-    /// Opens `input`, already decoded to UTF-8 with [`Self::character_encoding`], as CSV under this dialect: skips the preamble, joins a stacked header into
-    /// one row of field names, and returns a reader whose next record is the first data row.
+    /// Opens `input`, already decoded to UTF-8 with [`Self::character_encoding`], as CSV under this
+    /// dialect: skips the preamble, joins a stacked header into one row of field names, and returns a
+    /// reader whose next record is the first data row.
     ///
     /// Every parse of a profiled CSV goes through here, the dialect inspector's candidate scoring,
     /// the detector, and the ingestor alike, so they all agree on where the table starts, what its
@@ -108,14 +90,15 @@ impl Dialect {
 
     /// The table reader configuration: non-flexible, so a record whose field count differs from the
     /// first one is a parse error. It does not skip the preamble; [`Self::reader`] does that first.
-    pub(crate) fn reader_builder(&self) -> ReaderBuilder {
+    #[must_use]
+    pub fn reader_builder(&self) -> ReaderBuilder {
         let mut builder = ReaderBuilder::new();
         builder
-            .delimiter(self.delimiter)
+            .delimiter(self.delimiter.byte())
             .has_headers(self.header_rows.is_present())
             .terminator(self.terminator.as_csv())
             .escape(self.escape);
-        match self.quote_char {
+        match self.quote_char.byte() {
             Some(quote) => builder.quote(quote),
             None => builder.quoting(false),
         };
@@ -126,8 +109,11 @@ impl Dialect {
     /// [`Self::reader_builder`]'s reader does.
     fn core_reader(&self) -> csv_core::Reader {
         let mut builder = csv_core::ReaderBuilder::new();
-        builder.delimiter(self.delimiter).terminator(self.terminator.as_csv_core()).escape(self.escape);
-        match self.quote_char {
+        builder
+            .delimiter(self.delimiter.byte())
+            .terminator(self.terminator.as_csv_core())
+            .escape(self.escape);
+        match self.quote_char.byte() {
             Some(quote) => builder.quote(quote),
             None => builder.quoting(false),
         };
@@ -137,22 +123,29 @@ impl Dialect {
 
 #[cfg(test)]
 mod tests {
-    use crate::inspectors::csv::{
-        dialect::{Dialect, LineTerminator},
+    use crate::{
+        character_encoding::CharacterEncoding,
+        dialect::Dialect,
+        dialect_byte::DialectByte,
         header_rows::HeaderRows,
+        line_terminator::LineTerminator,
         preamble::Preamble,
+        quote::Quote,
+        value_notation::ValueNotation,
     };
+    use encoding_rs::UTF_8;
     use pretty_assertions::assert_eq;
 
     fn semicolon_dialect(preamble: Preamble) -> Dialect {
         Dialect {
-            delimiter: b';',
-            quote_char: Some(b'"'),
+            delimiter: DialectByte::SEMICOLON,
+            quote_char: Quote::Char(DialectByte::DOUBLE_QUOTE),
             preamble,
             header_rows: HeaderRows::ONE,
             escape: None,
             terminator: LineTerminator::Lf,
-            encoding: "UTF-8".to_owned(),
+            encoding: CharacterEncoding::new(UTF_8),
+            notation: ValueNotation::PLAIN,
         }
     }
 

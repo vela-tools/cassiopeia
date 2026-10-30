@@ -1,22 +1,28 @@
 use crate::{
     content::Content,
     inspectors::csv::{
-        dialect::{Dialect, LineTerminator},
         error::CsvInspectError,
         header::{continuation_rows, header_quality, looks_like_header_row},
-        header_rows::HeaderRows,
-        preamble::Preamble,
         table::Table,
         title::title_rows,
     },
 };
+use cassiopeia_csv_dialect::{
+    character_encoding::CharacterEncoding,
+    dialect::Dialect,
+    dialect_byte::DialectByte,
+    header_rows::HeaderRows,
+    header_statement::HeaderStatement,
+    line_terminator::LineTerminator,
+    preamble::Preamble,
+    quote::Quote,
+    statement::DialectStatement,
+    value_notation::ValueNotation,
+};
 
 pub mod data_type;
-pub mod dialect;
 pub mod error;
 mod header;
-pub mod header_rows;
-pub mod preamble;
 mod table;
 mod title;
 
@@ -40,31 +46,58 @@ const MAX_PREAMBLE_RECORDS: usize = 10;
 /// shorter tail is more likely a coincidence of a wrong delimiter than a table.
 const MIN_RECORDS_BELOW_PREAMBLE: usize = 2;
 
+/// The soft target size of the dialect sample; see [`CsvInspector::sample_of`].
+const SAMPLE_SIZE: usize = 32 * 1024;
+
+/// The delimiters tried when none is stated.
+const CANDIDATE_DELIMITERS: [DialectByte; 5] = [
+    DialectByte::COMMA,
+    DialectByte::TAB,
+    DialectByte::SEMICOLON,
+    DialectByte::PIPE,
+    DialectByte::SPACE,
+];
+
+/// The quoting tried when none is stated.
+const CANDIDATE_QUOTES: [Quote; 3] = [Quote::Char(DialectByte::DOUBLE_QUOTE), Quote::Char(DialectByte::SINGLE_QUOTE), Quote::Disabled];
+
 /// CSV dialect inspector.
 ///
 /// The structural inspector for delimited text: it samples a payload and scores candidate dialects to
 /// recover the delimiter, quote, preamble, header, and terminator a specific CSV file uses. It runs
 /// whichever way the format was decided, as part of auto-detection and for a declared CSV alike.
-pub struct CsvInspector {
-    delimiters: Vec<u8>,
-    quotes: Vec<Option<u8>>,
+///
+/// A member its [`DialectStatement`] states is taken as stated, and only the members left out are
+/// detected; a statement of every structural member is the dialect, and nothing is detected.
+pub struct CsvInspector<'s> {
+    statement: &'s DialectStatement,
     sample_size: usize,
 }
 
-impl Default for CsvInspector {
-    fn default() -> Self {
-        Self::new()
+/// One reading of a sample: a candidate dialect, the table it reads, and how coherent that table is.
+struct Reading {
+    dialect: Dialect,
+    table: Table,
+    score: f64,
+}
+
+impl Reading {
+    /// The reading of the two that scores higher; `other` must score strictly higher to win.
+    fn or_better(self, other: Option<Reading>) -> Reading {
+        match other {
+            Some(other) if other.score > self.score => other,
+            Some(_) | None => self,
+        }
     }
 }
 
-impl CsvInspector {
-    /// Creates an inspector with the default candidate delimiters and quotes.
+impl<'s> CsvInspector<'s> {
+    /// Creates an inspector that takes what `statement` states and detects the rest.
     #[must_use]
-    pub fn new() -> CsvInspector {
+    pub const fn new(statement: &'s DialectStatement) -> CsvInspector<'s> {
         CsvInspector {
-            delimiters: vec![b',', b'\t', b';', b'|', b' '],
-            quotes: vec![Some(b'"'), Some(b'\''), None],
-            sample_size: 32 * 1024,
+            statement,
+            sample_size: SAMPLE_SIZE,
         }
     }
 
@@ -76,6 +109,10 @@ impl CsvInspector {
     /// Returns [`CsvInspectError`] when the content is empty or no candidate dialect produces a
     /// coherent table.
     pub fn inspect(&self, content: &Content<'_>) -> Result<Dialect, CsvInspectError> {
+        if let Some(dialect) = self.statement.whole_dialect() {
+            return Ok(dialect);
+        }
+
         let bytes = content.bytes();
         if bytes.is_empty() {
             return Err(CsvInspectError::EmptyInput);
@@ -84,63 +121,130 @@ impl CsvInspector {
         // Transcode the sample to UTF-8 before scoring, so a non-UTF-8 file (Windows-1252, Latin-1,
         // ...) does not fail record parsing on its first non-ASCII byte. The encoding is carried on
         // the dialect for the ingestor to reuse.
-        let encoding = content.encoding_hint().encoding_of(bytes);
-        let decoded = encoding.decode(self.sample_of(bytes)).0;
+        let encoding = self
+            .statement
+            .encoding()
+            .unwrap_or_else(|| CharacterEncoding::new(content.encoding_hint().encoding_of(bytes)));
+        let decoded = encoding.encoding().decode(self.sample_of(bytes)).0;
         let sample = decoded.as_bytes();
+        let terminator = self.statement.terminator().unwrap_or_else(|| Self::terminator_of(sample));
 
-        let terminator = if sample.windows(2).any(|w| w == b"\r\n") {
-            LineTerminator::CrLf
-        } else {
-            LineTerminator::Lf
-        };
-
-        let mut best: Option<(Dialect, Table)> = None;
-        let mut best_score = f64::NEG_INFINITY;
-
-        for &delimiter in &self.delimiters {
-            for &quote in &self.quotes {
-                let headerless = Dialect {
+        let best = self
+            .delimiters()
+            .into_iter()
+            .flat_map(|delimiter| self.quotes().into_iter().map(move |quote| (delimiter, quote)))
+            .filter_map(|(delimiter, quote)| {
+                let candidate = Dialect {
                     delimiter,
                     quote_char: quote,
                     preamble: Preamble::NONE,
                     header_rows: HeaderRows::NONE,
                     escape: None,
                     terminator,
-                    encoding: encoding.name().to_owned(),
+                    encoding,
+                    notation: ValueNotation::PLAIN,
                 };
-                // The full table keeps row 0, so it is both what the no-headers hypothesis scores and
-                // what a header is judged against; the headers hypothesis scores the data-only table.
-                let Some((headerless, full)) = Self::locate_table(sample, headerless) else {
-                    continue;
-                };
-                let (headerless, full) = Self::below_titles(sample, headerless, full);
+                self.best_reading(sample, candidate)
+            })
+            .reduce(|best, reading| best.or_better(Some(reading)));
 
-                let header_signal = header_quality(&full);
-                let headed = Dialect {
-                    header_rows: HeaderRows::ONE,
-                    encoding: encoding.name().to_owned(),
-                    ..headerless
-                };
-                let data = (full.num_rows >= 2).then(|| Table::parse(sample, &headed)).flatten().filter(Table::is_tabular);
-
-                let no_header_score = full.score();
-                if no_header_score > best_score {
-                    best_score = no_header_score;
-                    best = Some((headerless, full));
-                }
-
-                if let Some(data) = data {
-                    let header_score = data.score() + header_signal * 15.0;
-                    if header_score > best_score {
-                        best_score = header_score;
-                        best = Some((headed, data));
-                    }
-                }
-            }
+        let Reading { mut dialect, table, .. } = best.ok_or(CsvInspectError::NoDialectDetected)?;
+        if !matches!(self.statement.header(), Some(HeaderStatement::Rows(_))) {
+            dialect = Self::with_stacked_header(dialect, &table);
         }
+        // The dialect owns its notation, while the statement stays the manifest's.
+        dialect.notation = self.statement.notation().clone();
+        Ok(dialect)
+    }
 
-        let (dialect, table) = best.ok_or(CsvInspectError::NoDialectDetected)?;
-        Ok(Self::with_stacked_header(dialect, &table))
+    /// The delimiters to try: the stated one, or every candidate.
+    fn delimiters(&self) -> Vec<DialectByte> {
+        self.statement
+            .delimiter()
+            .map_or_else(|| CANDIDATE_DELIMITERS.to_vec(), |delimiter| vec![delimiter])
+    }
+
+    /// The quoting to try: the stated one, or every candidate.
+    fn quotes(&self) -> Vec<Quote> {
+        self.statement.quote().map_or_else(|| CANDIDATE_QUOTES.to_vec(), |quote| vec![quote])
+    }
+
+    /// The line terminator of `sample`: CRLF as soon as one line ends with it.
+    fn terminator_of(sample: &[u8]) -> LineTerminator {
+        if sample.windows(2).any(|w| w == b"\r\n") {
+            LineTerminator::Crlf
+        } else {
+            LineTerminator::Lf
+        }
+    }
+
+    /// The best reading of `sample` under `candidate`'s delimiter and quote: where its table starts
+    /// and whether it has a header, each as stated or, left out, as scored.
+    ///
+    /// The full table keeps row 0, so it is both what the no-headers hypothesis scores and what a
+    /// header is judged against; the headers hypothesis scores the data-only table. A stated header
+    /// leaves one hypothesis, scored on the table alone.
+    fn best_reading(&self, sample: &[u8], candidate: Dialect) -> Option<Reading> {
+        let (headerless, full) = self.table_start(sample, candidate)?;
+        match self.statement.header() {
+            None => {
+                let header_signal = header_quality(&full);
+                let headed = Self::headed(sample, &headerless, HeaderRows::ONE, &full).map(|(dialect, data)| Reading {
+                    score: data.score() + header_signal * 15.0,
+                    dialect,
+                    table: data,
+                });
+                let unheaded = Reading {
+                    score: full.score(),
+                    dialect: headerless,
+                    table: full,
+                };
+                Some(unheaded.or_better(headed))
+            }
+            Some(HeaderStatement::Present) => Self::headed_reading(sample, &headerless, HeaderRows::ONE, &full),
+            Some(HeaderStatement::Rows(rows)) if rows.is_present() => Self::headed_reading(sample, &headerless, rows, &full),
+            Some(HeaderStatement::Rows(_)) => Some(Reading {
+                score: full.score(),
+                dialect: headerless,
+                table: full,
+            }),
+        }
+    }
+
+    /// The reading of `sample` with a header of `header_rows` records, scored on its data alone.
+    fn headed_reading(sample: &[u8], headerless: &Dialect, header_rows: HeaderRows, full: &Table) -> Option<Reading> {
+        Self::headed(sample, headerless, header_rows, full).map(|(dialect, data)| Reading {
+            score: data.score(),
+            dialect,
+            table: data,
+        })
+    }
+
+    /// `headerless` with a header of `header_rows` records, and the data-only table below that
+    /// header, when the full table holds a header and a data row and the data is tabular.
+    fn headed(sample: &[u8], headerless: &Dialect, header_rows: HeaderRows, full: &Table) -> Option<(Dialect, Table)> {
+        let headed = Dialect {
+            header_rows,
+            notation: ValueNotation::PLAIN,
+            ..*headerless
+        };
+        (full.num_rows >= 2)
+            .then(|| Table::parse(sample, &headed))
+            .flatten()
+            .filter(Table::is_tabular)
+            .map(|data| (headed, data))
+    }
+
+    /// Where the table in `sample` starts under `candidate`: below the stated preamble, or below the
+    /// preamble and titles detected, with the headerless table from there.
+    fn table_start(&self, sample: &[u8], candidate: Dialect) -> Option<(Dialect, Table)> {
+        if let Some(preamble) = self.statement.skip_rows() {
+            let dialect = Dialect { preamble, ..candidate };
+            let table = Table::parse(sample, &dialect).filter(Table::is_tabular)?;
+            return Some((dialect, table));
+        }
+        let (dialect, table) = Self::locate_table(sample, candidate)?;
+        Some(Self::below_titles(sample, dialect, table))
     }
 
     /// Settles how many records form the winning dialect's header, given the table it was scored on.
@@ -243,18 +347,24 @@ impl CsvInspector {
 
 #[cfg(test)]
 mod tests {
-    use crate::{
-        content::Content,
-        inspectors::csv::{CsvInspector, dialect::LineTerminator, header_rows::HeaderRows, preamble::Preamble},
+    use crate::{content::Content, inspectors::csv::CsvInspector};
+    use cassiopeia_csv_dialect::{
+        decimal_separator::DecimalSeparator,
+        dialect_byte::DialectByte,
+        header_rows::HeaderRows,
+        line_terminator::LineTerminator,
+        preamble::Preamble,
+        quote::Quote,
+        statement::DialectStatement,
     };
     use pretty_assertions::assert_eq;
 
     #[test]
     fn a_comma_delimited_file_with_headers_is_detected() {
         let sample = "name,age,city\nAda,36,London\nGrace,45,New York\n";
-        let dialect = CsvInspector::new().inspect(&Content::new(sample.as_bytes())).unwrap();
+        let dialect = CsvInspector::new(&DialectStatement::NOTHING).inspect(&Content::new(sample.as_bytes())).unwrap();
 
-        assert_eq!(dialect.delimiter, b',');
+        assert_eq!(dialect.delimiter, DialectByte::COMMA);
         assert_eq!(dialect.header_rows, HeaderRows::ONE);
         assert_eq!(dialect.terminator, LineTerminator::Lf);
     }
@@ -262,14 +372,14 @@ mod tests {
     #[test]
     fn a_semicolon_delimited_file_is_detected() {
         let sample = "name;age;city\nAda;36;London\nGrace;45;New York\n";
-        let dialect = CsvInspector::new().inspect(&Content::new(sample.as_bytes())).unwrap();
+        let dialect = CsvInspector::new(&DialectStatement::NOTHING).inspect(&Content::new(sample.as_bytes())).unwrap();
 
-        assert_eq!(dialect.delimiter, b';');
+        assert_eq!(dialect.delimiter, DialectByte::SEMICOLON);
     }
 
     #[test]
     fn empty_input_is_rejected() {
-        assert!(CsvInspector::new().inspect(&Content::new(b"")).is_err());
+        assert!(CsvInspector::new(&DialectStatement::NOTHING).inspect(&Content::new(b"")).is_err());
     }
 
     #[test]
@@ -278,9 +388,9 @@ mod tests {
         // must not consume it as a header row (which would drop the first record and key the rest by
         // that row's values).
         let sample = "1,\"Goroka\",\"PG\",-6.081,145.391\n2,\"Madang\",\"PG\",-5.207,145.789\n3,\"Hagen\",\"PG\",-5.826,144.296\n";
-        let dialect = CsvInspector::new().inspect(&Content::new(sample.as_bytes())).unwrap();
+        let dialect = CsvInspector::new(&DialectStatement::NOTHING).inspect(&Content::new(sample.as_bytes())).unwrap();
 
-        assert_eq!(dialect.delimiter, b',');
+        assert_eq!(dialect.delimiter, DialectByte::COMMA);
         assert_eq!(dialect.header_rows, HeaderRows::NONE);
     }
 
@@ -289,9 +399,9 @@ mod tests {
         // Every column is text, so type gives no signal; the first row's cells are real values (a
         // multi-word name, a code) rather than field labels, so it must be treated as data.
         let sample = "\"Bonaire, Saint Eustatius and Saba\",\"BQ\",\"\"\n\"Aruba\",\"AW\",\"AA\"\n\"Antigua and Barbuda\",\"AG\",\"AC\"\n";
-        let dialect = CsvInspector::new().inspect(&Content::new(sample.as_bytes())).unwrap();
+        let dialect = CsvInspector::new(&DialectStatement::NOTHING).inspect(&Content::new(sample.as_bytes())).unwrap();
 
-        assert_eq!(dialect.delimiter, b',');
+        assert_eq!(dialect.delimiter, DialectByte::COMMA);
         assert_eq!(dialect.header_rows, HeaderRows::NONE);
     }
 
@@ -299,7 +409,7 @@ mod tests {
     fn an_all_text_file_whose_first_row_holds_field_labels_is_read_as_headers() {
         // Every column is text, but the first row's cells are short label tokens, so it is a header.
         let sample = "name,iso_code,dafif_code\nAruba,AW,AA\nAntigua and Barbuda,AG,AC\n";
-        let dialect = CsvInspector::new().inspect(&Content::new(sample.as_bytes())).unwrap();
+        let dialect = CsvInspector::new(&DialectStatement::NOTHING).inspect(&Content::new(sample.as_bytes())).unwrap();
 
         assert_eq!(dialect.header_rows, HeaderRows::ONE);
     }
@@ -313,9 +423,9 @@ mod tests {
         let mut sample = String::from("id,title,cast\n1,Avatar,\"");
         sample.push_str(&"x".repeat(40 * 1024));
         sample.push_str("\"\n2,Titanic,\"short\"\n3,Aliens,\"short\"\n");
-        let dialect = CsvInspector::new().inspect(&Content::new(sample.as_bytes())).unwrap();
+        let dialect = CsvInspector::new(&DialectStatement::NOTHING).inspect(&Content::new(sample.as_bytes())).unwrap();
 
-        assert_eq!(dialect.delimiter, b',');
+        assert_eq!(dialect.delimiter, DialectByte::COMMA);
         assert_eq!(dialect.header_rows, HeaderRows::ONE);
     }
 
@@ -326,7 +436,7 @@ mod tests {
         // read as data, the file ingests headerless, every name-keyed field reference (`device_code`,
         // `on`) misses, and the entity renders with a null id and no attributes.
         let sample = "device_code,timestamp,on\nCA001,2026-09-09T13:10:00Z,true\nCA002,2026-09-09T13:11:00Z,false\n";
-        let dialect = CsvInspector::new().inspect(&Content::new(sample.as_bytes())).unwrap();
+        let dialect = CsvInspector::new(&DialectStatement::NOTHING).inspect(&Content::new(sample.as_bytes())).unwrap();
 
         assert_eq!(dialect.header_rows, HeaderRows::ONE);
     }
@@ -336,7 +446,7 @@ mod tests {
         // The whole boolean vocabulary the type inspector recognises works as a header label.
         for label in ["on", "off", "yes", "no", "y", "n", "true", "false"] {
             let sample = format!("device_code,{label}\nCA001,true\nCA002,false\n");
-            let dialect = CsvInspector::new().inspect(&Content::new(sample.as_bytes())).unwrap();
+            let dialect = CsvInspector::new(&DialectStatement::NOTHING).inspect(&Content::new(sample.as_bytes())).unwrap();
 
             assert_eq!(dialect.header_rows, HeaderRows::ONE, "header with a `{label}` column was read as data");
         }
@@ -347,10 +457,10 @@ mod tests {
         // Every value is double-quoted, including the numeric ones. Leaving quoting off would keep
         // the quotes in the data; the dialect must recover the quote character so they are stripped.
         let sample = "id;slots\n\"1\";\"30\"\n\"2\";\"24\"\n";
-        let dialect = CsvInspector::new().inspect(&Content::new(sample.as_bytes())).unwrap();
+        let dialect = CsvInspector::new(&DialectStatement::NOTHING).inspect(&Content::new(sample.as_bytes())).unwrap();
 
-        assert_eq!(dialect.delimiter, b';');
-        assert_eq!(dialect.quote_char, Some(b'"'));
+        assert_eq!(dialect.delimiter, DialectByte::SEMICOLON);
+        assert_eq!(dialect.quote_char, Quote::Char(DialectByte::DOUBLE_QUOTE));
         assert_eq!(dialect.header_rows, HeaderRows::ONE);
     }
 
@@ -359,10 +469,12 @@ mod tests {
 
     #[test]
     fn a_title_line_above_the_header_is_detected_as_a_one_record_preamble() {
-        let dialect = CsvInspector::new().inspect(&Content::new(TITLED_AIR_QUALITY.as_bytes())).unwrap();
+        let dialect = CsvInspector::new(&DialectStatement::NOTHING)
+            .inspect(&Content::new(TITLED_AIR_QUALITY.as_bytes()))
+            .unwrap();
 
-        assert_eq!(dialect.delimiter, b';');
-        assert_eq!(dialect.quote_char, Some(b'"'));
+        assert_eq!(dialect.delimiter, DialectByte::SEMICOLON);
+        assert_eq!(dialect.quote_char, Quote::Char(DialectByte::DOUBLE_QUOTE));
         assert_eq!(dialect.preamble, Preamble::new(1));
         assert_eq!(dialect.header_rows, HeaderRows::ONE);
         assert_eq!(dialect.terminator, LineTerminator::Lf);
@@ -371,9 +483,11 @@ mod tests {
     #[test]
     fn the_same_table_without_its_title_line_has_no_preamble() {
         let untitled = TITLED_AIR_QUALITY.split_once('\n').unwrap().1;
-        let dialect = CsvInspector::new().inspect(&Content::new(untitled.as_bytes())).unwrap();
+        let dialect = CsvInspector::new(&DialectStatement::NOTHING)
+            .inspect(&Content::new(untitled.as_bytes()))
+            .unwrap();
 
-        assert_eq!(dialect.delimiter, b';');
+        assert_eq!(dialect.delimiter, DialectByte::SEMICOLON);
         assert_eq!(dialect.preamble, Preamble::NONE);
         assert_eq!(dialect.header_rows, HeaderRows::ONE);
     }
@@ -383,7 +497,7 @@ mod tests {
         // Five line feeds but four CSV records: the preamble is counted in records, so the header and
         // the first data row below the quoted line break stay whole.
         let sample = "\"Lumes report\ngenerated 25.10.26\";v2.10\nStation;NO2;O3\nSTEF;12,45;54,55\nAKA;9,80;40,10\n";
-        let dialect = CsvInspector::new().inspect(&Content::new(sample.as_bytes())).unwrap();
+        let dialect = CsvInspector::new(&DialectStatement::NOTHING).inspect(&Content::new(sample.as_bytes())).unwrap();
         let mut reader = dialect.reader(sample.as_bytes()).unwrap();
 
         assert_eq!(dialect.preamble, Preamble::new(1));
@@ -394,7 +508,7 @@ mod tests {
     #[test]
     fn a_multi_line_title_block_is_detected_as_a_multi_record_preamble() {
         let sample = "Air quality;Vienna\nGenerated;25.10.26;08:00;CET;v2\nStation;NO2;O3\nSTEF;12;54\nAKA;9;40\nTAB;7;38\n";
-        let dialect = CsvInspector::new().inspect(&Content::new(sample.as_bytes())).unwrap();
+        let dialect = CsvInspector::new(&DialectStatement::NOTHING).inspect(&Content::new(sample.as_bytes())).unwrap();
 
         assert_eq!(dialect.preamble, Preamble::new(2));
         assert_eq!(dialect.header_rows, HeaderRows::ONE);
@@ -403,7 +517,7 @@ mod tests {
     #[test]
     fn a_blank_line_after_the_title_is_not_counted_as_a_preamble_record() {
         let sample = "Lumes;v2.10;25.10.26\n\nStation;NO2\nSTEF;12\nAKA;9\n";
-        let dialect = CsvInspector::new().inspect(&Content::new(sample.as_bytes())).unwrap();
+        let dialect = CsvInspector::new(&DialectStatement::NOTHING).inspect(&Content::new(sample.as_bytes())).unwrap();
         let mut reader = dialect.reader(sample.as_bytes()).unwrap();
 
         assert_eq!(dialect.preamble, Preamble::new(1));
@@ -416,7 +530,7 @@ mod tests {
         // undetectable rather than silently losing its header.
         let sample = "id;name\n1;alpha\n2;beta\n3;gamma;extra\n4;delta\n5;epsilon\n";
 
-        assert!(CsvInspector::new().inspect(&Content::new(sample.as_bytes())).is_err());
+        assert!(CsvInspector::new(&DialectStatement::NOTHING).inspect(&Content::new(sample.as_bytes())).is_err());
     }
 
     #[test]
@@ -426,7 +540,7 @@ mod tests {
         // detector (decimal commas, `NE` for missing), so the extra header rows are recognised by
         // their shape: all labels, and blank in the station column every data row fills.
         let sample = "Lumes;v2.10;30.10.26-10:00:00\n;Zeit-NO2;NO2;Zeit-PM10;PM10;PM10\n;;HMW;;MW24;HMW\n;MESZ;µg/m³;MESZ;µg/m³;µg/m³\nSTEF;30.10.2026, 10:00;18,48;30.10.2026, 10:00;NE;NE\nTAB;30.10.2026, 10:00;NE;30.10.2026, 10:00;14,03;14,44\nKE;30.10.2026, 10:00;15,17;30.10.2026, 10:00;12,49;18,80\n";
-        let dialect = CsvInspector::new().inspect(&Content::new(sample.as_bytes())).unwrap();
+        let dialect = CsvInspector::new(&DialectStatement::NOTHING).inspect(&Content::new(sample.as_bytes())).unwrap();
         let mut reader = dialect.reader(sample.as_bytes()).unwrap();
 
         assert_eq!(dialect.preamble, Preamble::new(1));
@@ -443,7 +557,7 @@ mod tests {
         // A spreadsheet export pads every row to the table's width, so the title has as many
         // fields as the header and the field-count check alone cannot see it.
         let sample = "Air quality report;;\nStation;NO2;O3\nSTEF;12,45;NE\nAKA;9,80;40,10\nTAB;NE;38,20\n";
-        let dialect = CsvInspector::new().inspect(&Content::new(sample.as_bytes())).unwrap();
+        let dialect = CsvInspector::new(&DialectStatement::NOTHING).inspect(&Content::new(sample.as_bytes())).unwrap();
         let mut reader = dialect.reader(sample.as_bytes()).unwrap();
 
         assert_eq!(dialect.preamble, Preamble::new(1));
@@ -454,7 +568,7 @@ mod tests {
     #[test]
     fn a_dense_title_as_wide_as_a_numeric_table_is_detected_as_a_preamble() {
         let sample = "Lumes;v2.10;25.10.26\nStation;NO2;O3\nSTEF;12;54\nAKA;9;40\nTAB;7;38\n";
-        let dialect = CsvInspector::new().inspect(&Content::new(sample.as_bytes())).unwrap();
+        let dialect = CsvInspector::new(&DialectStatement::NOTHING).inspect(&Content::new(sample.as_bytes())).unwrap();
         let mut reader = dialect.reader(sample.as_bytes()).unwrap();
 
         assert_eq!(dialect.preamble, Preamble::new(1));
@@ -465,7 +579,7 @@ mod tests {
     #[test]
     fn a_padded_title_above_a_stacked_header_leaves_the_stacked_header_whole() {
         let sample = "Lumes Wien;;;\n;Zeit-NO2;NO2;NO2\n;;HMW;MW24\n;MESZ;µg/m³;µg/m³\nSTEF;30.10.2026, 10:00;18,48;12,1\nTAB;30.10.2026, 10:00;NE;14,03\nKE;30.10.2026, 10:00;15,17;12,49\n";
-        let dialect = CsvInspector::new().inspect(&Content::new(sample.as_bytes())).unwrap();
+        let dialect = CsvInspector::new(&DialectStatement::NOTHING).inspect(&Content::new(sample.as_bytes())).unwrap();
         let mut reader = dialect.reader(sample.as_bytes()).unwrap();
 
         assert_eq!(dialect.preamble, Preamble::new(1));
@@ -485,15 +599,116 @@ mod tests {
 
     #[test]
     fn a_latin_1_name_past_the_sample_settles_the_encoding() {
-        let dialect = CsvInspector::new().inspect(&Content::new(&ascii_rows_then(b"M\xfcller"))).unwrap();
+        let dialect = CsvInspector::new(&DialectStatement::NOTHING)
+            .inspect(&Content::new(&ascii_rows_then(b"M\xfcller")))
+            .unwrap();
 
-        assert_eq!(dialect.encoding, "windows-1252");
+        assert_eq!(dialect.encoding.to_string(), "windows-1252");
     }
 
     #[test]
     fn a_utf_8_name_past_the_sample_settles_the_encoding() {
-        let dialect = CsvInspector::new().inspect(&Content::new(&ascii_rows_then("Müller".as_bytes()))).unwrap();
+        let dialect = CsvInspector::new(&DialectStatement::NOTHING)
+            .inspect(&Content::new(&ascii_rows_then("Müller".as_bytes())))
+            .unwrap();
 
-        assert_eq!(dialect.encoding, "UTF-8");
+        assert_eq!(dialect.encoding.to_string(), "UTF-8");
+    }
+
+    fn stated(statement: serde_json::Value) -> DialectStatement {
+        serde_json::from_value(statement).unwrap()
+    }
+
+    #[test]
+    fn a_stated_delimiter_wins_over_the_one_detection_would_pick() {
+        // Detection alone splits these records on the comma.
+        let sample = "id,name,city;note\n1,Ann,Graz;x\n2,Bob,Linz;y\n3,Cid,Wels;z\n";
+        let statement = stated(serde_json::json!({"delimiter": ";"}));
+        let dialect = CsvInspector::new(&statement).inspect(&Content::new(sample.as_bytes())).unwrap();
+        let mut reader = dialect.reader(sample.as_bytes()).unwrap();
+
+        assert_eq!(dialect.delimiter, DialectByte::SEMICOLON);
+        assert_eq!(reader.headers().unwrap(), vec!["id,name,city", "note"]);
+    }
+
+    #[test]
+    fn a_stated_preamble_skips_a_title_as_wide_as_the_table() {
+        // A dense title over an all-text table gives detection no evidence, so it stays in the table
+        // unless the manifest states it.
+        let sample = "Report;Vienna\nStation;Name\nSTEF;Stephansplatz\nAKA;Kendlerstrasse\nTAB;Taborstrasse\n";
+        let statement = stated(serde_json::json!({"skipRows": 1}));
+        let dialect = CsvInspector::new(&statement).inspect(&Content::new(sample.as_bytes())).unwrap();
+        let mut reader = dialect.reader(sample.as_bytes()).unwrap();
+
+        assert_eq!(dialect.preamble, Preamble::new(1));
+        assert_eq!(reader.headers().unwrap(), vec!["Station", "Name"]);
+    }
+
+    #[test]
+    fn a_stated_absent_header_reads_a_label_row_as_data() {
+        let statement = stated(serde_json::json!({"header": false}));
+        let dialect = CsvInspector::new(&statement)
+            .inspect(&Content::new(b"id,name,value\n1,alpha,10\n2,beta,20\n"))
+            .unwrap();
+
+        assert_eq!(dialect.header_rows, HeaderRows::NONE);
+    }
+
+    #[test]
+    fn a_stated_header_reads_a_numeric_first_row_as_the_header() {
+        let statement = stated(serde_json::json!({"header": true}));
+        let dialect = CsvInspector::new(&statement).inspect(&Content::new(b"1,2,3\n4,5,6\n7,8,9\n")).unwrap();
+
+        assert_eq!(dialect.header_rows, HeaderRows::ONE);
+    }
+
+    #[test]
+    fn a_stated_header_row_count_is_kept_as_stated() {
+        let sample = "Lumes;v2.10\n;NO2;O3\n;HMW;HMW\nSTEF;18,48;50,74\nTAB;NE;10,37\nKE;15,17;8,48\n";
+        let statement = stated(serde_json::json!({"skipRows": 1, "headerRows": 2}));
+        let dialect = CsvInspector::new(&statement).inspect(&Content::new(sample.as_bytes())).unwrap();
+        let mut reader = dialect.reader(sample.as_bytes()).unwrap();
+
+        assert_eq!(dialect.header_rows, HeaderRows::new(2));
+        assert_eq!(reader.headers().unwrap(), vec!["", "NO2 HMW", "O3 HMW"]);
+    }
+
+    #[test]
+    fn a_stated_encoding_wins_over_the_one_the_content_reads_as() {
+        let statement = stated(serde_json::json!({"encoding": "latin1"}));
+        let dialect = CsvInspector::new(&statement)
+            .inspect(&Content::new(&ascii_rows_then("Müller".as_bytes())))
+            .unwrap();
+
+        assert_eq!(dialect.encoding.to_string(), "windows-1252");
+    }
+
+    #[test]
+    fn a_whole_statement_is_the_dialect_without_detection() {
+        let statement = stated(serde_json::json!({
+            "delimiter": "|",
+            "quote": "none",
+            "skipRows": 2,
+            "headerRows": 1,
+            "terminator": "crlf",
+            "encoding": "utf-8",
+        }));
+        let dialect = CsvInspector::new(&statement).inspect(&Content::new(b"")).unwrap();
+
+        assert_eq!(dialect.delimiter, DialectByte::PIPE);
+        assert_eq!(dialect.quote_char, Quote::Disabled);
+        assert_eq!(dialect.preamble, Preamble::new(2));
+        assert_eq!(dialect.terminator, LineTerminator::Crlf);
+    }
+
+    #[test]
+    fn a_stated_value_notation_is_carried_onto_the_detected_dialect() {
+        let statement = stated(serde_json::json!({"decimalSeparator": ",", "nullValues": ["NE"]}));
+        let dialect = CsvInspector::new(&statement)
+            .inspect(&Content::new(b"Station;NO2\nSTEF;12,45\nTAB;NE\nAKA;9,80\n"))
+            .unwrap();
+
+        assert_eq!(dialect.notation.decimal_separator, DecimalSeparator::Comma);
+        assert!(dialect.notation.is_null_token("NE"));
     }
 }

@@ -1,4 +1,4 @@
-use crate::inspectors::csv::dialect::Dialect;
+use cassiopeia_csv_dialect::dialect::Dialect;
 use serde::Serialize;
 
 /// Format-specific details discovered while profiling a payload.

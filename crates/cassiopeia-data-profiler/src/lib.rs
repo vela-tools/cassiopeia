@@ -109,6 +109,7 @@ pub fn profile_bytes(bytes: &[u8], encoding_hint: &EncodingHint) -> Result<Profi
 mod tests {
     use crate::{encoding_hint::EncodingHint, error::DataProfilerError, metadata::FormatMetadata, profile_bytes};
     use cassiopeia_common::format::DataFormat;
+    use cassiopeia_csv_dialect::dialect_byte::DialectByte;
     use pretty_assertions::assert_eq;
 
     #[test]
@@ -150,7 +151,10 @@ mod tests {
         let bytes = b"id,name,value\n1,alpha,10\n2,beta,20\n";
         let profile = profile_bytes(bytes, &EncodingHint::NONE).unwrap();
         assert_eq!(*profile.format(), DataFormat::Csv);
-        assert_eq!(profile.metadata().as_ref().and_then(FormatMetadata::as_csv).unwrap().dialect().delimiter, b',');
+        assert_eq!(
+            profile.metadata().as_ref().and_then(FormatMetadata::as_csv).unwrap().dialect().delimiter,
+            DialectByte::COMMA
+        );
     }
 
     #[test]
@@ -158,7 +162,10 @@ mod tests {
         let profile = profile_bytes(b"id;name;value\n1;alpha;10\n2;beta;20\n", &EncodingHint::NONE).unwrap();
 
         assert_eq!(*profile.format(), DataFormat::Csv);
-        assert_eq!(profile.metadata().as_ref().and_then(FormatMetadata::as_csv).unwrap().dialect().delimiter, b';');
+        assert_eq!(
+            profile.metadata().as_ref().and_then(FormatMetadata::as_csv).unwrap().dialect().delimiter,
+            DialectByte::SEMICOLON
+        );
     }
 
     #[test]

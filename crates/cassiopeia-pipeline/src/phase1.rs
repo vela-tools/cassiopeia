@@ -68,6 +68,8 @@ impl Pipeline {
 
             let profiler = create_profiler(
                 input.format_override,
+                // The lane configuration is borrowed and reused every cycle, so the profiler owns a copy.
+                input.dialect.clone(),
                 collector_rx,
                 channel_policy,
                 shared_tx.clone(),

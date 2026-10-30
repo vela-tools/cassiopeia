@@ -42,6 +42,11 @@ pub enum ManifestError {
     #[error("The format '{0}' does not support multiple collections, so 'mappings' is not allowed")]
     CollectionsUnsupportedByFormat(DataFormat),
 
+    /// An input stated a CSV dialect without declaring the CSV format, so the dialect may describe
+    /// nothing the source holds.
+    #[error("An input's 'dialect' describes a CSV source, so the input must declare 'format: \"csv\"'")]
+    DialectWithoutCsvFormat,
+
     /// The manifest could not be serialized to JSON prior to formatting.
     #[error("Failed to serialize the manifest")]
     Serialize(#[from] serde_json::Error),

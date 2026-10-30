@@ -1,5 +1,5 @@
 use csv_core::{ReadRecordResult, Reader};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::io::{self, BufRead};
 
 /// Scratch bytes a preamble record's fields are parsed into and discarded from. A field longer than
@@ -15,7 +15,7 @@ const SCRATCH_FIELD_ENDS: usize = 64;
 /// (RFC 4180 clause 2.6), so one preamble record can span several lines; counting records lets every
 /// reader of a profiled file, which all parse through the same CSV state machine, skip exactly the
 /// same bytes.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(transparent)]
 pub struct Preamble(usize);
 
@@ -63,7 +63,7 @@ fn skip_record<R: BufRead>(core: &mut Reader, input: &mut R) -> io::Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use crate::inspectors::csv::preamble::Preamble;
+    use crate::preamble::Preamble;
     use csv_core::ReaderBuilder;
     use pretty_assertions::assert_eq;
     use std::io::Read;
