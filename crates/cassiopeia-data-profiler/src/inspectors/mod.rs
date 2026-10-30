@@ -25,7 +25,7 @@ pub mod grib;
 pub fn inspect(format: DataFormat, content: &Content<'_>) -> Result<Option<FormatMetadata>> {
     match format {
         DataFormat::Csv => {
-            let dialect = CsvInspector::new().inspect(content.bytes(), content.encoding_hint())?;
+            let dialect = CsvInspector::new().inspect(content)?;
             Ok(Some(FormatMetadata::Csv(CsvMetadata::new(dialect))))
         }
         DataFormat::Grib => Ok(GribInspector::inspect(content.bytes()).map(FormatMetadata::Grib)),

@@ -16,7 +16,7 @@ pub struct CsvDetector;
 
 impl Detector for CsvDetector {
     fn detect(&self, content: &Content<'_>) -> Option<Profile> {
-        let dialect = CsvInspector::new().inspect(content.bytes(), content.encoding_hint()).ok()?;
+        let dialect = CsvInspector::new().inspect(content).ok()?;
         if !dialect.header_rows.is_present() || !Self::has_header_and_record(content.bytes(), &dialect) {
             return None;
         }
