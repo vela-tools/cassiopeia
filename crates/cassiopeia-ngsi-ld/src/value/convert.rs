@@ -74,9 +74,7 @@ impl From<Value> for JsonValue {
                 Number::Float(f) => serde_json::Number::from_f64(f).map_or(JsonValue::Null, JsonValue::Number),
             },
             Value::String(s) => JsonValue::String(s.to_string()),
-            Value::Temporal(t) => match t {
-                TemporalValue::DateTime(dt) | TemporalValue::Date(dt) | TemporalValue::Time(dt) => JsonValue::String(dt.to_rfc3339()),
-            },
+            Value::Temporal(t) => JsonValue::String(t.text().to_string()),
             Value::Geospatial(g) => serde_json::to_value(g).unwrap_or(JsonValue::Null),
             Value::Array(arr) => JsonValue::Array(arr.into_iter().map(JsonValue::from).collect()),
             Value::Object(obj) => {

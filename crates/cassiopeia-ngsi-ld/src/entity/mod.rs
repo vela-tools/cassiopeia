@@ -16,10 +16,11 @@ use crate::entity::{
     context::NgsiLdContext,
     error::Result as NgsiLdResult,
     name::NameBuf,
-    representation::{DisplayStr, JsonLayout, NgsiLdSerializable, ReprAdapter, SerializeRepr},
+    representation::{DisplayStr, JsonLayout, NgsiLdSerializable, ReprAdapter, SerializeRepr, qualifiers::serialize_expires_at},
     scope::NgsiLdScope,
 };
 use cassiopeia_common::{representation::NgsiLdRepresentation, skip_null::NgsiLdSkipNull};
+use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize, Serializer, ser::SerializeMap};
 use serde_json::Value as JsonValue;
 use urn_rs::Urn;
@@ -37,9 +38,17 @@ pub struct NgsiLdEntity {
     pub entity_type: NameBuf,
     /// The scopes the entity belongs to (ETSI GS CIM 009 v1.9.1 clause 4.18), absent when it has none.
     ///
-    /// Written by [`SerializeRepr`] rather than the derived serializer, which skips it.
+    /// Written by [`SerializeRepr`] rather than the derived serializer, which skips it, and only in
+    /// the normalized and concise representations (clause 4.5.4).
     #[serde(skip)]
     pub scope: Option<NgsiLdScope>,
+    /// The instant after which the entity ceases to hold (ETSI GS CIM 009 v1.9.1 clause 4.22), an
+    /// optional member of the entity (clause 4.5.1), absent when no mapping resolved one.
+    ///
+    /// Written by [`SerializeRepr`] rather than the derived serializer, which skips it, and only in
+    /// the normalized and concise representations (clause 4.5.4).
+    #[serde(skip)]
+    pub expires_at: Option<DateTime<Utc>>,
     /// The entity's attributes, flattened into the top-level object on serialization.
     #[serde(flatten)]
     pub attributes: Attributes,
@@ -54,6 +63,7 @@ impl NgsiLdEntity {
             id,
             entity_type,
             scope: None,
+            expires_at: None,
             attributes: Attributes::default(),
         }
     }
@@ -68,8 +78,17 @@ impl SerializeRepr for NgsiLdEntity {
         }
         map.serialize_entry("id", &DisplayStr(&self.id))?;
         map.serialize_entry("type", &DisplayStr(&self.entity_type))?;
-        if let Some(scope) = &self.scope {
-            map.serialize_entry("scope", scope)?;
+        // Clause 4.5.1 lists `scope` and `expiresAt` among an entity's optional members, but the
+        // simplified representation of clause 4.5.4 admits only `@context`, `id`, `type`, and the
+        // attributes, so neither member survives there.
+        match representation {
+            NgsiLdRepresentation::Normalized | NgsiLdRepresentation::Concise => {
+                if let Some(scope) = &self.scope {
+                    map.serialize_entry("scope", scope)?;
+                }
+                serialize_expires_at(&mut map, self.expires_at.as_ref())?;
+            }
+            NgsiLdRepresentation::Simplified => {}
         }
 
         for (name, wrapper) in &self.attributes {

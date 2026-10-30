@@ -6,8 +6,11 @@
 
 pub(crate) mod aggregator;
 pub(crate) mod assembler;
+pub(crate) mod batch_sink_report;
 pub(crate) mod coded_error;
 pub(crate) mod collector;
+pub(crate) mod discarded_observation_report;
+pub(crate) mod dropped_geometry_report;
 pub(crate) mod expander;
 pub(crate) mod extractor;
 pub(crate) mod ingestor;
@@ -20,6 +23,7 @@ pub(crate) mod skipped_records;
 pub(crate) mod stage_env;
 pub(crate) mod stream_outcome;
 pub(crate) mod transformer;
+pub(crate) mod unreadable_expiry_report;
 pub(crate) mod unreadable_timestamp_report;
 pub(crate) mod unresolved_template_report;
 pub(crate) mod validation_abort;

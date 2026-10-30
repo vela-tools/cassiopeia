@@ -1,12 +1,15 @@
 use crate::{
     entity_store::{
         error::Result,
+        mapping_expiry::{MappingExpiry, join_observations},
         redb_database::RedbDatabase,
         redb_key::{collect_ids, for_each_id_chunk, make_prefix, prefix_end},
         redb_scope::{PendingScopes, SCOPES_TABLE, read_scope},
         store::{AssembledFragment, AssembledFragments, EntityStore, FragmentWrite, StoredUnit},
         stored_fragment::StoredFragment,
+        supersession::SlotRanking,
     },
+    mapping_id::MappingId,
     store_action::StoreAction,
     store_write_strategy::StoreWriteStrategy,
 };
@@ -29,7 +32,8 @@ const DATA_TABLE: TableDefinition<&[u8], &[u8]> = TableDefinition::new("data");
 /// sequence shared across clones), so a batch is a sequence of append-only inserts with no read and no
 /// reserialize, mirroring the relationship store's sequenced composite key. Assembly prefix-scans a
 /// base id's keys in insertion order into one emit-unit per observation, which the fold stage later
-/// folds into one `EntityTemporal` (ETSI GS CIM 009 v1.9.1 clause 5.2.20). Durability is
+/// folds into one `EntityTemporal` (ETSI GS CIM 009 v1.9.1 clause 5.2.20), and joins the expiries
+/// its observations carry into the entity's. Durability is
 /// `Durability::None`: the database lives in a temporary directory cleaned up at the end of the run.
 #[derive(Debug, Clone)]
 pub struct RedbSeriesEntityStore {
@@ -95,8 +99,9 @@ impl EntityStore for RedbSeriesEntityStore {
                     base_id,
                     source_data,
                     mapping_id,
-                    observed_at,
+                    timestamp,
                     scope,
+                    expires_at,
                     ..
                 } = write;
                 // Append-only: a fresh sequence number gives a new key, so no read of prior state.
@@ -106,9 +111,10 @@ impl EntityStore for RedbSeriesEntityStore {
                 let stored = StoredFragment {
                     mapping_id,
                     data: source_data,
-                    observed_at: observed_at.map(String::from),
+                    ranking: SlotRanking::first(timestamp),
                     records: NonZeroU64::MIN,
                     conflict: None,
+                    expires_at: MappingExpiry::first(expires_at),
                 };
                 let bytes = rmp_serde::to_vec(&stored)?;
                 data_table
@@ -148,23 +154,27 @@ impl EntityStore for RedbSeriesEntityStore {
         let scope_table = read_txn.open_table(SCOPES_TABLE).map_err(|e| self.db.err(e.into(), StoreAction::OpenTable))?;
 
         let mut units: Vec<StoredUnit> = Vec::new();
+        let mut expiries: Vec<(MappingId, MappingExpiry)> = Vec::new();
         for entry in data_table
             .range(prefix.as_slice()..end.as_slice())
             .map_err(|e| self.db.err(e.into(), StoreAction::Iterate))?
         {
             let (_key, value) = entry.map_err(|e| self.db.err(e.into(), StoreAction::Iterate))?;
             let stored: StoredFragment = rmp_serde::from_slice(value.value())?;
+            expiries.push((stored.mapping_id, stored.expires_at));
             units.push(smallvec![AssembledFragment {
                 mapping_id: stored.mapping_id,
                 data: stored.data,
                 records: stored.records,
                 conflict: stored.conflict,
+                unresolvable_discards: 0,
             }]);
         }
 
         let scope = read_scope(&scope_table, base_id, &self.db)?;
+        let expires_at = join_observations(expiries);
 
-        Ok(AssembledFragments { scope, units })
+        Ok(AssembledFragments { scope, expires_at, units })
     }
 
     fn count(&self) -> usize {
@@ -226,11 +236,17 @@ impl Drop for RedbSeriesEntityStore {
 mod tests {
     use crate::{
         entity_store::{
+            record_timestamp::RecordTimestamp,
             redb_series_store::RedbSeriesEntityStore,
             store::{
                 EntityStore,
                 FragmentWrite,
-                tests::{READS_EVERYTHING, assert_merges_scopes_per_id},
+                tests::{
+                    READS_EVERYTHING,
+                    assert_joins_expiries_across_mappings,
+                    assert_merges_scopes_per_id,
+                    assert_series_keeps_the_furthest_expiry_per_mapping,
+                },
             },
         },
         mapping_id::MappingId,
@@ -249,14 +265,25 @@ mod tests {
         assert_merges_scopes_per_id(&RedbSeriesEntityStore::new().unwrap());
     }
 
+    #[test]
+    fn the_expiries_of_an_id_s_mappings_are_joined() {
+        assert_joins_expiries_across_mappings(&RedbSeriesEntityStore::new().unwrap());
+    }
+
+    #[test]
+    fn a_mapping_s_observations_keep_their_furthest_expiry() {
+        assert_series_keeps_the_furthest_expiry_per_mapping(&RedbSeriesEntityStore::new().unwrap());
+    }
+
     fn write(base_id: &Urn, data: serde_json::Value, observed_at: &str) -> FragmentWrite<'static> {
         FragmentWrite {
             base_id: base_id.clone(),
             source_data: data,
             mapping_id: MappingId::new(1),
             temporal: true,
-            observed_at: Some(ObservedAt::new(observed_at)),
+            timestamp: RecordTimestamp::Declared(ObservedAt::new(observed_at)),
             scope: None,
+            expires_at: None,
             reads: &READS_EVERYTHING,
         }
     }

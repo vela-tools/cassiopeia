@@ -3,6 +3,7 @@ use crate::value::{
     types::{Number, TemporalValue},
 };
 use chrono::{DateTime, NaiveDate, NaiveDateTime, TimeZone, Utc};
+use jiff::{Timestamp, Zoned};
 use num_traits::ToPrimitive;
 
 /// The unit a Unix epoch number is counted in, read off its magnitude.
@@ -95,16 +96,36 @@ impl TemporalValue {
     /// A byte-shape pre-dispatch inspects the separators the input actually carries and tries only
     /// the one format family that can match, instead of re-scanning the same string through every
     /// supported format in sequence. Formats without timezone info are assumed UTC; a format that
-    /// carries a numeric UTC offset has that offset applied.
+    /// carries a numeric UTC offset has that offset applied. A time zone annotation, such as
+    /// `[Europe/Vienna]`, is resolved against the time zone database, and every result is
+    /// normalised to UTC.
     #[must_use]
     pub fn try_parse(s: &str) -> Option<Self> {
         let s = s.trim();
         let bytes = s.as_bytes();
 
-        // RFC 3339 is the only supported shape with a 'T'/'t' date-time separator; once one is
-        // present, nothing else can match, so dispatch straight to it.
+        // RFC 9557 extends RFC 3339 with a bracketed suffix, and only that form carries a '['. It is
+        // what `now()` renders and what Java's `ZonedDateTime` writes. An offset that disagrees with
+        // the named zone is rejected rather than either one silently winning, and a zone without an
+        // offset resolves its local time through the zone's rules, DST included.
+        if bytes.contains(&b'[') {
+            return s
+                .parse::<Zoned>()
+                .ok()
+                .and_then(|zoned| Self::from_epoch_nanoseconds(zoned.timestamp().as_nanosecond()));
+        }
+
+        // ISO 8601 is the only supported shape with a 'T'/'t' date-time separator; once one is
+        // present, nothing else can match, so dispatch straight to it. RFC 3339 alone requires an
+        // extended `+02:00` offset, but ISO 8601 also allows the basic `+0200` that Java's
+        // `SimpleDateFormat` writes, the hour-only `+02`, and the basic `20261024T223259+0200`, so
+        // the instant is read through the ISO 8601 grammar. A value without an offset or `Z` names
+        // no instant and is not read.
         if bytes.contains(&b'T') || bytes.contains(&b't') {
-            return DateTime::parse_from_rfc3339(s).ok().map(|dt| TemporalValue::DateTime(dt.with_timezone(&Utc)));
+            return s
+                .parse::<Timestamp>()
+                .ok()
+                .and_then(|timestamp| Self::from_epoch_nanoseconds(timestamp.as_nanosecond()));
         }
 
         if bytes.contains(&b' ') {
@@ -268,6 +289,79 @@ mod tests {
     fn a_day_first_space_separated_timestamp_carries_an_offset_too() {
         assert_eq!(instant("01/03/2026 11:04:35+02:00"), Some(Utc.with_ymd_and_hms(2026, 3, 1, 9, 4, 35).unwrap()));
         assert_eq!(instant("01/03/2026 11:04:35"), Some(eleven_oh_four()));
+    }
+
+    #[test]
+    fn a_t_separated_timestamp_reads_a_basic_format_offset() {
+        let expected = Utc.with_ymd_and_hms(2026, 10, 24, 20, 32, 59).unwrap();
+
+        for input in [
+            "2026-10-24T22:32:59+0200",
+            "2026-10-24T22:32:59.000+0200",
+            "2026-10-24T22:32:59+02",
+            "2026-10-24T22:32:59.000+02",
+            "20261024T223259+0200",
+            "2026-10-24T22:32:59+02:00",
+            "2026-10-24T20:32:59Z",
+        ] {
+            assert_eq!(instant(input), Some(expected), "mismatch for {input:?}");
+        }
+        assert_eq!(instant("2026-10-24T17:32:59-0300"), Some(expected));
+        assert_eq!(instant("2026-10-24T22:32:59.250+0200"), Some(expected + Duration::milliseconds(250)));
+    }
+
+    #[test]
+    fn a_t_separated_timestamp_without_an_offset_or_with_a_malformed_one_does_not_parse() {
+        for input in [
+            "2026-10-24T22:32:59",
+            "2026-10-24T22:32:59+",
+            "2026-10-24T22:32:59+2",
+            "2026-10-24T22:32:59+02000",
+            "2026-10-24T22:32:59+02:0",
+        ] {
+            assert_eq!(instant(input), None, "expected {input:?} to parse to nothing");
+        }
+    }
+
+    #[test]
+    fn an_rfc_9557_timestamp_with_an_agreeing_utc_annotation_reads_its_offset() {
+        let expected = Utc.with_ymd_and_hms(2026, 10, 25, 7, 58, 45).unwrap() + Duration::microseconds(798_651);
+
+        assert_eq!(instant("2026-10-25T07:58:45.798651+00:00[UTC]"), Some(expected));
+        assert_eq!(instant("2026-10-25T07:58:45.798651Z[UTC]"), Some(expected));
+    }
+
+    #[test]
+    fn an_rfc_9557_timestamp_in_a_named_zone_is_converted_to_utc() {
+        // Vienna is on CEST (+02:00) until 2026-10-25T01:00Z and on CET (+01:00) after it.
+        assert_eq!(instant("2026-03-01T12:04:35+01:00[Europe/Vienna]"), Some(eleven_oh_four()));
+        assert_eq!(
+            instant("2026-07-01T13:04:35+02:00[Europe/Vienna]"),
+            Some(Utc.with_ymd_and_hms(2026, 7, 1, 11, 4, 35).unwrap())
+        );
+        assert_eq!(instant("2026-03-01 12:04:35+01:00[Europe/Vienna]"), Some(eleven_oh_four()));
+        assert_eq!(instant("2026-03-01T12:04:35+01:00[!Europe/Vienna]"), Some(eleven_oh_four()));
+    }
+
+    #[test]
+    fn an_rfc_9557_timestamp_without_an_offset_resolves_through_its_zone_rules() {
+        assert_eq!(instant("2026-03-01T12:04:35[Europe/Vienna]"), Some(eleven_oh_four()));
+        assert_eq!(
+            instant("2026-07-01T13:04:35[Europe/Vienna]"),
+            Some(Utc.with_ymd_and_hms(2026, 7, 1, 11, 4, 35).unwrap())
+        );
+    }
+
+    #[test]
+    fn an_rfc_9557_timestamp_with_an_offset_its_zone_contradicts_does_not_parse() {
+        for input in [
+            "2026-03-01T11:04:35+02:00[UTC]",
+            "2026-07-01T13:04:35+01:00[Europe/Vienna]",
+            "2026-03-01T11:04:35+00:00[Not/AZone]",
+            "2026-03-01T11:04:35+00:00[UTC",
+        ] {
+            assert_eq!(instant(input), None, "expected {input:?} to parse to nothing");
+        }
     }
 
     #[test]

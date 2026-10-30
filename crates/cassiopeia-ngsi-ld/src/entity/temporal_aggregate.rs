@@ -5,6 +5,7 @@ use crate::entity::{
     name::NameBuf,
     scope::NgsiLdScope,
 };
+use chrono::{DateTime, Utc};
 use foldhash::fast::RandomState;
 use indexmap::{IndexMap, map::Entry};
 use urn_rs::Urn;
@@ -36,8 +37,8 @@ type AggregatedAttributes = IndexMap<NameBuf, AggregatedAttribute, RandomState>;
 /// Each observation reaches [`push`](TemporalAggregate::push) as its own [`NgsiLdEntity`] carrying
 /// one `observedAt`-stamped instance per temporal attribute. [`finish`](TemporalAggregate::finish)
 /// emits one entity whose every temporal attribute is a time-ordered array of those instances: the
-/// same wire shape a normalized or concise `EntityTemporal` takes. The `@context`, `id`, `type`, and
-/// `scope` are taken from the first observation.
+/// same wire shape a normalized or concise `EntityTemporal` takes. The `@context`, `id`, `type`,
+/// `scope`, and `expiresAt` are taken from the first observation.
 pub struct TemporalAggregate {
     /// The `@context` of the first observation, carried onto the folded entity.
     context: Option<NgsiLdContext>,
@@ -48,6 +49,10 @@ pub struct TemporalAggregate {
     /// The scopes of the first observation. The entity store merges every fragment's scopes per id
     /// before assembly, so every observation of one id carries the same set.
     scope: Option<NgsiLdScope>,
+    /// The `expiresAt` of the first observation (ETSI GS CIM 009 v1.9.1 clause 4.5.1). The entity
+    /// store merges every fragment's expiry per id before assembly, so every observation of one id
+    /// carries the same instant.
+    expires_at: Option<DateTime<Utc>>,
     /// The accumulating attribute occurrences, in first-seen order.
     attributes: AggregatedAttributes,
 }
@@ -61,6 +66,7 @@ impl TemporalAggregate {
             id,
             entity_type,
             scope,
+            expires_at,
             attributes,
         } = entity;
         let mut aggregate = TemporalAggregate {
@@ -68,6 +74,7 @@ impl TemporalAggregate {
             id,
             entity_type,
             scope,
+            expires_at,
             attributes: AggregatedAttributes::default(),
         };
         aggregate.merge_attributes(attributes);
@@ -85,8 +92,8 @@ impl TemporalAggregate {
 
     /// Merges a further observation of the same id into the aggregate.
     ///
-    /// Only the observation's attribute instances are taken; its `@context`, id, type, and scope are
-    /// ignored, since those come from the first observation.
+    /// Only the observation's attribute instances are taken; its `@context`, id, type, scope, and
+    /// expiry are ignored, since those come from the first observation.
     pub fn push(&mut self, entity: NgsiLdEntity) {
         self.merge_attributes(entity.attributes);
     }
@@ -119,6 +126,7 @@ impl TemporalAggregate {
             id: self.id,
             entity_type: self.entity_type,
             scope: self.scope,
+            expires_at: self.expires_at,
             attributes,
         }
     }

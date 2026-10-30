@@ -15,6 +15,10 @@ pub enum TemplateSite {
     #[display("scope")]
     Scope,
 
+    /// The entity `expiresAt` template.
+    #[display("expiresAt")]
+    ExpiresAt,
+
     /// The `observedAt` template the mapping reads its temporality from, compiled when the document
     /// is loaded.
     #[display("observedAt")]
@@ -36,6 +40,7 @@ mod tests {
     fn each_site_renders_the_document_key_it_stands_for() {
         assert_eq!(TemplateSite::EntityName.to_string(), "identity.entityName");
         assert_eq!(TemplateSite::Scope.to_string(), "scope");
+        assert_eq!(TemplateSite::ExpiresAt.to_string(), "expiresAt");
         assert_eq!(TemplateSite::ObservedAt.to_string(), "observedAt");
         assert_eq!(
             TemplateSite::Attribute(NameBuf::new("temperature").unwrap()).to_string(),

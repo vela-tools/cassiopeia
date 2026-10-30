@@ -1,5 +1,6 @@
 use crate::urn::error::UrnError;
 use cassiopeia_common::collection::CollectionName;
+use cassiopeia_mapping::template::error::TemplateError;
 use thiserror::Error;
 
 /// Errors raised while expanding a record into fragments.
@@ -8,6 +9,11 @@ pub enum ExpanderError {
     /// URN or scope generation failed for an entity or one of its relationships.
     #[error(transparent)]
     Urn(#[from] UrnError),
+
+    /// The entity `expiresAt` template failed to resolve against the record. The template's own
+    /// error names its declaration and mapping document, so it is the whole message.
+    #[error(transparent)]
+    Expiry(#[from] TemplateError),
 
     /// A record's collection label matched no mapping in a `Collections` binding.
     #[error("No mapping is bound to the source collection '{0}'")]

@@ -13,13 +13,18 @@
 //!   owns the threading and channel plumbing while the resolver contributes only the assembly work.
 //!   Assembly is also where records of one mapping that resolved to the same id and disagreed are
 //!   found: each is a [`RecordMerge`](crate::record_merge::RecordMerge), tallied by type into
-//!   [`MergedRecords`](crate::merged_records::MergedRecords) for the caller to report.
+//!   [`MergedRecords`](crate::merged_records::MergedRecords) for the caller to report. So are the
+//!   records a current-state store discarded because their `observedAt` template failed, tallied by
+//!   mapping into [`DiscardedObservations`](crate::discarded_observations::DiscardedObservations);
+//!   both travel in [`AssemblyLosses`](crate::assembly_losses::AssemblyLosses).
 //!
 //! [`FragmentResolver`](crate::fragment_resolver::FragmentResolver) is the standard implementation
 //! of both traits, backed by pluggable entity and relationship stores. Its two halves live in
 //! separate modules: [`fragment_resolver`] owns the write path, [`entity_assembly`] the read-back.
 
+pub mod assembly_losses;
 pub mod coalesced_batch;
+pub mod discarded_observations;
 pub mod entity_assembly;
 pub mod entity_source;
 pub mod entity_store;
@@ -31,6 +36,7 @@ pub mod id_assembly;
 pub mod mapping_id;
 pub mod mapping_registry;
 pub mod merged_records;
+pub mod observed_at_failures;
 pub mod record_merge;
 pub mod relationship_store;
 pub mod store_action;

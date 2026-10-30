@@ -84,6 +84,7 @@ impl Pipeline {
 
 #[cfg(test)]
 mod tests {
+    use cassiopeia_common::{representation::NgsiLdRepresentation, skip_null::NgsiLdSkipNull};
     use cassiopeia_expander::{compiler::ExpanderCompiler, expander::Expander, generic::GenericExpander, router::MappingRouter};
     use cassiopeia_extractor::{dropped_attributes::DroppedAttributes, entity_extractor::EntityExtractor, extractor::Extractor};
     use cassiopeia_ir::{fragment::Fragment, mapped::Mapped, record::Record};
@@ -92,17 +93,19 @@ mod tests {
         NgsiLdEntity,
         attribute::{NgsiLdAttribute, NgsiLdAttributeWrapper},
         name::NameBuf,
+        representation::NgsiLdSerializable,
     };
     use cassiopeia_resolver::{
+        assembly_losses::AssemblyLosses,
         entity_source::EntitySource,
         entity_store::dashmap_latest_store::DashMapLatestEntityStore,
         fragment_resolver::FragmentResolver,
         fragment_sink::FragmentSink,
-        merged_records::MergedRecords,
         relationship_store::dashmap_store::DashMapRelationshipStore,
     };
     use cassiopeia_transformer::{ngsi_ld_transformer::NgsiLdTransformer, transformer::Transformer};
-    use cassiopeia_unreadable_timestamps::unreadable_timestamps::UnreadableTimestamps;
+    use cassiopeia_unreadable_timestamps::{unreadable_expiries::UnreadableExpiries, unreadable_timestamps::UnreadableTimestamps};
+    use chrono::{TimeZone, Utc};
     use pretty_assertions::assert_eq;
     use serde_json::{Map, Value, json};
     use std::{ops::ControlFlow, path::Path, sync::Arc};
@@ -121,7 +124,7 @@ mod tests {
 
         let sink: &dyn FragmentSink = &fragment_resolver;
         for id in ["urn:ngsi-ld:Station:1", "urn:ngsi-ld:Station:2"] {
-            let fragment = Fragment::new(json!({"temperature": 20}), id.parse().unwrap(), None, None);
+            let fragment = Fragment::new(json!({"temperature": 20}), id.parse().unwrap(), None, None, None);
             sink.resolve(Mapped::new(fragment, Arc::clone(&mapping))).unwrap();
         }
 
@@ -130,7 +133,7 @@ mod tests {
 
         let mut ids: Vec<String> = Vec::new();
         source
-            .drive_assembly(8, &mut MergedRecords::new(), &mut |result| {
+            .drive_assembly(8, &mut AssemblyLosses::new(), &mut |result| {
                 ids.push(result.unwrap().id().to_string());
                 ControlFlow::Continue(())
             })
@@ -174,7 +177,7 @@ mod tests {
         };
 
         let expander = GenericExpander::new(MappingRouter::Single(Arc::clone(&mapping)), resolver.clone(), Map::new());
-        let fragments = expander.expand(Record::new(None, data)).unwrap();
+        let fragments = Expander::expand(&expander, Record::new(None, data), &UnreadableExpiries::new()).unwrap();
         let fragment_resolver = FragmentResolver::new(
             Box::new(DashMapLatestEntityStore::new()),
             Box::new(DashMapRelationshipStore::new()),
@@ -295,5 +298,22 @@ mod tests {
                 ),
             ]
         );
+    }
+
+    #[test]
+    fn a_mapping_expires_at_travels_every_stage_onto_the_serialized_entity() {
+        let document = r#"{
+            version: "v4",
+            dataModel: "Sensor",
+            identity: { entityName: "S-{{ id }}" },
+            expiresAt: "{{ until }}",
+            attributes: { temperature: { source: "{{ temperature }}" } },
+        }"#;
+
+        let entity = route_through_the_stages(document, json!({"id": 1, "temperature": 21.5, "until": "2026-10-25T13:00:00Z"}));
+
+        assert_eq!(entity.expires_at, Some(Utc.with_ymd_and_hms(2026, 10, 25, 13, 0, 0).unwrap()));
+        let serialized = entity.to_json(NgsiLdRepresentation::Normalized, NgsiLdSkipNull::Skip).unwrap();
+        assert_eq!(serialized["expiresAt"], "2026-10-25T13:00:00Z");
     }
 }

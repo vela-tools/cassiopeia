@@ -1,23 +1,16 @@
 use crate::dropped_geometry::DroppedGeometry;
+use cassiopeia_batch_sink::{batch_sink::BatchSink, occurrences::Occurrences};
 use cassiopeia_geometry::error::GeometryError;
 use cassiopeia_ngsi_ld::entity::name::NameBuf;
-use indexmap::IndexMap;
-use parking_lot::Mutex;
+use derive_more::{Deref, Into};
 
-/// The refused geometry conversions gathered while one batch of entities is extracted.
+/// The refused geometry conversions gathered while one batch of entities is extracted, one count
+/// per distinct refusal of one attribute.
 ///
-/// The sink is shared, not owned per entity: a batch extracts across a Rayon pool, so every worker
-/// records into the same one behind a shared reference.
-///
-/// The map is an [`IndexMap`] behind a [`Mutex`] rather than a `DashMap`: the messages a run prints
-/// have to come out in the same order every time it is run over the same source, which a sharded map
-/// cannot promise, and a sink is built per batch and stays empty in almost every one, so a sharded
-/// map's per-CPU allocation would be paid for nothing. The lock is only ever taken on the refusal
-/// path.
-#[derive(Default)]
-pub struct DroppedGeometries {
-    entries: Mutex<IndexMap<DroppedGeometry, u64>>,
-}
+/// The [`DroppedGeometry`] is the whole diagnostic as well as its key, so a record holds nothing but
+/// how often it was met.
+#[derive(Default, Deref, Into)]
+pub struct DroppedGeometries(BatchSink<DroppedGeometry, Occurrences>);
 
 impl DroppedGeometries {
     /// Opens an empty sink.
@@ -29,35 +22,33 @@ impl DroppedGeometries {
     /// Records one refusal, counting a repeat of one already seen.
     pub fn record(&self, attribute: &NameBuf, refusal: GeometryError) {
         let dropped = DroppedGeometry {
+            // The key carries the refusal by value, so it is built owned on every refusal; this runs
+            // on the refusal path only.
             attribute: attribute.clone(),
             refusal,
         };
 
-        *self.entries.lock().entry(dropped).or_insert(0) += 1;
-    }
-
-    /// Whether nothing was refused, which is the common case for a batch.
-    #[must_use]
-    pub fn is_empty(&self) -> bool {
-        self.entries.lock().is_empty()
-    }
-
-    /// Every distinct refusal and how often it happened, in the order the refusals first occurred.
-    #[must_use]
-    pub fn into_entries(self) -> Vec<(DroppedGeometry, u64)> {
-        self.entries.into_inner().into_iter().collect()
+        self.0.tally_owned(dropped, Occurrences::first);
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use crate::dropped_geometries::DroppedGeometries;
+    use crate::{dropped_geometries::DroppedGeometries, dropped_geometry::DroppedGeometry};
+    use cassiopeia_batch_sink::{batch_sink::BatchSink, recurring::Recurring};
     use cassiopeia_geometry::{error::GeometryError, geometry::GeometryKind};
     use cassiopeia_ngsi_ld::entity::name::NameBuf;
     use pretty_assertions::assert_eq;
 
     fn name(value: &str) -> NameBuf {
         NameBuf::new(value).expect("valid name")
+    }
+
+    fn entries(sink: DroppedGeometries) -> Vec<(DroppedGeometry, u64)> {
+        BatchSink::from(sink)
+            .into_entries()
+            .map(|(dropped, record)| (dropped, record.occurrences().get()))
+            .collect()
     }
 
     fn ambiguous() -> GeometryError {
@@ -79,7 +70,7 @@ mod tests {
         sink.record(&name("location"), ambiguous());
         sink.record(&name("location"), GeometryError::GeometryCollection);
 
-        let entries = sink.into_entries();
+        let entries = entries(sink);
         assert_eq!(entries.len(), 2);
         assert_eq!(entries[0].1, 2);
         assert_eq!(entries[1].1, 1);
@@ -91,7 +82,7 @@ mod tests {
         sink.record(&name("area"), ambiguous());
         sink.record(&name("location"), ambiguous());
 
-        let entries = sink.into_entries();
+        let entries = entries(sink);
         assert_eq!(entries[0].0.attribute, name("area"));
         assert_eq!(entries[1].0.attribute, name("location"));
     }

@@ -2,6 +2,7 @@ use crate::{
     entity_store::{
         concurrent_scopes::ConcurrentScopes,
         error::Result,
+        mapping_expiry::{MappingExpiry, join_observations},
         store::{AssembledFragment, AssembledFragments, EntityStore, FragmentWrite, StoredUnit},
     },
     store_write_strategy::StoreWriteStrategy,
@@ -12,16 +13,25 @@ use smallvec::smallvec;
 use std::{num::NonZeroU64, sync::Arc};
 use urn_rs::Urn;
 
+/// One stored observation and the entity `expiresAt` its record declares.
+#[derive(Debug)]
+struct SeriesObservation {
+    /// The observation as assembly returns it.
+    fragment: AssembledFragment,
+    /// The expiry the observation's record declares.
+    expires_at: MappingExpiry,
+}
+
 /// In-memory series entity store using [`DashMap`] for lock-free concurrent access.
 ///
 /// Each base [`Urn`] maps to an append-only list of every fragment stored for it, in arrival order.
 /// Assembly returns one emit-unit per fragment, so a temporal id's observations each become a
 /// single-instance entity the fold stage later folds into one `EntityTemporal` (ETSI GS CIM 009
-/// v1.9.1 clause 5.2.20).
+/// v1.9.1 clause 5.2.20), and the expiries the observations carry are joined into the entity's.
 #[derive(Clone, Debug, Default)]
 pub struct DashMapSeriesEntityStore {
     scopes: ConcurrentScopes,
-    data: Arc<DashMap<Urn, Vec<AssembledFragment>, RandomState>>,
+    data: Arc<DashMap<Urn, Vec<SeriesObservation>, RandomState>>,
 }
 
 impl DashMapSeriesEntityStore {
@@ -43,14 +53,19 @@ impl EntityStore for DashMapSeriesEntityStore {
             source_data,
             mapping_id,
             scope,
+            expires_at,
             ..
         } = write;
         // Every observation is kept on its own, so each stored fragment stands for exactly one record.
-        let fragment = AssembledFragment {
-            mapping_id,
-            data: source_data,
-            records: NonZeroU64::MIN,
-            conflict: None,
+        let observation = SeriesObservation {
+            fragment: AssembledFragment {
+                mapping_id,
+                data: source_data,
+                records: NonZeroU64::MIN,
+                conflict: None,
+                unresolvable_discards: 0,
+            },
+            expires_at: MappingExpiry::first(expires_at),
         };
 
         // Every observation after an id's first finds the key already present, which is the whole
@@ -58,13 +73,13 @@ impl EntityStore for DashMapSeriesEntityStore {
         // discard, leaving the clone to the one insert per id that actually needs an owned key.
         let unplaced = match self.data.get_mut(&base_id) {
             Some(mut existing) => {
-                existing.push(fragment);
+                existing.push(observation);
                 None
             }
-            None => Some(fragment),
+            None => Some(observation),
         };
-        if let Some(fragment) = unplaced {
-            self.data.entry(base_id.clone()).or_default().push(fragment);
+        if let Some(observation) = unplaced {
+            self.data.entry(base_id.clone()).or_default().push(observation);
         }
 
         if let Some(scope) = scope {
@@ -82,13 +97,11 @@ impl EntityStore for DashMapSeriesEntityStore {
         // straight after, so every stored record is moved into its emit-unit. Copying them here
         // instead would deep-clone the entire dataset a second time, on top of the copy the store
         // already holds.
-        let units: Vec<StoredUnit> = self
-            .data
-            .remove(base_id)
-            .map(|(_id, fragments)| fragments.into_iter().map(|fragment| smallvec![fragment]).collect())
-            .unwrap_or_default();
+        let observations = self.data.remove(base_id).map(|(_id, observations)| observations).unwrap_or_default();
+        let expires_at = join_observations(observations.iter().map(|observation| (observation.fragment.mapping_id, observation.expires_at)));
+        let units: Vec<StoredUnit> = observations.into_iter().map(|observation| smallvec![observation.fragment]).collect();
         let scope = self.scopes.get(base_id);
-        Ok(AssembledFragments { scope, units })
+        Ok(AssembledFragments { scope, expires_at, units })
     }
 
     fn count(&self) -> usize {
@@ -119,10 +132,16 @@ mod tests {
     use crate::{
         entity_store::{
             dashmap_series_store::DashMapSeriesEntityStore,
+            record_timestamp::RecordTimestamp,
             store::{
                 EntityStore,
                 FragmentWrite,
-                tests::{READS_EVERYTHING, assert_merges_scopes_per_id},
+                tests::{
+                    READS_EVERYTHING,
+                    assert_joins_expiries_across_mappings,
+                    assert_merges_scopes_per_id,
+                    assert_series_keeps_the_furthest_expiry_per_mapping,
+                },
             },
         },
         mapping_id::MappingId,
@@ -141,14 +160,25 @@ mod tests {
         assert_merges_scopes_per_id(&DashMapSeriesEntityStore::new());
     }
 
+    #[test]
+    fn the_expiries_of_an_id_s_mappings_are_joined() {
+        assert_joins_expiries_across_mappings(&DashMapSeriesEntityStore::new());
+    }
+
+    #[test]
+    fn a_mapping_s_observations_keep_their_furthest_expiry() {
+        assert_series_keeps_the_furthest_expiry_per_mapping(&DashMapSeriesEntityStore::new());
+    }
+
     fn write(base_id: &Urn, data: serde_json::Value, observed_at: &str) -> FragmentWrite<'static> {
         FragmentWrite {
             base_id: base_id.clone(),
             source_data: data,
             mapping_id: MappingId::new(1),
             temporal: true,
-            observed_at: Some(ObservedAt::new(observed_at)),
+            timestamp: RecordTimestamp::Declared(ObservedAt::new(observed_at)),
             scope: None,
+            expires_at: None,
             reads: &READS_EVERYTHING,
         }
     }

@@ -1,5 +1,5 @@
 use cassiopeia_common::telemetry::run::TelemetrySnapshot;
-use cassiopeia_diagnostic::{code::diagnostic_code::DiagnosticCode, diagnostic::Diagnostic, reason::Reason};
+use cassiopeia_diagnostic::{code::diagnostic_code::DiagnosticCode, context_field::ContextField, diagnostic::Diagnostic, reason::Reason};
 use cassiopeia_reporter::{
     guard::StageGuard,
     reporter::{DiagnosticSink, MessageLog, ProgressReporter, ProgressStage, RunSummary, StageReporter},
@@ -18,6 +18,10 @@ pub(crate) struct RecordedDiagnostic {
     pub(crate) causes: Vec<String>,
     /// How many occurrences it stood for.
     pub(crate) occurrences: u64,
+    /// The context that distinguishes it from another failure.
+    pub(crate) defining: Vec<ContextField>,
+    /// The context that describes one occurrence of it.
+    pub(crate) incidental: Vec<ContextField>,
 }
 
 /// A reporter that records the diagnostics sent to it and discards everything else.
@@ -57,6 +61,9 @@ impl DiagnosticSink for RecordingReporter {
             headline: diagnostic.headline().to_string(),
             causes: diagnostic.causes().iter().map(|cause| cause.as_str().to_string()).collect(),
             occurrences: diagnostic.occurrences().get(),
+            // The diagnostic is only borrowed for the call, so its context is copied to outlive it.
+            defining: diagnostic.defining().to_vec(),
+            incidental: diagnostic.incidental().clone(),
         });
     }
 }

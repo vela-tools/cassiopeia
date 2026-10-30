@@ -13,6 +13,9 @@ pub struct NgsiLdGeoProperty {
     /// When the geometry was observed.
     #[serde(rename = "observedAt", skip_serializing_if = "Option::is_none")]
     pub observed_at: Option<DateTime<Utc>>,
+    /// When the geometry ceases to hold (ETSI GS CIM 009 v1.9.1 clause 4.22).
+    #[serde(rename = "expiresAt", skip_serializing_if = "Option::is_none")]
+    pub expires_at: Option<DateTime<Utc>>,
     /// The dataset this instance belongs to (a URI).
     #[serde(rename = "datasetId", skip_serializing_if = "Option::is_none")]
     pub dataset_id: Option<Urn>,
@@ -28,6 +31,7 @@ impl NgsiLdGeoProperty {
         NgsiLdGeoProperty {
             value: geometry,
             observed_at: None,
+            expires_at: None,
             dataset_id: None,
             instance_id: None,
         }

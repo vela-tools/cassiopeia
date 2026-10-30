@@ -1,4 +1,5 @@
 use derive_more::{Deref, Display, Into};
+use serde::{Deserialize, Serialize};
 
 /// A record's `observedAt` temporal qualifier, as the exact text that flows into the temporal
 /// entity's URN.
@@ -8,8 +9,10 @@ use derive_more::{Deref, Display, Into};
 /// datetime type would change the identity of every temporal entity, so this newtype preserves the
 /// value verbatim while still keeping it out of the bare-`String` domain.
 /// The `Into` conversion hands the verbatim text over without copying it, so a store that persists
-/// the qualifier as plain text moves it rather than re-allocating.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Deref, Display, Into)]
+/// the qualifier as plain text moves it rather than re-allocating. It serializes as that bare text,
+/// so a disk-backed store persists it unchanged.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Deref, Display, Into, Serialize, Deserialize)]
+#[serde(transparent)]
 pub struct ObservedAt(String);
 
 impl ObservedAt {
@@ -34,6 +37,17 @@ mod tests {
     #[test]
     fn a_qualifier_preserves_its_exact_text() {
         assert_eq!(ObservedAt::new("2026-04-03T22:00:20Z").as_str(), "2026-04-03T22:00:20Z");
+    }
+
+    #[test]
+    fn a_qualifier_serializes_as_its_bare_text() {
+        let qualifier = ObservedAt::new("2026-04-03T22:00:20Z");
+
+        assert_eq!(serde_json::to_value(&qualifier).unwrap(), serde_json::json!("2026-04-03T22:00:20Z"));
+        assert_eq!(
+            serde_json::from_value::<ObservedAt>(serde_json::json!("2026-04-03T22:00:20Z")).unwrap(),
+            qualifier
+        );
     }
 
     #[test]

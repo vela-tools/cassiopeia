@@ -1,0 +1,19 @@
+[package]
+name = "cassiopeia-batch-sink"
+description = "The failures one pipeline batch met, folded into one counted record per key"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+derive-where = "1.7.0"
+indexmap = "2.14.2"
+parking_lot = "0.13.0"
+
+[dev-dependencies]
+pretty_assertions = "1.4.1"
+
+[lints]
+workspace = true

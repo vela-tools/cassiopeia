@@ -104,6 +104,7 @@ impl ProgressStage for PipelineStage {
 #[cfg(test)]
 mod tests {
     use crate::pipeline_stage::PipelineStage;
+    use cassiopeia_common::stage::Stage;
     use cassiopeia_reporter::reporter::ProgressStage;
     use pretty_assertions::assert_eq;
 
@@ -135,8 +136,6 @@ mod tests {
 
     #[test]
     fn the_scheduler_maps_to_no_measured_stage_while_the_rest_map_to_one() {
-        use cassiopeia_common::stage::Stage;
-
         assert_eq!(PipelineStage::Scheduler.stage(), None);
         assert_eq!(PipelineStage::ResolverSink.stage(), Some(Stage::Resolver));
         assert_eq!(PipelineStage::Extractor.stage(), Some(Stage::Extractor));

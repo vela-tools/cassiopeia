@@ -12,7 +12,16 @@ use crate::entity::{
     representation::{
         DisplaySeq,
         DisplayStr,
-        qualifiers::{serialize_dataset_id, serialize_instance_id, serialize_nested, serialize_object_type, serialize_observed_at, serialize_unit_code},
+        qualifiers::{
+            serialize_dataset_id,
+            serialize_expires_at,
+            serialize_instance_id,
+            serialize_nested,
+            serialize_object_type,
+            serialize_observed_at,
+            serialize_unit_code,
+            serialize_value_type,
+        },
     },
 };
 use cassiopeia_common::{representation::NgsiLdRepresentation, skip_null::NgsiLdSkipNull};
@@ -29,7 +38,9 @@ pub fn serialize_property<S: Serializer>(prop: &NgsiLdProperty, skip_null: NgsiL
     let mut map = serializer.serialize_map(None)?;
     map.serialize_entry("type", "Property")?;
     map.serialize_entry("value", &prop.value)?;
+    serialize_value_type(&mut map, &prop.value)?;
     serialize_observed_at(&mut map, prop.observed_at.as_ref())?;
+    serialize_expires_at(&mut map, prop.expires_at.as_ref())?;
     serialize_unit_code(&mut map, prop.unit_code.as_ref())?;
     serialize_dataset_id(&mut map, prop.dataset_id.as_ref())?;
     serialize_instance_id(&mut map, prop.instance_id.as_ref())?;
@@ -47,6 +58,7 @@ pub fn serialize_relationship<S: Serializer>(rel: &NgsiLdRelationship, skip_null
     map.serialize_entry("object", &DisplayStr(&rel.object))?;
     serialize_object_type(&mut map, rel.object_type.as_ref())?;
     serialize_observed_at(&mut map, rel.observed_at.as_ref())?;
+    serialize_expires_at(&mut map, rel.expires_at.as_ref())?;
     serialize_dataset_id(&mut map, rel.dataset_id.as_ref())?;
     serialize_instance_id(&mut map, rel.instance_id.as_ref())?;
     serialize_nested(&mut map, &rel.attributes, MODE, skip_null)?;
@@ -62,6 +74,7 @@ pub fn serialize_geo_property<S: Serializer>(geo: &NgsiLdGeoProperty, _skip_null
     map.serialize_entry("type", "GeoProperty")?;
     map.serialize_entry("value", &geo.value)?;
     serialize_observed_at(&mut map, geo.observed_at.as_ref())?;
+    serialize_expires_at(&mut map, geo.expires_at.as_ref())?;
     serialize_dataset_id(&mut map, geo.dataset_id.as_ref())?;
     serialize_instance_id(&mut map, geo.instance_id.as_ref())?;
     map.end()
@@ -77,6 +90,7 @@ pub fn serialize_list_relationship<S: Serializer>(rel: &NgsiLdListRelationship, 
     map.serialize_entry("objectList", &DisplaySeq(&rel.object_list))?;
     serialize_object_type(&mut map, rel.object_type.as_ref())?;
     serialize_observed_at(&mut map, rel.observed_at.as_ref())?;
+    serialize_expires_at(&mut map, rel.expires_at.as_ref())?;
     serialize_dataset_id(&mut map, rel.dataset_id.as_ref())?;
     serialize_nested(&mut map, &rel.attributes, MODE, skip_null)?;
     map.end()
@@ -91,6 +105,7 @@ pub fn serialize_language_property<S: Serializer>(prop: &NgsiLdLanguageProperty,
     map.serialize_entry("type", "LanguageProperty")?;
     map.serialize_entry("languageMap", &prop.language_map)?;
     serialize_observed_at(&mut map, prop.observed_at.as_ref())?;
+    serialize_expires_at(&mut map, prop.expires_at.as_ref())?;
     serialize_dataset_id(&mut map, prop.dataset_id.as_ref())?;
     serialize_nested(&mut map, &prop.attributes, MODE, skip_null)?;
     map.end()
@@ -105,6 +120,7 @@ pub fn serialize_vocab_property<S: Serializer>(prop: &NgsiLdVocabProperty, skip_
     map.serialize_entry("type", "VocabProperty")?;
     map.serialize_entry("vocab", &DisplayStr(&prop.has_vocab))?;
     serialize_observed_at(&mut map, prop.observed_at.as_ref())?;
+    serialize_expires_at(&mut map, prop.expires_at.as_ref())?;
     serialize_dataset_id(&mut map, prop.dataset_id.as_ref())?;
     serialize_nested(&mut map, &prop.attributes, MODE, skip_null)?;
     map.end()
@@ -119,6 +135,7 @@ pub fn serialize_list_property<S: Serializer>(prop: &NgsiLdListProperty, skip_nu
     map.serialize_entry("type", "ListProperty")?;
     map.serialize_entry("valueList", &prop.has_value_list)?;
     serialize_observed_at(&mut map, prop.observed_at.as_ref())?;
+    serialize_expires_at(&mut map, prop.expires_at.as_ref())?;
     serialize_dataset_id(&mut map, prop.dataset_id.as_ref())?;
     serialize_nested(&mut map, &prop.attributes, MODE, skip_null)?;
     map.end()
@@ -133,6 +150,7 @@ pub fn serialize_json_property<S: Serializer>(prop: &NgsiLdJsonProperty, skip_nu
     map.serialize_entry("type", "JsonProperty")?;
     map.serialize_entry("json", &prop.has_json)?;
     serialize_observed_at(&mut map, prop.observed_at.as_ref())?;
+    serialize_expires_at(&mut map, prop.expires_at.as_ref())?;
     serialize_dataset_id(&mut map, prop.dataset_id.as_ref())?;
     serialize_nested(&mut map, &prop.attributes, MODE, skip_null)?;
     map.end()

@@ -327,6 +327,7 @@ mod parity_tests {
             entity_type: NameBuf::new("Sensor").unwrap(),
             context: None,
             scope: None,
+            expires_at: None,
             attributes,
         }
     }

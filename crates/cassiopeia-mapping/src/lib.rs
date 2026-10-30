@@ -1,4 +1,5 @@
 pub mod attribute;
+pub mod entity_members;
 pub mod error;
 pub mod geometry_validation;
 pub mod identity;
@@ -40,7 +41,9 @@ mod tests {
 
         assert!(mapping.is_temporal());
         assert_eq!(
-            mapping.extract_observed_at(&runner.resolver(), &json!({"timestamp": "2026-04-03T22:00:20Z"})),
+            mapping
+                .extract_observed_at(&runner.resolver(), &json!({"timestamp": "2026-04-03T22:00:20Z"}))
+                .unwrap(),
             Some(ObservedAt::new("2026-04-03T22:00:20Z"))
         );
     }

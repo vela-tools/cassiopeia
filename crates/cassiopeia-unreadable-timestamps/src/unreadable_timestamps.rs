@@ -1,21 +1,15 @@
-use crate::unreadable_timestamp::UnreadableTimestamp;
+use crate::{
+    attribute_loss::{AttributeLoss, AttributeLossRef},
+    timestamp_loss::TimestampLoss,
+    unreadable_timestamp::UnreadableTimestamp,
+};
+use cassiopeia_batch_sink::batch_sink::BatchSink;
 use cassiopeia_ngsi_ld::entity::name::NameBuf;
-use indexmap::IndexMap;
-use parking_lot::Mutex;
+use derive_more::{Deref, Into};
 
-/// The timestamps one batch could not read, one record per attribute that lost one.
-///
-/// The sink is shared, not owned per entity: a batch is processed across a Rayon pool, so every
-/// worker records into the same one behind a shared reference.
-///
-/// The map is an [`IndexMap`] behind a [`Mutex`] rather than a `DashMap`: a run's messages come out
-/// in the order the failures were met rather than in a hash order that would reshuffle between
-/// builds, and a sink is built per batch and stays empty in almost every one, so a sharded map's
-/// per-CPU allocation would be paid for nothing. The lock is only ever taken on the failure path.
-#[derive(Default)]
-pub struct UnreadableTimestamps {
-    entries: Mutex<IndexMap<NameBuf, UnreadableTimestamp>>,
-}
+/// The attribute timestamps one batch could not read, one record per [`AttributeLoss`].
+#[derive(Default, Deref, Into)]
+pub struct UnreadableTimestamps(BatchSink<AttributeLoss, UnreadableTimestamp>);
 
 impl UnreadableTimestamps {
     /// Opens an empty sink.
@@ -24,41 +18,41 @@ impl UnreadableTimestamps {
         UnreadableTimestamps::default()
     }
 
-    /// Records that `attribute` carried `text`, which is not a timestamp.
+    /// Records that `attribute`'s `loss` timestamp carried `text`, which is not a timestamp.
     ///
     /// The first text an attribute fails on is kept as its example; every later one is counted
-    /// against that same record rather than opening another. Which text that is, when a batch is
-    /// processed in parallel and its records carry different ones, is whichever reached the sink
-    /// first: the example illustrates the shape, it does not identify a record.
-    pub fn record(&self, attribute: &NameBuf, text: &str) {
-        self.entries
-            .lock()
-            .entry(attribute.clone())
-            .and_modify(UnreadableTimestamp::count_another)
-            .or_insert_with(|| UnreadableTimestamp::first(text));
-    }
-
-    /// Whether nothing failed to read, which is the common case for a batch.
-    #[must_use]
-    pub fn is_empty(&self) -> bool {
-        self.entries.lock().is_empty()
-    }
-
-    /// Every attribute that lost a timestamp and what it lost, in the order they first failed.
-    #[must_use]
-    pub fn into_entries(self) -> Vec<(NameBuf, UnreadableTimestamp)> {
-        self.entries.into_inner().into_iter().collect()
+    /// against that same record.
+    pub fn record(&self, loss: TimestampLoss, attribute: &NameBuf, text: &str) {
+        let key = AttributeLossRef { loss, attribute };
+        self.0.tally(&key, || (key.to_owned_key(), UnreadableTimestamp::first(text)));
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use crate::unreadable_timestamps::UnreadableTimestamps;
+    use crate::{
+        attribute_loss::AttributeLoss,
+        timestamp_loss::TimestampLoss,
+        unreadable_timestamp::UnreadableTimestamp,
+        unreadable_timestamps::UnreadableTimestamps,
+    };
+    use cassiopeia_batch_sink::{batch_sink::BatchSink, recurring::Recurring};
     use cassiopeia_ngsi_ld::entity::name::NameBuf;
     use pretty_assertions::assert_eq;
 
     fn name(value: &str) -> NameBuf {
         NameBuf::new(value).expect("valid name")
+    }
+
+    fn loss(loss: TimestampLoss, attribute: &str) -> AttributeLoss {
+        AttributeLoss {
+            loss,
+            attribute: name(attribute),
+        }
+    }
+
+    fn entries(sink: UnreadableTimestamps) -> Vec<(AttributeLoss, UnreadableTimestamp)> {
+        BatchSink::from(sink).into_entries().collect()
     }
 
     #[test]
@@ -69,24 +63,50 @@ mod tests {
     #[test]
     fn every_text_one_attribute_fails_on_is_counted_against_one_record() {
         let sink = UnreadableTimestamps::new();
-        sink.record(&name("dateObserved"), "2026-03-01 11:04:35+00:00");
-        sink.record(&name("dateObserved"), "2026-03-01 11:04:36+00:00");
+        sink.record(TimestampLoss::AttributeValue, &name("dateObserved"), "2026-03-01 11:04:35+00:00");
+        sink.record(TimestampLoss::AttributeValue, &name("dateObserved"), "2026-03-01 11:04:36+00:00");
 
-        let entries = sink.into_entries();
+        let entries = entries(sink);
         assert_eq!(entries.len(), 1);
-        assert_eq!(entries[0].1.occurrences.get(), 2);
+        assert_eq!(entries[0].0, loss(TimestampLoss::AttributeValue, "dateObserved"));
+        assert_eq!(entries[0].1.occurrences().get(), 2);
         assert_eq!(entries[0].1.example.as_ref(), "2026-03-01 11:04:35+00:00");
     }
 
     #[test]
     fn two_attributes_that_lose_a_timestamp_are_two_records_in_the_order_they_failed() {
         let sink = UnreadableTimestamps::new();
-        sink.record(&name("dateObservedTo"), "later");
-        sink.record(&name("dateObserved"), "earlier");
+        sink.record(TimestampLoss::ObservedAt, &name("dateObservedTo"), "later");
+        sink.record(TimestampLoss::ObservedAt, &name("dateObserved"), "earlier");
 
-        let entries = sink.into_entries();
+        let entries = entries(sink);
         assert_eq!(entries.len(), 2);
-        assert_eq!(entries[0].0, name("dateObservedTo"));
-        assert_eq!(entries[1].0, name("dateObserved"));
+        assert_eq!(entries[0].0.attribute, name("dateObservedTo"));
+        assert_eq!(entries[1].0.attribute, name("dateObserved"));
+    }
+
+    #[test]
+    fn one_attribute_losing_two_different_timestamps_is_two_records() {
+        let sink = UnreadableTimestamps::new();
+        sink.record(TimestampLoss::ObservedAt, &name("temperature"), "not a timestamp");
+        sink.record(TimestampLoss::ExpiresAt, &name("temperature"), "tomorrow");
+
+        let entries = entries(sink);
+        assert_eq!(entries.len(), 2);
+        assert_eq!(entries[0].0, loss(TimestampLoss::ObservedAt, "temperature"));
+        assert_eq!(entries[0].1.example.as_ref(), "not a timestamp");
+        assert_eq!(entries[1].0, loss(TimestampLoss::ExpiresAt, "temperature"));
+        assert_eq!(entries[1].1.example.as_ref(), "tomorrow");
+    }
+
+    #[test]
+    fn the_same_attribute_and_loss_meet_again_in_one_record_not_two() {
+        let sink = UnreadableTimestamps::new();
+        sink.record(TimestampLoss::ExpiresAt, &name("until"), "one");
+        sink.record(TimestampLoss::ExpiresAt, &name("until"), "two");
+
+        let entries = entries(sink);
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].1.occurrences().get(), 2);
     }
 }

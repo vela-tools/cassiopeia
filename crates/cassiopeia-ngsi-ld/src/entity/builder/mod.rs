@@ -5,6 +5,7 @@ use crate::entity::{
     name::NameBuf,
     scope::NgsiLdScope,
 };
+use chrono::{DateTime, Utc};
 use urn_rs::Urn;
 
 pub mod attribute;
@@ -15,6 +16,7 @@ pub struct NgsiLdEntityBuilder {
     entity_type: NameBuf,
     context: Option<NgsiLdContext>,
     scope: Option<NgsiLdScope>,
+    expires_at: Option<DateTime<Utc>>,
     attributes: Attributes,
 }
 
@@ -27,6 +29,7 @@ impl NgsiLdEntityBuilder {
             entity_type,
             context: None,
             scope: None,
+            expires_at: None,
             attributes: Attributes::default(),
         }
     }
@@ -42,6 +45,14 @@ impl NgsiLdEntityBuilder {
     #[must_use]
     pub fn scope(mut self, scope: NgsiLdScope) -> Self {
         self.scope = Some(scope);
+        self
+    }
+
+    /// Sets the instant after which the entity ceases to hold (ETSI GS CIM 009 v1.9.1 clause 4.22),
+    /// written as an optional member of the entity (clause 4.5.1).
+    #[must_use]
+    pub const fn expires_at(mut self, expires_at: DateTime<Utc>) -> Self {
+        self.expires_at = Some(expires_at);
         self
     }
 
@@ -64,6 +75,7 @@ impl NgsiLdEntityBuilder {
             entity_type: self.entity_type,
             context: self.context,
             scope: self.scope,
+            expires_at: self.expires_at,
             attributes: self.attributes,
         }
     }
@@ -80,12 +92,24 @@ impl NgsiLdEntity {
 #[cfg(test)]
 mod tests {
     use crate::entity::{builder::NgsiLdEntityBuilder, name::NameBuf};
+    use chrono::{TimeZone, Utc};
     use pretty_assertions::assert_eq;
 
     #[test]
     fn the_builder_assembles_an_entity_with_its_id_and_type() {
         let entity = NgsiLdEntityBuilder::new("urn:ngsi-ld:Sensor:1".parse().unwrap(), NameBuf::new("Sensor").unwrap()).build();
         assert_eq!(entity.entity_type.as_str(), "Sensor");
+        assert_eq!(entity.expires_at, None);
         assert!(entity.attributes.is_empty());
+    }
+
+    #[test]
+    fn the_builder_carries_a_set_expiry() {
+        let expires_at = Utc.with_ymd_and_hms(2026, 10, 25, 13, 0, 0).unwrap();
+        let entity = NgsiLdEntityBuilder::new("urn:ngsi-ld:Sensor:1".parse().unwrap(), NameBuf::new("Sensor").unwrap())
+            .expires_at(expires_at)
+            .build();
+
+        assert_eq!(entity.expires_at, Some(expires_at));
     }
 }

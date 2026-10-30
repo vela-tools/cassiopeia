@@ -1,6 +1,12 @@
-use crate::{entity_store::error::Result, field_path::FieldPath, mapping_id::MappingId, store_write_strategy::StoreWriteStrategy};
-use cassiopeia_mapping::{observed_at::ObservedAt, source_reads::SourceReads};
+use crate::{
+    entity_store::{error::Result, record_timestamp::RecordTimestamp},
+    field_path::FieldPath,
+    mapping_id::MappingId,
+    store_write_strategy::StoreWriteStrategy,
+};
+use cassiopeia_mapping::source_reads::SourceReads;
 use cassiopeia_ngsi_ld::entity::scope::NgsiLdScope;
+use chrono::{DateTime, Utc};
 use serde_json::Value;
 use smallvec::SmallVec;
 use std::{fmt::Debug, num::NonZeroU64};
@@ -10,7 +16,7 @@ use urn_rs::Urn;
 ///
 /// Temporality is an attribute concern (ETSI GS CIM 009 v1.9.1 clause 4.5.5), so the store keys by
 /// the base id and every mapping and every observation of that id accumulates together. `temporal`
-/// and `observed_at` let a current-state store rank a temporal mapping's records by their record-level
+/// and `timestamp` let a current-state store rank a temporal mapping's records by their record-level
 /// `observedAt`; a series store ignores them and keeps every observation.
 ///
 /// The write owns the record it carries. The resolver already owns the fragment it is storing and
@@ -26,11 +32,13 @@ pub struct FragmentWrite<'a> {
     pub mapping_id: MappingId,
     /// Whether the producing mapping is temporal (declares an `observedAt`).
     pub temporal: bool,
-    /// The record-level `observedAt`, verbatim; monotonic under string compare for a fixed format.
-    /// `None` when the mapping is not temporal or the record carries no timestamp.
-    pub observed_at: Option<ObservedAt>,
+    /// What the record-level `observedAt` template yielded for the record: its timestamp verbatim,
+    /// monotonic under string compare for a fixed format, no timestamp, or a failure.
+    pub timestamp: RecordTimestamp,
     /// The entity's scope, when one was resolved.
     pub scope: Option<NgsiLdScope>,
+    /// The entity's `expiresAt`, when one was resolved (ETSI GS CIM 009 v1.9.1 clause 4.5.1).
+    pub expires_at: Option<DateTime<Utc>>,
     /// The top-level source keys the producing mapping reads: a current-state store counts a
     /// disagreement between merged records only beneath one of them.
     pub reads: &'a SourceReads,
@@ -54,6 +62,10 @@ pub struct AssembledFragment {
     /// discarded a value (see [`deep_merge`](crate::entity_store::merge::deep_merge)). Always `None`
     /// for a series observation, which is never merged in the store.
     pub conflict: Option<FieldPath>,
+    /// How many of the mapping's records whose `observedAt` template failed the slot discarded for a
+    /// later one (see [`SlotRanking`](crate::entity_store::supersession::SlotRanking)). Always zero
+    /// for a series observation, which discards nothing.
+    pub unresolvable_discards: u64,
 }
 
 /// The fragments contributing to one emit-unit.
@@ -72,6 +84,9 @@ pub type StoredUnit = SmallVec<[AssembledFragment; 1]>;
 pub struct AssembledFragments {
     /// The entity's scope, when one was stored.
     pub scope: Option<NgsiLdScope>,
+    /// The entity's `expiresAt` (ETSI GS CIM 009 v1.9.1 clause 4.5.1), joined from the expiries its
+    /// mappings contribute (see [`join`](crate::entity_store::mapping_expiry::join)).
+    pub expires_at: Option<DateTime<Utc>>,
     /// One fragment-list per emit-unit.
     pub units: Vec<StoredUnit>,
 }
@@ -194,11 +209,15 @@ impl Clone for Box<dyn EntityStore> {
 #[cfg(test)]
 pub(crate) mod tests {
     use crate::{
-        entity_store::store::{EntityStore, FragmentWrite},
+        entity_store::{
+            record_timestamp::RecordTimestamp,
+            store::{EntityStore, FragmentWrite},
+        },
         mapping_id::MappingId,
     };
-    use cassiopeia_mapping::source_reads::SourceReads;
+    use cassiopeia_mapping::{observed_at::ObservedAt, source_reads::SourceReads};
     use cassiopeia_ngsi_ld::entity::scope::{NgsiLdScope, ScopeBuf};
+    use chrono::{DateTime, TimeZone, Utc};
     use pretty_assertions::assert_eq;
     use serde_json::json;
     use urn_rs::Urn;
@@ -213,10 +232,33 @@ pub(crate) mod tests {
             source_data: json!({ "mapping": mapping }),
             mapping_id: MappingId::new(mapping),
             temporal: false,
-            observed_at: None,
+            timestamp: RecordTimestamp::Absent,
             scope: NgsiLdScope::from_scopes(scopes.iter().map(|scope| ScopeBuf::new(*scope).unwrap())),
+            expires_at: None,
             reads: &READS_EVERYTHING,
         }
+    }
+
+    /// A write like [`write`], carrying one entity `expiresAt` at `epoch_seconds`, or none when
+    /// `epoch_seconds` is `None`.
+    fn write_expiring(base_id: &Urn, mapping: u32, epoch_seconds: Option<i64>) -> FragmentWrite<'static> {
+        FragmentWrite {
+            expires_at: epoch_seconds.map(instant),
+            ..write(base_id, mapping, &[])
+        }
+    }
+
+    /// A write like [`write_expiring`] from a temporal mapping, observed at `observed_at`.
+    fn write_observed(base_id: &Urn, mapping: u32, observed_at: &str, epoch_seconds: Option<i64>) -> FragmentWrite<'static> {
+        FragmentWrite {
+            temporal: true,
+            timestamp: RecordTimestamp::Declared(ObservedAt::new(observed_at)),
+            ..write_expiring(base_id, mapping, epoch_seconds)
+        }
+    }
+
+    fn instant(seconds: i64) -> DateTime<Utc> {
+        Utc.timestamp_opt(seconds, 0).single().unwrap()
     }
 
     /// Cross-backend contract every [`EntityStore`] must honour: the scopes every fragment of one id
@@ -243,5 +285,81 @@ pub(crate) mod tests {
         let scope = store.assemble_entity(&scoped).unwrap().scope;
         assert_eq!(serde_json::to_value(scope).unwrap(), json!(["/a", "/b", "/c", "/d"]));
         assert_eq!(store.assemble_entity(&unscoped).unwrap().scope, None);
+    }
+
+    /// Cross-backend contract every [`EntityStore`] must honour: the expiries the mappings of one id
+    /// contribute are joined as clause 4.5.5.3 of ETSI GS CIM 009 v1.9.1 joins the entity-level
+    /// `expiresAt` of several versions of one entity. When every mapping declares one the furthest
+    /// wins, when any mapping declares none the entity has none, whichever order the mappings
+    /// arrive in and across separate writes as well as one batch, and an id whose records declare
+    /// no expiry assembles without one. Every backend calls this so all of them are held to
+    /// identical behaviour.
+    pub(crate) fn assert_joins_expiries_across_mappings(store: &dyn EntityStore) {
+        let every_mapping: Urn = "urn:ngsi-ld:Camera:1".parse().unwrap();
+        let one_mapping: Urn = "urn:ngsi-ld:Camera:2".parse().unwrap();
+        let no_mapping: Urn = "urn:ngsi-ld:Camera:3".parse().unwrap();
+
+        store.store_fragment(write_expiring(&every_mapping, 1, Some(100))).unwrap();
+        store.store_fragment(write_expiring(&one_mapping, 1, None)).unwrap();
+        store
+            .store_fragment_batch(vec![
+                write_expiring(&every_mapping, 2, Some(300)),
+                write_expiring(&one_mapping, 2, Some(300)),
+                write_expiring(&no_mapping, 1, None),
+            ])
+            .unwrap();
+        store.store_fragment(write_expiring(&every_mapping, 3, Some(200))).unwrap();
+
+        assert_eq!(store.assemble_entity(&every_mapping).unwrap().expires_at, Some(instant(300)));
+        assert_eq!(store.assemble_entity(&one_mapping).unwrap().expires_at, None);
+        assert_eq!(store.assemble_entity(&no_mapping).unwrap().expires_at, None);
+    }
+
+    /// Contract every current-state [`EntityStore`] must honour: a mapping's expiry follows the
+    /// record the store retains for it, since `expiresAt` says when the stored entity is to be
+    /// deleted (ETSI GS CIM 009 v1.9.1 clause 4.22). A temporal record that supersedes the retained
+    /// one replaces its expiry, a shorter one and an absent one alike, while a stale record changes
+    /// nothing; a static record merged into the retained one overrides its expiry only when it
+    /// declares one. Both hold across separate writes as well as within one batch.
+    pub(crate) fn assert_expiry_follows_the_retained_record(store: &dyn EntityStore) {
+        let shortened: Urn = "urn:ngsi-ld:Camera:1".parse().unwrap();
+        let cleared: Urn = "urn:ngsi-ld:Camera:2".parse().unwrap();
+        let refined: Urn = "urn:ngsi-ld:Camera:3".parse().unwrap();
+
+        store.store_fragment(write_observed(&shortened, 1, "2026-04-03T22:00:00Z", Some(300))).unwrap();
+        store
+            .store_fragment_batch(vec![
+                write_observed(&shortened, 1, "2026-04-03T22:10:00Z", Some(100)),
+                write_observed(&shortened, 1, "2026-04-03T22:05:00Z", Some(500)),
+                write_observed(&cleared, 1, "2026-04-03T22:00:00Z", Some(300)),
+                write_observed(&cleared, 1, "2026-04-03T22:10:00Z", None),
+                write_expiring(&refined, 1, Some(300)),
+                write_expiring(&refined, 1, Some(100)),
+            ])
+            .unwrap();
+        store.store_fragment(write_expiring(&refined, 1, None)).unwrap();
+
+        assert_eq!(store.assemble_entity(&shortened).unwrap().expires_at, Some(instant(100)));
+        assert_eq!(store.assemble_entity(&cleared).unwrap().expires_at, None);
+        assert_eq!(store.assemble_entity(&refined).unwrap().expires_at, Some(instant(100)));
+    }
+
+    /// Contract every series [`EntityStore`] must honour: a mapping's observations contribute the
+    /// expiry furthest in the future, an observation declaring none clearing nothing, since the
+    /// stored series is due for deletion only once its last observation is (ETSI GS CIM 009 v1.9.1
+    /// clause 4.22). This holds across separate writes as well as within one batch.
+    pub(crate) fn assert_series_keeps_the_furthest_expiry_per_mapping(store: &dyn EntityStore) {
+        let id: Urn = "urn:ngsi-ld:Camera:1".parse().unwrap();
+
+        store.store_fragment(write_observed(&id, 1, "2026-04-03T22:00:00Z", Some(100))).unwrap();
+        store
+            .store_fragment_batch(vec![
+                write_observed(&id, 1, "2026-04-03T22:05:00Z", Some(300)),
+                write_observed(&id, 1, "2026-04-03T22:10:00Z", None),
+            ])
+            .unwrap();
+        store.store_fragment(write_observed(&id, 1, "2026-04-03T22:15:00Z", Some(200))).unwrap();
+
+        assert_eq!(store.assemble_entity(&id).unwrap().expires_at, Some(instant(300)));
     }
 }

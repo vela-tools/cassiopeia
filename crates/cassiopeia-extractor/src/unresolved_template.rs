@@ -1,3 +1,4 @@
+use cassiopeia_batch_sink::recurring::Recurring;
 use cassiopeia_mapping::template::error::TemplateError;
 use std::num::NonZeroU64;
 use urn_rs::Urn;
@@ -33,16 +34,22 @@ impl UnresolvedTemplate {
             occurrences: NonZeroU64::MIN,
         }
     }
+}
 
-    /// Counts one more entity, keeping the first failure already held.
-    pub const fn count_another(&mut self) {
+impl Recurring for UnresolvedTemplate {
+    fn count_another(&mut self) {
         self.occurrences = self.occurrences.saturating_add(1);
+    }
+
+    fn occurrences(&self) -> NonZeroU64 {
+        self.occurrences
     }
 }
 
 #[cfg(test)]
 mod tests {
     use crate::unresolved_template::UnresolvedTemplate;
+    use cassiopeia_batch_sink::recurring::Recurring;
     use cassiopeia_mapping::{
         template::{
             TemplateSource,

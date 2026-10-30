@@ -19,6 +19,7 @@ use urn_rs::Urn;
 pub struct PropertyBuilder {
     value: Value,
     observed_at: Option<DateTime<Utc>>,
+    expires_at: Option<DateTime<Utc>>,
     unit_code: Option<UnitCode>,
     dataset_id: Option<Urn>,
     instance_id: Option<Urn>,
@@ -30,6 +31,7 @@ impl PropertyBuilder {
         Self {
             value: value.into(),
             observed_at: None,
+            expires_at: None,
             unit_code: None,
             dataset_id: None,
             instance_id: None,
@@ -40,6 +42,12 @@ impl PropertyBuilder {
     #[must_use]
     pub const fn observed_at(mut self, observed_at: DateTime<Utc>) -> Self {
         self.observed_at = Some(observed_at);
+        self
+    }
+
+    #[must_use]
+    pub const fn expires_at(mut self, expires_at: DateTime<Utc>) -> Self {
+        self.expires_at = Some(expires_at);
         self
     }
 
@@ -72,6 +80,7 @@ impl PropertyBuilder {
         NgsiLdProperty {
             value: self.value,
             observed_at: self.observed_at,
+            expires_at: self.expires_at,
             unit_code: self.unit_code,
             dataset_id: self.dataset_id,
             instance_id: self.instance_id,
@@ -84,6 +93,7 @@ pub struct RelationshipBuilder {
     object: Urn,
     object_type: Option<NameBuf>,
     observed_at: Option<DateTime<Utc>>,
+    expires_at: Option<DateTime<Utc>>,
     dataset_id: Option<Urn>,
     instance_id: Option<Urn>,
     attributes: NestedAttributes,
@@ -96,6 +106,7 @@ impl RelationshipBuilder {
             object,
             object_type: None,
             observed_at: None,
+            expires_at: None,
             dataset_id: None,
             instance_id: None,
             attributes: NestedAttributes::default(),
@@ -111,6 +122,12 @@ impl RelationshipBuilder {
     #[must_use]
     pub const fn observed_at(mut self, observed_at: DateTime<Utc>) -> Self {
         self.observed_at = Some(observed_at);
+        self
+    }
+
+    #[must_use]
+    pub const fn expires_at(mut self, expires_at: DateTime<Utc>) -> Self {
+        self.expires_at = Some(expires_at);
         self
     }
 
@@ -138,6 +155,7 @@ impl RelationshipBuilder {
             object: self.object,
             object_type: self.object_type,
             observed_at: self.observed_at,
+            expires_at: self.expires_at,
             dataset_id: self.dataset_id,
             instance_id: self.instance_id,
             attributes: self.attributes,

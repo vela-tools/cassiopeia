@@ -1,8 +1,8 @@
 use crate::unresolved_template::UnresolvedTemplate;
+use cassiopeia_batch_sink::batch_sink::BatchSink;
 use cassiopeia_mapping::template::error::TemplateError;
 use cassiopeia_ngsi_ld::entity::name::NameBuf;
-use indexmap::IndexMap;
-use parking_lot::Mutex;
+use derive_more::{Deref, Into};
 use urn_rs::Urn;
 
 /// The attributes one batch dropped because their template could not be resolved, one record per
@@ -11,15 +11,8 @@ use urn_rs::Urn;
 /// A template that fails to render for one record costs that record the attribute, not the whole
 /// entity: one optional attribute's gap must not take down everything else the record carries. The
 /// loss is still named, here, so the run can say which attribute it dropped and where.
-///
-/// The sink is shared, not owned per entity: a batch extracts across a Rayon pool, so every worker
-/// records into the same one behind a shared reference. The map is an [`IndexMap`] behind a
-/// [`Mutex`] rather than a `DashMap` so a run's messages come out in the order the failures were met,
-/// and because a sink stays empty in almost every batch; the lock is only taken on the failure path.
-#[derive(Default)]
-pub struct UnresolvedTemplates {
-    entries: Mutex<IndexMap<NameBuf, UnresolvedTemplate>>,
-}
+#[derive(Default, Deref, Into)]
+pub struct UnresolvedTemplates(BatchSink<NameBuf, UnresolvedTemplate>);
 
 impl UnresolvedTemplates {
     /// Opens an empty sink.
@@ -31,32 +24,18 @@ impl UnresolvedTemplates {
     /// Records that `entity` lost `attribute` because its template failed with `error`.
     ///
     /// The first failure an attribute meets is kept as its example; every later one is counted
-    /// against that same record. Which one is first, when a batch is extracted in parallel, is
-    /// whichever reached the sink first: the example points at a record, it does not rank them.
+    /// against that same record.
     pub fn record(&self, attribute: &NameBuf, entity: &Urn, error: TemplateError) {
-        self.entries
-            .lock()
-            .entry(attribute.clone())
-            .and_modify(UnresolvedTemplate::count_another)
-            .or_insert_with(|| UnresolvedTemplate::first(entity, error));
-    }
-
-    /// Whether every template resolved, which is the common case for a batch.
-    #[must_use]
-    pub fn is_empty(&self) -> bool {
-        self.entries.lock().is_empty()
-    }
-
-    /// Every attribute that was dropped and what dropped it, in the order they first failed.
-    #[must_use]
-    pub fn into_entries(self) -> Vec<(NameBuf, UnresolvedTemplate)> {
-        self.entries.into_inner().into_iter().collect()
+        // An attribute seen for the first time is the only case that owns anything: the map key
+        // must own the attribute name, which is only borrowed from the mapping.
+        self.0.tally(attribute, || (attribute.clone(), UnresolvedTemplate::first(entity, error)));
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use crate::unresolved_templates::UnresolvedTemplates;
+    use crate::{unresolved_template::UnresolvedTemplate, unresolved_templates::UnresolvedTemplates};
+    use cassiopeia_batch_sink::batch_sink::BatchSink;
     use cassiopeia_mapping::{
         template::{
             TemplateSource,
@@ -76,6 +55,10 @@ mod tests {
 
     fn urn(value: &str) -> Urn {
         value.parse().unwrap()
+    }
+
+    fn entries(sink: UnresolvedTemplates) -> Vec<(NameBuf, UnresolvedTemplate)> {
+        BatchSink::from(sink).into_entries().collect()
     }
 
     fn failure() -> TemplateError {
@@ -99,7 +82,7 @@ mod tests {
         sink.record(&name("dafifCode"), &urn("urn:ngsi-ld:Country:A"), failure());
         sink.record(&name("dafifCode"), &urn("urn:ngsi-ld:Country:B"), failure());
 
-        let entries = sink.into_entries();
+        let entries = entries(sink);
         assert_eq!(entries.len(), 1);
         assert_eq!(entries[0].1.entity, urn("urn:ngsi-ld:Country:A"));
         assert_eq!(entries[0].1.occurrences.get(), 2);
@@ -111,7 +94,7 @@ mod tests {
         sink.record(&name("dafifCode"), &urn("urn:ngsi-ld:Country:A"), failure());
         sink.record(&name("isoCode"), &urn("urn:ngsi-ld:Country:A"), failure());
 
-        let entries = sink.into_entries();
+        let entries = entries(sink);
         assert_eq!(entries[0].0, name("dafifCode"));
         assert_eq!(entries[1].0, name("isoCode"));
     }

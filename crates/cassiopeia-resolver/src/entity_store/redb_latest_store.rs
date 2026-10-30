@@ -1,13 +1,15 @@
 use crate::{
     entity_store::{
         error::Result,
+        mapping_expiry::{MappingExpiry, join},
         merge::deep_merge,
+        record_timestamp::RecordTimestamp,
         redb_database::RedbDatabase,
         redb_key::{collect_ids, distinct_id_count, for_each_id_chunk, make_prefix, prefix_end},
         redb_scope::{PendingScopes, SCOPES_TABLE, read_scope},
         store::{AssembledFragment, AssembledFragments, EntityStore, FragmentWrite, StoredUnit},
         stored_fragment::StoredFragment,
-        supersession::supersedes,
+        supersession::{SlotRanking, Supersession},
     },
     field_path::FieldPath,
     mapping_id::MappingId,
@@ -15,7 +17,8 @@ use crate::{
     store_write_strategy::StoreWriteStrategy,
 };
 use ahash::AHashMap;
-use cassiopeia_mapping::{observed_at::ObservedAt, source_reads::SourceReads};
+use cassiopeia_mapping::source_reads::SourceReads;
+use chrono::{DateTime, Utc};
 use redb::{Durability, ReadableDatabase, ReadableTable, TableDefinition};
 use serde_json::Value;
 use smallvec::SmallVec;
@@ -29,7 +32,8 @@ const DATA_TABLE: TableDefinition<&[u8], &[u8]> = TableDefinition::new("data");
 /// Each mapping's retained fragment for a base id lives under the key `{base_id}\x1F{mapping_id_be}`.
 /// A batch reads each key once, applies the current-state rule (a temporal mapping keeps the
 /// greatest-`observedAt` record, a static mapping deep-merges), and commits once. Assembly prefix-scans
-/// a base id's keys into one joined emit-unit. Durability is `Durability::None`: the database lives in
+/// a base id's keys into one joined emit-unit, joining the expiry each key carries into the entity's.
+/// Durability is `Durability::None`: the database lives in
 /// a temporary directory cleaned up at the end of the run, so fsync would be pure waste.
 #[derive(Debug, Clone)]
 pub struct RedbLatestEntityStore {
@@ -66,12 +70,15 @@ struct LatestEntry {
 /// The record a current-state key retains, and how many records it has absorbed.
 struct RetainedRecord {
     data: Value,
-    observed_at: Option<String>,
+    /// How the key ranks a temporal mapping's records, across every batch.
+    ranking: SlotRanking,
     /// How many of the mapping's records resolved to the id, across every batch.
     records: NonZeroU64,
     /// The earliest field on which a merged record disagreed with the retained one, across every
     /// batch.
     conflict: Option<FieldPath>,
+    /// The entity `expiresAt` the mapping's records contribute, across every batch.
+    expires_at: MappingExpiry,
 }
 
 impl EntityStore for RedbLatestEntityStore {
@@ -110,8 +117,9 @@ impl EntityStore for RedbLatestEntityStore {
                     source_data,
                     mapping_id,
                     temporal,
-                    observed_at,
+                    timestamp,
                     scope,
+                    expires_at,
                     reads,
                 } = write;
                 let key = Self::make_key(&base_id, mapping_id);
@@ -125,9 +133,10 @@ impl EntityStore for RedbLatestEntityStore {
                                 let stored: StoredFragment = rmp_serde::from_slice(guard.value())?;
                                 Some(RetainedRecord {
                                     data: stored.data,
-                                    observed_at: stored.observed_at,
+                                    ranking: stored.ranking,
                                     records: stored.records,
                                     conflict: stored.conflict,
+                                    expires_at: stored.expires_at,
                                 })
                             }
                             None => None,
@@ -136,7 +145,7 @@ impl EntityStore for RedbLatestEntityStore {
                     }
                 };
 
-                apply_write(entry, source_data, temporal, observed_at, reads);
+                apply_write(entry, source_data, temporal, timestamp, expires_at, reads);
                 if let Some(scope) = scope {
                     pending_scopes.add(&base_id, scope);
                 }
@@ -147,9 +156,10 @@ impl EntityStore for RedbLatestEntityStore {
                     let stored = StoredFragment {
                         mapping_id: entry.mapping_id,
                         data: retained.data,
-                        observed_at: retained.observed_at,
+                        ranking: retained.ranking,
                         records: retained.records,
                         conflict: retained.conflict,
+                        expires_at: retained.expires_at,
                     };
                     let bytes = rmp_serde::to_vec(&stored)?;
                     data_table
@@ -186,17 +196,20 @@ impl EntityStore for RedbLatestEntityStore {
         let scope_table = read_txn.open_table(SCOPES_TABLE).map_err(|e| self.db.err(e.into(), StoreAction::OpenTable))?;
 
         let mut unit: StoredUnit = SmallVec::new();
+        let mut expiries: SmallVec<[MappingExpiry; 1]> = SmallVec::new();
         for entry in data_table
             .range(prefix.as_slice()..end.as_slice())
             .map_err(|e| self.db.err(e.into(), StoreAction::Iterate))?
         {
             let (_key, value) = entry.map_err(|e| self.db.err(e.into(), StoreAction::Iterate))?;
             let stored: StoredFragment = rmp_serde::from_slice(value.value())?;
+            expiries.push(stored.expires_at);
             unit.push(AssembledFragment {
                 mapping_id: stored.mapping_id,
                 data: stored.data,
                 records: stored.records,
                 conflict: stored.conflict,
+                unresolvable_discards: stored.ranking.unresolvable_discards(),
             });
         }
 
@@ -204,8 +217,9 @@ impl EntityStore for RedbLatestEntityStore {
         // deterministic without an extra sort.
         let units = if unit.is_empty() { Vec::new() } else { vec![unit] };
         let scope = read_scope(&scope_table, base_id, &self.db)?;
+        let expires_at = join(expiries);
 
-        Ok(AssembledFragments { scope, units })
+        Ok(AssembledFragments { scope, expires_at, units })
     }
 
     fn count(&self) -> usize {
@@ -260,29 +274,40 @@ impl Drop for RedbLatestEntityStore {
 
 /// Applies one write to its coalesced accumulator under the current-state rule, counting it among the
 /// records the mapping resolved to the id.
-fn apply_write(entry: &mut LatestEntry, source_data: Value, temporal: bool, observed_at: Option<ObservedAt>, reads: &SourceReads) {
+fn apply_write(
+    entry: &mut LatestEntry,
+    source_data: Value,
+    temporal: bool,
+    timestamp: RecordTimestamp,
+    expires_at: Option<DateTime<Utc>>,
+    reads: &SourceReads,
+) {
     let Some(retained) = &mut entry.retained else {
         entry.retained = Some(RetainedRecord {
             data: source_data,
-            observed_at: observed_at.map(String::from),
+            ranking: SlotRanking::first(timestamp),
             records: NonZeroU64::MIN,
             conflict: None,
+            expires_at: MappingExpiry::first(expires_at),
         });
         return;
     };
 
     retained.records = retained.records.saturating_add(1);
     if temporal {
-        // A temporal mapping's records are observations of one id: keep the latest.
-        let new = observed_at.as_ref().map(ObservedAt::as_str);
-        if supersedes(new, retained.observed_at.as_deref()) {
-            retained.data = source_data;
-            retained.observed_at = observed_at.map(String::from);
+        // A temporal mapping's records are observations of one id: keep the latest, expiry and all.
+        match retained.ranking.rank(timestamp) {
+            Supersession::Supersedes => {
+                retained.data = source_data;
+                retained.expires_at.supersede(expires_at);
+            }
+            Supersession::Stale => {}
         }
     } else {
         // A static mapping's records refine one entity: merge them, remembering where they disagreed.
         let conflict = deep_merge(&mut retained.data, &source_data, reads);
         retained.conflict = FieldPath::earliest(retained.conflict.take(), conflict);
+        retained.expires_at.refine(expires_at);
     }
 }
 
@@ -290,11 +315,12 @@ fn apply_write(entry: &mut LatestEntry, source_data: Value, temporal: bool, obse
 mod tests {
     use crate::{
         entity_store::{
+            record_timestamp::RecordTimestamp,
             redb_latest_store::RedbLatestEntityStore,
             store::{
                 EntityStore,
                 FragmentWrite,
-                tests::{READS_EVERYTHING, assert_merges_scopes_per_id},
+                tests::{READS_EVERYTHING, assert_expiry_follows_the_retained_record, assert_joins_expiries_across_mappings, assert_merges_scopes_per_id},
             },
         },
         mapping_id::MappingId,
@@ -313,14 +339,25 @@ mod tests {
         assert_merges_scopes_per_id(&RedbLatestEntityStore::new().unwrap());
     }
 
+    #[test]
+    fn the_expiries_of_an_id_s_mappings_are_joined() {
+        assert_joins_expiries_across_mappings(&RedbLatestEntityStore::new().unwrap());
+    }
+
+    #[test]
+    fn a_mapping_s_expiry_follows_the_record_it_retains() {
+        assert_expiry_follows_the_retained_record(&RedbLatestEntityStore::new().unwrap());
+    }
+
     fn write(base_id: &Urn, data: serde_json::Value, mapping: u32, temporal: bool, observed_at: Option<&str>) -> FragmentWrite<'static> {
         FragmentWrite {
             base_id: base_id.clone(),
             source_data: data,
             mapping_id: MappingId::new(mapping),
             temporal,
-            observed_at: observed_at.map(ObservedAt::new),
+            timestamp: RecordTimestamp::from(observed_at.map(ObservedAt::new)),
             scope: None,
+            expires_at: None,
             reads: &READS_EVERYTHING,
         }
     }

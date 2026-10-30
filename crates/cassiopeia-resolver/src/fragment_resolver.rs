@@ -1,9 +1,13 @@
 use crate::{
-    entity_store::store::{EntityStore, FragmentWrite},
+    entity_store::{
+        record_timestamp::RecordTimestamp,
+        store::{EntityStore, FragmentWrite},
+    },
     error::{ResolverError, Result},
     fragment_sink::FragmentSink,
     mapping_id::MappingId,
     mapping_registry::MappingRegistry,
+    observed_at_failures::ObservedAtFailures,
     relationship_store::store::RelationshipStore,
     store_batch_failure::StoreBatchFailure,
     store_write_strategy::StoreWriteStrategy,
@@ -11,14 +15,19 @@ use crate::{
 use ahash::RandomState;
 use cassiopeia_common::parallelism::Parallelism;
 use cassiopeia_ir::{
-    fragment::Fragment,
+    fragment::{Fragment, FragmentParts},
     mapped::Mapped,
     parent_context::{ParentContext, ParentContextType},
 };
-use cassiopeia_mapping::{mapping::Mapping, template::resolver::TemplateResolver};
+use cassiopeia_mapping::{
+    mapping::Mapping,
+    observed_at::ObservedAt,
+    template::{error::TemplateError, resolver::TemplateResolver},
+};
 use dashmap::DashMap;
 use rayon::prelude::*;
 use std::{
+    result,
     sync::Arc,
     time::{Duration, Instant},
 };
@@ -56,6 +65,9 @@ pub struct FragmentResolver {
     /// relationship declared on every observation does not accumulate one duplicate per observation
     /// under the base-id key.
     temporal_edge_dedup: Arc<DashMap<(Urn, String, Urn), (), RandomState>>,
+    /// The first failure of each mapping's `observedAt` template, for reporting the records a
+    /// current-state store discards because of it.
+    pub(crate) observed_at_failures: Arc<ObservedAtFailures>,
 }
 
 impl FragmentResolver {
@@ -75,6 +87,22 @@ impl FragmentResolver {
             parallelism: Parallelism::Parallel,
             write_strategy,
             temporal_edge_dedup: Arc::new(DashMap::with_hasher(RandomState::new())),
+            observed_at_failures: Arc::new(ObservedAtFailures::new()),
+        }
+    }
+
+    /// The timestamp a record of the mapping `mapping_id` ranks by, given what its `observedAt`
+    /// template yielded.
+    ///
+    /// A failed template ranks the record as carrying no timestamp, and its failure is kept for the
+    /// report that names the records a current-state store discards because of it.
+    pub(crate) fn record_timestamp(&self, mapping_id: MappingId, observed_at: result::Result<Option<ObservedAt>, TemplateError>) -> RecordTimestamp {
+        match observed_at {
+            Ok(observed_at) => RecordTimestamp::from(observed_at),
+            Err(error) => {
+                self.observed_at_failures.record(mapping_id, error);
+                RecordTimestamp::Unresolvable
+            }
         }
     }
 
@@ -248,9 +276,15 @@ impl FragmentResolver {
     /// of once per fragment; the stored result is identical either way.
     fn resolve_with_mapping_id(&self, fragment: Mapped<Fragment>, mapping_id: MappingId) -> Result<()> {
         let (fragment, mapping) = fragment.into_parts();
-        let observed_at = mapping.extract_observed_at(&self.resolver, fragment.source_data());
+        let timestamp = self.record_timestamp(mapping_id, mapping.extract_observed_at(&self.resolver, fragment.source_data()));
         let temporal = mapping.is_temporal();
-        let (source_data, base_id, scope, parent_context) = fragment.into_parts();
+        let FragmentParts {
+            source_data,
+            target_urn: base_id,
+            scope,
+            expires_at,
+            parent_context,
+        } = fragment.into_parts();
 
         for (parent, property, child) in self.build_edges(&base_id, parent_context.as_ref(), temporal) {
             self.relationship_store.add_child(&parent, &property, &child)?;
@@ -261,8 +295,9 @@ impl FragmentResolver {
             source_data,
             mapping_id,
             temporal,
-            observed_at,
+            timestamp,
             scope,
+            expires_at,
             reads: mapping.source_reads(),
         })?;
         Ok(())
@@ -365,7 +400,13 @@ mod tests {
             );
             resolver
                 .resolve(Mapped::new(
-                    Fragment::new(json!({"temperature": 20, "timestamp": timestamp}), station.clone(), None, Some(vec![context])),
+                    Fragment::new(
+                        json!({"temperature": 20, "timestamp": timestamp}),
+                        station.clone(),
+                        None,
+                        None,
+                        Some(vec![context]),
+                    ),
                     Arc::clone(&mappings[0]),
                 ))
                 .unwrap();
@@ -384,11 +425,11 @@ mod tests {
         let (resolver, mappings) = latest_resolver(&[SIMPLE]);
         let batch = vec![
             Mapped::new(
-                Fragment::new(json!({"t": 1}), urn("urn:ngsi-ld:Station:1"), None, None),
+                Fragment::new(json!({"t": 1}), urn("urn:ngsi-ld:Station:1"), None, None, None),
                 Arc::clone(&mappings[0]),
             ),
             Mapped::new(
-                Fragment::new(json!({"t": 2}), urn("urn:ngsi-ld:Station:2"), None, None),
+                Fragment::new(json!({"t": 2}), urn("urn:ngsi-ld:Station:2"), None, None, None),
                 Arc::clone(&mappings[0]),
             ),
         ];
@@ -404,7 +445,7 @@ mod tests {
         let batch: Vec<Mapped<Fragment>> = (0..16)
             .map(|index| {
                 Mapped::new(
-                    Fragment::new(json!({"t": index}), urn(&format!("urn:ngsi-ld:Station:{index}")), None, None),
+                    Fragment::new(json!({"t": index}), urn(&format!("urn:ngsi-ld:Station:{index}")), None, None, None),
                     Arc::clone(&mappings[0]),
                 )
             })
@@ -426,9 +467,9 @@ mod tests {
         let air = urn("urn:ngsi-ld:AirQualityObserved:1");
         let weather = urn("urn:ngsi-ld:WeatherObserved:1");
         let batch = vec![
-            Mapped::new(Fragment::new(json!({"t": 1}), air.clone(), None, None), Arc::clone(&mappings[0])),
-            Mapped::new(Fragment::new(json!({"h": 2}), weather.clone(), None, None), Arc::clone(&mappings[1])),
-            Mapped::new(Fragment::new(json!({"t": 3}), air.clone(), None, None), Arc::clone(&mappings[0])),
+            Mapped::new(Fragment::new(json!({"t": 1}), air.clone(), None, None, None), Arc::clone(&mappings[0])),
+            Mapped::new(Fragment::new(json!({"h": 2}), weather.clone(), None, None, None), Arc::clone(&mappings[1])),
+            Mapped::new(Fragment::new(json!({"t": 3}), air.clone(), None, None, None), Arc::clone(&mappings[0])),
         ];
 
         let results = resolver.resolve_batch(batch);
@@ -450,7 +491,7 @@ mod tests {
             (offset..offset + 4)
                 .map(|index| {
                     Mapped::new(
-                        Fragment::new(json!({"t": index}), urn(&format!("urn:ngsi-ld:Station:{index}")), None, None),
+                        Fragment::new(json!({"t": index}), urn(&format!("urn:ngsi-ld:Station:{index}")), None, None, None),
                         Arc::clone(&mappings[0]),
                     )
                 })
@@ -474,7 +515,7 @@ mod tests {
         let batch: Vec<Mapped<Fragment>> = (0..64)
             .map(|index| {
                 Mapped::new(
-                    Fragment::new(json!({"t": index}), urn(&format!("urn:ngsi-ld:Station:{index}")), None, None),
+                    Fragment::new(json!({"t": index}), urn(&format!("urn:ngsi-ld:Station:{index}")), None, None, None),
                     Arc::clone(&mappings[0]),
                 )
             })

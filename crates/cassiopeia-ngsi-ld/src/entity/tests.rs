@@ -16,12 +16,14 @@ use crate::{
         context::{NgsiLdContext, NgsiLdContextEntry},
         name::NameBuf,
         representation::{JsonLayout, NgsiLdSerializable},
+        scope::{NgsiLdScope, ScopeBuf},
     },
-    value::types::Value,
+    value::types::{TemporalValue, Value},
 };
 use cassiopeia_common::{representation::NgsiLdRepresentation, skip_null::NgsiLdSkipNull};
 use cassiopeia_geometry::geometry::NgsiLdGeometry;
-use chrono::{TimeZone, Utc};
+use chrono::{Duration, TimeZone, Utc};
+use compact_str::CompactString;
 use indexmap::IndexMap;
 use iri_rs::IriBuf;
 use pretty_assertions::assert_eq;
@@ -43,6 +45,7 @@ fn create_test_entity(id: &str, entity_type: &str, key: &str, attr: NgsiLdAttrib
         entity_type: NameBuf::new(entity_type).unwrap(),
         context: Some(url_ctx("https://uri.etsi.org/ngsi-ld/v1/ngsi-ld-core-context-v1.8.jsonld")),
         scope: None,
+        expires_at: None,
         attributes,
     }
 }
@@ -65,6 +68,7 @@ mod property_tests {
         let prop = NgsiLdAttribute::Property(NgsiLdProperty {
             value: Value::from(JsonValue::String("John Doe".to_string())),
             observed_at: None,
+            expires_at: None,
             unit_code: None,
             dataset_id: None,
             instance_id: None,
@@ -91,6 +95,7 @@ mod property_tests {
         let prop = NgsiLdAttribute::Property(NgsiLdProperty {
             value: Value::from(json!(25)),
             observed_at: Some(dt),
+            expires_at: None,
             unit_code: Some(UnitCode::Cel),
             dataset_id: Some("urn:dataset:temp".parse().unwrap()),
             instance_id: Some("urn:instance:123".parse().unwrap()),
@@ -116,10 +121,111 @@ mod property_tests {
     }
 
     #[test]
+    fn an_expires_at_serializes_as_a_date_time_qualifier_not_a_nested_attribute() {
+        let dt = Utc.with_ymd_and_hms(2026, 10, 25, 13, 0, 0).unwrap();
+        let prop = NgsiLdAttribute::Property(NgsiLdProperty {
+            value: Value::from(JsonValue::String("ok".to_string())),
+            observed_at: None,
+            expires_at: Some(dt),
+            unit_code: None,
+            dataset_id: None,
+            instance_id: None,
+            attributes: IndexMap::default(),
+        });
+        let entity = create_test_entity("A1", "Alert", "category", prop);
+
+        let normalized = serialize_entity(&entity, NgsiLdRepresentation::Normalized, NgsiLdSkipNull::Skip);
+        assert_eq!(normalized["category"]["type"], "Property");
+        assert_eq!(normalized["category"]["value"], "ok");
+        assert_eq!(normalized["category"]["expiresAt"], "2026-10-25T13:00:00Z");
+
+        // An `expiresAt` alone is still metadata, so the concise form keeps the object shape
+        // instead of collapsing to the bare value.
+        let concise = serialize_entity(&entity, NgsiLdRepresentation::Concise, NgsiLdSkipNull::Skip);
+        assert_eq!(concise["category"]["value"], "ok");
+        assert_eq!(concise["category"]["expiresAt"], "2026-10-25T13:00:00Z");
+
+        let simplified = serialize_entity(&entity, NgsiLdRepresentation::Simplified, NgsiLdSkipNull::Skip);
+        assert_eq!(simplified["category"], "ok");
+    }
+
+    #[test]
+    fn a_time_value_carries_its_value_type_in_normalized_and_concise_but_not_simplified() {
+        let instant = Utc.with_ymd_and_hms(2026, 10, 24, 20, 49, 0).unwrap();
+        for (temporal, text, value_type) in [
+            (TemporalValue::DateTime(instant), "2026-10-24T20:49:00Z", "DateTime"),
+            (TemporalValue::Date(instant), "2026-10-24", "Date"),
+            (TemporalValue::Time(instant), "20:49:00Z", "Time"),
+        ] {
+            let entity = create_test_entity(
+                "A1",
+                "Alert",
+                "expectedArrival",
+                NgsiLdAttribute::Property(NgsiLdProperty::new(Value::Temporal(temporal))),
+            );
+
+            let normalized = serialize_entity(&entity, NgsiLdRepresentation::Normalized, NgsiLdSkipNull::Skip);
+            assert_eq!(
+                normalized["expectedArrival"],
+                json!({"type": "Property", "value": text, "valueType": value_type})
+            );
+
+            // A bare value has no place for the `valueType`, so the concise form keeps the object
+            // shape to stay lossless.
+            let concise = serialize_entity(&entity, NgsiLdRepresentation::Concise, NgsiLdSkipNull::Skip);
+            assert_eq!(concise["expectedArrival"], json!({"value": text, "valueType": value_type}));
+
+            let simplified = serialize_entity(&entity, NgsiLdRepresentation::Simplified, NgsiLdSkipNull::Skip);
+            assert_eq!(simplified["expectedArrival"], text);
+        }
+    }
+
+    #[test]
+    fn a_string_that_reads_as_a_time_carries_no_value_type() {
+        let entity = create_test_entity(
+            "A1",
+            "Alert",
+            "note",
+            NgsiLdAttribute::Property(NgsiLdProperty::new(Value::String(CompactString::from("2026-10-24T20:49:00Z")))),
+        );
+
+        let normalized = serialize_entity(&entity, NgsiLdRepresentation::Normalized, NgsiLdSkipNull::Skip);
+        assert_eq!(normalized["note"], json!({"type": "Property", "value": "2026-10-24T20:49:00Z"}));
+        let concise = serialize_entity(&entity, NgsiLdRepresentation::Concise, NgsiLdSkipNull::Skip);
+        assert_eq!(concise["note"], "2026-10-24T20:49:00Z");
+    }
+
+    #[test]
+    fn a_value_and_its_qualifiers_keep_six_fractional_digits_at_most() {
+        let instant = Utc.with_ymd_and_hms(2026, 10, 24, 19, 49, 9).unwrap() + Duration::nanoseconds(712_623_245);
+        let mut property = NgsiLdProperty::new(Value::Temporal(TemporalValue::DateTime(instant)));
+        property.observed_at = Some(instant);
+        property.expires_at = Some(instant);
+        let mut entity = create_test_entity("A1", "Alert", "stamp", NgsiLdAttribute::Property(property));
+        entity.expires_at = Some(instant);
+
+        for representation in [NgsiLdRepresentation::Normalized, NgsiLdRepresentation::Concise] {
+            let serialized = serialize_entity(&entity, representation, NgsiLdSkipNull::Skip);
+            assert_eq!(serialized["expiresAt"], "2026-10-24T19:49:09.712623Z");
+            assert_eq!(serialized["stamp"]["value"], "2026-10-24T19:49:09.712623Z");
+            assert_eq!(serialized["stamp"]["observedAt"], "2026-10-24T19:49:09.712623Z");
+            assert_eq!(serialized["stamp"]["expiresAt"], "2026-10-24T19:49:09.712623Z");
+        }
+    }
+
+    #[test]
+    fn an_expires_at_deserializes_from_its_date_time_text() {
+        let property: NgsiLdProperty = serde_json::from_value(json!({"value": "ok", "expiresAt": "2026-10-25T13:00:00Z"})).unwrap();
+
+        assert_eq!(property.expires_at, Some(Utc.with_ymd_and_hms(2026, 10, 25, 13, 0, 0).unwrap()));
+    }
+
+    #[test]
     fn test_property_with_nested_properties() {
         let accuracy_prop = NgsiLdAttribute::Property(NgsiLdProperty {
             value: Value::from(JsonValue::Number(95.into())),
             observed_at: None,
+            expires_at: None,
             unit_code: Some(UnitCode::P1),
             dataset_id: None,
             instance_id: None,
@@ -132,6 +238,7 @@ mod property_tests {
         let main_prop = NgsiLdAttribute::Property(NgsiLdProperty {
             value: Value::from(JsonValue::Number(100.into())),
             observed_at: None,
+            expires_at: None,
             unit_code: None,
             dataset_id: None,
             instance_id: None,
@@ -162,6 +269,7 @@ mod property_tests {
         let prop_null = NgsiLdAttribute::Property(NgsiLdProperty {
             value: Value::from(JsonValue::Null),
             observed_at: None,
+            expires_at: None,
             unit_code: None,
             dataset_id: None,
             instance_id: None,
@@ -191,6 +299,7 @@ mod relationship_tests {
             object: "urn:ngsi-ld:Vehicle:car123".parse::<Urn>().unwrap(),
             object_type: None,
             observed_at: None,
+            expires_at: None,
             dataset_id: None,
             instance_id: None,
             attributes: IndexMap::default(),
@@ -209,6 +318,34 @@ mod relationship_tests {
     }
 
     #[test]
+    fn a_relationship_serializes_its_expires_at_next_to_its_object() {
+        let dt = Utc.with_ymd_and_hms(2026, 10, 25, 13, 0, 0).unwrap();
+        let rel = NgsiLdAttribute::Relationship(NgsiLdRelationship {
+            object: "urn:ngsi-ld:Vehicle:car123".parse::<Urn>().unwrap(),
+            object_type: None,
+            observed_at: None,
+            expires_at: Some(dt),
+            dataset_id: None,
+            instance_id: None,
+            attributes: IndexMap::default(),
+        });
+        let entity = create_test_entity("001", "Person", "drives", rel);
+
+        let normalized = serialize_entity(&entity, NgsiLdRepresentation::Normalized, NgsiLdSkipNull::Skip);
+        assert_eq!(normalized["drives"]["type"], "Relationship");
+        assert_eq!(normalized["drives"]["object"], "urn:ngsi-ld:Vehicle:car123");
+        assert_eq!(normalized["drives"]["expiresAt"], "2026-10-25T13:00:00Z");
+
+        // An `expiresAt` alone still keeps the concise relationship an object.
+        let concise = serialize_entity(&entity, NgsiLdRepresentation::Concise, NgsiLdSkipNull::Skip);
+        assert_eq!(concise["drives"]["object"], "urn:ngsi-ld:Vehicle:car123");
+        assert_eq!(concise["drives"]["expiresAt"], "2026-10-25T13:00:00Z");
+
+        let simplified = serialize_entity(&entity, NgsiLdRepresentation::Simplified, NgsiLdSkipNull::Skip);
+        assert_eq!(simplified["drives"], "urn:ngsi-ld:Vehicle:car123");
+    }
+
+    #[test]
     fn test_relationship_with_metadata() {
         let dt = Utc.with_ymd_and_hms(2023, 12, 25, 10, 30, 0).unwrap();
         let mut rel_props = IndexMap::default();
@@ -216,6 +353,7 @@ mod relationship_tests {
         let count_prop = NgsiLdAttribute::Property(NgsiLdProperty {
             value: Value::from(JsonValue::Number(5.into())),
             observed_at: None,
+            expires_at: None,
             unit_code: None,
             dataset_id: None,
             instance_id: None,
@@ -227,6 +365,7 @@ mod relationship_tests {
             object: "urn:ngsi-ld:Organization:Beatles".parse::<Urn>().unwrap(),
             object_type: None,
             observed_at: Some(dt),
+            expires_at: None,
             dataset_id: Some("urn:ngsi-ld:Relationship:Beatles".parse().unwrap()),
             instance_id: None,
             attributes: rel_props,
@@ -264,6 +403,7 @@ mod geoproperty_tests {
         let geo = NgsiLdAttribute::GeoProperty(NgsiLdGeoProperty {
             value: geo_value,
             observed_at: None,
+            expires_at: None,
             dataset_id: None,
             instance_id: None,
         });
@@ -300,6 +440,7 @@ mod geoproperty_tests {
         let geo = NgsiLdAttribute::GeoProperty(NgsiLdGeoProperty {
             value: geo_value,
             observed_at: Some(dt),
+            expires_at: None,
             dataset_id: Some("urn:dataset:geo".parse().unwrap()),
             instance_id: None,
         });
@@ -334,6 +475,7 @@ mod list_relationship_tests {
             ],
             object_type: None,
             observed_at: None,
+            expires_at: None,
             dataset_id: None,
             attributes: IndexMap::default(),
         });
@@ -362,6 +504,7 @@ mod list_relationship_tests {
             object_list: vec!["urn:ngsi-ld:Organization:ComuneDiMilano".parse::<Urn>().unwrap()],
             object_type: None,
             observed_at: None,
+            expires_at: None,
             dataset_id: None,
             attributes: IndexMap::default(),
         });
@@ -387,6 +530,7 @@ mod list_relationship_tests {
             object_list: vec!["urn:ngsi-ld:Person:1".parse::<Urn>().unwrap()],
             object_type: Some(NameBuf::new("Person").unwrap()),
             observed_at: None,
+            expires_at: None,
             dataset_id: None,
             attributes,
         });
@@ -425,6 +569,7 @@ mod list_relationship_tests {
                 object: "urn:ngsi-ld:Character:JackSparrow".parse::<Urn>().unwrap(),
                 object_type: Some(NameBuf::new("Character").unwrap()),
                 observed_at: None,
+                expires_at: None,
                 dataset_id: None,
                 instance_id: None,
                 attributes: IndexMap::default(),
@@ -434,6 +579,7 @@ mod list_relationship_tests {
             object: "urn:ngsi-ld:Person:31".parse::<Urn>().unwrap(),
             object_type: Some(NameBuf::new("Person").unwrap()),
             observed_at: None,
+            expires_at: None,
             dataset_id: None,
             instance_id: None,
             attributes,
@@ -457,6 +603,7 @@ mod list_relationship_tests {
             ],
             object_type: Some(NameBuf::new("Person").unwrap()),
             observed_at: Some(dt),
+            expires_at: None,
             dataset_id: None,
             attributes: IndexMap::default(),
         });
@@ -487,6 +634,7 @@ mod multi_attribute_tests {
         let prop1 = NgsiLdAttribute::Property(NgsiLdProperty {
             value: Value::from(JsonValue::Number(20.into())),
             observed_at: None,
+            expires_at: None,
             unit_code: None,
             dataset_id: Some("urn:dataset:1".parse().unwrap()),
             instance_id: None,
@@ -495,6 +643,7 @@ mod multi_attribute_tests {
         let prop2 = NgsiLdAttribute::Property(NgsiLdProperty {
             value: Value::from(JsonValue::Number(22.into())),
             observed_at: None,
+            expires_at: None,
             unit_code: None,
             dataset_id: Some("urn:dataset:2".parse().unwrap()),
             instance_id: None,
@@ -509,6 +658,7 @@ mod multi_attribute_tests {
             entity_type: NameBuf::new("Sensor").unwrap(),
             context: Some(url_ctx("https://uri.etsi.org/ngsi-ld/v1/ngsi-ld-core-context-v1.8.jsonld")),
             scope: None,
+            expires_at: None,
             attributes: multi_attrs,
         };
 
@@ -537,6 +687,7 @@ mod multi_attribute_tests {
             object: "urn:ngsi-ld:Person:John".parse::<Urn>().unwrap(),
             object_type: None,
             observed_at: None,
+            expires_at: None,
             dataset_id: None,
             instance_id: None,
             attributes: IndexMap::default(),
@@ -545,6 +696,7 @@ mod multi_attribute_tests {
             object: "urn:ngsi-ld:Person:Paul".parse::<Urn>().unwrap(),
             object_type: None,
             observed_at: None,
+            expires_at: None,
             dataset_id: None,
             instance_id: None,
             attributes: IndexMap::default(),
@@ -558,6 +710,7 @@ mod multi_attribute_tests {
             entity_type: NameBuf::new("Person").unwrap(),
             context: Some(url_ctx("https://uri.etsi.org/ngsi-ld/v1/ngsi-ld-core-context-v1.8.jsonld")),
             scope: None,
+            expires_at: None,
             attributes: multi_attrs,
         };
 
@@ -581,6 +734,7 @@ mod multi_attribute_tests {
             object: "urn:ngsi-ld:Airport:535".parse::<Urn>().unwrap(),
             object_type: Some(NameBuf::new("Airport").unwrap()),
             observed_at: None,
+            expires_at: None,
             dataset_id: Some("urn:ngsi-ld:dataset:role:departure".parse().unwrap()),
             instance_id: None,
             attributes: IndexMap::default(),
@@ -589,6 +743,7 @@ mod multi_attribute_tests {
             object: "urn:ngsi-ld:Airport:340".parse::<Urn>().unwrap(),
             object_type: Some(NameBuf::new("Airport").unwrap()),
             observed_at: None,
+            expires_at: None,
             dataset_id: Some("urn:ngsi-ld:dataset:role:arrival".parse().unwrap()),
             instance_id: None,
             attributes: IndexMap::default(),
@@ -601,6 +756,7 @@ mod multi_attribute_tests {
             entity_type: NameBuf::new("Flight").unwrap(),
             context: Some(url_ctx("https://uri.etsi.org/ngsi-ld/v1/ngsi-ld-core-context-v1.8.jsonld")),
             scope: None,
+            expires_at: None,
             attributes: multi_attrs,
         };
 
@@ -629,6 +785,7 @@ mod multi_attribute_tests {
             object_list: vec!["urn:ngsi-ld:Airport:1".parse::<Urn>().unwrap(), "urn:ngsi-ld:Airport:2".parse::<Urn>().unwrap()],
             object_type: Some(NameBuf::new("Airport").unwrap()),
             observed_at: None,
+            expires_at: None,
             dataset_id: Some("urn:ngsi-ld:dataset:role:departure".parse().unwrap()),
             attributes: IndexMap::default(),
         });
@@ -636,6 +793,7 @@ mod multi_attribute_tests {
             object_list: vec!["urn:ngsi-ld:Airport:3".parse::<Urn>().unwrap()],
             object_type: Some(NameBuf::new("Airport").unwrap()),
             observed_at: None,
+            expires_at: None,
             dataset_id: Some("urn:ngsi-ld:dataset:role:arrival".parse().unwrap()),
             attributes: IndexMap::default(),
         });
@@ -647,6 +805,7 @@ mod multi_attribute_tests {
             entity_type: NameBuf::new("Route").unwrap(),
             context: Some(url_ctx("https://uri.etsi.org/ngsi-ld/v1/ngsi-ld-core-context-v1.8.jsonld")),
             scope: None,
+            expires_at: None,
             attributes: multi_attrs,
         };
 
@@ -683,6 +842,7 @@ mod entity_list_tests {
             NgsiLdAttribute::Property(NgsiLdProperty {
                 value: Value::from(JsonValue::String("John".to_string())),
                 observed_at: None,
+                expires_at: None,
                 unit_code: None,
                 dataset_id: None,
                 instance_id: None,
@@ -697,6 +857,7 @@ mod entity_list_tests {
             NgsiLdAttribute::Property(NgsiLdProperty {
                 value: Value::from(JsonValue::String("Paul".to_string())),
                 observed_at: None,
+                expires_at: None,
                 unit_code: None,
                 dataset_id: None,
                 instance_id: None,
@@ -745,6 +906,7 @@ mod entity_list_tests {
             NgsiLdAttribute::Property(NgsiLdProperty {
                 value: Value::from(JsonValue::String("John".to_string())),
                 observed_at: None,
+                expires_at: None,
                 unit_code: None,
                 dataset_id: None,
                 instance_id: None,
@@ -773,6 +935,7 @@ mod edge_case_tests {
             entity_type: NameBuf::new("Empty").unwrap(),
             context: None,
             scope: None,
+            expires_at: None,
             attributes: IndexMap::default(),
         };
 
@@ -792,6 +955,7 @@ mod edge_case_tests {
             NgsiLdAttributeWrapper::single(NgsiLdAttribute::Property(NgsiLdProperty {
                 value: Value::from(JsonValue::String("Test".to_string())),
                 observed_at: None,
+                expires_at: None,
                 unit_code: None,
                 dataset_id: None,
                 instance_id: None,
@@ -805,6 +969,7 @@ mod edge_case_tests {
                 object: "urn:ngsi-ld:Person:Other".parse::<Urn>().unwrap(),
                 object_type: None,
                 observed_at: None,
+                expires_at: None,
                 dataset_id: None,
                 instance_id: None,
                 attributes: IndexMap::default(),
@@ -818,6 +983,7 @@ mod edge_case_tests {
                     coordinates: [0.0, 0.0].into(),
                 },
                 observed_at: None,
+                expires_at: None,
                 dataset_id: None,
                 instance_id: None,
             })),
@@ -829,6 +995,7 @@ mod edge_case_tests {
                 object_list: vec!["urn:ngsi-ld:Person:A".parse::<Urn>().unwrap(), "urn:ngsi-ld:Person:B".parse::<Urn>().unwrap()],
                 object_type: None,
                 observed_at: None,
+                expires_at: None,
                 dataset_id: None,
                 attributes: IndexMap::default(),
             })),
@@ -839,6 +1006,7 @@ mod edge_case_tests {
             entity_type: NameBuf::new("AllTypes").unwrap(),
             context: Some(url_ctx("https://uri.etsi.org/ngsi-ld/v1/ngsi-ld-core-context-v1.8.jsonld")),
             scope: None,
+            expires_at: None,
             attributes,
         };
 
@@ -864,6 +1032,7 @@ mod edge_case_tests {
         let level3_prop = NgsiLdAttribute::Property(NgsiLdProperty {
             value: Value::from(JsonValue::Number(3.into())),
             observed_at: None,
+            expires_at: None,
             unit_code: None,
             dataset_id: None,
             instance_id: None,
@@ -876,6 +1045,7 @@ mod edge_case_tests {
         let level2_prop = NgsiLdAttribute::Property(NgsiLdProperty {
             value: Value::from(JsonValue::Number(2.into())),
             observed_at: None,
+            expires_at: None,
             unit_code: None,
             dataset_id: None,
             instance_id: None,
@@ -888,6 +1058,7 @@ mod edge_case_tests {
         let root_prop = NgsiLdAttribute::Property(NgsiLdProperty {
             value: Value::from(JsonValue::Number(1.into())),
             observed_at: None,
+            expires_at: None,
             unit_code: None,
             dataset_id: None,
             instance_id: None,
@@ -910,6 +1081,7 @@ mod edge_case_tests {
         let prop = NgsiLdAttribute::Property(NgsiLdProperty {
             value: Value::from(JsonValue::String("🎵 John Lennon ♪".to_string())),
             observed_at: None,
+            expires_at: None,
             unit_code: None,
             dataset_id: None,
             instance_id: None,
@@ -931,6 +1103,7 @@ mod edge_case_tests {
         let prop = NgsiLdAttribute::Property(NgsiLdProperty {
             value: Value::from(JsonValue::Number(serde_json::Number::from_f64(123_456_789.987_654_33).unwrap())),
             observed_at: None,
+            expires_at: None,
             unit_code: None,
             dataset_id: None,
             instance_id: None,
@@ -970,6 +1143,7 @@ mod edge_case_tests {
         let geo = NgsiLdAttribute::GeoProperty(NgsiLdGeoProperty {
             value: multi_polygon,
             observed_at: Some("2023-01-01T00:00:00Z".parse().unwrap()),
+            expires_at: None,
             dataset_id: Some("urn:dataset:geo".parse().unwrap()),
             instance_id: None,
         });
@@ -1016,6 +1190,7 @@ mod edge_case_tests {
         let prop = NgsiLdAttribute::Property(NgsiLdProperty {
             value: Value::from(json!(100)),
             observed_at: None,
+            expires_at: None,
             unit_code: Some(UnitCode::Kgm),
             dataset_id: None,
             instance_id: None,
@@ -1044,6 +1219,7 @@ mod edge_case_tests {
             object_list: vec![],
             object_type: None,
             observed_at: None,
+            expires_at: None,
             dataset_id: None,
             attributes: IndexMap::default(),
         });
@@ -1064,6 +1240,7 @@ mod edge_case_tests {
         let prop_with_metadata = NgsiLdAttribute::Property(NgsiLdProperty {
             value: Value::from(JsonValue::Null),
             observed_at: Some("2023-12-25T10:30:00Z".parse().unwrap()),
+            expires_at: None,
             unit_code: Some(UnitCode::Kgm),
             dataset_id: Some("urn:dataset:sensor1".parse().unwrap()),
             instance_id: None,
@@ -1086,6 +1263,7 @@ mod edge_case_tests {
         let prop_with_metadata = NgsiLdAttribute::Property(NgsiLdProperty {
             value: Value::from(JsonValue::Null),
             observed_at: Some("2023-12-25T10:30:00Z".parse().unwrap()),
+            expires_at: None,
             unit_code: Some(UnitCode::Kgm),
             dataset_id: None,
             instance_id: None,
@@ -1107,6 +1285,7 @@ mod edge_case_tests {
         let simple_null_prop = NgsiLdAttribute::Property(NgsiLdProperty {
             value: Value::from(JsonValue::Null),
             observed_at: None,
+            expires_at: None,
             unit_code: None,
             dataset_id: None,
             instance_id: None,
@@ -1125,6 +1304,7 @@ mod edge_case_tests {
         let prop = NgsiLdAttribute::Property(NgsiLdProperty {
             value: Value::from(json!(42)),
             observed_at: None,
+            expires_at: None,
             unit_code: None,
             dataset_id: Some("urn:dataset:1".parse().unwrap()),
             instance_id: None,
@@ -1139,6 +1319,7 @@ mod edge_case_tests {
             entity_type: NameBuf::new("Test").unwrap(),
             context: None,
             scope: None,
+            expires_at: None,
             attributes: attrs,
         };
 
@@ -1181,6 +1362,7 @@ mod edge_case_tests {
                 entity_type: NameBuf::new("Test").unwrap(),
                 context: Some(string_context),
                 scope: None,
+                expires_at: None,
                 attributes: IndexMap::default(),
             };
 
@@ -1189,6 +1371,7 @@ mod edge_case_tests {
                 entity_type: NameBuf::new("Test").unwrap(),
                 context: Some(list_context),
                 scope: None,
+                expires_at: None,
                 attributes: IndexMap::default(),
             };
 
@@ -1197,6 +1380,7 @@ mod edge_case_tests {
                 entity_type: NameBuf::new("Test").unwrap(),
                 context: Some(NgsiLdContext::Single(NgsiLdContextEntry::Inline(map_context))),
                 scope: None,
+                expires_at: None,
                 attributes: IndexMap::default(),
             };
 
@@ -1205,6 +1389,7 @@ mod edge_case_tests {
                 entity_type: NameBuf::new("Test").unwrap(),
                 context: None,
                 scope: None,
+                expires_at: None,
                 attributes: IndexMap::default(),
             };
 
@@ -1274,6 +1459,7 @@ mod edge_case_tests {
                 NgsiLdAttributeWrapper::single(NgsiLdAttribute::Property(NgsiLdProperty {
                     value: Value::from(JsonValue::String("first".to_string())),
                     observed_at: None,
+                    expires_at: None,
                     unit_code: None,
                     dataset_id: None,
                     instance_id: None,
@@ -1286,6 +1472,7 @@ mod edge_case_tests {
                 NgsiLdAttributeWrapper::single(NgsiLdAttribute::Property(NgsiLdProperty {
                     value: Value::from(JsonValue::String("last".to_string())),
                     observed_at: None,
+                    expires_at: None,
                     unit_code: None,
                     dataset_id: None,
                     instance_id: None,
@@ -1298,6 +1485,7 @@ mod edge_case_tests {
                 NgsiLdAttributeWrapper::single(NgsiLdAttribute::Property(NgsiLdProperty {
                     value: Value::from(JsonValue::String("middle".to_string())),
                     observed_at: None,
+                    expires_at: None,
                     unit_code: None,
                     dataset_id: None,
                     instance_id: None,
@@ -1310,6 +1498,7 @@ mod edge_case_tests {
                 entity_type: NameBuf::new("TestEntity").unwrap(),
                 context: Some(url_ctx("https://schema.org")),
                 scope: None,
+                expires_at: None,
                 attributes,
             };
 
@@ -1349,6 +1538,7 @@ mod edge_case_tests {
             let vocab = NgsiLdAttribute::VocabProperty(NgsiLdVocabProperty {
                 has_vocab: IriBuf::new("urn:ngsi-ld:vocab:electricMicrobus").unwrap(),
                 observed_at: None,
+                expires_at: None,
                 dataset_id: None,
                 attributes: IndexMap::default(),
             });
@@ -1371,6 +1561,7 @@ mod edge_case_tests {
             let vocab = NgsiLdAttribute::VocabProperty(NgsiLdVocabProperty {
                 has_vocab: IriBuf::new("urn:ngsi-ld:vocab:electricMicrobus").unwrap(),
                 observed_at: Some(dt),
+                expires_at: None,
                 dataset_id: Some("urn:dataset:vocab".parse().unwrap()),
                 attributes: IndexMap::default(),
             });
@@ -1391,6 +1582,7 @@ mod edge_case_tests {
             let list = NgsiLdAttribute::ListProperty(NgsiLdListProperty {
                 has_value_list: vec![Value::from(json!(124)), Value::from(json!(156))],
                 observed_at: None,
+                expires_at: None,
                 dataset_id: None,
                 attributes: IndexMap::default(),
             });
@@ -1421,6 +1613,7 @@ mod edge_case_tests {
             let json_prop = NgsiLdAttribute::JsonProperty(NgsiLdJsonProperty {
                 has_json: Value::from(json_val.clone()),
                 observed_at: None,
+                expires_at: None,
                 dataset_id: None,
                 attributes: IndexMap::default(),
             });
@@ -1455,6 +1648,7 @@ fn an_entity_round_trips_through_serde_keeping_its_attributes_in_declaration_ord
         id: "urn:ngsi-ld:Sensor:1".parse::<Urn>().unwrap(),
         entity_type: NameBuf::new("Sensor").unwrap(),
         scope: None,
+        expires_at: None,
         attributes,
     };
 
@@ -1481,4 +1675,63 @@ fn attributes_are_reachable_and_removable_by_a_plain_string_key() {
     assert!(attributes.get("observedAt").is_some());
     assert!(attributes.swap_remove("observedAt").is_some());
     assert!(attributes.get("observedAt").is_none());
+}
+
+/// A `Sensor` carrying a `scope`, an entity `expiresAt`, and one `temperature` attribute.
+fn scoped_expiring_entity() -> NgsiLdEntity {
+    let mut attributes = Attributes::default();
+    attributes.insert(
+        NameBuf::new("temperature").unwrap(),
+        NgsiLdAttributeWrapper::single(NgsiLdAttribute::Property(NgsiLdProperty::new(Value::from(json!(21.5))))),
+    );
+    NgsiLdEntity {
+        context: None,
+        id: "urn:ngsi-ld:Sensor:1".parse::<Urn>().unwrap(),
+        entity_type: NameBuf::new("Sensor").unwrap(),
+        scope: NgsiLdScope::from_scopes(vec![ScopeBuf::new("/Ljubljana").unwrap()]),
+        expires_at: Some(Utc.with_ymd_and_hms(2026, 10, 25, 13, 0, 0).unwrap()),
+        attributes,
+    }
+}
+
+#[test]
+fn an_entity_expires_at_serializes_after_the_scope_in_normalized_and_concise() {
+    // The optional reserved members of clause 4.5.1 keep one fixed order in the entity map: `scope`,
+    // then `expiresAt`, then the attributes.
+    let entity = scoped_expiring_entity();
+
+    for representation in [NgsiLdRepresentation::Normalized, NgsiLdRepresentation::Concise] {
+        let serialized = serialize_entity(&entity, representation, NgsiLdSkipNull::Skip);
+        let keys: Vec<&str> = serialized.as_object().unwrap().keys().map(String::as_str).collect();
+
+        assert_eq!(keys, ["id", "type", "scope", "expiresAt", "temperature"], "in {representation:?}");
+        assert_eq!(serialized["scope"], json!("/Ljubljana"));
+        assert_eq!(serialized["expiresAt"], "2026-10-25T13:00:00Z");
+    }
+}
+
+#[test]
+fn a_simplified_entity_omits_its_scope_and_expires_at() {
+    // Clause 4.5.4 admits only `@context`, `id`, `type`, and the attributes in the simplified
+    // representation.
+    let serialized = serialize_entity(&scoped_expiring_entity(), NgsiLdRepresentation::Simplified, NgsiLdSkipNull::Skip);
+    let keys: Vec<&str> = serialized.as_object().unwrap().keys().map(String::as_str).collect();
+
+    assert_eq!(keys, ["id", "type", "temperature"]);
+}
+
+#[test]
+fn an_entity_without_a_scope_or_an_expiry_emits_neither_member() {
+    let entity = NgsiLdEntity::new("urn:ngsi-ld:Sensor:1".parse::<Urn>().unwrap(), NameBuf::new("Sensor").unwrap());
+
+    for representation in [
+        NgsiLdRepresentation::Normalized,
+        NgsiLdRepresentation::Concise,
+        NgsiLdRepresentation::Simplified,
+    ] {
+        let serialized = serialize_entity(&entity, representation, NgsiLdSkipNull::Skip);
+
+        assert!(serialized.get("scope").is_none(), "in {representation:?}");
+        assert!(serialized.get("expiresAt").is_none(), "in {representation:?}");
+    }
 }

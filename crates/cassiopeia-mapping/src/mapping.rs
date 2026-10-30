@@ -1,5 +1,6 @@
 use crate::{
     attribute::{Attribute, Attributes},
+    entity_members::EntityMembers,
     error::{MappingError, Result},
     geometry_validation::validate,
     identity::Identity,
@@ -7,7 +8,7 @@ use crate::{
     observed_at::ObservedAt,
     scope::{CompiledScope, Scope},
     source_reads::SourceReads,
-    template::{CompiledTemplate, TemplateSource, resolver::TemplateResolver, runner::TemplateRunner},
+    template::{CompiledTemplate, TemplateSource, error::TemplateError, resolver::TemplateResolver, runner::TemplateRunner},
     template_location::TemplateLocation,
     template_site::TemplateSite,
     version::Version,
@@ -17,7 +18,7 @@ use cassiopeia_ngsi_ld::data_model::DataModel;
 use getset::{CopyGetters, Getters, MutGetters, Setters};
 use serde::{Deserialize, Serialize};
 use serde_json::Value as JsonValue;
-use std::{fs::read_to_string, path::Path, sync::Arc};
+use std::{fs::read_to_string, path::Path, result, sync::Arc};
 
 /// A mapping document: the declaration of how one source record becomes one NGSI-LD entity.
 ///
@@ -53,6 +54,20 @@ pub struct Mapping {
     #[serde(skip)]
     #[getset(get = "pub", set = "pub")]
     compiled_scope: Option<CompiledScope>,
+
+    /// The optional entity `expiresAt` declaration, resolved per record into the entity's
+    /// `expiresAt` member (ETSI GS CIM 009 v1.9.1 clause 4.5.1).
+    ///
+    /// The key is spelled in camelCase like the rest of the document's own keys (`dataModel`,
+    /// `entityName`), not in Cassiopeia's internal `snake_case`.
+    #[serde(default, rename = "expiresAt", skip_serializing_if = "Option::is_none")]
+    #[getset(get = "pub")]
+    expires_at: Option<TemplateSource>,
+
+    /// The compiled `expiresAt`, filled in by the expansion stage once the mapping is loaded.
+    #[serde(skip)]
+    #[getset(get = "pub", set = "pub")]
+    compiled_expires_at: Option<CompiledTemplate>,
 
     /// The attribute declarations.
     ///
@@ -104,17 +119,20 @@ impl Mapping {
         version: Version,
         data_model: DataModel,
         identity: Identity,
-        scope: Option<Scope>,
+        members: EntityMembers,
         attributes: Attributes,
         origin: &Path,
         runner: &mut TemplateRunner,
     ) -> Result<Mapping> {
+        let EntityMembers { scope, expires_at } = members;
         let mut mapping = Mapping {
             version,
             data_model,
             identity,
             scope,
             compiled_scope: None,
+            expires_at,
+            compiled_expires_at: None,
             attributes,
             temporal_source: None,
             observed_at_template: None,
@@ -189,15 +207,21 @@ impl Mapping {
     ///
     /// Returns `None` when the mapping is not temporal, or when the record's timestamp field is
     /// absent or empty; a missing timestamp drops the temporal qualifier rather than the record.
-    #[must_use]
-    pub fn extract_observed_at(&self, resolver: &TemplateResolver, data: &JsonValue) -> Option<ObservedAt> {
-        let template = self.observed_at_template.as_ref()?;
+    ///
+    /// # Errors
+    /// Returns the [`TemplateError`] when the template fails to render for the record. That is not
+    /// the same as a record without a timestamp: the failure has to reach the run's report, which a
+    /// record ranked as carrying no timestamp would never do.
+    pub fn extract_observed_at(&self, resolver: &TemplateResolver, data: &JsonValue) -> result::Result<Option<ObservedAt>, TemplateError> {
+        let Some(template) = self.observed_at_template.as_ref() else {
+            return Ok(None);
+        };
 
-        match resolver.resolve(template, data).ok()? {
+        Ok(match resolver.resolve(template, data)? {
             JsonValue::String(value) if !value.is_empty() => Some(ObservedAt::new(value)),
             JsonValue::Number(value) => Some(ObservedAt::new(value.to_string())),
             JsonValue::String(_) | JsonValue::Null | JsonValue::Bool(_) | JsonValue::Array(_) | JsonValue::Object(_) => None,
-        }
+        })
     }
 
     /// Marks this mapping as a `syntheticEntity` declaration rather than a document bound to an input.
@@ -232,6 +256,7 @@ impl Mapping {
 mod tests {
     use crate::{
         attribute::Attribute,
+        entity_members::EntityMembers,
         error::MappingError,
         identity::Identity,
         mapping::Mapping,
@@ -300,7 +325,7 @@ mod tests {
         let record = json!({"id": 1, "temperature": 21.5, "timestamp": "2026-04-03T22:00:20Z"});
 
         assert_eq!(
-            mapping.extract_observed_at(&runner.resolver(), &record),
+            mapping.extract_observed_at(&runner.resolver(), &record).unwrap(),
             Some(ObservedAt::new("2026-04-03T22:00:20Z"))
         );
     }
@@ -311,7 +336,10 @@ mod tests {
         let mapping = Mapping::from_json5(TEMPORAL, Path::new("test.json5"), &mut runner).unwrap();
         let record = json!({"id": 1, "timestamp": 1_775_253_620});
 
-        assert_eq!(mapping.extract_observed_at(&runner.resolver(), &record), Some(ObservedAt::new("1775253620")));
+        assert_eq!(
+            mapping.extract_observed_at(&runner.resolver(), &record).unwrap(),
+            Some(ObservedAt::new("1775253620"))
+        );
     }
 
     #[test]
@@ -319,7 +347,7 @@ mod tests {
         let mut runner = TemplateRunner::new();
         let mapping = Mapping::from_json5(TEMPORAL, Path::new("test.json5"), &mut runner).unwrap();
 
-        assert_eq!(mapping.extract_observed_at(&runner.resolver(), &json!({"id": 1})), None);
+        assert_eq!(mapping.extract_observed_at(&runner.resolver(), &json!({"id": 1})).unwrap(), None);
     }
 
     #[test]
@@ -328,7 +356,26 @@ mod tests {
         let mapping = Mapping::from_json5(NON_TEMPORAL, Path::new("test.json5"), &mut runner).unwrap();
         let record = json!({"timestamp": "2026-04-03T22:00:20Z"});
 
-        assert_eq!(mapping.extract_observed_at(&runner.resolver(), &record), None);
+        assert_eq!(mapping.extract_observed_at(&runner.resolver(), &record).unwrap(), None);
+    }
+
+    #[test]
+    fn a_failing_observed_at_template_is_an_error_rather_than_no_timestamp() {
+        let document = r#"{
+            version: "v4",
+            dataModel: "Thing",
+            identity: { entityName: "{{ id }}" },
+            attributes: {
+                temperature: { source: "{{ t }}", properties: { observedAt: { source: "{{ ts | trim }}" } } },
+            },
+        }"#;
+        let mut runner = TemplateRunner::new();
+        let mapping = Mapping::from_json5(document, Path::new("test.json5"), &mut runner).unwrap();
+
+        let error = mapping
+            .extract_observed_at(&runner.resolver(), &json!({"id": "A", "t": 21, "ts": null}))
+            .unwrap_err();
+        assert_eq!(error.location.site, TemplateSite::ObservedAt);
     }
 
     #[test]
@@ -450,6 +497,39 @@ mod tests {
     }
 
     #[test]
+    fn an_expires_at_template_declared_beside_the_identity_is_read() {
+        let document = r#"{
+            version: "v4",
+            dataModel: "Sensor",
+            identity: { entityName: "S-{{ id }}" },
+            expiresAt: "{{ until }}",
+            attributes: {},
+        }"#;
+
+        assert_eq!(parse(document).expires_at(), &Some(TemplateSource::new("{{ until }}")));
+    }
+
+    #[test]
+    fn an_expires_at_is_optional() {
+        assert_eq!(parse(NON_TEMPORAL).expires_at(), &None);
+    }
+
+    #[test]
+    fn an_expires_at_declared_inside_the_identity_is_rejected() {
+        let document = r#"{
+            version: "v4",
+            dataModel: "Sensor",
+            identity: { entityName: "S-{{ id }}", expiresAt: "{{ until }}" },
+            attributes: {},
+        }"#;
+
+        assert!(matches!(
+            Mapping::from_json5(document, Path::new("test.json5"), &mut TemplateRunner::new()),
+            Err(MappingError::Parse { .. })
+        ));
+    }
+
+    #[test]
     fn a_scope_declared_inside_the_identity_is_rejected() {
         let document = r#"{
             version: "v4",
@@ -486,7 +566,10 @@ mod tests {
             Version::V4,
             "Sensor".parse::<DataModel>().unwrap(),
             Identity::new(TemplateSource::new("S-{{ id }}")),
-            Some(Scope::Single(TemplateSource::new("/test"))),
+            EntityMembers {
+                scope: Some(Scope::Single(TemplateSource::new("/test"))),
+                expires_at: None,
+            },
             IndexMap::new(),
             Path::new("test.json5"),
             &mut TemplateRunner::new(),
@@ -511,7 +594,7 @@ mod tests {
             Version::V4,
             "Sensor".parse::<DataModel>().unwrap(),
             Identity::new(TemplateSource::new("S-{{ id }}")),
-            None,
+            EntityMembers::default(),
             IndexMap::new(),
             Path::new("test.json5"),
             &mut TemplateRunner::new(),
@@ -519,6 +602,35 @@ mod tests {
         .unwrap();
 
         assert!(serde_json::to_value(&mapping).unwrap().get("scope").is_none());
+    }
+
+    #[test]
+    fn a_declared_expires_at_round_trips_through_the_constructor_and_the_wire_form() {
+        let mapping = Mapping::new(
+            Version::V4,
+            "Sensor".parse::<DataModel>().unwrap(),
+            Identity::new(TemplateSource::new("S-{{ id }}")),
+            EntityMembers {
+                scope: None,
+                expires_at: Some(TemplateSource::new("{{ until }}")),
+            },
+            IndexMap::new(),
+            Path::new("test.json5"),
+            &mut TemplateRunner::new(),
+        )
+        .unwrap();
+
+        assert_eq!(mapping.expires_at(), &Some(TemplateSource::new("{{ until }}")));
+        assert_eq!(
+            serde_json::to_value(&mapping).unwrap(),
+            json!({
+                "version": "v4",
+                "dataModel": "Sensor",
+                "identity": { "entityName": "S-{{ id }}" },
+                "expiresAt": "{{ until }}",
+                "attributes": {},
+            })
+        );
     }
 
     #[test]
@@ -555,7 +667,7 @@ mod tests {
             Version::V4,
             "Sensor".parse::<DataModel>().unwrap(),
             Identity::new(TemplateSource::new("S-{{ id }}")),
-            None,
+            EntityMembers::default(),
             attributes,
             Path::new("Sensor.json5"),
             &mut TemplateRunner::new(),

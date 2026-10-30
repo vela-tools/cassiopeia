@@ -22,7 +22,19 @@ pub struct EntityRelationships {
 
 /// The owned constituent parts of an [`EntityRelationships`], produced by
 /// [`EntityRelationships::into_parts`].
-pub type EntityRelationshipsParts = (Relationships, Option<NestedRelationships>, Option<InstanceRelationships>);
+///
+/// Each field is the [`EntityRelationships`] field of the same name.
+#[derive(Debug)]
+pub struct EntityRelationshipsParts {
+    /// Top-level relationship objects, keyed by attribute name.
+    pub top_level: Relationships,
+    /// Nested relationship objects, keyed by their path from the entity; `None` when the entity has
+    /// none (ETSI GS CIM 009 v1.9.1 clause 4.5.2.2 with 4.5.3).
+    pub nested: Option<NestedRelationships>,
+    /// Multi-attribute relationship objects, grouped per instance; `None` when the entity has none
+    /// (clause 4.5.5).
+    pub instances: Option<InstanceRelationships>,
+}
 
 impl EntityRelationships {
     /// Gathers an entity's top-level, nested, and per-instance relationship objects.
@@ -55,14 +67,18 @@ impl EntityRelationships {
     /// Deconstructs the relationships into their owned maps, consuming them.
     #[must_use]
     pub fn into_parts(self) -> EntityRelationshipsParts {
-        (self.top_level, self.nested, self.instances)
+        EntityRelationshipsParts {
+            top_level: self.top_level,
+            nested: self.nested,
+            instances: self.instances,
+        }
     }
 }
 
 #[cfg(test)]
 mod tests {
     use crate::{
-        entity_relationships::EntityRelationships,
+        entity_relationships::{EntityRelationships, EntityRelationshipsParts},
         instance_index::InstanceIndex,
         relationships::{InstanceObjects, InstanceRelationships, Relationships},
     };
@@ -120,7 +136,7 @@ mod tests {
 
     #[test]
     fn into_parts_returns_every_map() {
-        let (top_level, nested, instances) = with_instance_objects().into_parts();
+        let EntityRelationshipsParts { top_level, nested, instances } = with_instance_objects().into_parts();
 
         assert_eq!(top_level.len(), 1);
         assert_eq!(nested, None);

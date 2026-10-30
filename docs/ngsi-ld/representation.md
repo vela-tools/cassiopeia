@@ -22,7 +22,8 @@ Normalized is the complete attribute form. Each attribute is an object with a `t
     },
     "dateObserved": {
         "type": "Property",
-        "value": "2026-08-21T10:00:00.000Z"
+        "value": "2026-08-21T10:00:00Z",
+        "valueType": "DateTime"
     },
     "location": {
         "type": "GeoProperty",
@@ -71,14 +72,17 @@ For file output, Cassiopeia writes normalized entities by default. The form is v
 
 ### Concise
 
-Concise is also lossless. It removes a redundant `type` member when the remaining shape makes the attribute type clear. A Property with no metadata can therefore be a bare value. A Property with qualifiers remains an object, but its `type` is omitted. A GeoProperty without sub-attributes can be recognized from its GeoJSON shape. ETSI describes concise Property and Relationship serialization alongside normalized serialization in clauses 4.5.2 and 4.5.3.
+Concise is also lossless. It removes a redundant `type` member when the remaining shape makes the attribute type clear. A Property with no metadata can therefore be a bare value. A Property with qualifiers remains an object, but its `type` is omitted. A time value, such as `dateObserved`, also remains an object, because its `valueType` has no place in a bare value. A GeoProperty without sub-attributes can be recognized from its GeoJSON shape. ETSI describes concise Property and Relationship serialization alongside normalized serialization in clauses 4.5.2 and 4.5.3.
 
 ```json
 {
     "id": "urn:ngsi-ld:WeatherObserved:65142878",
     "type": "WeatherObserved",
     "stationName": "LJUBLJANA/BEZIGRAD",
-    "dateObserved": "2026-08-21T10:00:00.000Z",
+    "dateObserved": {
+        "value": "2026-08-21T10:00:00Z",
+        "valueType": "DateTime"
+    },
     "location": {
         "type": "Point",
         "coordinates": [
@@ -113,14 +117,14 @@ Concise is also lossless. It removes a redundant `type` member when the remainin
 
 ### Simplified
 
-Simplified representation, often called key-values, keeps each attribute's value and removes the surrounding attribute object. A consumer requests it with `options=keyValues`. ETSI defines it in clause 4.5.4. A Property becomes its value, a Relationship becomes its target URI or URIs, and a GeoProperty becomes its GeoJSON geometry.
+Simplified representation, often called key-values, keeps each attribute's value and removes the surrounding attribute object. A consumer requests it with `options=keyValues`. ETSI defines it in clause 4.5.4. A Property becomes its value, a Relationship becomes its target URI or URIs, and a GeoProperty becomes its GeoJSON geometry. Beside the attributes, the entity keeps only `@context`, `id`, and `type`: its `scope` and `expiresAt` are left out.
 
 ```json
 {
     "id": "urn:ngsi-ld:WeatherObserved:65142878",
     "type": "WeatherObserved",
     "stationName": "LJUBLJANA/BEZIGRAD",
-    "dateObserved": "2026-08-21T10:00:00.000Z",
+    "dateObserved": "2026-08-21T10:00:00Z",
     "location": {
         "type": "Point",
         "coordinates": [

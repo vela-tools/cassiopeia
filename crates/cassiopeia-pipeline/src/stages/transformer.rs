@@ -2,10 +2,11 @@ use crate::{
     error::PipelineError,
     pipeline_stage::PipelineStage,
     stages::{
+        batch_sink_report::report_sink,
         pump::{BatchSender, PumpConfig, PumpProcessor, run_pump_stage},
         skipped_records::SkippedRecords,
         stage_env::StageEnv,
-        unreadable_timestamp_report::{TimestampLoss, report_unreadable_timestamps},
+        unreadable_timestamp_report::unreadable_timestamp_diagnostic,
     },
 };
 use cassiopeia_common::{
@@ -31,9 +32,10 @@ use std::{ops::ControlFlow, sync::Arc};
 /// not abort the run. Failures are grouped by reason and each distinct one is reported once with a
 /// count, so a systematic mapping mistake reads as a named problem rather than as a number.
 ///
-/// An attribute whose `observedAt` reads as no instant is emitted without the qualifier rather than
-/// dropped, and the loss is named once per attribute and counted as a warning: a value that
-/// publishes with nothing anchoring it in time is exactly what nothing downstream can notice.
+/// An attribute whose `observedAt` or `expiresAt` reads as no instant is emitted without the
+/// qualifier rather than dropped, and the loss is named once per attribute and qualifier and counted
+/// as a warning: a value that publishes with nothing anchoring it in time, or with no bound on how
+/// long it holds, is exactly what nothing downstream can notice.
 struct TransformerProcessor {
     /// The transformer that builds NGSI-LD entities, configured for the run's parallelism.
     transformer: NgsiLdTransformer,
@@ -66,7 +68,7 @@ impl PumpProcessor for TransformerProcessor {
         if !skipped.is_empty() {
             skipped.report(self.reporter, Severity::Warning);
         }
-        let warnings = failed + report_unreadable_timestamps(self.reporter, TimestampLoss::ObservedAt, unreadable);
+        let warnings = failed + report_sink(self.reporter, unreadable, unreadable_timestamp_diagnostic);
         if warnings > 0 {
             stage.warn_inc_by(warnings);
             self.telemetry.add_warnings(warnings);
@@ -190,7 +192,7 @@ mod tests {
         )]);
         let metadata = IndexMap::from_iter([(name("temperature"), MetadataStorage::shared(shared))]);
 
-        let mut entity = Entity::new(urn, json!({}), None, IndexMap::default(), Some(values));
+        let mut entity = Entity::new(urn, json!({}), None, None, IndexMap::default(), Some(values));
         entity.set_metadata(Some(metadata));
 
         Mapped::new(entity, Arc::clone(mapping))

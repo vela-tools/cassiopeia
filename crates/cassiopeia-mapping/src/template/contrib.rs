@@ -41,6 +41,7 @@ pub fn register(registrar: &mut Registrar) {
 #[cfg(test)]
 mod tests {
     use crate::template::{contrib::register, registrar::Registrar};
+    use cassiopeia_ngsi_ld::value::types::TemporalValue;
     use pretty_assertions::assert_eq;
     use tera::Context;
 
@@ -66,5 +67,18 @@ mod tests {
     #[test]
     fn the_base64_filters_round_trip() {
         assert_eq!(render(r#"{{ "hi" | b64_encode | b64_decode }}"#), "hi");
+    }
+
+    #[test]
+    fn the_timestamp_now_renders_reads_back_as_a_datetime_in_utc_and_in_the_local_zone() {
+        // `now()` renders the RFC 9557 form, offset plus bracketed zone, which `datetime` must read
+        // so that a feed without a timestamp of its own can stamp its fetch time as `observedAt`.
+        for template in ["{{ now(utc=true) }}", "{{ now() }}"] {
+            let rendered = render(template);
+            assert!(
+                matches!(TemporalValue::try_parse(&rendered), Some(TemporalValue::DateTime(_))),
+                "expected {rendered:?} from {template:?} to read as a datetime"
+            );
+        }
     }
 }

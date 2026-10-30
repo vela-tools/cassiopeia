@@ -6,8 +6,9 @@ use crate::{
 };
 use cassiopeia_common::parallelism::Parallelism;
 use cassiopeia_ir::{
-    assembled_entity::AssembledEntity,
+    assembled_entity::{AssembledEntity, AssembledEntityParts},
     entity::{AttributeValues, Entity},
+    entity_relationships::EntityRelationshipsParts,
     mapped::{Mapped, Mappings},
     metadata::EntityMetadata,
 };
@@ -45,7 +46,13 @@ impl EntityExtractor {
 
 impl Extractor for EntityExtractor {
     fn extract(&self, assembled: AssembledEntity, dropped: &DroppedAttributes) -> Result<Mapped<Entity>> {
-        let (id, scope, mut relationships, fragments) = assembled.into_parts();
+        let AssembledEntityParts {
+            id,
+            scope,
+            expires_at,
+            mut relationships,
+            fragments,
+        } = assembled.into_parts();
         let mut values = AttributeValues::default();
         let mut metadata = EntityMetadata::default();
         let mappings: Mappings = fragments.iter().map(|(_, mapping)| Arc::clone(mapping)).collect();
@@ -92,8 +99,12 @@ impl Extractor for EntityExtractor {
         // maps and the carried mappings, so the entity's own record is no longer needed. Nested
         // objects were folded into the metadata as sub-attributes, so only the top-level and the
         // per-instance objects travel on.
-        let (relationships, _nested, instance_relationships) = relationships.into_parts();
-        let mut entity = Entity::new(id, JsonValue::Null, scope, relationships, Some(values));
+        let EntityRelationshipsParts {
+            top_level: relationships,
+            instances: instance_relationships,
+            ..
+        } = relationships.into_parts();
+        let mut entity = Entity::new(id, JsonValue::Null, scope, expires_at, relationships, Some(values));
         if !metadata.is_empty() {
             entity.set_metadata(Some(metadata));
         }
@@ -113,6 +124,7 @@ impl Extractor for EntityExtractor {
 #[cfg(test)]
 mod tests {
     use crate::{dropped_attributes::DroppedAttributes, entity_extractor::EntityExtractor, extractor::Extractor};
+    use cassiopeia_batch_sink::{batch_sink::BatchSink, recurring::Recurring};
     use cassiopeia_common::parallelism::Parallelism;
     use cassiopeia_expander::compiler::ExpanderCompiler;
     use cassiopeia_geometry::geometry::NgsiLdGeometry;
@@ -134,6 +146,7 @@ mod tests {
         entity::{attribute::NgsiLdAttributeKind, name::NameBuf},
         value::types::{Number, TemporalValue, Value},
     };
+    use cassiopeia_unreadable_timestamps::{attribute_loss::AttributeLoss, timestamp_loss::TimestampLoss};
     use chrono::{TimeZone, Utc};
     use pretty_assertions::assert_eq;
     use serde_json::{Value as JsonValue, json};
@@ -160,7 +173,7 @@ mod tests {
     }
 
     fn entity(id: &str, data: JsonValue) -> Entity {
-        Entity::new(urn(id), data, None, Relationships::default(), None)
+        Entity::new(urn(id), data, None, None, Relationships::default(), None)
     }
 
     fn nested_path(segments: &[&str]) -> RelationshipPath {
@@ -253,10 +266,10 @@ mod tests {
         assert!(!values.contains_key(&name("location")));
         assert!(values.contains_key(&name("reference")));
 
-        let entries = dropped.geometries.into_entries();
+        let entries = BatchSink::from(dropped.geometries).into_entries().collect::<Vec<_>>();
         assert_eq!(entries.len(), 1);
         assert_eq!(entries[0].0.attribute, name("location"));
-        assert_eq!(entries[0].1, 1);
+        assert_eq!(entries[0].1.occurrences().get(), 1);
     }
 
     #[test]
@@ -319,9 +332,15 @@ mod tests {
         assert!(!values.contains_key(&name("reading")));
         assert!(values.contains_key(&name("reference")));
 
-        let entries = dropped.timestamps.into_entries();
+        let entries = BatchSink::from(dropped.timestamps).into_entries().collect::<Vec<_>>();
         assert_eq!(entries.len(), 1);
-        assert_eq!(entries[0].0, name("reading"));
+        assert_eq!(
+            entries[0].0,
+            AttributeLoss {
+                loss: TimestampLoss::AttributeValue,
+                attribute: name("reading")
+            }
+        );
         assert_eq!(entries[0].1.example.as_ref(), "the third of March");
         assert_eq!(entries[0].1.occurrences.get(), 1);
     }
@@ -844,7 +863,10 @@ mod tests {
             .into_parts();
 
         assert_eq!(result.instance_relationships(), &None);
-        assert_eq!(dropped.templates.into_entries()[0].0, name("servesAirports"));
+        assert_eq!(
+            BatchSink::from(dropped.templates).into_entries().collect::<Vec<_>>()[0].0,
+            name("servesAirports")
+        );
     }
 
     #[test]
@@ -895,7 +917,7 @@ mod tests {
         let extractor = EntityExtractor::new(resolver);
         let mut relationships = Relationships::default();
         relationships.insert(name("controlledAsset"), vec![urn("urn:ngsi-ld:Asset:9")]);
-        let entity = Entity::new(urn("urn:ngsi-ld:Device:1"), json!({"id": "1"}), None, relationships, None);
+        let entity = Entity::new(urn("urn:ngsi-ld:Device:1"), json!({"id": "1"}), None, None, relationships, None);
         let mapped = AssembledEntity::from_single(entity, mapping);
 
         let (result, _) = extractor.extract(mapped, &DroppedAttributes::new()).unwrap().into_parts();
@@ -931,6 +953,7 @@ mod tests {
         let mut entity = Entity::new(
             urn("urn:ngsi-ld:Movie:1"),
             json!({"id": "1", "actor": "31", "character": "JackSparrow", "order": 0}),
+            None,
             None,
             relationships,
             None,
@@ -986,6 +1009,7 @@ mod tests {
             urn("urn:ngsi-ld:Movie:1"),
             json!({"id": "1", "actor": "31", "character": "X", "place": "Y"}),
             None,
+            None,
             relationships,
             None,
         );
@@ -1034,6 +1058,7 @@ mod tests {
             urn("urn:ngsi-ld:Movie:1"),
             json!({"id": "1", "director": "5", "films": "10 20"}),
             None,
+            None,
             relationships,
             None,
         );
@@ -1062,6 +1087,7 @@ mod tests {
         let mut entity = Entity::new(
             urn("urn:ngsi-ld:Movie:1"),
             json!({"id": "1", "actor": "31", "order": 0}),
+            None,
             None,
             relationships,
             None,
@@ -1100,6 +1126,7 @@ mod tests {
         let entity = Entity::new(
             urn("urn:ngsi-ld:Movie:1"),
             json!({"id": "1", "cast": "1 2", "size": 2}),
+            None,
             None,
             relationships,
             None,
@@ -1239,7 +1266,7 @@ mod tests {
         let (value, dropped) = extract_dafif_code(SPLIT, "array", &JsonValue::Null);
 
         assert_eq!(value, None);
-        let entries = dropped.templates.into_entries();
+        let entries = BatchSink::from(dropped.templates).into_entries().collect::<Vec<_>>();
         assert_eq!(entries.len(), 1);
         assert_eq!(entries[0].0, name("dafifCode"));
         assert_eq!(entries[0].1.entity, urn("urn:ngsi-ld:Country:Bonaire"));
@@ -1354,13 +1381,13 @@ mod tests {
         let dropped = DroppedAttributes::new();
         let mut relationships = Relationships::default();
         relationships.insert(name("owner"), vec![urn("urn:ngsi-ld:Person:7")]);
-        let source = Entity::new(urn("urn:ngsi-ld:Vehicle:1"), json!({"id": "1", "owner": "7"}), None, relationships, None);
+        let source = Entity::new(urn("urn:ngsi-ld:Vehicle:1"), json!({"id": "1", "owner": "7"}), None, None, relationships, None);
 
         let (result, _) = extractor.extract(AssembledEntity::from_single(source, mapping), &dropped).unwrap().into_parts();
 
         assert!(!result.relationships().contains_key(&name("owner")));
         assert!(result.values().as_ref().expect("values set").contains_key(&name("reference")));
-        assert_eq!(dropped.templates.into_entries()[0].0, name("owner"));
+        assert_eq!(BatchSink::from(dropped.templates).into_entries().collect::<Vec<_>>()[0].0, name("owner"));
     }
 
     #[test]
@@ -1544,7 +1571,7 @@ mod tests {
         );
 
         assert_eq!(value, None);
-        let entries = dropped.geometries.into_entries();
+        let entries = BatchSink::from(dropped.geometries).into_entries().collect::<Vec<_>>();
         assert_eq!(entries.len(), 1);
         assert_eq!(entries[0].0.attribute, name("label"));
     }
@@ -1631,7 +1658,7 @@ mod tests {
         );
 
         assert_eq!(footprint, None);
-        let entries = dropped.geometries.into_entries();
+        let entries = BatchSink::from(dropped.geometries).into_entries().collect::<Vec<_>>();
         assert_eq!(entries.len(), 1);
         assert_eq!(entries[0].0.attribute, name("footprint"));
     }
@@ -1673,7 +1700,7 @@ mod tests {
         );
 
         assert_eq!(value, None);
-        let entries = dropped.geometries.into_entries();
+        let entries = BatchSink::from(dropped.geometries).into_entries().collect::<Vec<_>>();
         assert_eq!(entries.len(), 1);
         assert_eq!(entries[0].0.attribute, name("label"));
     }
@@ -1756,7 +1783,7 @@ mod tests {
 
         extractor.extract(mapped, &dropped).unwrap();
 
-        let entries = dropped.templates.into_entries();
+        let entries = BatchSink::from(dropped.templates).into_entries().collect::<Vec<_>>();
         let error = &entries[0].1.error;
         assert_eq!(error.location.site, TemplateSite::Attribute(name("codes")));
         assert_eq!(*error.location.document, *Path::new("test.json5"));
