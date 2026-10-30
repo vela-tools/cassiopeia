@@ -388,6 +388,23 @@ mod tests {
     }
 
     #[test]
+    fn the_inspected_preamble_of_a_quoted_two_line_title_ingests_the_first_data_row_intact() {
+        // Five line feeds but four CSV records: the inspector and the ingestor must both count the
+        // quoted title as one record, or the header or the first data row is lost.
+        let contents = "\"Lumes report\ngenerated 25.10.26\";v2.10\nStation;NO2;O3\nSTEF;12,45;54,55\nAKA;9,80;40,10\n";
+        let dialect = CsvInspector::new().inspect(&Content::new(contents.as_bytes())).unwrap();
+        assert_eq!(dialect.preamble, Preamble::new(1));
+        let (_dir, payload) = profiled_csv(contents, Some(FormatMetadata::Csv(CsvMetadata::new(dialect))));
+        let records = ingest_all(payload);
+
+        assert_eq!(records.len(), 2);
+        assert_eq!(records[0].data().get("Station"), Some(&Value::String("STEF".to_string())));
+        assert_eq!(records[0].data().get("NO2"), Some(&Value::String("12,45".to_string())));
+        assert_eq!(records[0].data().get("O3"), Some(&Value::String("54,55".to_string())));
+        assert_eq!(records[1].data().get("Station"), Some(&Value::String("AKA".to_string())));
+    }
+
+    #[test]
     fn a_stacked_header_keys_columns_by_joined_names_and_a_blank_one_by_position() {
         let contents = "Lumes;v2.10;30.10.26-10:00:00\n;Zeit-NO2;NO2;Zeit-PM10;PM10;PM10\n;;HMW;;MW24;HMW\n;MESZ;µg/m³;MESZ;µg/m³;µg/m³\nSTEF;30.10.2026, 10:00;18,48;30.10.2026, 10:00;NE;NE\nTAB;30.10.2026, 10:00;NE;30.10.2026, 10:00;14,03;14,44\nKE;30.10.2026, 10:00;15,17;30.10.2026, 10:00;12,49;18,80\n";
         let dialect = CsvInspector::new().inspect(&Content::new(contents.as_bytes())).unwrap();
