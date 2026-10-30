@@ -45,7 +45,10 @@ impl Profile {
 #[cfg(test)]
 mod tests {
     use crate::{
-        inspectors::csv::dialect::{Dialect, LineTerminator},
+        inspectors::csv::{
+            dialect::{Dialect, LineTerminator},
+            preamble::Preamble,
+        },
         metadata::{CsvMetadata, FormatMetadata},
         profile::Profile,
     };
@@ -76,6 +79,7 @@ mod tests {
         let dialect = Dialect {
             delimiter: b';',
             quote_char: Some(b'"'),
+            preamble: Preamble::NONE,
             has_headers: true,
             escape: None,
             terminator: LineTerminator::Lf,

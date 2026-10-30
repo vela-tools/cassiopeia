@@ -1,5 +1,8 @@
 use cassiopeia_data_profiler::{
-    inspectors::csv::dialect::{Dialect, LineTerminator},
+    inspectors::csv::{
+        dialect::{Dialect, LineTerminator},
+        preamble::Preamble,
+    },
     metadata::{FormatMetadata, GribEdition},
     profile::Profile,
 };
@@ -50,7 +53,8 @@ fn metadata_line(metadata: Option<&FormatMetadata>, rendering: Rendering) -> Opt
     }
 }
 
-/// Renders the CSV dialect line: delimiter, quoting, optional escape, header, terminator, encoding.
+/// Renders the CSV dialect line: delimiter, quoting, optional escape, optional preamble, header,
+/// terminator, encoding.
 fn csv_line(dialect: &Dialect, rendering: Rendering) -> String {
     let mut fields = vec![
         field("delimiter", &byte_token(dialect.delimiter), rendering),
@@ -58,6 +62,9 @@ fn csv_line(dialect: &Dialect, rendering: Rendering) -> String {
     ];
     if let Some(escape) = dialect.escape {
         fields.push(field("escape", &byte_token(escape), rendering));
+    }
+    if dialect.preamble != Preamble::NONE {
+        fields.push(field("preamble", &preamble_token(dialect.preamble), rendering));
     }
     fields.push(paint(HIGHLIGHT, header_token(dialect.has_headers), rendering));
     fields.push(paint(MUTED, terminator_token(dialect.terminator), rendering));
@@ -92,6 +99,14 @@ fn optional_byte_token(byte: Option<u8>) -> String {
     }
 }
 
+/// The preamble token for a dialect: how many CSV records sit above the table.
+fn preamble_token(preamble: Preamble) -> String {
+    match preamble.records() {
+        1 => "1 record".to_owned(),
+        records => format!("{records} records"),
+    }
+}
+
 /// The header token for a dialect.
 const fn header_token(has_headers: bool) -> &'static str {
     if has_headers { "header row" } else { "no header" }
@@ -107,9 +122,12 @@ const fn terminator_token(terminator: LineTerminator) -> &'static str {
 
 #[cfg(test)]
 mod tests {
-    use crate::profile_report::{byte_token, csv_line, grib_line, metadata_line, optional_byte_token, render_profile};
+    use crate::profile_report::{byte_token, csv_line, grib_line, metadata_line, optional_byte_token, preamble_token, render_profile};
     use cassiopeia_data_profiler::{
-        inspectors::csv::dialect::{Dialect, LineTerminator},
+        inspectors::csv::{
+            dialect::{Dialect, LineTerminator},
+            preamble::Preamble,
+        },
         metadata::{CsvMetadata, FormatMetadata, GribEdition, GribMetadata},
         profile_bytes,
     };
@@ -122,6 +140,7 @@ mod tests {
         Dialect {
             delimiter: b',',
             quote_char: Some(b'"'),
+            preamble: Preamble::NONE,
             has_headers: true,
             escape: None,
             terminator: LineTerminator::Lf,
@@ -155,6 +174,7 @@ mod tests {
         let dialect = Dialect {
             delimiter: b'\t',
             quote_char: None,
+            preamble: Preamble::NONE,
             has_headers: false,
             escape: None,
             terminator: LineTerminator::CrLf,
@@ -163,6 +183,27 @@ mod tests {
         let line = csv_line(&dialect, Rendering::Plain);
 
         assert_eq!(line, "delimiter tab \u{b7} quote none \u{b7} no header \u{b7} CRLF \u{b7} windows-1252");
+    }
+
+    #[test]
+    fn a_csv_line_states_a_preamble_above_the_header() {
+        let dialect = Dialect {
+            delimiter: b';',
+            preamble: Preamble::new(1),
+            ..comma_dialect()
+        };
+        let line = csv_line(&dialect, Rendering::Plain);
+
+        assert_eq!(
+            line,
+            "delimiter ; \u{b7} quote \" \u{b7} preamble 1 record \u{b7} header row \u{b7} LF \u{b7} UTF-8"
+        );
+    }
+
+    #[test]
+    fn a_preamble_token_pluralises_its_record_count() {
+        assert_eq!(preamble_token(Preamble::new(1)), "1 record");
+        assert_eq!(preamble_token(Preamble::new(3)), "3 records");
     }
 
     #[test]
