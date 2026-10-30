@@ -63,6 +63,7 @@ inputs: [
 | `mapping` | One of two | The path to a single mapping file. |
 | `mappings` | One of two | A list of per-collection mappings, for a source split into named collections. |
 | `format` | No | The source format. Detected from the content when omitted. |
+| `dialect` | No | What a CSV source looks like, for an input whose `format` is `csv`. See [CSV dialect](#csv-dialect). |
 | `context` | No | A per-input `@context` override that wins over the output-level `context` for this input's entities. |
 | `schema` | No | A per-input custom validation schema. Use a local path or an `http(s)` URL. It wins over the output-level `output.validation.schema` for the types this input produces. |
 
@@ -105,6 +106,44 @@ The `format` field accepts one of the following values. When omitted, it default
 | `shapefile` | ESRI Shapefile, plain or zipped. |
 
 The [source-format guide](source-formats.md) describes the records each format produces.
+
+### CSV dialect
+
+`dialect` states what a CSV source looks like, for a file whose dialect detection gets wrong or cannot see at all. Only an input that declares `format: "csv"` accepts it.
+
+~~~json5
+{
+    source: "https://www.wien.gv.at/ma22-lgb/umweltgut/lumesakt-v2.csv",
+    format: "csv",
+    mapping: "air-quality.json5",
+    dialect: {
+        delimiter: ";",
+        encoding: "latin1",
+        skipRows: 1,
+        headerRows: 3,
+        decimalSeparator: ",",
+        nullValues: ["NE", "---"],
+    },
+},
+~~~
+
+Every member is optional. A member you state wins, and Cassiopeia still detects the ones you leave out. When `delimiter`, `quote`, `skipRows`, `headerRows` (or `header: false`), `terminator`, and `encoding` are all stated, Cassiopeia detects nothing, so the run no longer depends on detection.
+
+| Member | Value |
+| --- | --- |
+| `delimiter` | The one character that separates fields, such as `","`, `";"`, or `"\t"`. |
+| `quote` | The one character that encloses a field, or `"none"` to turn quoting off. It must differ from the delimiter. |
+| `skipRows` | The number of rows above the header to skip. Rows are counted as CSV records, so a quoted title that spans two lines is one row. |
+| `header` | `false` for a file without a header, whose columns are then read by position. `true` states that the file has a header and leaves its row count to detection. |
+| `headerRows` | The number of rows the header spans. Each column's non-blank header cells are joined with a space, so `NO2` over `HMW` over `µg/m³` becomes the field `NO2 HMW µg/m³`. |
+| `terminator` | `"lf"` or `"crlf"`. |
+| `encoding` | A label from the WHATWG Encoding Standard, such as `"utf-8"`, `"windows-1252"`, or `"iso-8859-2"`. The standard reads `"latin1"` as `windows-1252`. |
+| `decimalSeparator` | `"."`, the default, or `","`, which reads `12,45` as the number 12.45. Under `","`, a value with a full stop, such as the date `25.10.2026`, stays a string. |
+| `nullValues` | Values read as missing, such as `["NE", "---"]`, besides an empty field and `\N`. |
+
+Cassiopeia rejects `header: false` together with a `headerRows` above 0, and `header: true` together with `headerRows: 0`. Detection never sets `decimalSeparator` or `nullValues`, because nothing in a file tells a decimal comma or a missing-value token apart from text.
+
+`cassiopeia profile` prints the detected dialect in these member names and in manifest syntax, so a member it got wrong can be copied into `dialect` and corrected there. The [source-format guide](source-formats.md#csv) describes how each member is detected.
 
 ### Per-input context
 
@@ -194,7 +233,7 @@ retry: {
 
 ## What makes a manifest invalid
 
-Cassiopeia rejects a manifest when `inputs` is empty, an input has both or neither of `mapping` and `mappings`, `mappings` is empty or names the same collection twice, `mappings` is used with a format that does not support collections, or any field has a value outside its accepted set. Because the top level rejects unknown keys, a stray or misspelled field is also an error.
+Cassiopeia rejects a manifest when `inputs` is empty, an input has both or neither of `mapping` and `mappings`, `mappings` is empty or names the same collection twice, `mappings` is used with a format that does not support collections, `dialect` is used on an input that does not declare `format: "csv"`, or any field has a value outside its accepted set. Because the top level rejects unknown keys, a stray or misspelled field is also an error.
 
 ## Next steps
 

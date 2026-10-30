@@ -11,6 +11,7 @@ repository.workspace = true
 bytecount = "0.6.9"
 cassiopeia-common.workspace = true
 cassiopeia-crs.workspace = true
+cassiopeia-csv-dialect.workspace = true
 cassiopeia-data-profiler.workspace = true
 cassiopeia-ir.workspace = true
 convert_case = "0.12.0"

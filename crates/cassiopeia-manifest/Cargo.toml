@@ -9,6 +9,7 @@ repository.workspace = true
 
 [dependencies]
 cassiopeia-common.workspace = true
+cassiopeia-csv-dialect.workspace = true
 chrono = "0.4.45"
 cron = { version = "0.17.0", features = ["serde"] }
 derive_more = { version = "2.1.1", features = ["deref", "display"] }

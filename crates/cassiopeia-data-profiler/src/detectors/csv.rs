@@ -1,11 +1,12 @@
 use crate::{
     content::Content,
     detectors::Detector,
-    inspectors::csv::{CsvInspector, dialect::Dialect},
+    inspectors::csv::CsvInspector,
     metadata::{CsvMetadata, FormatMetadata},
     profile::Profile,
 };
 use cassiopeia_common::format::DataFormat;
+use cassiopeia_csv_dialect::{dialect::Dialect, statement::DialectStatement};
 use mediatype::media_type;
 
 /// Detects delimited text by parsing a header row and a small sample of records.
@@ -16,7 +17,7 @@ pub struct CsvDetector;
 
 impl Detector for CsvDetector {
     fn detect(&self, content: &Content<'_>) -> Option<Profile> {
-        let dialect = CsvInspector::new().inspect(content).ok()?;
+        let dialect = CsvInspector::new(&DialectStatement::NOTHING).inspect(content).ok()?;
         if !dialect.header_rows.is_present() || !Self::has_header_and_record(content.bytes(), &dialect) {
             return None;
         }
@@ -44,10 +45,10 @@ mod tests {
         content::Content,
         detectors::{Detector, csv::CsvDetector},
         encoding_hint::EncodingHint,
-        inspectors::csv::{header_rows::HeaderRows, preamble::Preamble},
         metadata::FormatMetadata,
     };
     use cassiopeia_common::format::DataFormat;
+    use cassiopeia_csv_dialect::{dialect_byte::DialectByte, header_rows::HeaderRows, preamble::Preamble};
     use pretty_assertions::assert_eq;
     use url::Url;
 
@@ -57,7 +58,7 @@ mod tests {
         assert_eq!(*profile.format(), DataFormat::Csv);
         assert_eq!(profile.mime_type().to_string(), "text/csv");
         let metadata = profile.metadata().as_ref().and_then(FormatMetadata::as_csv).unwrap();
-        assert_eq!(metadata.dialect().delimiter, b',');
+        assert_eq!(metadata.dialect().delimiter, DialectByte::COMMA);
     }
 
     #[test]
@@ -92,7 +93,7 @@ mod tests {
         let decoded = dialect.character_encoding().decode(&bytes).0;
         let mut reader = dialect.reader(decoded.as_bytes()).unwrap();
 
-        assert_eq!(dialect.encoding, "windows-1252");
+        assert_eq!(dialect.encoding.to_string(), "windows-1252");
         assert_eq!(reader.headers().unwrap(), vec!["", "NO2 HMW µg/m³", "O3 HMW µg/m³"]);
     }
 

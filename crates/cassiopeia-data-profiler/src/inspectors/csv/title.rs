@@ -65,24 +65,30 @@ fn has_distinct_cells(record: &StringRecord) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use crate::inspectors::csv::{
-        dialect::{Dialect, LineTerminator},
+    use crate::inspectors::csv::{table::Table, title::title_rows};
+    use cassiopeia_csv_dialect::{
+        character_encoding::CharacterEncoding,
+        dialect::Dialect,
+        dialect_byte::DialectByte,
         header_rows::HeaderRows,
+        line_terminator::LineTerminator,
         preamble::Preamble,
-        table::Table,
-        title::title_rows,
+        quote::Quote,
+        value_notation::ValueNotation,
     };
+    use encoding_rs::UTF_8;
     use pretty_assertions::assert_eq;
 
     fn table(sample: &str) -> Table {
         let dialect = Dialect {
-            delimiter: b';',
-            quote_char: Some(b'"'),
+            delimiter: DialectByte::SEMICOLON,
+            quote_char: Quote::Char(DialectByte::DOUBLE_QUOTE),
             preamble: Preamble::NONE,
             header_rows: HeaderRows::NONE,
             escape: None,
             terminator: LineTerminator::Lf,
-            encoding: "UTF-8".to_owned(),
+            encoding: CharacterEncoding::new(UTF_8),
+            notation: ValueNotation::PLAIN,
         };
         Table::parse(sample.as_bytes(), &dialect).unwrap()
     }

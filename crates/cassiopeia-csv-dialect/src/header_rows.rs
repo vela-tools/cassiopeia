@@ -1,11 +1,11 @@
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 /// How many CSV records, below the preamble, make up a table's header.
 ///
 /// One record is the common case. A stacked header spreads each column's label over several records,
 /// such as a name, an aggregation, and a unit; the records are joined per column into one field name.
-/// The count is in logical CSV records, like [`crate::inspectors::csv::preamble::Preamble`].
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+/// The count is in logical CSV records, like [`crate::preamble::Preamble`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(transparent)]
 pub struct HeaderRows(usize);
 
@@ -37,7 +37,7 @@ impl HeaderRows {
 
 #[cfg(test)]
 mod tests {
-    use crate::inspectors::csv::header_rows::HeaderRows;
+    use crate::header_rows::HeaderRows;
     use pretty_assertions::assert_eq;
 
     #[test]

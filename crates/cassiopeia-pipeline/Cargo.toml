@@ -12,6 +12,7 @@ cassiopeia-aggregator.workspace = true
 cassiopeia-batch-sink.workspace = true
 cassiopeia-collector.workspace = true
 cassiopeia-common.workspace = true
+cassiopeia-csv-dialect.workspace = true
 cassiopeia-diagnostic.workspace = true
 cassiopeia-expander.workspace = true
 cassiopeia-extractor.workspace = true

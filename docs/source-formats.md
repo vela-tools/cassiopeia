@@ -39,10 +39,10 @@ cassiopeia profile energy-1m.csv
 ~~~text
 energy-1m.csv · 127.5 MiB
 CSV · text/csv · 90% confidence
-delimiter , · quote " · header row · CRLF · UTF-8
+delimiter "," · quote "\"" · skipRows 0 · headerRows 1 · terminator "crlf" · encoding "UTF-8"
 ~~~
 
-The report has at most three lines. The first names the file and gives its size. The second shows the detection result: the format, its media type, and a confidence score. The third appears only when the format has detectable parsing details. For CSV, it shows the dialect above, including the delimiter, quoting, any preamble, the header, the line terminator, and the character encoding. For GRIB, it shows the edition. Formats that need no such parameters, including JSON, GeoJSON, KML, XML, and Shapefile, print only the first two lines.
+The report has at most three lines. The first names the file and gives its size. The second shows the detection result: the format, its media type, and a confidence score. The third appears only when the format has detectable parsing details. For CSV, it shows the dialect above: the delimiter, the quoting, the preamble, the header, the line terminator, and the character encoding. It uses the member names and value syntax of a manifest input's [`dialect`](manifest.md#csv-dialect), so a member that detection got wrong can be copied into a manifest and corrected there. For GRIB, it shows the edition. Formats that need no such parameters, including JSON, GeoJSON, KML, XML, and Shapefile, print only the first two lines.
 
 ~~~text
 stations.geojson · 4.2 KiB
@@ -59,26 +59,29 @@ Cassiopeia treats a CSV source as a table. The header row supplies the field nam
 
 Cassiopeia profiles the CSV before reading it. It detects the delimiter, the quote character, any preamble above the table, how many rows the header spans, and whether lines end with LF or CRLF. The profiler considers comma, tab, semicolon, pipe, and space delimiters, along with double quotes, single quotes, or no quoting. The ingestor reads the file with exactly the dialect the profiler reports, so the preamble it skips and the field names it uses are the ones `cassiopeia profile` shows.
 
+When detection gets a member wrong, state it in the input's [`dialect`](manifest.md#csv-dialect). A stated member is used as stated, and only the members left out are detected. A dialect with every structural member stated is used without any detection.
+
 Cassiopeia keeps a header's text as written, accented characters and punctuation included, and replaces a newline inside a quoted header with a space. A field name that is not an identifier is read with bracket notation, as in `{{ this['NO2 HMW µg/m³'] }}`. A column whose header is blank is keyed by its zero-based position, as in a headerless file, so it is read as `{{ this['0'] }}`.
 
 ### Character encoding
 
-Cassiopeia reads a CSV in the character encoding it detects and converts it to UTF-8, so a Windows-1252 or ISO-8859-2 file is read correctly rather than rejected. For a source fetched by URL, a `charset` the server declares in its `Content-Type` decides the encoding outright. Without one, the encoding is guessed from the content, and the domain the file is served from weighs the guess toward the encodings used in that region, as a browser does for an undeclared page. That settles files whose only non-ASCII characters are symbols. In Windows-1252, `µg/m³` and `°C` use bytes that ISO-8859-2 reads as the letters `ľ` and `ł`, and content alone cannot tell which was meant. Served from a `.at` or `.de` domain, such a file reads as Windows-1252. A local file has no such context, so its encoding comes from its content alone, and `cassiopeia profile` on a downloaded copy can report a different encoding than a run that reads the same file by URL.
+Cassiopeia reads a CSV in the character encoding it detects and converts it to UTF-8, so a Windows-1252 or ISO-8859-2 file is read correctly rather than rejected. For a source fetched by URL, a `charset` the server declares in its `Content-Type` decides the encoding outright. Without one, the encoding is guessed from the content, and the domain the file is served from weighs the guess toward the encodings used in that region, as a browser does for an undeclared page. That settles files whose only non-ASCII characters are symbols. In Windows-1252, `µg/m³` and `°C` use bytes that ISO-8859-2 reads as the letters `ľ` and `ł`, and content alone cannot tell which was meant. Served from a `.at` or `.de` domain, such a file reads as Windows-1252. A local file has no such context, so its encoding comes from its content alone, and `cassiopeia profile` on a downloaded copy can report a different encoding than a run that reads the same file by URL. An `encoding` stated in the input's `dialect` wins over both the declared `charset` and the guess.
 
 The guess weighs the whole file, not only the rows the dialect is detected from, so a name with an accented letter far down a file of plain ASCII rows still decides the encoding. Only lines with a non-ASCII character carry evidence, so only those are weighed. Up to 8 MiB of them is drawn from across the whole file, which keeps detection under a second for a file of any size. A file that is valid UTF-8 throughout is read as UTF-8. A file is never repaired. When a line holds bytes that are not valid in the encoding the file is read as, typically because a server declared `charset=utf-8` for a Windows-1252 file, the run fails and names the line of the file and the encoding, counting from the first line, title and header included. The bytes are never replaced with `�` in the values Cassiopeia maps.
 
 ### Preamble and stacked headers
 
-Some feeds put a title line above the table. Cassiopeia skips such leading rows as a preamble when each of them has a different number of fields from the table below. A title row with as many fields as the table is also skipped in two cases. The first is a title padded to the table's width, with text in at most one cell and the rest blank, as spreadsheet exports write it (`Air quality report;;;`); a run of such rows, blank rows included, directly above the header is skipped whole. The second is a fully filled title above a header whose labels sit over at least two numeric, date, or other typed columns, where the header row reads as a header and not as data. A fully filled title above a table whose columns are all text cannot be told apart from a header and is read as one. The preamble is counted in CSV records, not lines, so a quoted title that spans two lines is one record and the header below it is read intact. The profile report shows it as `preamble 1 record`.
+Some feeds put a title line above the table. Cassiopeia skips such leading rows as a preamble when each of them has a different number of fields from the table below. A title row with as many fields as the table is also skipped in two cases. The first is a title padded to the table's width, with text in at most one cell and the rest blank, as spreadsheet exports write it (`Air quality report;;;`); a run of such rows, blank rows included, directly above the header is skipped whole. The second is a fully filled title above a header whose labels sit over at least two numeric, date, or other typed columns, where the header row reads as a header and not as data. A fully filled title above a table whose columns are all text cannot be told apart from a header and is read as one. The preamble is counted in CSV records, not lines, so a quoted title that spans two lines is one record and the header below it is read intact. The profile report shows it as `skipRows 1`.
 
-A header can also span several rows, such as a name row, an aggregation row, and a unit row. Cassiopeia treats a row directly below the header as part of it when every non-blank cell is a short label with no number or date in it, and the row leaves blank a column that every data row fills, as a stacked header usually leaves its station or key column unlabelled. Each column's non-blank header cells are joined from top to bottom with a space, so `NO2` over `HMW` over `µg/m³` becomes the field `NO2 HMW µg/m³`. Two columns that share a name but differ in a lower row, such as `PM10 MW24 µg/m³` and `PM10 HMW µg/m³`, become distinct fields. The profile report shows the header as `3 header rows`. A header spans at most four rows.
+A header can also span several rows, such as a name row, an aggregation row, and a unit row. Cassiopeia treats a row directly below the header as part of it when every non-blank cell is a short label with no number or date in it, and the row leaves blank a column that every data row fills, as a stacked header usually leaves its station or key column unlabelled. Each column's non-blank header cells are joined from top to bottom with a space, so `NO2` over `HMW` over `µg/m³` becomes the field `NO2 HMW µg/m³`. Two columns that share a name but differ in a lower row, such as `PM10 MW24 µg/m³` and `PM10 HMW µg/m³`, become distinct fields. The profile report shows the header as `headerRows 3`. A header spans at most four rows.
 
 ### Value inference
 
 Cassiopeia converts CSV fields to JSON values as it reads them:
 
-- Empty fields become `null`.
-- Integers and decimal numbers become JSON numbers.
+- Empty fields become `null`, and so does `\N`, the missing-value token of SQL dumps.
+- Values listed in the input's `dialect.nullValues`, such as `NE`, become `null`.
+- Integers and decimal numbers become JSON numbers. A decimal comma, as in `12,45`, is read as a number only when the input's `dialect` states `decimalSeparator: ","`; otherwise the value stays a string.
 - `true`, `yes`, and `on` become `true`; `false`, `no`, and `off` become `false`, ignoring case.
 - Values with leading zeroes remain strings, which preserves identifiers such as `00123`.
 - Everything else remains a string.
@@ -111,7 +114,7 @@ attributes: {
 }
 ~~~
 
-Mappings address named fields, so a headerless file may need preprocessing before it can be mapped cleanly. If Cassiopeia cannot infer the dialect reliably, declare the format explicitly and verify the resulting record shape before writing the mapping.
+Mappings address named fields, so a headerless file may need preprocessing before it can be mapped cleanly. If Cassiopeia cannot infer the dialect reliably, declare `format: "csv"`, state the members it gets wrong in the input's [`dialect`](manifest.md#csv-dialect), and verify the resulting record shape before writing the mapping.
 
 ## JSON
 

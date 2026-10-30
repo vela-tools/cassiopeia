@@ -45,15 +45,21 @@ impl Profile {
 #[cfg(test)]
 mod tests {
     use crate::{
-        inspectors::csv::{
-            dialect::{Dialect, LineTerminator},
-            header_rows::HeaderRows,
-            preamble::Preamble,
-        },
         metadata::{CsvMetadata, FormatMetadata},
         profile::Profile,
     };
     use cassiopeia_common::format::DataFormat;
+    use cassiopeia_csv_dialect::{
+        character_encoding::CharacterEncoding,
+        dialect::Dialect,
+        dialect_byte::DialectByte,
+        header_rows::HeaderRows,
+        line_terminator::LineTerminator,
+        preamble::Preamble,
+        quote::Quote,
+        value_notation::ValueNotation,
+    };
+    use encoding_rs::UTF_8;
     use mediatype::media_type;
     use pretty_assertions::assert_eq;
 
@@ -78,17 +84,18 @@ mod tests {
     #[test]
     fn a_profile_serialises_attached_format_metadata() {
         let dialect = Dialect {
-            delimiter: b';',
-            quote_char: Some(b'"'),
+            delimiter: DialectByte::SEMICOLON,
+            quote_char: Quote::Char(DialectByte::DOUBLE_QUOTE),
             preamble: Preamble::NONE,
             header_rows: HeaderRows::ONE,
             escape: None,
             terminator: LineTerminator::Lf,
-            encoding: "UTF-8".to_string(),
+            encoding: CharacterEncoding::new(UTF_8),
+            notation: ValueNotation::PLAIN,
         };
         let profile = Profile::new(DataFormat::Csv, media_type!(TEXT / CSV), 0.9).with_metadata(FormatMetadata::Csv(CsvMetadata::new(dialect)));
         let json = serde_json::to_value(&profile).unwrap();
 
-        assert_eq!(json["metadata"]["Csv"]["dialect"]["delimiter"], 59);
+        assert_eq!(json["metadata"]["Csv"]["dialect"]["delimiter"], ";");
     }
 }

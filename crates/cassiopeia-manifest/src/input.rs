@@ -3,6 +3,7 @@ use crate::{
     mapping_binding::{CollectionMapping, MappingBinding},
 };
 use cassiopeia_common::{context::mode::AtContextMode, format::DataFormat, input::Input, schema_source::SchemaSource};
+use cassiopeia_csv_dialect::statement::DialectStatement;
 use getset::Getters;
 use serde::{Deserialize, Serialize};
 use std::{collections::HashSet, path::PathBuf};
@@ -29,6 +30,12 @@ pub struct ManifestInput {
     #[builder(default = None)]
     #[getset(get = "pub")]
     format: Option<DataFormat>,
+
+    /// What the source's CSV dialect is stated to be: each stated member wins over detection, and
+    /// detection settles the rest. Only a source declared as CSV may state one.
+    #[builder(default = None)]
+    #[getset(get = "pub")]
+    dialect: Option<DialectStatement>,
 
     /// An `@context` mode for this source alone, overriding the output-level mode.
     #[builder(default = None)]
@@ -67,6 +74,8 @@ struct ManifestInputRaw {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     format: Option<DataFormat>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    dialect: Option<DialectStatement>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     context: Option<AtContextMode>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     schema: Option<SchemaSource>,
@@ -79,11 +88,15 @@ impl TryFrom<ManifestInputRaw> for ManifestInput {
 
     fn try_from(raw: ManifestInputRaw) -> Result<ManifestInput, ManifestError> {
         let mapping_binding = build_binding(raw.mapping, raw.mappings, raw.format)?;
+        if raw.dialect.is_some() && raw.format.and_then(DataFormat::to_option) != Some(DataFormat::Csv) {
+            return Err(ManifestError::DialectWithoutCsvFormat);
+        }
 
         Ok(ManifestInput {
             source: raw.source,
             mapping_binding,
             format: raw.format,
+            dialect: raw.dialect,
             context: raw.context,
             schema: raw.schema,
             vars: raw.vars,
@@ -103,6 +116,7 @@ impl From<ManifestInput> for ManifestInputRaw {
             mapping,
             mappings,
             format: input.format,
+            dialect: input.dialect,
             context: input.context,
             schema: input.schema,
             vars: input.vars,
@@ -150,6 +164,7 @@ mod tests {
         mapping_binding::{CollectionMapping, MappingBinding},
     };
     use cassiopeia_common::{collection::CollectionName, context::mode::AtContextMode, format::DataFormat, input::Input, schema_source::SchemaSource};
+    use cassiopeia_csv_dialect::{dialect_byte::DialectByte, preamble::Preamble};
     use pretty_assertions::assert_eq;
     use std::path::PathBuf;
 
@@ -263,12 +278,51 @@ mod tests {
     }
 
     #[test]
+    fn a_csv_input_reads_its_stated_dialect() {
+        let input =
+            parse(r#"{"source": "a.csv", "mapping": "m.json5", "format": "csv", "dialect": {"delimiter": ";", "skipRows": 1, "nullValues": ["NE"]}}"#).unwrap();
+        let dialect = input.dialect().as_ref().unwrap();
+
+        assert_eq!(dialect.delimiter(), Some(DialectByte::SEMICOLON));
+        assert_eq!(dialect.skip_rows(), Some(Preamble::new(1)));
+        assert!(dialect.notation().is_null_token("NE"));
+    }
+
+    #[test]
+    fn a_stated_dialect_round_trips_through_serialization() {
+        let input =
+            parse(r#"{"source": "a.csv", "mapping": "m.json5", "format": "csv", "dialect": {"encoding": "latin1", "headerRows": 3, "decimalSeparator": ","}}"#)
+                .unwrap();
+
+        let json = serde_json::to_string(&input).unwrap();
+        assert_eq!(parse(&json).unwrap(), input);
+    }
+
+    #[test]
+    fn a_dialect_on_an_input_not_declared_as_csv_is_rejected() {
+        for format in [r#", "format": "json""#, r#", "format": "auto""#, ""] {
+            let error = parse(&format!(
+                r#"{{"source": "a.csv", "mapping": "m.json5"{format}, "dialect": {{"delimiter": ";"}}}}"#
+            ))
+            .unwrap_err();
+            assert!(error.to_string().contains("must declare 'format: \"csv\"'"), "{error}");
+        }
+    }
+
+    #[test]
+    fn an_invalid_dialect_member_is_rejected() {
+        let error = parse(r#"{"source": "a.csv", "mapping": "m.json5", "format": "csv", "dialect": {"delimiter": ";;"}}"#).unwrap_err();
+        assert!(error.to_string().contains("';;' is not a single ASCII character"), "{error}");
+    }
+
+    #[test]
     fn the_conflicting_binding_error_is_typed() {
         let raw = ManifestInputRaw {
             source: Input::Local(PathBuf::from("a.kml")),
             mapping: Some(PathBuf::from("m.json5")),
             mappings: Some(vec![CollectionMapping::new(CollectionName::from("A"), PathBuf::from("a.json5"))]),
             format: None,
+            dialect: None,
             context: None,
             schema: None,
             vars: None,
