@@ -20,6 +20,7 @@ use crate::entity::{
             serialize_object_type,
             serialize_observed_at,
             serialize_unit_code,
+            serialize_value_type,
         },
     },
 };
@@ -35,7 +36,10 @@ const MODE: NgsiLdRepresentation = NgsiLdRepresentation::Concise;
 /// # Errors
 /// Returns the serializer's error if serialization fails.
 pub fn serialize_property<S: Serializer>(prop: &NgsiLdProperty, skip_null: NgsiLdSkipNull, serializer: S) -> Result<S::Ok, S::Error> {
-    let has_metadata = prop.observed_at.is_some()
+    // A `valueType` has no place in a bare value, so a time value keeps the object form to stay
+    // lossless (clause 4.5.2.3).
+    let has_metadata = prop.value.temporal_type().is_some()
+        || prop.observed_at.is_some()
         || prop.expires_at.is_some()
         || prop.unit_code.is_some()
         || prop.dataset_id.is_some()
@@ -47,6 +51,7 @@ pub fn serialize_property<S: Serializer>(prop: &NgsiLdProperty, skip_null: NgsiL
 
     let mut map = serializer.serialize_map(None)?;
     map.serialize_entry("value", &prop.value)?;
+    serialize_value_type(&mut map, &prop.value)?;
     serialize_observed_at(&mut map, prop.observed_at.as_ref())?;
     serialize_expires_at(&mut map, prop.expires_at.as_ref())?;
     serialize_unit_code(&mut map, prop.unit_code.as_ref())?;

@@ -16,7 +16,7 @@ use crate::entity::{
     context::NgsiLdContext,
     error::Result as NgsiLdResult,
     name::NameBuf,
-    representation::{DisplayStr, JsonLayout, NgsiLdSerializable, ReprAdapter, SerializeRepr},
+    representation::{DisplayStr, JsonLayout, NgsiLdSerializable, ReprAdapter, SerializeRepr, qualifiers::serialize_expires_at},
     scope::NgsiLdScope,
 };
 use cassiopeia_common::{representation::NgsiLdRepresentation, skip_null::NgsiLdSkipNull};
@@ -86,9 +86,7 @@ impl SerializeRepr for NgsiLdEntity {
                 if let Some(scope) = &self.scope {
                     map.serialize_entry("scope", scope)?;
                 }
-                if let Some(expires_at) = &self.expires_at {
-                    map.serialize_entry("expiresAt", expires_at)?;
-                }
+                serialize_expires_at(&mut map, self.expires_at.as_ref())?;
             }
             NgsiLdRepresentation::Simplified => {}
         }

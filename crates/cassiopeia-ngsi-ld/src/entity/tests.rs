@@ -18,11 +18,12 @@ use crate::{
         representation::{JsonLayout, NgsiLdSerializable},
         scope::{NgsiLdScope, ScopeBuf},
     },
-    value::types::Value,
+    value::types::{TemporalValue, Value},
 };
 use cassiopeia_common::{representation::NgsiLdRepresentation, skip_null::NgsiLdSkipNull};
 use cassiopeia_geometry::geometry::NgsiLdGeometry;
-use chrono::{TimeZone, Utc};
+use chrono::{Duration, TimeZone, Utc};
+use compact_str::CompactString;
 use indexmap::IndexMap;
 use iri_rs::IriBuf;
 use pretty_assertions::assert_eq;
@@ -146,6 +147,70 @@ mod property_tests {
 
         let simplified = serialize_entity(&entity, NgsiLdRepresentation::Simplified, NgsiLdSkipNull::Skip);
         assert_eq!(simplified["category"], "ok");
+    }
+
+    #[test]
+    fn a_time_value_carries_its_value_type_in_normalized_and_concise_but_not_simplified() {
+        let instant = Utc.with_ymd_and_hms(2026, 10, 24, 20, 49, 0).unwrap();
+        for (temporal, text, value_type) in [
+            (TemporalValue::DateTime(instant), "2026-10-24T20:49:00Z", "DateTime"),
+            (TemporalValue::Date(instant), "2026-10-24", "Date"),
+            (TemporalValue::Time(instant), "20:49:00Z", "Time"),
+        ] {
+            let entity = create_test_entity(
+                "A1",
+                "Alert",
+                "expectedArrival",
+                NgsiLdAttribute::Property(NgsiLdProperty::new(Value::Temporal(temporal))),
+            );
+
+            let normalized = serialize_entity(&entity, NgsiLdRepresentation::Normalized, NgsiLdSkipNull::Skip);
+            assert_eq!(
+                normalized["expectedArrival"],
+                json!({"type": "Property", "value": text, "valueType": value_type})
+            );
+
+            // A bare value has no place for the `valueType`, so the concise form keeps the object
+            // shape to stay lossless.
+            let concise = serialize_entity(&entity, NgsiLdRepresentation::Concise, NgsiLdSkipNull::Skip);
+            assert_eq!(concise["expectedArrival"], json!({"value": text, "valueType": value_type}));
+
+            let simplified = serialize_entity(&entity, NgsiLdRepresentation::Simplified, NgsiLdSkipNull::Skip);
+            assert_eq!(simplified["expectedArrival"], text);
+        }
+    }
+
+    #[test]
+    fn a_string_that_reads_as_a_time_carries_no_value_type() {
+        let entity = create_test_entity(
+            "A1",
+            "Alert",
+            "note",
+            NgsiLdAttribute::Property(NgsiLdProperty::new(Value::String(CompactString::from("2026-10-24T20:49:00Z")))),
+        );
+
+        let normalized = serialize_entity(&entity, NgsiLdRepresentation::Normalized, NgsiLdSkipNull::Skip);
+        assert_eq!(normalized["note"], json!({"type": "Property", "value": "2026-10-24T20:49:00Z"}));
+        let concise = serialize_entity(&entity, NgsiLdRepresentation::Concise, NgsiLdSkipNull::Skip);
+        assert_eq!(concise["note"], "2026-10-24T20:49:00Z");
+    }
+
+    #[test]
+    fn a_value_and_its_qualifiers_keep_six_fractional_digits_at_most() {
+        let instant = Utc.with_ymd_and_hms(2026, 10, 24, 19, 49, 9).unwrap() + Duration::nanoseconds(712_623_245);
+        let mut property = NgsiLdProperty::new(Value::Temporal(TemporalValue::DateTime(instant)));
+        property.observed_at = Some(instant);
+        property.expires_at = Some(instant);
+        let mut entity = create_test_entity("A1", "Alert", "stamp", NgsiLdAttribute::Property(property));
+        entity.expires_at = Some(instant);
+
+        for representation in [NgsiLdRepresentation::Normalized, NgsiLdRepresentation::Concise] {
+            let serialized = serialize_entity(&entity, representation, NgsiLdSkipNull::Skip);
+            assert_eq!(serialized["expiresAt"], "2026-10-24T19:49:09.712623Z");
+            assert_eq!(serialized["stamp"]["value"], "2026-10-24T19:49:09.712623Z");
+            assert_eq!(serialized["stamp"]["observedAt"], "2026-10-24T19:49:09.712623Z");
+            assert_eq!(serialized["stamp"]["expiresAt"], "2026-10-24T19:49:09.712623Z");
+        }
     }
 
     #[test]

@@ -1,10 +1,11 @@
 use cassiopeia_geometry::geometry::NgsiLdGeometry;
-use chrono::{DateTime, SecondsFormat, Utc};
+use chrono::{DateTime, Utc};
 use compact_str::CompactString;
 use foldhash::fast::RandomState;
 use indexmap::IndexMap;
 use serde::{Deserialize, Serialize, Serializer};
 use std::fmt;
+use strum::EnumDiscriminants;
 
 /// The contents of a structured [`Value::Object`], in the order its keys were resolved.
 ///
@@ -63,26 +64,32 @@ pub enum Number {
     Float(f64),
 }
 
-#[derive(Debug, Clone, Deserialize, PartialEq)]
+/// A value of one of the three time value data types of ETSI GS CIM 009 v1.9.1 clause 4.6.3.
+///
+/// Its variant names the data type, which [`TemporalValueType`] carries into a Property's
+/// `valueType` member so a broker reads the value as a time rather than as a string.
+#[derive(Debug, Clone, Deserialize, PartialEq, EnumDiscriminants)]
+#[strum_discriminants(name(TemporalValueType), derive(Serialize))]
+#[strum_discriminants(
+    doc = "The data type of a [`TemporalValue`], serialized as the term clause 4.6.3 names it by (`DateTime`, `Date` or `Time`), which the NGSI-LD core context maps to its datatype URI."
+)]
 pub enum TemporalValue {
+    /// A calendar date with a time of day, in UTC.
     DateTime(DateTime<Utc>),
+    /// The calendar date of the instant.
     Date(DateTime<Utc>),
+    /// The time of day of the instant, in UTC.
     Time(DateTime<Utc>),
 }
 
-// Manual because the wire form is a formatted RFC 3339 / date / time string, not the underlying
+// Manual because the wire form is the clause 4.6.3 text of the data type, not the underlying
 // `DateTime` representation.
 impl Serialize for TemporalValue {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
         S: Serializer,
     {
-        let s = match self {
-            TemporalValue::DateTime(dt) => dt.to_rfc3339_opts(SecondsFormat::Millis, true),
-            TemporalValue::Date(dt) => dt.format("%Y-%m-%d").to_string(),
-            TemporalValue::Time(dt) => dt.format("%H:%M:%S").to_string(),
-        };
-        serializer.serialize_str(&s)
+        serializer.collect_str(&self.text())
     }
 }
 
@@ -108,6 +115,15 @@ impl Value {
         }
     }
 
+    /// The time value data type of the value, when it holds a time value.
+    #[must_use]
+    pub fn temporal_type(&self) -> Option<TemporalValueType> {
+        match self {
+            Value::Temporal(temporal) => Some(TemporalValueType::from(temporal)),
+            Value::Null | Value::Boolean(_) | Value::Number(_) | Value::String(_) | Value::Geospatial(_) | Value::Array(_) | Value::Object(_) => None,
+        }
+    }
+
     /// The string contents, when the value is a string.
     #[must_use]
     pub fn as_str(&self) -> Option<&str> {
@@ -128,11 +144,7 @@ impl fmt::Display for Value {
                 Number::Float(fl) => write!(f, "{fl}"),
             },
             Value::String(s) => write!(f, "{s}"),
-            Value::Temporal(t) => match t {
-                TemporalValue::DateTime(dt) | TemporalValue::Date(dt) | TemporalValue::Time(dt) => {
-                    write!(f, "{}", dt.to_rfc3339_opts(SecondsFormat::Millis, true))
-                }
-            },
+            Value::Temporal(t) => write!(f, "{}", t.text()),
             Value::Geospatial(g) => write!(f, "{g}"),
             // A structured value's text is its compact JSON encoding through the `Serialize` impl
             // above, the same form template resolution writes for an array or object. Encoding can
@@ -144,7 +156,7 @@ impl fmt::Display for Value {
 
 #[cfg(test)]
 mod tests {
-    use crate::value::types::{Number, TemporalValue, Value};
+    use crate::value::types::{Number, TemporalValue, TemporalValueType, Value};
     use chrono::{TimeZone, Utc};
     use compact_str::CompactString;
     use pretty_assertions::assert_eq;
@@ -182,7 +194,33 @@ mod tests {
     fn a_temporal_value_serialises_to_its_wire_string() {
         let dt = Utc.with_ymd_and_hms(2024, 3, 13, 12, 0, 0).unwrap();
         let value = Value::Temporal(TemporalValue::DateTime(dt));
-        assert_eq!(serde_json::to_value(&value).unwrap(), json!("2024-03-13T12:00:00.000Z"));
+        assert_eq!(serde_json::to_value(&value).unwrap(), json!("2024-03-13T12:00:00Z"));
+    }
+
+    #[test]
+    fn a_temporal_value_names_its_data_type_and_a_string_names_none() {
+        let dt = Utc.with_ymd_and_hms(2024, 3, 13, 12, 0, 0).unwrap();
+
+        assert_eq!(Value::Temporal(TemporalValue::DateTime(dt)).temporal_type(), Some(TemporalValueType::DateTime));
+        assert_eq!(Value::Temporal(TemporalValue::Date(dt)).temporal_type(), Some(TemporalValueType::Date));
+        assert_eq!(Value::Temporal(TemporalValue::Time(dt)).temporal_type(), Some(TemporalValueType::Time));
+        assert_eq!(Value::String(CompactString::from("2024-03-13T12:00:00Z")).temporal_type(), None);
+    }
+
+    #[test]
+    fn a_temporal_value_type_serializes_to_the_clause_4_6_3_term() {
+        assert_eq!(serde_json::to_value(TemporalValueType::DateTime).unwrap(), json!("DateTime"));
+        assert_eq!(serde_json::to_value(TemporalValueType::Date).unwrap(), json!("Date"));
+        assert_eq!(serde_json::to_value(TemporalValueType::Time).unwrap(), json!("Time"));
+    }
+
+    #[test]
+    fn a_temporal_value_displays_as_its_wire_text() {
+        let dt = Utc.with_ymd_and_hms(2024, 3, 13, 12, 0, 0).unwrap();
+
+        assert_eq!(Value::Temporal(TemporalValue::DateTime(dt)).to_string(), "2024-03-13T12:00:00Z");
+        assert_eq!(Value::Temporal(TemporalValue::Date(dt)).to_string(), "2024-03-13");
+        assert_eq!(Value::Temporal(TemporalValue::Time(dt)).to_string(), "12:00:00Z");
     }
 
     #[test]

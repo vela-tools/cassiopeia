@@ -1,12 +1,15 @@
 //! Shared streaming writers for the common attribute qualifiers, so every representation serializes
-//! `observedAt` / `expiresAt` / `unitCode` / `datasetId` / `instanceId` / `objectType` and nested
+//! `valueType` / `observedAt` / `expiresAt` / `unitCode` / `datasetId` / `instanceId` / `objectType` and nested
 //! attributes the same way instead of repeating the insertion blocks. Each writes straight into an
 //! open [`SerializeMap`] with no intermediate `serde_json::Value`.
 
-use crate::entity::{
-    attribute::NestedAttributes,
-    name::NameBuf,
-    representation::{DisplayStr, ReprAdapter},
+use crate::{
+    entity::{
+        attribute::NestedAttributes,
+        name::NameBuf,
+        representation::{DisplayStr, ReprAdapter},
+    },
+    value::{temporal_text, types::Value},
 };
 use cassiopeia_common::{representation::NgsiLdRepresentation, skip_null::NgsiLdSkipNull};
 use cefact_units::UnitCode;
@@ -14,24 +17,39 @@ use chrono::{DateTime, Utc};
 use serde::ser::SerializeMap;
 use urn_rs::Urn;
 
-/// Writes `observedAt` when present.
+/// Writes `valueType` when the Property's value is a time value.
+///
+/// Clause 4.5.2 makes `valueType` the non-reified datatype of a Property's value, and Annex C.6 uses
+/// it to mark a `DateTime`, `Date` or `Time`. Without it the value is a plain string, which a broker
+/// stores as text, so a query with a time operand does not match it.
+///
+/// # Errors
+/// Returns the serializer's error if the data type cannot be serialized.
+pub(crate) fn serialize_value_type<M: SerializeMap>(map: &mut M, value: &Value) -> Result<(), M::Error> {
+    if let Some(value_type) = value.temporal_type() {
+        map.serialize_entry("valueType", &value_type)?;
+    }
+    Ok(())
+}
+
+/// Writes `observedAt` when present, as an NGSI-LD `DateTime` (clause 4.8).
 ///
 /// # Errors
 /// Returns the serializer's error if the timestamp cannot be serialized.
 pub(crate) fn serialize_observed_at<M: SerializeMap>(map: &mut M, observed_at: Option<&DateTime<Utc>>) -> Result<(), M::Error> {
     if let Some(observed_at) = observed_at {
-        map.serialize_entry("observedAt", observed_at)?;
+        map.serialize_entry("observedAt", &DisplayStr(temporal_text::date_time(*observed_at)))?;
     }
     Ok(())
 }
 
-/// Writes `expiresAt` when present.
+/// Writes `expiresAt` when present, as an NGSI-LD `DateTime` (clause 4.22).
 ///
 /// # Errors
 /// Returns the serializer's error if the timestamp cannot be serialized.
 pub(crate) fn serialize_expires_at<M: SerializeMap>(map: &mut M, expires_at: Option<&DateTime<Utc>>) -> Result<(), M::Error> {
     if let Some(expires_at) = expires_at {
-        map.serialize_entry("expiresAt", expires_at)?;
+        map.serialize_entry("expiresAt", &DisplayStr(temporal_text::date_time(*expires_at)))?;
     }
     Ok(())
 }

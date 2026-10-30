@@ -20,6 +20,7 @@ use crate::entity::{
             serialize_object_type,
             serialize_observed_at,
             serialize_unit_code,
+            serialize_value_type,
         },
     },
 };
@@ -37,6 +38,7 @@ pub fn serialize_property<S: Serializer>(prop: &NgsiLdProperty, skip_null: NgsiL
     let mut map = serializer.serialize_map(None)?;
     map.serialize_entry("type", "Property")?;
     map.serialize_entry("value", &prop.value)?;
+    serialize_value_type(&mut map, &prop.value)?;
     serialize_observed_at(&mut map, prop.observed_at.as_ref())?;
     serialize_expires_at(&mut map, prop.expires_at.as_ref())?;
     serialize_unit_code(&mut map, prop.unit_code.as_ref())?;
