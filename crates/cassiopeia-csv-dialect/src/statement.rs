@@ -4,6 +4,7 @@ use crate::{
     dialect::Dialect,
     dialect_byte::DialectByte,
     error::DialectError,
+    escape::Escape,
     header_rows::HeaderRows,
     header_statement::HeaderStatement,
     line_terminator::LineTerminator,
@@ -25,6 +26,7 @@ use serde::{Deserialize, Serialize};
 pub struct DialectStatement {
     delimiter: Option<DialectByte>,
     quote: Option<Quote>,
+    escape: Option<Escape>,
     skip_rows: Option<Preamble>,
     header: Option<HeaderStatement>,
     terminator: Option<LineTerminator>,
@@ -37,6 +39,7 @@ impl DialectStatement {
     pub const NOTHING: DialectStatement = DialectStatement {
         delimiter: None,
         quote: None,
+        escape: None,
         skip_rows: None,
         header: None,
         terminator: None,
@@ -54,6 +57,12 @@ impl DialectStatement {
     #[must_use]
     pub const fn quote(&self) -> Option<Quote> {
         self.quote
+    }
+
+    /// The stated escape of a quote inside a quoted field.
+    #[must_use]
+    pub const fn escape(&self) -> Option<Escape> {
+        self.escape
     }
 
     /// The stated number of preamble records above the table (`skipRows`).
@@ -89,6 +98,10 @@ impl DialectStatement {
     /// The dialect this statement describes on its own, when it states every structural member, so
     /// the file is read without detecting anything. A stated `header: true` leaves the header's
     /// record count to detection, so it is not a whole dialect.
+    ///
+    /// The escape is the one structural member a whole dialect need not state: with nothing left to
+    /// detect, an unstated escape is RFC 4180's doubling (clause 2.7), which is also how a dialect
+    /// that doubles its quotes states itself.
     #[must_use]
     pub fn whole_dialect(&self) -> Option<Dialect> {
         let Some(HeaderStatement::Rows(header_rows)) = self.header else {
@@ -99,7 +112,7 @@ impl DialectStatement {
             quote_char: self.quote?,
             preamble: self.skip_rows?,
             header_rows,
-            escape: None,
+            escape: self.escape.unwrap_or_default(),
             terminator: self.terminator?,
             encoding: self.encoding?,
             // The dialect owns its notation, while the statement stays the manifest's.
@@ -114,6 +127,12 @@ impl From<&Dialect> for DialectStatement {
         DialectStatement {
             delimiter: Some(dialect.delimiter),
             quote: Some(dialect.quote_char),
+            // Doubling is RFC 4180's escape and what an unstated escape reads as in a whole dialect,
+            // so it is left out, as is any escape under disabled quoting, where it has no effect.
+            escape: match (dialect.quote_char, dialect.escape) {
+                (Quote::Char(_), Escape::Char(escape)) => Some(Escape::Char(escape)),
+                (Quote::Char(_) | Quote::Disabled, Escape::Doubled) | (Quote::Disabled, Escape::Char(_)) => None,
+            },
             skip_rows: Some(dialect.preamble),
             header: Some(HeaderStatement::Rows(dialect.header_rows)),
             terminator: Some(dialect.terminator),
@@ -135,6 +154,8 @@ struct DialectStatementRaw {
     delimiter: Option<DialectByte>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     quote: Option<Quote>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    escape: Option<Escape>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     skip_rows: Option<Preamble>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -160,10 +181,19 @@ impl TryFrom<DialectStatementRaw> for DialectStatement {
         {
             return Err(DialectError::DelimiterIsQuote(char::from(delimiter.byte())));
         }
+        if let (Some(_), Some(Quote::Disabled)) = (raw.escape, raw.quote) {
+            return Err(DialectError::EscapeWithoutQuote);
+        }
+        if let (Some(Escape::Char(escape)), Some(Quote::Char(quote))) = (raw.escape, raw.quote)
+            && escape == quote
+        {
+            return Err(DialectError::EscapeIsQuote(char::from(escape.byte())));
+        }
 
         Ok(DialectStatement {
             delimiter: raw.delimiter,
             quote: raw.quote,
+            escape: raw.escape,
             skip_rows: raw.skip_rows,
             header: HeaderStatement::from_members(raw.header, raw.header_rows)?,
             terminator: raw.terminator,
@@ -184,6 +214,7 @@ impl From<DialectStatement> for DialectStatementRaw {
         DialectStatementRaw {
             delimiter: statement.delimiter,
             quote: statement.quote,
+            escape: statement.escape,
             skip_rows: statement.skip_rows,
             header,
             header_rows,
@@ -202,6 +233,8 @@ mod tests {
         decimal_separator::DecimalSeparator,
         dialect::Dialect,
         dialect_byte::DialectByte,
+        error::DialectError,
+        escape::Escape,
         header_rows::HeaderRows,
         header_statement::HeaderStatement,
         line_terminator::LineTerminator,
@@ -309,7 +342,7 @@ mod tests {
             quote_char: Quote::Char(DialectByte::DOUBLE_QUOTE),
             preamble: Preamble::new(1),
             header_rows: HeaderRows::new(3),
-            escape: None,
+            escape: Escape::Doubled,
             terminator: LineTerminator::Lf,
             encoding: CharacterEncoding::new(WINDOWS_1252),
             notation: ValueNotation::PLAIN,
@@ -339,5 +372,68 @@ mod tests {
             json!({"decimalSeparator": ",", "nullValues": ["NE"]})
         );
         assert_eq!(statement.notation().null_values, vec![NullToken::try_from("NE".to_owned()).unwrap()]);
+    }
+
+    #[test]
+    fn a_stated_escape_is_read_and_round_trips() {
+        for (stated, escape) in [("\\", Escape::Char(DialectByte::BACKSLASH)), ("double", Escape::Doubled)] {
+            let statement = parse(json!({"quote": "\"", "escape": stated})).unwrap();
+
+            assert_eq!(statement.escape(), Some(escape));
+            assert_eq!(serde_json::to_value(&statement).unwrap(), json!({"quote": "\"", "escape": stated}));
+        }
+    }
+
+    #[test]
+    fn a_stated_escape_is_rejected_when_quoting_is_off() {
+        for stated in ["\\", "double"] {
+            let error = serde_json::from_value::<DialectStatement>(json!({"quote": "none", "escape": stated})).unwrap_err();
+
+            assert_eq!(error.to_string(), DialectError::EscapeWithoutQuote.to_string());
+        }
+    }
+
+    #[test]
+    fn an_escape_equal_to_the_quote_is_rejected() {
+        let error = parse(json!({"quote": "'", "escape": "'"})).unwrap_err();
+
+        assert_eq!(error.to_string(), DialectError::EscapeIsQuote('\'').to_string());
+    }
+
+    #[test]
+    fn a_whole_statement_with_a_stated_escape_is_a_dialect_with_that_escape() {
+        let statement = parse(json!({
+            "delimiter": ",",
+            "quote": "\"",
+            "escape": "\\",
+            "skipRows": 0,
+            "headerRows": 1,
+            "terminator": "lf",
+            "encoding": "utf-8",
+        }))
+        .unwrap();
+
+        assert_eq!(statement.whole_dialect().unwrap().escape, Escape::Char(DialectByte::BACKSLASH));
+    }
+
+    #[test]
+    fn a_dialect_states_an_escape_only_when_it_is_not_doubling() {
+        let dialect = Dialect {
+            delimiter: DialectByte::COMMA,
+            quote_char: Quote::Char(DialectByte::DOUBLE_QUOTE),
+            preamble: Preamble::NONE,
+            header_rows: HeaderRows::ONE,
+            escape: Escape::Char(DialectByte::BACKSLASH),
+            terminator: LineTerminator::Lf,
+            encoding: CharacterEncoding::new(WINDOWS_1252),
+            notation: ValueNotation::PLAIN,
+        };
+        let doubled = Dialect {
+            escape: Escape::Doubled,
+            ..dialect.clone()
+        };
+
+        assert_eq!(serde_json::to_value(DialectStatement::from(&dialect)).unwrap()["escape"], json!("\\"));
+        assert!(serde_json::to_value(DialectStatement::from(&doubled)).unwrap().get("escape").is_none());
     }
 }

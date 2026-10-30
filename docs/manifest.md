@@ -127,12 +127,13 @@ The [source-format guide](source-formats.md) describes the records each format p
 },
 ~~~
 
-Every member is optional. A member you state wins, and Cassiopeia still detects the ones you leave out. When `delimiter`, `quote`, `skipRows`, `headerRows` (or `header: false`), `terminator`, and `encoding` are all stated, Cassiopeia detects nothing, so the run no longer depends on detection.
+Every member is optional. A member you state wins, and Cassiopeia still detects the ones you leave out. When `delimiter`, `quote`, `skipRows`, `headerRows` (or `header: false`), `terminator`, and `encoding` are all stated, Cassiopeia detects nothing, so the run no longer depends on detection. An `escape` left out of such a dialect is `"double"`, the RFC 4180 default.
 
 | Member | Value |
 | --- | --- |
 | `delimiter` | The one character that separates fields, such as `","`, `";"`, or `"\t"`. |
 | `quote` | The one character that encloses a field, or `"none"` to turn quoting off. It must differ from the delimiter. |
+| `escape` | How a quote inside a quoted field is written: `"double"` for a doubled quote (`""`), as RFC 4180 has it, or the one character written in front of it, such as `"\\"` for `\"`. Under an escape character, a doubled quote is still read as one quote, and the character after the escape is always taken literally, so `\\` reads as `\` and `\n` as `n`. |
 | `skipRows` | The number of rows above the header to skip. Rows are counted as CSV records, so a quoted title that spans two lines is one row. |
 | `header` | `false` for a file without a header, whose columns are then read by position. `true` states that the file has a header and leaves its row count to detection. |
 | `headerRows` | The number of rows the header spans. Each column's non-blank header cells are joined with a space, so `NO2` over `HMW` over `µg/m³` becomes the field `NO2 HMW µg/m³`. |
@@ -141,7 +142,7 @@ Every member is optional. A member you state wins, and Cassiopeia still detects 
 | `decimalSeparator` | `"."`, the default, or `","`, which reads `12,45` as the number 12.45. Under `","`, a value with a full stop, such as the date `25.10.2026`, stays a string. |
 | `nullValues` | Values read as missing, such as `["NE", "---"]`, besides an empty field and `\N`. |
 
-Cassiopeia rejects `header: false` together with a `headerRows` above 0, and `header: true` together with `headerRows: 0`. Detection never sets `decimalSeparator` or `nullValues`, because nothing in a file tells a decimal comma or a missing-value token apart from text.
+Cassiopeia rejects `header: false` together with a `headerRows` above 0, and `header: true` together with `headerRows: 0`. It also rejects an `escape` together with `quote: "none"`, since no field is quoted, and an `escape` character equal to the quote, since a quote escaped by itself is a doubled quote, stated as `"double"`. Detection never sets `decimalSeparator` or `nullValues`, because nothing in a file tells a decimal comma or a missing-value token apart from text.
 
 `cassiopeia profile` prints the detected dialect in these member names and in manifest syntax, so a member it got wrong can be copied into `dialect` and corrected there. The [source-format guide](source-formats.md#csv) describes how each member is detected.
 

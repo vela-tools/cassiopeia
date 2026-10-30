@@ -6,6 +6,7 @@ pub mod decimal_separator;
 pub mod dialect;
 pub mod dialect_byte;
 pub mod error;
+pub mod escape;
 pub mod header_rows;
 pub mod header_statement;
 pub mod line_terminator;

@@ -79,6 +79,7 @@ mod tests {
         decimal_separator::DecimalSeparator,
         dialect::Dialect,
         dialect_byte::DialectByte,
+        escape::Escape,
         header_rows::HeaderRows,
         line_terminator::LineTerminator,
         preamble::Preamble,
@@ -102,7 +103,7 @@ mod tests {
             quote_char: Quote::Char(DialectByte::DOUBLE_QUOTE),
             preamble: Preamble::NONE,
             header_rows: HeaderRows::ONE,
-            escape: None,
+            escape: Escape::Doubled,
             terminator: LineTerminator::Lf,
             encoding: CharacterEncoding::new(UTF_8),
             notation: ValueNotation::PLAIN,
@@ -162,6 +163,20 @@ mod tests {
 
         assert!(csv_line(&dialect, Rendering::Plain).unwrap().ends_with("decimalSeparator \",\""));
         assert!(!csv_line(&comma_dialect(), Rendering::Plain).unwrap().contains("decimalSeparator"));
+    }
+
+    #[test]
+    fn a_csv_line_states_the_escape_only_for_a_backslash_dialect() {
+        let dialect = Dialect {
+            escape: Escape::Char(DialectByte::BACKSLASH),
+            ..comma_dialect()
+        };
+
+        assert_eq!(
+            csv_line(&dialect, Rendering::Plain).unwrap(),
+            "delimiter \",\" \u{b7} quote \"\\\"\" \u{b7} escape \"\\\\\" \u{b7} skipRows 0 \u{b7} headerRows 1 \u{b7} terminator \"lf\" \u{b7} encoding \"UTF-8\""
+        );
+        assert!(!csv_line(&comma_dialect(), Rendering::Plain).unwrap().contains("escape"));
     }
 
     #[test]

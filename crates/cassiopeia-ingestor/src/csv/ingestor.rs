@@ -263,6 +263,7 @@ mod tests {
         decimal_separator::DecimalSeparator,
         dialect::Dialect,
         dialect_byte::DialectByte,
+        escape::Escape,
         header_rows::HeaderRows,
         line_terminator::LineTerminator,
         null_token::NullToken,
@@ -361,7 +362,7 @@ mod tests {
             quote_char: Quote::Char(DialectByte::DOUBLE_QUOTE),
             preamble: Preamble::NONE,
             header_rows: HeaderRows::NONE,
-            escape: None,
+            escape: Escape::Doubled,
             terminator: LineTerminator::Lf,
             encoding: CharacterEncoding::new(UTF_8),
             notation: ValueNotation::PLAIN,
@@ -396,7 +397,7 @@ mod tests {
             quote_char: Quote::Char(DialectByte::DOUBLE_QUOTE),
             preamble: Preamble::new(1),
             header_rows: HeaderRows::ONE,
-            escape: None,
+            escape: Escape::Doubled,
             terminator: LineTerminator::Lf,
             encoding: CharacterEncoding::new(UTF_8),
             notation: ValueNotation::PLAIN,
@@ -445,6 +446,20 @@ mod tests {
     }
 
     #[test]
+    fn the_inspected_backslash_escape_ingests_escaped_quotes_as_quotes() {
+        let contents = "id,name,value\n1,\"say \\\"hi\\\"\",10\n2,plain,20\n3,\"a\\\"b\",30\n";
+        let dialect = CsvInspector::new(&DialectStatement::NOTHING)
+            .inspect(&Content::new(contents.as_bytes()))
+            .unwrap();
+        assert_eq!(dialect.escape, Escape::Char(DialectByte::BACKSLASH));
+        let (_dir, payload) = profiled_csv(contents, Some(FormatMetadata::Csv(CsvMetadata::new(dialect))));
+        let records = ingest_all(payload);
+        let names: Vec<_> = records.iter().map(|record| record.data().get("name").and_then(Value::as_str)).collect();
+
+        assert_eq!(names, vec![Some("say \"hi\""), Some("plain"), Some("a\"b")]);
+    }
+
+    #[test]
     fn a_stacked_header_keys_columns_by_joined_names_and_a_blank_one_by_position() {
         let contents = "Lumes;v2.10;30.10.26-10:00:00\n;Zeit-NO2;NO2;Zeit-PM10;PM10;PM10\n;;HMW;;MW24;HMW\n;MESZ;µg/m³;MESZ;µg/m³;µg/m³\nSTEF;30.10.2026, 10:00;18,48;30.10.2026, 10:00;NE;NE\nTAB;30.10.2026, 10:00;NE;30.10.2026, 10:00;14,03;14,44\nKE;30.10.2026, 10:00;15,17;30.10.2026, 10:00;12,49;18,80\n";
         let dialect = CsvInspector::new(&DialectStatement::NOTHING)
@@ -469,7 +484,7 @@ mod tests {
             quote_char: Quote::Char(DialectByte::DOUBLE_QUOTE),
             preamble: Preamble::NONE,
             header_rows: HeaderRows::ONE,
-            escape: None,
+            escape: Escape::Doubled,
             terminator: LineTerminator::Lf,
             encoding: CharacterEncoding::new(encoding),
             notation: ValueNotation::PLAIN,
@@ -506,7 +521,7 @@ mod tests {
             quote_char: Quote::Char(DialectByte::DOUBLE_QUOTE),
             preamble: Preamble::new(1),
             header_rows: HeaderRows::ONE,
-            escape: None,
+            escape: Escape::Doubled,
             terminator: LineTerminator::Lf,
             encoding: CharacterEncoding::new(UTF_8),
             notation: ValueNotation::PLAIN,
@@ -543,7 +558,7 @@ mod tests {
             quote_char: Quote::Char(DialectByte::DOUBLE_QUOTE),
             preamble: Preamble::NONE,
             header_rows: HeaderRows::ONE,
-            escape: None,
+            escape: Escape::Doubled,
             terminator: LineTerminator::Lf,
             encoding: CharacterEncoding::new(UTF_8),
             notation: ValueNotation::PLAIN,
@@ -561,7 +576,7 @@ mod tests {
             quote_char: Quote::Char(DialectByte::DOUBLE_QUOTE),
             preamble: Preamble::NONE,
             header_rows: HeaderRows::ONE,
-            escape: None,
+            escape: Escape::Doubled,
             terminator: LineTerminator::Lf,
             encoding: CharacterEncoding::new(UTF_8),
             notation,
@@ -684,7 +699,7 @@ mod tests {
             quote_char: Quote::Char(DialectByte::DOUBLE_QUOTE),
             preamble: Preamble::NONE,
             header_rows: HeaderRows::NONE,
-            escape: None,
+            escape: Escape::Doubled,
             terminator: LineTerminator::Lf,
             encoding: CharacterEncoding::new(UTF_8),
             notation: ValueNotation::PLAIN,
