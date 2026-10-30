@@ -1,7 +1,7 @@
 use crate::error::DialectError;
 use serde::{Deserialize, Serialize};
 
-/// A byte with a structural role in a CSV record, a delimiter or a quote: one ASCII character other
+/// A byte with a structural role in a CSV record, a delimiter, a quote or an escape: one ASCII character other
 /// than a line break, which ends a record rather than structuring one. A manifest states it as a
 /// one-character string, such as `";"` or `"\t"`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -29,6 +29,9 @@ impl DialectByte {
 
     /// The single quote.
     pub const SINGLE_QUOTE: DialectByte = DialectByte(b'\'');
+
+    /// The backslash, the escape in front of a quote in MySQL and PHP exports.
+    pub const BACKSLASH: DialectByte = DialectByte(b'\\');
 
     /// The byte itself, as the CSV parser takes it.
     #[must_use]

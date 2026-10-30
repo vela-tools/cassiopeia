@@ -3,7 +3,7 @@ use thiserror::Error;
 /// A stated CSV dialect member that cannot describe a file.
 #[derive(Debug, Error, PartialEq, Eq)]
 pub enum DialectError {
-    /// A delimiter or quote that is not a single ASCII character, or that is a line break, which
+    /// A delimiter, quote or escape that is not a single ASCII character, or that is a line break, which
     /// ends a record rather than structuring one.
     #[error("'{0}' is not a single ASCII character other than a line break")]
     InvalidByte(String),
@@ -19,6 +19,14 @@ pub enum DialectError {
     /// A stated delimiter and quote that are the same character, so no field could be quoted.
     #[error("The delimiter and the quote are both '{0}'")]
     DelimiterIsQuote(char),
+
+    /// An escape stated together with `quote: "none"`, so there is no quoted field for it to act in.
+    #[error("An escape is stated, but 'quote' is \"none\", so no field is quoted")]
+    EscapeWithoutQuote,
+
+    /// A stated escape byte and quote that are the same character, which is how doubling is stated.
+    #[error("The escape and the quote are both '{0}'; state the escape \"double\" instead")]
+    EscapeIsQuote(char),
 
     /// `header: false` stated together with a header of one or more records.
     #[error("'header' is false, but 'headerRows' is {0}")]

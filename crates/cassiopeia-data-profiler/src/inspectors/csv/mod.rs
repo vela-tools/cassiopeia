@@ -2,6 +2,7 @@ use crate::{
     content::Content,
     inspectors::csv::{
         error::CsvInspectError,
+        escape_evidence::backs_escape,
         header::{continuation_rows, header_quality, looks_like_header_row},
         table::Table,
         title::title_rows,
@@ -11,6 +12,7 @@ use cassiopeia_csv_dialect::{
     character_encoding::CharacterEncoding,
     dialect::Dialect,
     dialect_byte::DialectByte,
+    escape::Escape,
     header_rows::HeaderRows,
     header_statement::HeaderStatement,
     line_terminator::LineTerminator,
@@ -22,6 +24,7 @@ use cassiopeia_csv_dialect::{
 
 pub mod data_type;
 pub mod error;
+mod escape_evidence;
 mod header;
 mod table;
 mod title;
@@ -66,10 +69,14 @@ const CANDIDATE_DELIMITERS: [DialectByte; 5] = [
 /// The quoting tried when none is stated.
 const CANDIDATE_QUOTES: [Quote; 3] = [Quote::Char(DialectByte::DOUBLE_QUOTE), Quote::Char(DialectByte::SINGLE_QUOTE), Quote::Disabled];
 
+/// The escape byte tried, in front of the doubling RFC 4180 states, when none is stated and the
+/// sample backs it; see [`backs_escape`].
+const CANDIDATE_ESCAPE: DialectByte = DialectByte::BACKSLASH;
+
 /// CSV dialect inspector.
 ///
 /// The structural inspector for delimited text: it samples a payload and scores candidate dialects to
-/// recover the delimiter, quote, preamble, header, and terminator a specific CSV file uses. It runs
+/// recover the delimiter, quote, escape, preamble, header, and terminator a specific CSV file uses. It runs
 /// whichever way the format was decided, as part of auto-detection and for a declared CSV alike.
 ///
 /// A member its [`DialectStatement`] states is taken as stated, and only the members left out are
@@ -149,23 +156,27 @@ impl<'s> CsvInspector<'s> {
             .into_iter()
             .flat_map(|delimiter| self.quotes().into_iter().map(move |quote| (delimiter, quote)))
             .filter_map(|(delimiter, quote)| {
-                let candidate = Dialect {
-                    delimiter,
-                    quote_char: quote,
-                    preamble: Preamble::NONE,
-                    header_rows: HeaderRows::NONE,
-                    escape: None,
-                    terminator,
-                    encoding,
-                    notation: ValueNotation::PLAIN,
-                };
-                // A quote decides which line breaks end a record, so a cut sample is trimmed to its
-                // complete records under each candidate, never at a line.
-                let records = match extent {
-                    SampleExtent::Whole => sample,
-                    SampleExtent::Cut => candidate.complete_records(sample),
-                };
-                self.best_reading(records, candidate)
+                // The first escape whose candidate reads a table is the one scored, so an escape the
+                // sample backs is tried alone and doubling only when that escape reads no table.
+                self.escapes(sample, delimiter, quote).into_iter().find_map(|escape| {
+                    let candidate = Dialect {
+                        delimiter,
+                        quote_char: quote,
+                        preamble: Preamble::NONE,
+                        header_rows: HeaderRows::NONE,
+                        escape,
+                        terminator,
+                        encoding,
+                        notation: ValueNotation::PLAIN,
+                    };
+                    // A quote and its escape decide which line breaks end a record, so a cut sample
+                    // is trimmed to its complete records under each candidate, never at a line.
+                    let records = match extent {
+                        SampleExtent::Whole => sample,
+                        SampleExtent::Cut => candidate.complete_records(sample),
+                    };
+                    self.best_reading(records, candidate)
+                })
             })
             .reduce(|best, reading| best.or_better(Some(reading)));
 
@@ -185,9 +196,39 @@ impl<'s> CsvInspector<'s> {
             .map_or_else(|| CANDIDATE_DELIMITERS.to_vec(), |delimiter| vec![delimiter])
     }
 
-    /// The quoting to try: the stated one, or every candidate.
+    /// The quoting to try: the stated one, or every candidate. A stated escape needs a quote to act
+    /// in, so under one, disabled quoting is no candidate.
     fn quotes(&self) -> Vec<Quote> {
-        self.statement.quote().map_or_else(|| CANDIDATE_QUOTES.to_vec(), |quote| vec![quote])
+        self.statement.quote().map_or_else(
+            || {
+                CANDIDATE_QUOTES
+                    .into_iter()
+                    .filter(|quote| match (quote, self.statement.escape()) {
+                        (Quote::Disabled, Some(_)) => false,
+                        (Quote::Disabled, None) | (Quote::Char(_), Some(_) | None) => true,
+                    })
+                    .collect()
+            },
+            |quote| vec![quote],
+        )
+    }
+
+    /// The escapes to try under `quote`, in order of preference: the stated one, or the candidate
+    /// escape when `sample` backs it and doubling after it, or doubling alone.
+    ///
+    /// Error-free parsing cannot choose between doubling and an escape byte, since `csv_core` reads
+    /// a file of either kind without error under both; [`backs_escape`] holds the rule that does.
+    /// Doubling is RFC 4180's escape, so the escape byte is tried only on the sample's evidence,
+    /// which keeps the candidates scored for an RFC 4180 file what they were without it.
+    fn escapes(&self, sample: &[u8], delimiter: DialectByte, quote: Quote) -> Vec<Escape> {
+        match (quote, self.statement.escape()) {
+            (Quote::Char(_), Some(escape)) => vec![escape],
+            (Quote::Char(quote), None) if backs_escape(sample, delimiter, quote, CANDIDATE_ESCAPE) => {
+                vec![Escape::Char(CANDIDATE_ESCAPE), Escape::Doubled]
+            }
+            // An escape has no effect without a quote, so disabled quoting carries the default.
+            (Quote::Disabled, Some(_) | None) | (Quote::Char(_), None) => vec![Escape::Doubled],
+        }
     }
 
     /// The line terminator of `sample`: CRLF as soon as one line ends with it.
@@ -374,6 +415,7 @@ mod tests {
     use cassiopeia_csv_dialect::{
         decimal_separator::DecimalSeparator,
         dialect_byte::DialectByte,
+        escape::Escape,
         header_rows::HeaderRows,
         line_terminator::LineTerminator,
         preamble::Preamble,
@@ -757,5 +799,69 @@ mod tests {
 
         assert_eq!(dialect.notation.decimal_separator, DecimalSeparator::Comma);
         assert!(dialect.notation.is_null_token("NE"));
+    }
+
+    /// Quotes escaped with a backslash, as MySQL's `SELECT ... INTO OUTFILE` writes them.
+    const BACKSLASH_ESCAPED: &str = "id,name,value\n1,\"say \\\"hi\\\"\",10\n2,plain,20\n3,\"a\\\"b\",30\n";
+
+    #[test]
+    fn backslash_escaped_quotes_are_detected_as_a_backslash_escape() {
+        let dialect = CsvInspector::new(&DialectStatement::NOTHING)
+            .inspect(&Content::new(BACKSLASH_ESCAPED.as_bytes()))
+            .unwrap();
+        let mut reader = dialect.reader(BACKSLASH_ESCAPED.as_bytes()).unwrap();
+        let names: Vec<_> = reader.records().map(|record| record.unwrap()[1].to_owned()).collect();
+
+        assert_eq!(dialect.delimiter, DialectByte::COMMA);
+        assert_eq!(dialect.quote_char, Quote::Char(DialectByte::DOUBLE_QUOTE));
+        assert_eq!(dialect.escape, Escape::Char(DialectByte::BACKSLASH));
+        assert_eq!(names, vec!["say \"hi\"", "plain", "a\"b"]);
+    }
+
+    #[test]
+    fn doubled_quotes_are_detected_as_doubling() {
+        let sample = "id,name,value\n1,\"say \"\"hi\"\"\",10\n2,plain,20\n3,\"a\"\"b\",30\n";
+        let dialect = CsvInspector::new(&DialectStatement::NOTHING).inspect(&Content::new(sample.as_bytes())).unwrap();
+
+        assert_eq!(dialect.escape, Escape::Doubled);
+    }
+
+    #[test]
+    fn a_quoted_windows_path_ending_in_a_backslash_is_detected_as_doubling_and_read_intact() {
+        let sample = "path,count\n\"C:\\data\\\",1\n\"D:\\export\\\",2\n\"E:\\\",3\n";
+        let dialect = CsvInspector::new(&DialectStatement::NOTHING).inspect(&Content::new(sample.as_bytes())).unwrap();
+        let mut reader = dialect.reader(sample.as_bytes()).unwrap();
+
+        assert_eq!(dialect.escape, Escape::Doubled);
+        assert_eq!(reader.records().next().unwrap().unwrap(), vec!["C:\\data\\", "1"]);
+    }
+
+    #[test]
+    fn a_file_without_quotes_is_detected_with_no_escape() {
+        let dialect = CsvInspector::new(&DialectStatement::NOTHING)
+            .inspect(&Content::new(b"id,name,value\n1,alpha,10\n2,beta,20\n"))
+            .unwrap();
+
+        assert_eq!(dialect.escape, Escape::Doubled);
+    }
+
+    #[test]
+    fn a_stated_escape_is_used_instead_of_detection() {
+        let statement = stated(serde_json::json!({"escape": "double"}));
+        let dialect = CsvInspector::new(&statement).inspect(&Content::new(BACKSLASH_ESCAPED.as_bytes())).unwrap();
+
+        assert_eq!(dialect.escape, Escape::Doubled);
+        assert_eq!(dialect.quote_char, Quote::Char(DialectByte::DOUBLE_QUOTE));
+    }
+
+    #[test]
+    fn a_stated_backslash_escape_is_used_on_a_file_without_escaped_quotes() {
+        let statement = stated(serde_json::json!({"escape": "\\"}));
+        let dialect = CsvInspector::new(&statement)
+            .inspect(&Content::new(b"id,name,value\n1,alpha,10\n2,beta,20\n"))
+            .unwrap();
+
+        assert_eq!(dialect.escape, Escape::Char(DialectByte::BACKSLASH));
+        assert_ne!(dialect.quote_char, Quote::Disabled);
     }
 }

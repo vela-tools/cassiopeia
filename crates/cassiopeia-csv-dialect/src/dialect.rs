@@ -1,6 +1,7 @@
 use crate::{
     character_encoding::CharacterEncoding,
     dialect_byte::DialectByte,
+    escape::Escape,
     header_rows::HeaderRows,
     line_terminator::LineTerminator,
     preamble::Preamble,
@@ -25,8 +26,8 @@ pub struct Dialect {
     pub preamble: Preamble,
     /// The records after the preamble that form the header, joined per column into field names.
     pub header_rows: HeaderRows,
-    /// The escape byte, if any.
-    pub escape: Option<u8>,
+    /// How a quote inside a quoted field is escaped. It has no effect when quoting is disabled.
+    pub escape: Escape,
     /// The line terminator.
     pub terminator: LineTerminator,
     /// The character encoding. The ingestor decodes the file with it so a non-UTF-8 source is read
@@ -111,6 +112,9 @@ impl Dialect {
 
     /// The table reader configuration: non-flexible, so a record whose field count differs from the
     /// first one is a parse error. It does not skip the preamble; [`Self::reader`] does that first.
+    ///
+    /// Both readers leave `double_quote` on whatever the escape, so a doubled quote reads as one
+    /// under an escape byte too; `csv_core` checks for the escape byte only after the quote.
     #[must_use]
     pub fn reader_builder(&self) -> ReaderBuilder {
         let mut builder = ReaderBuilder::new();
@@ -118,7 +122,7 @@ impl Dialect {
             .delimiter(self.delimiter.byte())
             .has_headers(self.header_rows.is_present())
             .terminator(self.terminator.as_csv())
-            .escape(self.escape);
+            .escape(self.escape.byte());
         match self.quote_char.byte() {
             Some(quote) => builder.quote(quote),
             None => builder.quoting(false),
@@ -133,7 +137,7 @@ impl Dialect {
         builder
             .delimiter(self.delimiter.byte())
             .terminator(self.terminator.as_csv_core())
-            .escape(self.escape);
+            .escape(self.escape.byte());
         match self.quote_char.byte() {
             Some(quote) => builder.quote(quote),
             None => builder.quoting(false),
@@ -148,6 +152,7 @@ mod tests {
         character_encoding::CharacterEncoding,
         dialect::Dialect,
         dialect_byte::DialectByte,
+        escape::Escape,
         header_rows::HeaderRows,
         line_terminator::LineTerminator,
         preamble::Preamble,
@@ -163,7 +168,7 @@ mod tests {
             quote_char: Quote::Char(DialectByte::DOUBLE_QUOTE),
             preamble,
             header_rows: HeaderRows::ONE,
-            escape: None,
+            escape: Escape::Doubled,
             terminator: LineTerminator::Lf,
             encoding: CharacterEncoding::new(UTF_8),
             notation: ValueNotation::PLAIN,
@@ -269,5 +274,84 @@ mod tests {
         let mut reader = dialect.reader(&b"1;2\n3;4\n"[..]).unwrap();
 
         assert_eq!(reader.records().next().unwrap().unwrap(), vec!["1", "2"]);
+    }
+
+    fn backslash_dialect(preamble: Preamble) -> Dialect {
+        Dialect {
+            escape: Escape::Char(DialectByte::BACKSLASH),
+            ..semicolon_dialect(preamble)
+        }
+    }
+
+    #[test]
+    fn a_backslash_escaped_dialect_reads_an_escaped_quote_as_a_quote() {
+        let mut reader = backslash_dialect(Preamble::NONE)
+            .reader(
+                &br#"id;name
+1;"say \"hi\""
+"#[..],
+            )
+            .unwrap();
+
+        assert_eq!(reader.records().next().unwrap().unwrap(), vec!["1", r#"say "hi""#]);
+    }
+
+    #[test]
+    fn a_backslash_escaped_dialect_reads_an_escaped_backslash_as_one_backslash() {
+        let mut reader = backslash_dialect(Preamble::NONE)
+            .reader(
+                &br#"id;path
+1;"C:\\data\\"
+"#[..],
+            )
+            .unwrap();
+
+        assert_eq!(reader.records().next().unwrap().unwrap(), vec!["1", r"C:\data\"]);
+    }
+
+    #[test]
+    fn the_doubling_dialect_reads_a_doubled_quote_as_a_quote() {
+        let mut reader = semicolon_dialect(Preamble::NONE)
+            .reader(
+                &br#"id;name
+1;"say ""hi"""
+"#[..],
+            )
+            .unwrap();
+
+        assert_eq!(reader.records().next().unwrap().unwrap(), vec!["1", r#"say "hi""#]);
+    }
+
+    #[test]
+    fn a_backslash_escaped_dialect_still_reads_a_doubled_quote_as_a_quote() {
+        let mut reader = backslash_dialect(Preamble::NONE)
+            .reader(
+                &br#"id;name
+1;"say ""hi"""
+"#[..],
+            )
+            .unwrap();
+
+        assert_eq!(reader.records().next().unwrap().unwrap(), vec!["1", r#"say "hi""#]);
+    }
+
+    #[test]
+    fn both_readers_split_a_backslash_escaped_field_with_a_line_break_alike() {
+        // The preamble is skipped by the `csv_core` reader and the table read by the `csv` reader,
+        // so an escaped quote in the preamble's quoted line break must end its record at the same
+        // place in both, or the header is read from the middle of the title.
+        let input = b"\"Report \\\"live\\\"\ngenerated 25.10.26\";v2\nid;name\n1;\"say \\\"hi\\\"\nagain\"\n2;plain\n";
+        let mut reader = backslash_dialect(Preamble::new(1)).reader(&input[..]).unwrap();
+        let records: Vec<_> = reader.records().map(Result::unwrap).collect();
+
+        assert_eq!(reader.headers().unwrap(), vec!["id", "name"]);
+        assert_eq!(records, vec![vec!["1", "say \"hi\"\nagain"], vec!["2", "plain"]]);
+    }
+
+    #[test]
+    fn a_dialect_serialises_its_escape_as_a_manifest_string() {
+        let json = serde_json::to_value(backslash_dialect(Preamble::NONE)).unwrap();
+
+        assert_eq!(json["escape"], "\\");
     }
 }
