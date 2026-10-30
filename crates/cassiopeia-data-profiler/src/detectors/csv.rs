@@ -5,7 +5,6 @@ use crate::{
     profile::Profile,
 };
 use cassiopeia_common::format::DataFormat;
-use csv::ReaderBuilder;
 use mediatype::media_type;
 
 /// Detects delimited text by parsing a header row and a small sample of records.
@@ -26,20 +25,9 @@ impl Detector for CsvDetector {
 
 impl CsvDetector {
     fn has_header_and_record(bytes: &[u8], dialect: &Dialect) -> bool {
-        let mut builder = ReaderBuilder::new();
-        builder
-            .delimiter(dialect.delimiter)
-            .has_headers(dialect.has_headers)
-            .terminator(dialect.terminator.as_csv());
-
-        if let Some(quote) = dialect.quote_char {
-            builder.quote(quote);
-        } else {
-            builder.quoting(false);
-        }
-        builder.escape(dialect.escape);
-
-        let mut reader = builder.from_reader(bytes);
+        let Ok(mut reader) = dialect.reader(bytes) else {
+            return false;
+        };
         let Ok(headers) = reader.headers() else {
             return false;
         };
@@ -51,6 +39,7 @@ impl CsvDetector {
 mod tests {
     use crate::{
         detectors::{Detector, csv::CsvDetector},
+        inspectors::csv::preamble::Preamble,
         metadata::FormatMetadata,
     };
     use cassiopeia_common::format::DataFormat;
@@ -73,5 +62,14 @@ mod tests {
     #[test]
     fn an_empty_buffer_is_rejected() {
         assert!(CsvDetector.detect(b"").is_none());
+    }
+
+    #[test]
+    fn a_titled_table_is_detected_as_csv_with_its_preamble() {
+        let profile = CsvDetector.detect(b"Lumes;v2.10\nStation;NO2;O3\nSTEF;12;54\nAKA;9;40\n").unwrap();
+        let metadata = profile.metadata().as_ref().and_then(FormatMetadata::as_csv).unwrap();
+
+        assert_eq!(metadata.dialect().preamble, Preamble::new(1));
+        assert!(metadata.dialect().has_headers);
     }
 }

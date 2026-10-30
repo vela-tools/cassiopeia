@@ -1,36 +1,19 @@
 use crate::inspectors::csv::{
-    data_type::DataType,
     dialect::{Dialect, LineTerminator},
     error::CsvInspectError,
+    header::{header_quality, looks_like_header_row},
+    preamble::Preamble,
+    table::Table,
 };
-use ::csv::{Reader, ReaderBuilder, StringRecord};
 use chardetng::{EncodingDetector, Iso2022JpDetection, Utf8Detection};
-use std::{
-    collections::{HashMap, HashSet},
-    io::Read,
-};
+use std::io::Read;
 
 pub mod data_type;
 pub mod dialect;
 pub mod error;
-
-/// Table structure for uniformity analysis during dialect scoring.
-#[derive(Debug)]
-struct Table {
-    records: Vec<StringRecord>,
-    column_types: Vec<Vec<DataType>>,
-    num_columns: usize,
-    num_rows: usize,
-}
-
-/// Whether a candidate parse treats row 0 as a header to skip or as an ordinary data row to keep.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum HeaderRow {
-    /// Row 0 is data and stays in the table.
-    Keep,
-    /// Row 0 is a header and is not read as data.
-    Skip,
-}
+mod header;
+pub mod preamble;
+mod table;
 
 /// Read granularity for [`CsvInspector::read_sample`].
 const CHUNK: usize = 64 * 1024;
@@ -44,11 +27,19 @@ const MIN_SAMPLE_ROWS: usize = 5;
 /// target on its own, so a fixed-size sample could hold no complete data row at all.
 const MAX_SAMPLE_BYTES: usize = 4 * 1024 * 1024;
 
+/// The most leading records a preamble may cover. It bounds the candidate preambles tried per
+/// dialect; real title blocks above a table are a line or a few.
+const MAX_PREAMBLE_RECORDS: usize = 10;
+
+/// The fewest records a table below a non-empty preamble must hold: a header and a data row. A
+/// shorter tail is more likely a coincidence of a wrong delimiter than a table.
+const MIN_RECORDS_BELOW_PREAMBLE: usize = 2;
+
 /// CSV dialect inspector.
 ///
 /// The structural inspector for delimited text: it samples a payload and scores candidate dialects to
-/// recover the delimiter, quote, header, and terminator a specific CSV file uses. It runs whichever way
-/// the format was decided, as part of auto-detection and for a declared CSV alike.
+/// recover the delimiter, quote, preamble, header, and terminator a specific CSV file uses. It runs
+/// whichever way the format was decided, as part of auto-detection and for a declared CSV alike.
 pub struct CsvInspector {
     delimiters: Vec<u8>,
     quotes: Vec<Option<u8>>,
@@ -98,7 +89,6 @@ impl CsvInspector {
         let mut detector = EncodingDetector::new(Iso2022JpDetection::Deny);
         detector.feed(&sample_buf, true);
         let encoding = detector.guess(None, Utf8Detection::Allow);
-        let encoding_name = encoding.name().to_string();
         let decoded = encoding.decode(&sample_buf).0;
         let sample = decoded.as_bytes();
 
@@ -108,41 +98,45 @@ impl CsvInspector {
             LineTerminator::Lf
         };
 
-        let mut best_dialect: Option<Dialect> = None;
-        let mut best_table: Option<Table> = None;
+        let mut best: Option<(Dialect, Table)> = None;
         let mut best_score = f64::NEG_INFINITY;
 
         for &delimiter in &self.delimiters {
             for &quote in &self.quotes {
+                let headerless = Dialect {
+                    delimiter,
+                    quote_char: quote,
+                    preamble: Preamble::NONE,
+                    has_headers: false,
+                    escape: None,
+                    terminator,
+                    encoding: encoding.name().to_owned(),
+                };
                 // The full table keeps row 0, so it is both what the no-headers hypothesis scores and
                 // what a header is judged against; the headers hypothesis scores the data-only table.
-                let Some(full) = Self::build_dialect_table(sample, delimiter, quote, terminator, HeaderRow::Keep) else {
+                let Some((headerless, full)) = Self::locate_table(sample, headerless) else {
                     continue;
                 };
-                if full.num_columns <= 1 || full.num_rows == 0 {
-                    continue;
-                }
 
-                let header_signal = Self::header_quality(&full);
-                let full_rows = full.num_rows;
+                let header_signal = header_quality(&full);
+                let headed = Dialect {
+                    has_headers: true,
+                    encoding: encoding.name().to_owned(),
+                    ..headerless
+                };
+                let data = (full.num_rows >= 2).then(|| Table::parse(sample, &headed)).flatten().filter(Table::is_tabular);
 
-                let no_header_score = Self::score_table(&full);
+                let no_header_score = full.score();
                 if no_header_score > best_score {
                     best_score = no_header_score;
-                    best_dialect = Some(Self::dialect(delimiter, quote, false, terminator, &encoding_name));
-                    best_table = Some(full);
+                    best = Some((headerless, full));
                 }
 
-                if full_rows >= 2
-                    && let Some(data) = Self::build_dialect_table(sample, delimiter, quote, terminator, HeaderRow::Skip)
-                    && data.num_columns > 1
-                    && data.num_rows > 0
-                {
-                    let header_score = Self::score_table(&data) + header_signal * 15.0;
+                if let Some(data) = data {
+                    let header_score = data.score() + header_signal * 15.0;
                     if header_score > best_score {
                         best_score = header_score;
-                        best_dialect = Some(Self::dialect(delimiter, quote, true, terminator, &encoding_name));
-                        best_table = Some(data);
+                        best = Some((headed, data));
                     }
                 }
             }
@@ -150,14 +144,49 @@ impl CsvInspector {
 
         // Safety net: if the winner picked `has_headers = false` but row 0 looks
         // like a header, force headers on so the header row is not ingested.
-        if let (Some(dialect), Some(table)) = (best_dialect.as_mut(), best_table.as_ref())
+        if let Some((dialect, table)) = best.as_mut()
             && !dialect.has_headers
-            && Self::looks_like_header_row(table)
+            && looks_like_header_row(table)
         {
             dialect.has_headers = true;
         }
 
-        best_dialect.ok_or(CsvInspectError::NoDialectDetected)
+        best.map(|(dialect, _)| dialect).ok_or(CsvInspectError::NoDialectDetected)
+    }
+
+    /// Finds where the table in `sample` starts under `dialect`'s delimiter and quote, returning the
+    /// dialect with its preamble set and the headerless table below that preamble.
+    ///
+    /// A preamble is the run of leading records, such as a title line, whose field count differs
+    /// from the table's. The reader is not flexible, so while such a record is still in front of the
+    /// table the parse fails; the shortest preamble under which it succeeds is the one detected. A
+    /// candidate preamble is only tried when every record in it is a different width from the record
+    /// that would start the table, so a ragged row further down never turns the rows above it, the
+    /// header among them, into a preamble.
+    fn locate_table(sample: &[u8], mut dialect: Dialect) -> Option<(Dialect, Table)> {
+        let widths: Vec<usize> = dialect
+            .reader_builder()
+            .flexible(true)
+            .from_reader(sample)
+            .records()
+            .take(MAX_PREAMBLE_RECORDS + 1)
+            .map_while(Result::ok)
+            .map(|record| record.len())
+            .collect();
+
+        for (records, width) in widths.iter().enumerate() {
+            if widths[..records].contains(width) {
+                continue;
+            }
+            dialect.preamble = Preamble::new(records);
+            if let Some(table) = Table::parse(sample, &dialect) {
+                // Every record from here on shares one width, so a longer preamble could only drop
+                // rows of the same table, never reveal a different one.
+                let enough_rows = records == 0 || table.num_rows >= MIN_RECORDS_BELOW_PREAMBLE;
+                return (table.is_tabular() && enough_rows).then_some((dialect, table));
+            }
+        }
+        None
     }
 
     /// Reads a dialect sample large enough to score a header, bounded by a hard byte ceiling.
@@ -193,323 +222,11 @@ impl CsvInspector {
         }
         Ok(sample)
     }
-
-    fn looks_like_header_row(table: &Table) -> bool {
-        if table.num_rows < 2 || table.column_types.is_empty() {
-            return false;
-        }
-
-        // Row 0 must read as field labels rather than values on two counts: no cell carries a genuine
-        // data value, and every cell is label-shaped (short and comma-free, so a multi-word textual
-        // value is not mistaken for a header either).
-        //
-        // A boolean literal (`on`, `off`, `yes`, `no`, `true`, `false`, `y`, `n`) is a bare word that
-        // is equally a valid column label, so a boolean-typed row-0 cell counts as a label here, not a
-        // value. Without this a header column legitimately named `on` types as a boolean, row 0 is
-        // read as data, the file is ingested headerless, and every name-keyed field reference misses
-        // (the entity renders with a null id).
-        let Some(first_row) = table.records.first() else {
-            return false;
-        };
-        let row0_carries_no_value = table
-            .column_types
-            .iter()
-            .all(|col| col.first().is_none_or(|t| matches!(t, DataType::Text | DataType::Empty | DataType::Boolean)));
-        let row0_all_labels = !first_row.is_empty()
-            && first_row.iter().all(|cell| {
-                let cell = cell.trim();
-                cell.is_empty() || is_field_label(cell)
-            });
-        if !row0_carries_no_value || !row0_all_labels {
-            return false;
-        }
-
-        table
-            .column_types
-            .iter()
-            .any(|col| col.iter().skip(1).any(|t| !matches!(t, DataType::Text | DataType::Empty)))
-    }
-
-    /// Parses `sample` under one dialect into a [`Table`], keeping or skipping row 0 per `header_row`.
-    fn build_dialect_table(sample: &[u8], delimiter: u8, quote: Option<u8>, terminator: LineTerminator, header_row: HeaderRow) -> Option<Table> {
-        let mut builder = ReaderBuilder::new();
-        builder
-            .delimiter(delimiter)
-            .has_headers(header_row == HeaderRow::Skip)
-            .terminator(terminator.as_csv());
-        if let Some(quote) = quote {
-            builder.quote(quote);
-        } else {
-            builder.quoting(false);
-        }
-        Self::build_table(builder.from_reader(sample))
-    }
-
-    /// Assembles a [`Dialect`] from the parameters a winning candidate was scored under.
-    fn dialect(delimiter: u8, quote: Option<u8>, has_headers: bool, terminator: LineTerminator, encoding: &str) -> Dialect {
-        Dialect {
-            delimiter,
-            quote_char: quote,
-            has_headers,
-            escape: None,
-            terminator,
-            encoding: encoding.to_string(),
-        }
-    }
-
-    fn build_table<R: Read>(mut reader: Reader<R>) -> Option<Table> {
-        let mut records = Vec::new();
-        for result in reader.records() {
-            match result {
-                Ok(record) => records.push(record),
-                Err(_) => return None,
-            }
-        }
-
-        if records.is_empty() {
-            return None;
-        }
-
-        let num_columns = records.first().map_or(0, StringRecord::len);
-        let num_rows = records.len();
-        let column_types = (0..num_columns)
-            .map(|col| records.iter().map(|record| record.get(col).map_or(DataType::Empty, DataType::detect)).collect())
-            .collect();
-
-        Some(Table {
-            records,
-            column_types,
-            num_columns,
-            num_rows,
-        })
-    }
-
-    /// Scores how coherent a parsed table is, independent of whether row 0 is a header. The header
-    /// decision is made separately from [`Self::header_quality`], which the caller weighs in.
-    fn score_table(table: &Table) -> f64 {
-        let mut score = 0.0;
-        score += Self::column_consistency(table) * 40.0;
-        score += Self::type_uniformity(table) * 30.0;
-        let col_bonus = to_f64(table.num_columns).min(20.0) / 20.0;
-        score += col_bonus * 10.0;
-        if table.num_rows <= 1 {
-            score -= 20.0;
-        }
-
-        let empty_cols = table.column_types.iter().filter(|col| col.iter().all(|t| *t == DataType::Empty)).count();
-        if table.num_columns > 0 {
-            score -= (to_f64(empty_cols) / to_f64(table.num_columns)) * 15.0;
-        }
-
-        // A field still wrapped in matching quotes means the quote candidate under test left the
-        // enclosing quotes in the data. The other scoring terms cannot see this: a quoted numeric
-        // column reads as uniform `Text` whether or not the quotes were stripped, so quoting-off
-        // would otherwise tie or beat quoting-on for every file with quoted numeric columns. This
-        // penalty is what makes the correct quote character win.
-        score -= Self::enclosed_quote_fraction(table) * 50.0;
-        score
-    }
-
-    /// Fraction of non-empty parsed fields still enclosed in a matching pair of quote characters.
-    fn enclosed_quote_fraction(table: &Table) -> f64 {
-        let mut total = 0usize;
-        let mut enclosed = 0usize;
-        for record in &table.records {
-            for field in record {
-                let field = field.trim();
-                if field.is_empty() {
-                    continue;
-                }
-                total += 1;
-                if is_enclosed_in_quotes(field) {
-                    enclosed += 1;
-                }
-            }
-        }
-
-        if total == 0 { 0.0 } else { to_f64(enclosed) / to_f64(total) }
-    }
-
-    fn column_consistency(table: &Table) -> f64 {
-        if table.records.is_empty() {
-            return 0.0;
-        }
-        let expected = table.num_columns;
-        let consistent = table.records.iter().filter(|r| r.len() == expected).count();
-        to_f64(consistent) / to_f64(table.records.len())
-    }
-
-    fn type_uniformity(table: &Table) -> f64 {
-        if table.column_types.is_empty() {
-            return 0.0;
-        }
-
-        let mut total_uniformity = 0.0;
-        for col_types in &table.column_types {
-            let non_empty: Vec<&DataType> = col_types.iter().filter(|t| **t != DataType::Empty).collect();
-            if non_empty.is_empty() {
-                continue;
-            }
-            let mut type_counts: HashMap<&DataType, usize> = HashMap::new();
-            for t in &non_empty {
-                *type_counts.entry(t).or_insert(0) += 1;
-            }
-            let max_count = type_counts.values().max().copied().unwrap_or(0);
-            total_uniformity += to_f64(max_count) / to_f64(non_empty.len());
-        }
-
-        total_uniformity / to_f64(table.column_types.len())
-    }
-
-    /// Scores how much row 0 looks like a header, as a signed value in `[-1, 1]`: positive is
-    /// header-like, negative is data-like.
-    ///
-    /// The primary signal is a column-pattern violation. Each column's type is learned from the rows
-    /// below row 0; row 0 is then header-like where it breaks a well-typed column (a text label over
-    /// a numeric or boolean column) and data-like where it conforms to one (a number sitting in a
-    /// numeric column). This is what separates a real header from a data row that merely happens to
-    /// be mostly text: a data row's first cells still fit their columns' types.
-    ///
-    /// When no column carries a strong type (an all-text table), type gives no signal and the score
-    /// falls back to row 0's shape: a header's cells are usually unique, non-blank textual labels.
-    fn header_quality(table: &Table) -> f64 {
-        let Some(first_row) = table.records.first() else {
-            return 0.0;
-        };
-        if first_row.is_empty() || table.num_columns == 0 {
-            return 0.0;
-        }
-
-        let mut evidence = 0.0;
-        let mut typed_columns = 0usize;
-        for column in &table.column_types {
-            let Some(dominant) = dominant_typed_pattern(column.get(1..).unwrap_or(&[])) else {
-                continue;
-            };
-            typed_columns += 1;
-            match column.first().copied().unwrap_or(DataType::Empty) {
-                // A text label sitting over a numeric or boolean column is header evidence.
-                DataType::Text | DataType::Empty => evidence += 1.0,
-                // A boolean literal (`on`, `off`, `yes`, `no`, `true`, `false`, `y`, `n`) is a bare
-                // word that is equally a valid column label, so row 0 holding one over a boolean
-                // column is genuinely ambiguous and must not be scored as a data row — a header named
-                // `on` otherwise reads as data and the whole entity renders with a null id. It gives
-                // no signal either way.
-                DataType::Boolean => {}
-                // Row 0 fits the column's own type, so it reads as one more data row.
-                row0 if row0 == dominant => evidence -= 1.0,
-                // Typed but a different type: inconclusive, contributes nothing.
-                DataType::Integer
-                | DataType::Float
-                | DataType::Date
-                | DataType::Time
-                | DataType::DateTime
-                | DataType::Email
-                | DataType::Url
-                | DataType::Phone
-                | DataType::Currency
-                | DataType::Percentage => {}
-            }
-        }
-
-        if typed_columns > 0 {
-            return evidence / to_f64(table.num_columns);
-        }
-
-        header_shape(first_row)
-    }
-}
-
-fn to_f64(count: usize) -> f64 {
-    u32::try_from(count).map_or_else(|_| f64::from(u32::MAX), f64::from)
-}
-
-/// The dominant type of a column's data cells, but only when that type is a strong, non-textual
-/// pattern the header check can measure row 0 against.
-///
-/// `Empty` cells are ignored as missing values. The dominant type must cover at least four fifths of
-/// the remaining cells, so a noisy or mixed column contributes no signal; a column that is dominantly
-/// `Text` or has no typed cells returns `None`.
-fn dominant_typed_pattern(cells: &[DataType]) -> Option<DataType> {
-    let mut counts: HashMap<DataType, usize> = HashMap::new();
-    let mut present = 0usize;
-    for &cell in cells {
-        if cell == DataType::Empty {
-            continue;
-        }
-        present += 1;
-        *counts.entry(cell).or_insert(0) += 1;
-    }
-
-    if present == 0 {
-        return None;
-    }
-
-    let (dominant, count) = counts.into_iter().max_by_key(|&(_, count)| count)?;
-    if matches!(dominant, DataType::Text | DataType::Empty) {
-        return None;
-    }
-
-    (to_f64(count) / to_f64(present) >= 0.8).then_some(dominant)
-}
-
-/// The longest a cell can be and still read as a field label rather than a value.
-const MAX_LABEL_LENGTH: usize = 40;
-
-/// The most whitespace-separated words a field label carries; more reads as prose, i.e. a value.
-const MAX_LABEL_WORDS: usize = 3;
-
-/// A fallback header signal for an all-text table, where column types cannot separate a header from
-/// a data row.
-///
-/// It rests on shape: a header row's cells look like field labels (short, distinct tokens such as
-/// `name` or `iso_code`), whereas a data row carries real values. A single cell that reads as a
-/// value rather than a label (one with a comma, a parenthesis, or several words) is taken as proof
-/// that row 0 is data, so the score turns negative; an all-label row scores positive, more so when
-/// its labels are distinct.
-fn header_shape(first_row: &StringRecord) -> f64 {
-    let mut seen = HashSet::new();
-    let mut unique = true;
-    let mut labels = 0usize;
-    for field in first_row {
-        let field = field.trim();
-        if field.is_empty() {
-            continue;
-        }
-        if !is_field_label(field) {
-            return -1.0;
-        }
-        labels += 1;
-        if !seen.insert(field) {
-            unique = false;
-        }
-    }
-
-    if labels == 0 {
-        return 0.0;
-    }
-
-    if unique { 1.0 } else { 0.5 }
-}
-
-/// Whether `cell` has the shape of a field label rather than a data value: short, free of the
-/// commas, parentheses, and semicolons a value carries, and no more than a few words.
-fn is_field_label(cell: &str) -> bool {
-    cell.len() <= MAX_LABEL_LENGTH && !cell.contains([',', '(', ')', ';']) && cell.split_whitespace().count() <= MAX_LABEL_WORDS
-}
-
-/// Whether `field` begins and ends with the same quote character (`"` or `'`).
-///
-/// A leading apostrophe in ordinary text (`L'Aquila`) is not matched, because only a field that is
-/// enclosed on both ends signals unstripped quoting rather than an incidental quote.
-fn is_enclosed_in_quotes(field: &str) -> bool {
-    let bytes = field.as_bytes();
-    matches!(bytes, [first, .., last] if (*first == b'"' || *first == b'\'') && first == last)
 }
 
 #[cfg(test)]
 mod tests {
-    use crate::inspectors::csv::{CsvInspector, dialect::LineTerminator};
+    use crate::inspectors::csv::{CsvInspector, dialect::LineTerminator, preamble::Preamble};
     use pretty_assertions::assert_eq;
 
     #[test]
@@ -615,5 +332,70 @@ mod tests {
         assert_eq!(dialect.delimiter, b';');
         assert_eq!(dialect.quote_char, Some(b'"'));
         assert!(dialect.has_headers);
+    }
+
+    /// The reproduction from the issue: a three-field title line above a five-column table.
+    const TITLED_AIR_QUALITY: &str = "Lumes;v2.10;25.10.26-08:00:00\nStation;Zeit-NO2;NO2;Zeit-O3;O3\nSTEF;25.10.2026, 08:00;12,45;25.10.2026, 08:00;54,55\nTAB;25.10.2026, 08:00;NE;25.10.2026, 08:00;NE\nAKA;25.10.2026, 08:00;9,80;25.10.2026, 08:00;40,10\n";
+
+    #[test]
+    fn a_title_line_above_the_header_is_detected_as_a_one_record_preamble() {
+        let dialect = CsvInspector::new().inspect(TITLED_AIR_QUALITY.as_bytes()).unwrap();
+
+        assert_eq!(dialect.delimiter, b';');
+        assert_eq!(dialect.quote_char, Some(b'"'));
+        assert_eq!(dialect.preamble, Preamble::new(1));
+        assert!(dialect.has_headers);
+        assert_eq!(dialect.terminator, LineTerminator::Lf);
+    }
+
+    #[test]
+    fn the_same_table_without_its_title_line_has_no_preamble() {
+        let untitled = TITLED_AIR_QUALITY.split_once('\n').unwrap().1;
+        let dialect = CsvInspector::new().inspect(untitled.as_bytes()).unwrap();
+
+        assert_eq!(dialect.delimiter, b';');
+        assert_eq!(dialect.preamble, Preamble::NONE);
+        assert!(dialect.has_headers);
+    }
+
+    #[test]
+    fn a_quoted_title_spanning_two_lines_is_one_preamble_record() {
+        // Five line feeds but four CSV records: the preamble is counted in records, so the header and
+        // the first data row below the quoted line break stay whole.
+        let sample = "\"Lumes report\ngenerated 25.10.26\";v2.10\nStation;NO2;O3\nSTEF;12,45;54,55\nAKA;9,80;40,10\n";
+        let dialect = CsvInspector::new().inspect(sample.as_bytes()).unwrap();
+        let mut reader = dialect.reader(sample.as_bytes()).unwrap();
+
+        assert_eq!(dialect.preamble, Preamble::new(1));
+        assert_eq!(reader.headers().unwrap(), vec!["Station", "NO2", "O3"]);
+        assert_eq!(reader.records().next().unwrap().unwrap(), vec!["STEF", "12,45", "54,55"]);
+    }
+
+    #[test]
+    fn a_multi_line_title_block_is_detected_as_a_multi_record_preamble() {
+        let sample = "Air quality;Vienna\nGenerated;25.10.26;08:00;CET;v2\nStation;NO2;O3\nSTEF;12;54\nAKA;9;40\nTAB;7;38\n";
+        let dialect = CsvInspector::new().inspect(sample.as_bytes()).unwrap();
+
+        assert_eq!(dialect.preamble, Preamble::new(2));
+        assert!(dialect.has_headers);
+    }
+
+    #[test]
+    fn a_blank_line_after_the_title_is_not_counted_as_a_preamble_record() {
+        let sample = "Lumes;v2.10;25.10.26\n\nStation;NO2\nSTEF;12\nAKA;9\n";
+        let dialect = CsvInspector::new().inspect(sample.as_bytes()).unwrap();
+        let mut reader = dialect.reader(sample.as_bytes()).unwrap();
+
+        assert_eq!(dialect.preamble, Preamble::new(1));
+        assert_eq!(reader.headers().unwrap(), vec!["Station", "NO2"]);
+    }
+
+    #[test]
+    fn a_ragged_row_below_the_header_does_not_turn_the_header_into_a_preamble() {
+        // Rows 0 to 2 share the table's width, so they cannot be a preamble; the file stays
+        // undetectable rather than silently losing its header.
+        let sample = "id;name\n1;alpha\n2;beta\n3;gamma;extra\n4;delta\n5;epsilon\n";
+
+        assert!(CsvInspector::new().inspect(sample.as_bytes()).is_err());
     }
 }

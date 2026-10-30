@@ -1,5 +1,5 @@
 use crate::{csv::error::CsvIngestError, error::IngestorError, ingestor::Ingestor};
-use ::csv::{Reader, ReaderBuilder, StringRecord};
+use ::csv::{Reader, StringRecord};
 use cassiopeia_common::{channel::ChannelSender, signal::Signal};
 use cassiopeia_data_profiler::metadata::FormatMetadata;
 use cassiopeia_ir::{
@@ -10,15 +10,18 @@ use encoding_rs::{Encoding, UTF_8};
 use encoding_rs_io::{DecodeReaderBytes, DecodeReaderBytesBuilder};
 use rustc_hash::FxHashMap;
 use serde_json::{Map, Number, Value};
-use std::{fs::File, mem};
+use std::{fs::File, io::BufReader, mem};
 use tracing::{info, warn};
+
+/// A CSV reader over a file decoded to UTF-8 with its profiled encoding.
+type DecodedFileReader = Reader<BufReader<DecodeReaderBytes<File, Vec<u8>>>>;
 
 /// Ingestor for CSV data.
 ///
 /// Uses the profiled CSV dialect when one is available, then parses records with
 /// smart value inference.
 pub struct CsvIngestor {
-    reader: Option<Reader<DecodeReaderBytes<File, Vec<u8>>>>,
+    reader: Option<DecodedFileReader>,
     header_mapping: FxHashMap<String, String>,
     has_headers: bool,
     batch_size: usize,
@@ -44,25 +47,9 @@ impl CsvIngestor {
             CollectedPayload::Bytes(_) => return Err(CsvIngestError::RequiresFile.into()),
         };
 
-        let mut builder = ReaderBuilder::new();
-        let encoding = if let Some(dialect) = &dialect {
-            info!("Using profiled CSV dialect: {:#?}", dialect);
-            builder
-                .delimiter(dialect.delimiter)
-                .has_headers(dialect.has_headers)
-                .terminator(dialect.terminator.as_csv());
-
-            if let Some(quote) = dialect.quote_char {
-                builder.quote(quote);
-            } else {
-                builder.quoting(false);
-            }
-            builder.escape(dialect.escape);
-
-            Encoding::for_label(dialect.encoding.as_bytes()).unwrap_or(UTF_8)
-        } else {
-            UTF_8
-        };
+        let encoding = dialect
+            .as_ref()
+            .map_or(UTF_8, |dialect| Encoding::for_label(dialect.encoding.as_bytes()).unwrap_or(UTF_8));
 
         // Decode the file to UTF-8 with the profiled encoding, so a non-UTF-8 source (Windows-1252,
         // Latin-1, ...) is read correctly instead of failing on its first non-UTF-8 byte.
@@ -71,8 +58,21 @@ impl CsvIngestor {
             // The error owns the path after this borrow ends.
             path: path.clone(),
         })?;
-        let decoded = DecodeReaderBytesBuilder::new().encoding(Some(encoding)).build(file);
-        let mut reader = builder.from_reader(decoded);
+        let decoded = BufReader::new(DecodeReaderBytesBuilder::new().encoding(Some(encoding)).build(file));
+
+        // The profiled dialect opens the file exactly as the inspector parsed its sample, preamble
+        // skip included, so the header read below is the one the inspector detected.
+        let mut reader = match &dialect {
+            Some(dialect) => {
+                info!("Using profiled CSV dialect: {:#?}", dialect);
+                dialect.reader(decoded).map_err(|source| CsvIngestError::Preamble {
+                    source,
+                    // The error owns the path after this borrow ends.
+                    path: path.clone(),
+                })?
+            }
+            None => Reader::from_reader(decoded),
+        };
 
         // A headerless source has no names to key its columns by; its records are keyed by position
         // instead, so the first row is not consumed as a header and nothing is lost.
@@ -223,7 +223,11 @@ mod tests {
     use crate::{csv::ingestor::CsvIngestor, ingestor::Ingestor};
     use cassiopeia_common::{channel::ChannelSender, format::DataFormat, signal::Signal};
     use cassiopeia_data_profiler::{
-        inspectors::csv::dialect::{Dialect, LineTerminator},
+        inspectors::csv::{
+            CsvInspector,
+            dialect::{Dialect, LineTerminator},
+            preamble::Preamble,
+        },
         metadata::{CsvMetadata, FormatMetadata},
         profile::Profile,
     };
@@ -301,6 +305,7 @@ mod tests {
         let metadata = FormatMetadata::Csv(CsvMetadata::new(Dialect {
             delimiter: b',',
             quote_char: Some(b'"'),
+            preamble: Preamble::NONE,
             has_headers: false,
             escape: None,
             terminator: LineTerminator::Lf,
@@ -327,10 +332,47 @@ mod tests {
     }
 
     #[test]
+    fn a_profiled_preamble_is_skipped_before_the_header() {
+        // A quoted title spanning two lines is one CSV record: the ingestor skips it as a whole and
+        // the first data row arrives intact.
+        let contents = "\"Lumes report\ngenerated 25.10.26\";v2.10\nStation;NO2\nSTEF;12,45\nAKA;9,80\n";
+        let metadata = FormatMetadata::Csv(CsvMetadata::new(Dialect {
+            delimiter: b';',
+            quote_char: Some(b'"'),
+            preamble: Preamble::new(1),
+            has_headers: true,
+            escape: None,
+            terminator: LineTerminator::Lf,
+            encoding: "UTF-8".to_string(),
+        }));
+        let (_dir, payload) = profiled_csv(contents, Some(metadata));
+        let records = ingest_all(payload);
+
+        assert_eq!(records.len(), 2);
+        assert_eq!(records[0].data().get("Station"), Some(&Value::String("STEF".to_string())));
+        assert_eq!(records[0].data().get("NO2"), Some(&Value::String("12,45".to_string())));
+        assert_eq!(records[1].data().get("Station"), Some(&Value::String("AKA".to_string())));
+    }
+
+    #[test]
+    fn the_inspected_dialect_ingests_a_titled_table_from_its_header() {
+        let contents = "Lumes;v2.10;25.10.26-08:00:00\nStation;Zeit-NO2;NO2;O3\nSTEF;25.10.2026, 08:00;12;54\nTAB;25.10.2026, 08:00;NE;38\n";
+        let dialect = CsvInspector::new().inspect(contents.as_bytes()).unwrap();
+        let (_dir, payload) = profiled_csv(contents, Some(FormatMetadata::Csv(CsvMetadata::new(dialect))));
+        let records = ingest_all(payload);
+
+        assert_eq!(records.len(), 2);
+        assert_eq!(records[0].data().get("Station"), Some(&Value::String("STEF".to_string())));
+        assert_eq!(records[0].data().get("NO2"), Some(&Value::Number(12.into())));
+        assert_eq!(records[1].data().get("NO2"), Some(&Value::String("NE".to_string())));
+    }
+
+    #[test]
     fn profiled_dialect_is_used_for_non_default_csv() {
         let metadata = FormatMetadata::Csv(CsvMetadata::new(Dialect {
             delimiter: b';',
             quote_char: Some(b'"'),
+            preamble: Preamble::NONE,
             has_headers: true,
             escape: None,
             terminator: LineTerminator::Lf,

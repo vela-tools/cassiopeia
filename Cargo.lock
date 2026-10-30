@@ -553,6 +553,7 @@ dependencies = [
  "cassiopeia-common",
  "chardetng",
  "csv",
+ "csv-core",
  "encoding_rs",
  "getset",
  "lazy-regex",
