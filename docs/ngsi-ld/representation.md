@@ -113,7 +113,7 @@ Concise is also lossless. It removes a redundant `type` member when the remainin
 
 ### Simplified
 
-Simplified representation, often called key-values, keeps each attribute's value and removes the surrounding attribute object. A consumer requests it with `options=keyValues`. ETSI defines it in clause 4.5.4. A Property becomes its value, a Relationship becomes its target URI or URIs, and a GeoProperty becomes its GeoJSON geometry.
+Simplified representation, often called key-values, keeps each attribute's value and removes the surrounding attribute object. A consumer requests it with `options=keyValues`. ETSI defines it in clause 4.5.4. A Property becomes its value, a Relationship becomes its target URI or URIs, and a GeoProperty becomes its GeoJSON geometry. Beside the attributes, the entity keeps only `@context`, `id`, and `type`: its `scope` and `expiresAt` are left out.
 
 ```json
 {

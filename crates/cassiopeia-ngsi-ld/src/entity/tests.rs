@@ -1612,30 +1612,30 @@ fn attributes_are_reachable_and_removable_by_a_plain_string_key() {
     assert!(attributes.get("observedAt").is_none());
 }
 
-#[test]
-fn an_entity_expires_at_serializes_after_the_scope_in_every_representation() {
-    // The optional reserved members of clause 4.5.1 keep one fixed order in the entity map: `scope`,
-    // then `expiresAt`, then the attributes. This is also the only test that serializes a non-empty
-    // entity `scope`.
+/// A `Sensor` carrying a `scope`, an entity `expiresAt`, and one `temperature` attribute.
+fn scoped_expiring_entity() -> NgsiLdEntity {
     let mut attributes = Attributes::default();
     attributes.insert(
         NameBuf::new("temperature").unwrap(),
         NgsiLdAttributeWrapper::single(NgsiLdAttribute::Property(NgsiLdProperty::new(Value::from(json!(21.5))))),
     );
-    let entity = NgsiLdEntity {
+    NgsiLdEntity {
         context: None,
         id: "urn:ngsi-ld:Sensor:1".parse::<Urn>().unwrap(),
         entity_type: NameBuf::new("Sensor").unwrap(),
         scope: NgsiLdScope::from_scopes(vec![ScopeBuf::new("/Ljubljana").unwrap()]),
         expires_at: Some(Utc.with_ymd_and_hms(2026, 10, 25, 13, 0, 0).unwrap()),
         attributes,
-    };
+    }
+}
 
-    for representation in [
-        NgsiLdRepresentation::Normalized,
-        NgsiLdRepresentation::Concise,
-        NgsiLdRepresentation::Simplified,
-    ] {
+#[test]
+fn an_entity_expires_at_serializes_after_the_scope_in_normalized_and_concise() {
+    // The optional reserved members of clause 4.5.1 keep one fixed order in the entity map: `scope`,
+    // then `expiresAt`, then the attributes.
+    let entity = scoped_expiring_entity();
+
+    for representation in [NgsiLdRepresentation::Normalized, NgsiLdRepresentation::Concise] {
         let serialized = serialize_entity(&entity, representation, NgsiLdSkipNull::Skip);
         let keys: Vec<&str> = serialized.as_object().unwrap().keys().map(String::as_str).collect();
 
@@ -1643,6 +1643,16 @@ fn an_entity_expires_at_serializes_after_the_scope_in_every_representation() {
         assert_eq!(serialized["scope"], json!("/Ljubljana"));
         assert_eq!(serialized["expiresAt"], "2026-10-25T13:00:00Z");
     }
+}
+
+#[test]
+fn a_simplified_entity_omits_its_scope_and_expires_at() {
+    // Clause 4.5.4 admits only `@context`, `id`, `type`, and the attributes in the simplified
+    // representation.
+    let serialized = serialize_entity(&scoped_expiring_entity(), NgsiLdRepresentation::Simplified, NgsiLdSkipNull::Skip);
+    let keys: Vec<&str> = serialized.as_object().unwrap().keys().map(String::as_str).collect();
+
+    assert_eq!(keys, ["id", "type", "temperature"]);
 }
 
 #[test]

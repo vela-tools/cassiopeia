@@ -67,7 +67,7 @@ Concise is useful when the consumer understands the NGSI-LD concise rules and yo
 
 ### Simplified
 
-Simplified output keeps only the attribute value. It is the most compact form, but it does not carry metadata such as `observedAt`, `unitCode`, or `datasetId`:
+Simplified output keeps only the attribute value. It is the most compact form, but it does not carry metadata such as `observedAt`, `unitCode`, or `datasetId`, nor the entity's `scope` or `expiresAt`:
 
 ~~~json
 {
