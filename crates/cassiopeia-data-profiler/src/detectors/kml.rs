@@ -1,4 +1,4 @@
-use crate::{detectors::Detector, profile::Profile};
+use crate::{content::Content, detectors::Detector, profile::Profile};
 use cassiopeia_common::format::DataFormat;
 use mediatype::media_type;
 use std::{
@@ -11,7 +11,8 @@ use zip::ZipArchive;
 pub struct KmlDetector;
 
 impl Detector for KmlDetector {
-    fn detect(&self, bytes: &[u8]) -> Option<Profile> {
+    fn detect(&self, content: &Content<'_>) -> Option<Profile> {
+        let bytes = content.bytes();
         if is_kml(bytes) {
             return Some(Profile::new(DataFormat::Kml, media_type!(APPLICATION / vnd::GOOGLE_EARTH_KML + XML), 1.0));
         }
@@ -51,7 +52,10 @@ fn is_kml(bytes: &[u8]) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use crate::detectors::{Detector, kml::KmlDetector};
+    use crate::{
+        content::Content,
+        detectors::{Detector, kml::KmlDetector},
+    };
     use cassiopeia_common::format::DataFormat;
     use pretty_assertions::assert_eq;
     use std::io::{Cursor, Write};
@@ -60,14 +64,14 @@ mod tests {
     #[test]
     fn kml_is_detected_by_its_root_element_and_ogc_namespace() {
         let bytes = br#"<?xml version="1.0"?><kml xmlns="http://www.opengis.net/kml/2.2"><Document/></kml>"#;
-        let profile = KmlDetector.detect(bytes).unwrap();
+        let profile = KmlDetector.detect(&Content::new(bytes)).unwrap();
         assert_eq!(*profile.format(), DataFormat::Kml);
         assert_eq!(profile.mime_type().to_string(), "application/vnd.google-earth.kml+xml");
     }
 
     #[test]
     fn xml_without_the_kml_namespace_is_rejected() {
-        assert!(KmlDetector.detect(br"<kml>no namespace</kml>").is_none());
+        assert!(KmlDetector.detect(&Content::new(br"<kml>no namespace</kml>")).is_none());
     }
 
     #[test]
@@ -80,7 +84,7 @@ mod tests {
             archive.finish().unwrap();
         }
 
-        let profile = KmlDetector.detect(bytes.get_ref()).unwrap();
+        let profile = KmlDetector.detect(&Content::new(bytes.get_ref())).unwrap();
         assert_eq!(*profile.format(), DataFormat::Kmz);
         assert_eq!(profile.mime_type().to_string(), "application/vnd.google-earth.kmz");
     }

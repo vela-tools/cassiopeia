@@ -31,8 +31,8 @@ impl Profiler for AutoProfiler {
             &self.receiver,
             routes,
             |payload| match payload {
-                CollectedPayload::File(file) => Ok(profile_path(file.path())?),
-                CollectedPayload::Bytes(bytes) => Ok(profile_bytes(bytes.data())?),
+                CollectedPayload::File(file) => Ok(profile_path(file.path(), file.encoding_hint())?),
+                CollectedPayload::Bytes(bytes) => Ok(profile_bytes(bytes.data(), bytes.encoding_hint())?),
             },
             self.telemetry.as_ref(),
         )
@@ -52,13 +52,13 @@ mod tests {
         signal::Signal,
         telemetry::run::RunTelemetry,
     };
-    use cassiopeia_data_profiler::metadata::FormatMetadata;
+    use cassiopeia_data_profiler::{encoding_hint::EncodingHint, metadata::FormatMetadata};
     use cassiopeia_ir::payload::{BytesPayload, CollectedPayload};
     use pretty_assertions::assert_eq;
     use std::sync::Arc;
 
     fn csv_bytes_payload() -> CollectedPayload {
-        CollectedPayload::Bytes(BytesPayload::new(b"id,name\n1,alpha\n2,beta\n".to_vec(), None))
+        CollectedPayload::Bytes(BytesPayload::new(b"id,name\n1,alpha\n2,beta\n".to_vec(), None, EncodingHint::NONE))
     }
 
     #[test]

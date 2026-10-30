@@ -1,4 +1,4 @@
-use crate::{detectors::Detector, profile::Profile};
+use crate::{content::Content, detectors::Detector, profile::Profile};
 use cassiopeia_common::format::DataFormat;
 use mediatype::media_type;
 use serde::{Deserialize, de::IgnoredAny};
@@ -46,7 +46,8 @@ struct TypePeek {
 pub struct JsonDetector;
 
 impl Detector for JsonDetector {
-    fn detect(&self, bytes: &[u8]) -> Option<Profile> {
+    fn detect(&self, content: &Content<'_>) -> Option<Profile> {
+        let bytes = content.bytes();
         let content = str::from_utf8(bytes).ok()?;
 
         match serde_json::from_str::<TypePeek>(content) {
@@ -64,55 +65,58 @@ impl Detector for JsonDetector {
 
 #[cfg(test)]
 mod tests {
-    use crate::detectors::{Detector, json::JsonDetector};
+    use crate::{
+        content::Content,
+        detectors::{Detector, json::JsonDetector},
+    };
     use cassiopeia_common::format::DataFormat;
     use pretty_assertions::assert_eq;
 
     #[test]
     fn a_feature_collection_is_detected_as_geojson() {
-        let profile = JsonDetector.detect(br#"{"type":"FeatureCollection","features":[]}"#).unwrap();
+        let profile = JsonDetector.detect(&Content::new(br#"{"type":"FeatureCollection","features":[]}"#)).unwrap();
         assert_eq!(*profile.format(), DataFormat::GeoJson);
         assert_eq!(profile.mime_type().to_string(), "application/geo+json");
     }
 
     #[test]
     fn a_bare_geometry_is_detected_as_geojson_by_its_type_member() {
-        let profile = JsonDetector.detect(br#"{"type":"Point","coordinates":[1.0,2.0]}"#).unwrap();
+        let profile = JsonDetector.detect(&Content::new(br#"{"type":"Point","coordinates":[1.0,2.0]}"#)).unwrap();
         assert_eq!(*profile.format(), DataFormat::GeoJson);
     }
 
     #[test]
     fn a_plain_json_object_is_detected_as_generic_json() {
-        let profile = JsonDetector.detect(br#"{"name":"value","count":3}"#).unwrap();
+        let profile = JsonDetector.detect(&Content::new(br#"{"name":"value","count":3}"#)).unwrap();
         assert_eq!(*profile.format(), DataFormat::Json);
         assert_eq!(profile.mime_type().to_string(), "application/json");
     }
 
     #[test]
     fn an_object_whose_type_is_not_a_geojson_token_is_generic_json() {
-        let profile = JsonDetector.detect(br#"{"type":"sensor-reading","value":42}"#).unwrap();
+        let profile = JsonDetector.detect(&Content::new(br#"{"type":"sensor-reading","value":42}"#)).unwrap();
         assert_eq!(*profile.format(), DataFormat::Json);
     }
 
     #[test]
     fn a_top_level_array_is_detected_as_generic_json() {
-        let profile = JsonDetector.detect(br#"[{"id":1},{"id":2}]"#).unwrap();
+        let profile = JsonDetector.detect(&Content::new(br#"[{"id":1},{"id":2}]"#)).unwrap();
         assert_eq!(*profile.format(), DataFormat::Json);
     }
 
     #[test]
     fn a_top_level_scalar_is_detected_as_generic_json() {
-        let profile = JsonDetector.detect(b"42").unwrap();
+        let profile = JsonDetector.detect(&Content::new(b"42")).unwrap();
         assert_eq!(*profile.format(), DataFormat::Json);
     }
 
     #[test]
     fn invalid_json_is_rejected() {
-        assert!(JsonDetector.detect(b"not json at all").is_none());
+        assert!(JsonDetector.detect(&Content::new(b"not json at all")).is_none());
     }
 
     #[test]
     fn a_truncated_object_is_rejected() {
-        assert!(JsonDetector.detect(br#"{"type":"Feature""#).is_none());
+        assert!(JsonDetector.detect(&Content::new(br#"{"type":"Feature""#)).is_none());
     }
 }

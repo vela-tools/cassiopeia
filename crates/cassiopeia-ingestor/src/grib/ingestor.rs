@@ -152,7 +152,7 @@ mod tests {
     use cassiopeia_common::{channel::ChannelSender, format::DataFormat, signal::Signal};
     #[cfg(not(feature = "grib1"))]
     use cassiopeia_data_profiler::metadata::{FormatMetadata, GribMetadata};
-    use cassiopeia_data_profiler::{metadata::GribEdition, profile::Profile};
+    use cassiopeia_data_profiler::{encoding_hint::EncodingHint, metadata::GribEdition, profile::Profile};
     use cassiopeia_ir::{
         payload::{BytesPayload, CollectedPayload, FilePayload, ProfiledPayload},
         record::Record,
@@ -286,7 +286,7 @@ mod tests {
         let path = dir.path().join("data.grib2");
         File::create(&path).unwrap().write_all(&bytes).unwrap();
         ProfiledPayload::new(
-            CollectedPayload::File(FilePayload::new(path, Some(DataFormat::Grib))),
+            CollectedPayload::File(FilePayload::new(path, Some(DataFormat::Grib), EncodingHint::NONE)),
             Profile::new(DataFormat::Grib, media_type!(APPLICATION / OCTET_STREAM), 1.0),
         )
     }
@@ -448,7 +448,7 @@ mod tests {
         // decoder, so the rejection surfaces at ingest time as a typed edition error.
         File::create(&path).unwrap().write_all(b"GRIB\x00\x00\x1c\x01\x00\x00\x00\x00").unwrap();
         let payload = ProfiledPayload::new(
-            CollectedPayload::File(FilePayload::new(path, Some(DataFormat::Grib))),
+            CollectedPayload::File(FilePayload::new(path, Some(DataFormat::Grib), EncodingHint::NONE)),
             Profile::new(DataFormat::Grib, media_type!(APPLICATION / OCTET_STREAM), 1.0)
                 .with_metadata(FormatMetadata::Grib(GribMetadata::new(GribEdition::V1))),
         );
@@ -466,7 +466,7 @@ mod tests {
         // Edition octet 9: no decoder exists for it in either build.
         File::create(&path).unwrap().write_all(b"GRIB\x00\x00\x1c\x09\x00\x00\x00\x00").unwrap();
         let payload = ProfiledPayload::new(
-            CollectedPayload::File(FilePayload::new(path, Some(DataFormat::Grib))),
+            CollectedPayload::File(FilePayload::new(path, Some(DataFormat::Grib), EncodingHint::NONE)),
             Profile::new(DataFormat::Grib, media_type!(APPLICATION / OCTET_STREAM), 1.0),
         );
 
@@ -477,7 +477,7 @@ mod tests {
     #[test]
     fn a_bytes_payload_is_rejected_because_grib_needs_a_file() {
         let payload = ProfiledPayload::new(
-            CollectedPayload::Bytes(BytesPayload::new(b"GRIB\x00\x00\x00\x02".to_vec(), Some(DataFormat::Grib))),
+            CollectedPayload::Bytes(BytesPayload::new(b"GRIB\x00\x00\x00\x02".to_vec(), Some(DataFormat::Grib), EncodingHint::NONE)),
             Profile::new(DataFormat::Grib, media_type!(APPLICATION / OCTET_STREAM), 1.0),
         );
         let error = GribIngestor::from_payload(payload, 8).unwrap_err();

@@ -484,9 +484,12 @@ name = "cassiopeia-collector"
 version = "1.1.1"
 dependencies = [
  "cassiopeia-common",
+ "cassiopeia-data-profiler",
  "cassiopeia-ir",
  "derive_more",
+ "getset",
  "http",
+ "mediatype",
  "pretty_assertions",
  "reqwest",
  "temp-dir",
@@ -564,6 +567,7 @@ dependencies = [
  "serde",
  "serde_json",
  "thiserror 2.0.21",
+ "url",
  "zip",
 ]
 

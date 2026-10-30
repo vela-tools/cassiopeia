@@ -1,12 +1,14 @@
-use crate::inspectors::csv::{
-    dialect::{Dialect, LineTerminator},
-    error::CsvInspectError,
-    header::{continuation_rows, header_quality, looks_like_header_row},
-    header_rows::HeaderRows,
-    preamble::Preamble,
-    table::Table,
+use crate::{
+    encoding_hint::EncodingHint,
+    inspectors::csv::{
+        dialect::{Dialect, LineTerminator},
+        error::CsvInspectError,
+        header::{continuation_rows, header_quality, looks_like_header_row},
+        header_rows::HeaderRows,
+        preamble::Preamble,
+        table::Table,
+    },
 };
-use chardetng::{EncodingDetector, Iso2022JpDetection, Utf8Detection};
 use std::io::Read;
 
 pub mod data_type;
@@ -65,13 +67,14 @@ impl CsvInspector {
         }
     }
 
-    /// Inspects the dialect of `reader` by sampling and scoring candidate dialects.
+    /// Inspects the dialect of `reader` by sampling and scoring candidate dialects, reading its
+    /// character encoding with the context `encoding_hint` gives.
     ///
     /// # Errors
     ///
     /// Returns [`CsvInspectError`] when the sample cannot be read, is empty, or no candidate
     /// dialect produces a coherent table.
-    pub fn inspect<R: Read>(&self, reader: R) -> Result<Dialect, CsvInspectError> {
+    pub fn inspect<R: Read>(&self, reader: R, encoding_hint: &EncodingHint) -> Result<Dialect, CsvInspectError> {
         let mut sample_buf = self.read_sample(reader)?;
 
         if sample_buf.is_empty() {
@@ -83,14 +86,10 @@ impl CsvInspector {
             sample_buf.truncate(last_newline + 1);
         }
 
-        // Detect the source encoding and transcode the sample to UTF-8 before scoring, so a
-        // non-UTF-8 file (Windows-1252, Latin-1, ...) does not fail record parsing on its first
-        // non-ASCII byte. The detected label is carried on the dialect for the ingestor to reuse.
-        // ISO-2022-JP detection is denied, since it is only reliable in a browser context, and a
-        // UTF-8 guess is allowed.
-        let mut detector = EncodingDetector::new(Iso2022JpDetection::Deny);
-        detector.feed(&sample_buf, true);
-        let encoding = detector.guess(None, Utf8Detection::Allow);
+        // Transcode the sample to UTF-8 before scoring, so a non-UTF-8 file (Windows-1252, Latin-1,
+        // ...) does not fail record parsing on its first non-ASCII byte. The encoding is carried on
+        // the dialect for the ingestor to reuse.
+        let encoding = encoding_hint.encoding_of(&sample_buf);
         let decoded = encoding.decode(&sample_buf).0;
         let sample = decoded.as_bytes();
 
@@ -237,13 +236,16 @@ impl CsvInspector {
 
 #[cfg(test)]
 mod tests {
-    use crate::inspectors::csv::{CsvInspector, dialect::LineTerminator, header_rows::HeaderRows, preamble::Preamble};
+    use crate::{
+        encoding_hint::EncodingHint,
+        inspectors::csv::{CsvInspector, dialect::LineTerminator, header_rows::HeaderRows, preamble::Preamble},
+    };
     use pretty_assertions::assert_eq;
 
     #[test]
     fn a_comma_delimited_file_with_headers_is_detected() {
         let sample = "name,age,city\nAda,36,London\nGrace,45,New York\n";
-        let dialect = CsvInspector::new().inspect(sample.as_bytes()).unwrap();
+        let dialect = CsvInspector::new().inspect(sample.as_bytes(), &EncodingHint::NONE).unwrap();
 
         assert_eq!(dialect.delimiter, b',');
         assert_eq!(dialect.header_rows, HeaderRows::ONE);
@@ -253,14 +255,14 @@ mod tests {
     #[test]
     fn a_semicolon_delimited_file_is_detected() {
         let sample = "name;age;city\nAda;36;London\nGrace;45;New York\n";
-        let dialect = CsvInspector::new().inspect(sample.as_bytes()).unwrap();
+        let dialect = CsvInspector::new().inspect(sample.as_bytes(), &EncodingHint::NONE).unwrap();
 
         assert_eq!(dialect.delimiter, b';');
     }
 
     #[test]
     fn empty_input_is_rejected() {
-        assert!(CsvInspector::new().inspect(&b""[..]).is_err());
+        assert!(CsvInspector::new().inspect(&b""[..], &EncodingHint::NONE).is_err());
     }
 
     #[test]
@@ -269,7 +271,7 @@ mod tests {
         // must not consume it as a header row (which would drop the first record and key the rest by
         // that row's values).
         let sample = "1,\"Goroka\",\"PG\",-6.081,145.391\n2,\"Madang\",\"PG\",-5.207,145.789\n3,\"Hagen\",\"PG\",-5.826,144.296\n";
-        let dialect = CsvInspector::new().inspect(sample.as_bytes()).unwrap();
+        let dialect = CsvInspector::new().inspect(sample.as_bytes(), &EncodingHint::NONE).unwrap();
 
         assert_eq!(dialect.delimiter, b',');
         assert_eq!(dialect.header_rows, HeaderRows::NONE);
@@ -280,7 +282,7 @@ mod tests {
         // Every column is text, so type gives no signal; the first row's cells are real values (a
         // multi-word name, a code) rather than field labels, so it must be treated as data.
         let sample = "\"Bonaire, Saint Eustatius and Saba\",\"BQ\",\"\"\n\"Aruba\",\"AW\",\"AA\"\n\"Antigua and Barbuda\",\"AG\",\"AC\"\n";
-        let dialect = CsvInspector::new().inspect(sample.as_bytes()).unwrap();
+        let dialect = CsvInspector::new().inspect(sample.as_bytes(), &EncodingHint::NONE).unwrap();
 
         assert_eq!(dialect.delimiter, b',');
         assert_eq!(dialect.header_rows, HeaderRows::NONE);
@@ -290,7 +292,7 @@ mod tests {
     fn an_all_text_file_whose_first_row_holds_field_labels_is_read_as_headers() {
         // Every column is text, but the first row's cells are short label tokens, so it is a header.
         let sample = "name,iso_code,dafif_code\nAruba,AW,AA\nAntigua and Barbuda,AG,AC\n";
-        let dialect = CsvInspector::new().inspect(sample.as_bytes()).unwrap();
+        let dialect = CsvInspector::new().inspect(sample.as_bytes(), &EncodingHint::NONE).unwrap();
 
         assert_eq!(dialect.header_rows, HeaderRows::ONE);
     }
@@ -304,7 +306,7 @@ mod tests {
         let mut sample = String::from("id,title,cast\n1,Avatar,\"");
         sample.push_str(&"x".repeat(40 * 1024));
         sample.push_str("\"\n2,Titanic,\"short\"\n3,Aliens,\"short\"\n");
-        let dialect = CsvInspector::new().inspect(sample.as_bytes()).unwrap();
+        let dialect = CsvInspector::new().inspect(sample.as_bytes(), &EncodingHint::NONE).unwrap();
 
         assert_eq!(dialect.delimiter, b',');
         assert_eq!(dialect.header_rows, HeaderRows::ONE);
@@ -317,7 +319,7 @@ mod tests {
         // read as data, the file ingests headerless, every name-keyed field reference (`device_code`,
         // `on`) misses, and the entity renders with a null id and no attributes.
         let sample = "device_code,timestamp,on\nCA001,2026-09-09T13:10:00Z,true\nCA002,2026-09-09T13:11:00Z,false\n";
-        let dialect = CsvInspector::new().inspect(sample.as_bytes()).unwrap();
+        let dialect = CsvInspector::new().inspect(sample.as_bytes(), &EncodingHint::NONE).unwrap();
 
         assert_eq!(dialect.header_rows, HeaderRows::ONE);
     }
@@ -327,7 +329,7 @@ mod tests {
         // The whole boolean vocabulary the type inspector recognises works as a header label.
         for label in ["on", "off", "yes", "no", "y", "n", "true", "false"] {
             let sample = format!("device_code,{label}\nCA001,true\nCA002,false\n");
-            let dialect = CsvInspector::new().inspect(sample.as_bytes()).unwrap();
+            let dialect = CsvInspector::new().inspect(sample.as_bytes(), &EncodingHint::NONE).unwrap();
 
             assert_eq!(dialect.header_rows, HeaderRows::ONE, "header with a `{label}` column was read as data");
         }
@@ -338,7 +340,7 @@ mod tests {
         // Every value is double-quoted, including the numeric ones. Leaving quoting off would keep
         // the quotes in the data; the dialect must recover the quote character so they are stripped.
         let sample = "id;slots\n\"1\";\"30\"\n\"2\";\"24\"\n";
-        let dialect = CsvInspector::new().inspect(sample.as_bytes()).unwrap();
+        let dialect = CsvInspector::new().inspect(sample.as_bytes(), &EncodingHint::NONE).unwrap();
 
         assert_eq!(dialect.delimiter, b';');
         assert_eq!(dialect.quote_char, Some(b'"'));
@@ -350,7 +352,7 @@ mod tests {
 
     #[test]
     fn a_title_line_above_the_header_is_detected_as_a_one_record_preamble() {
-        let dialect = CsvInspector::new().inspect(TITLED_AIR_QUALITY.as_bytes()).unwrap();
+        let dialect = CsvInspector::new().inspect(TITLED_AIR_QUALITY.as_bytes(), &EncodingHint::NONE).unwrap();
 
         assert_eq!(dialect.delimiter, b';');
         assert_eq!(dialect.quote_char, Some(b'"'));
@@ -362,7 +364,7 @@ mod tests {
     #[test]
     fn the_same_table_without_its_title_line_has_no_preamble() {
         let untitled = TITLED_AIR_QUALITY.split_once('\n').unwrap().1;
-        let dialect = CsvInspector::new().inspect(untitled.as_bytes()).unwrap();
+        let dialect = CsvInspector::new().inspect(untitled.as_bytes(), &EncodingHint::NONE).unwrap();
 
         assert_eq!(dialect.delimiter, b';');
         assert_eq!(dialect.preamble, Preamble::NONE);
@@ -374,7 +376,7 @@ mod tests {
         // Five line feeds but four CSV records: the preamble is counted in records, so the header and
         // the first data row below the quoted line break stay whole.
         let sample = "\"Lumes report\ngenerated 25.10.26\";v2.10\nStation;NO2;O3\nSTEF;12,45;54,55\nAKA;9,80;40,10\n";
-        let dialect = CsvInspector::new().inspect(sample.as_bytes()).unwrap();
+        let dialect = CsvInspector::new().inspect(sample.as_bytes(), &EncodingHint::NONE).unwrap();
         let mut reader = dialect.reader(sample.as_bytes()).unwrap();
 
         assert_eq!(dialect.preamble, Preamble::new(1));
@@ -385,7 +387,7 @@ mod tests {
     #[test]
     fn a_multi_line_title_block_is_detected_as_a_multi_record_preamble() {
         let sample = "Air quality;Vienna\nGenerated;25.10.26;08:00;CET;v2\nStation;NO2;O3\nSTEF;12;54\nAKA;9;40\nTAB;7;38\n";
-        let dialect = CsvInspector::new().inspect(sample.as_bytes()).unwrap();
+        let dialect = CsvInspector::new().inspect(sample.as_bytes(), &EncodingHint::NONE).unwrap();
 
         assert_eq!(dialect.preamble, Preamble::new(2));
         assert_eq!(dialect.header_rows, HeaderRows::ONE);
@@ -394,7 +396,7 @@ mod tests {
     #[test]
     fn a_blank_line_after_the_title_is_not_counted_as_a_preamble_record() {
         let sample = "Lumes;v2.10;25.10.26\n\nStation;NO2\nSTEF;12\nAKA;9\n";
-        let dialect = CsvInspector::new().inspect(sample.as_bytes()).unwrap();
+        let dialect = CsvInspector::new().inspect(sample.as_bytes(), &EncodingHint::NONE).unwrap();
         let mut reader = dialect.reader(sample.as_bytes()).unwrap();
 
         assert_eq!(dialect.preamble, Preamble::new(1));
@@ -407,7 +409,7 @@ mod tests {
         // undetectable rather than silently losing its header.
         let sample = "id;name\n1;alpha\n2;beta\n3;gamma;extra\n4;delta\n5;epsilon\n";
 
-        assert!(CsvInspector::new().inspect(sample.as_bytes()).is_err());
+        assert!(CsvInspector::new().inspect(sample.as_bytes(), &EncodingHint::NONE).is_err());
     }
 
     #[test]
@@ -417,7 +419,7 @@ mod tests {
         // detector (decimal commas, `NE` for missing), so the extra header rows are recognised by
         // their shape: all labels, and blank in the station column every data row fills.
         let sample = "Lumes;v2.10;30.10.26-10:00:00\n;Zeit-NO2;NO2;Zeit-PM10;PM10;PM10\n;;HMW;;MW24;HMW\n;MESZ;µg/m³;MESZ;µg/m³;µg/m³\nSTEF;30.10.2026, 10:00;18,48;30.10.2026, 10:00;NE;NE\nTAB;30.10.2026, 10:00;NE;30.10.2026, 10:00;14,03;14,44\nKE;30.10.2026, 10:00;15,17;30.10.2026, 10:00;12,49;18,80\n";
-        let dialect = CsvInspector::new().inspect(sample.as_bytes()).unwrap();
+        let dialect = CsvInspector::new().inspect(sample.as_bytes(), &EncodingHint::NONE).unwrap();
         let mut reader = dialect.reader(sample.as_bytes()).unwrap();
 
         assert_eq!(dialect.preamble, Preamble::new(1));

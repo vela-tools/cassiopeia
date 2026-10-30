@@ -128,7 +128,7 @@ mod tests {
         shapefile::{error::ShapefileIngestError, ingestor::ShapefileIngestor},
     };
     use cassiopeia_common::{channel::ChannelSender, collection::CollectionName, format::DataFormat, signal::Signal};
-    use cassiopeia_data_profiler::profile::Profile;
+    use cassiopeia_data_profiler::{encoding_hint::EncodingHint, profile::Profile};
     use cassiopeia_ir::{
         payload::{BytesPayload, CollectedPayload, FilePayload, ProfiledPayload},
         record::Record,
@@ -193,7 +193,7 @@ mod tests {
     /// Builds a profiled payload pointing at a bare `.shp` on disk.
     fn bare_payload(shp_path: &Path) -> ProfiledPayload {
         ProfiledPayload::new(
-            CollectedPayload::File(FilePayload::new(shp_path.to_path_buf(), Some(DataFormat::Shapefile))),
+            CollectedPayload::File(FilePayload::new(shp_path.to_path_buf(), Some(DataFormat::Shapefile), EncodingHint::NONE)),
             Profile::new(DataFormat::Shapefile, media_type!(APPLICATION / OCTET_STREAM), 1.0),
         )
     }
@@ -214,7 +214,7 @@ mod tests {
         }
         archive.finish().unwrap();
         ProfiledPayload::new(
-            CollectedPayload::File(FilePayload::new(archive_path.to_path_buf(), Some(DataFormat::Shapefile))),
+            CollectedPayload::File(FilePayload::new(archive_path.to_path_buf(), Some(DataFormat::Shapefile), EncodingHint::NONE)),
             Profile::new(DataFormat::Shapefile, media_type!(APPLICATION / OCTET_STREAM), 1.0),
         )
     }
@@ -457,7 +457,7 @@ mod tests {
     #[test]
     fn a_bytes_payload_is_rejected_because_a_shapefile_needs_files() {
         let payload = ProfiledPayload::new(
-            CollectedPayload::Bytes(BytesPayload::new(vec![0x00, 0x00, 0x27, 0x0A], Some(DataFormat::Shapefile))),
+            CollectedPayload::Bytes(BytesPayload::new(vec![0x00, 0x00, 0x27, 0x0A], Some(DataFormat::Shapefile), EncodingHint::NONE)),
             Profile::new(DataFormat::Shapefile, media_type!(APPLICATION / OCTET_STREAM), 1.0),
         );
         let error = ShapefileIngestor::from_payload(payload, 4).unwrap_err();

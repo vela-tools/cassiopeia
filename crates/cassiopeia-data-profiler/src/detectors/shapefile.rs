@@ -1,4 +1,4 @@
-use crate::{detectors::Detector, profile::Profile};
+use crate::{content::Content, detectors::Detector, profile::Profile};
 use cassiopeia_common::format::DataFormat;
 use mediatype::{MediaType, Name, names::APPLICATION};
 use std::io::Cursor;
@@ -22,7 +22,8 @@ const SHP_FILE_CODE: [u8; 4] = [0x00, 0x00, 0x27, 0x0A];
 pub struct ShapefileDetector;
 
 impl Detector for ShapefileDetector {
-    fn detect(&self, bytes: &[u8]) -> Option<Profile> {
+    fn detect(&self, content: &Content<'_>) -> Option<Profile> {
+        let bytes = content.bytes();
         if bytes.starts_with(&SHP_FILE_CODE) || zip_holds_a_shp(bytes) {
             return Some(Profile::new(DataFormat::Shapefile, SHAPEFILE_MEDIA_TYPE, 1.0));
         }
@@ -49,7 +50,10 @@ fn zip_holds_a_shp(bytes: &[u8]) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use crate::detectors::{Detector, shapefile::ShapefileDetector};
+    use crate::{
+        content::Content,
+        detectors::{Detector, shapefile::ShapefileDetector},
+    };
     use cassiopeia_common::format::DataFormat;
     use pretty_assertions::assert_eq;
     use std::io::{Cursor, Write};
@@ -72,7 +76,7 @@ mod tests {
     fn the_shp_file_code_is_detected_as_a_shapefile() {
         let mut bytes = vec![0x00, 0x00, 0x27, 0x0A];
         bytes.extend_from_slice(&[0u8; 96]);
-        let profile = ShapefileDetector.detect(&bytes).unwrap();
+        let profile = ShapefileDetector.detect(&Content::new(&bytes)).unwrap();
         assert_eq!(*profile.format(), DataFormat::Shapefile);
         assert_eq!(profile.mime_type().to_string(), "application/x-shapefile");
     }
@@ -80,20 +84,20 @@ mod tests {
     #[test]
     fn a_zip_holding_a_shp_member_is_detected_as_a_shapefile() {
         let bytes = zip_with(&["roads.shp", "roads.dbf", "roads.shx"]);
-        let profile = ShapefileDetector.detect(&bytes).unwrap();
+        let profile = ShapefileDetector.detect(&Content::new(&bytes)).unwrap();
         assert_eq!(*profile.format(), DataFormat::Shapefile);
     }
 
     #[test]
     fn a_zip_without_a_shp_member_is_not_a_shapefile() {
-        assert!(ShapefileDetector.detect(&zip_with(&["doc.kml"])).is_none());
-        assert!(ShapefileDetector.detect(&zip_with(&["xl/workbook.xml"])).is_none());
+        assert!(ShapefileDetector.detect(&Content::new(&zip_with(&["doc.kml"]))).is_none());
+        assert!(ShapefileDetector.detect(&Content::new(&zip_with(&["xl/workbook.xml"]))).is_none());
     }
 
     #[test]
     fn arbitrary_text_is_not_a_shapefile() {
-        assert!(ShapefileDetector.detect(b"id,name\n1,alpha\n").is_none());
-        assert!(ShapefileDetector.detect(br#"{"type":"FeatureCollection"}"#).is_none());
-        assert!(ShapefileDetector.detect(b"").is_none());
+        assert!(ShapefileDetector.detect(&Content::new(b"id,name\n1,alpha\n")).is_none());
+        assert!(ShapefileDetector.detect(&Content::new(br#"{"type":"FeatureCollection"}"#)).is_none());
+        assert!(ShapefileDetector.detect(&Content::new(b"")).is_none());
     }
 }

@@ -1,4 +1,5 @@
 use crate::{
+    content::Content,
     detectors::{csv::CsvDetector, grib::GribDetector, json::JsonDetector, kml::KmlDetector, shapefile::ShapefileDetector, xml::XmlDetector},
     profile::Profile,
 };
@@ -12,11 +13,12 @@ pub mod xml;
 
 /// A single-format detector: inspects a byte buffer and reports a [`Profile`] when it recognises it.
 pub trait Detector: Send + Sync {
-    /// Attempts to detect the format of `bytes`, returning a [`Profile`] on a match.
+    /// Attempts to detect the format of `content`, returning a [`Profile`] on a match.
     ///
     /// # Arguments
-    /// * `bytes` - The full content of the file or buffer being profiled.
-    fn detect(&self, bytes: &[u8]) -> Option<Profile>;
+    /// * `content` - The full content of the file or buffer being profiled, with the encoding context
+    ///   its source supplied.
+    fn detect(&self, content: &Content<'_>) -> Option<Profile>;
 }
 
 /// The detectors run by [`crate::profile_path`] and [`crate::profile_bytes`], in order.
@@ -34,7 +36,7 @@ pub const fn default_detectors() -> &'static [&'static dyn Detector] {
 
 #[cfg(test)]
 mod tests {
-    use crate::detectors::default_detectors;
+    use crate::{content::Content, detectors::default_detectors};
     use cassiopeia_common::format::DataFormat;
     use pretty_assertions::assert_eq;
 
@@ -47,7 +49,7 @@ mod tests {
             b"id,name\n1,alpha\n".as_slice(),
         ]
         .iter()
-        .filter_map(|bytes| default_detectors().iter().find_map(|d| d.detect(bytes)))
+        .filter_map(|bytes| default_detectors().iter().find_map(|d| d.detect(&Content::new(bytes))))
         .map(|profile| *profile.format())
         .collect();
 
@@ -64,7 +66,7 @@ mod tests {
     fn grib_magic_is_detected_ahead_of_the_text_detectors() {
         let profile = default_detectors()
             .iter()
-            .find_map(|d| d.detect(b"GRIB\x00\x00\x00\x02"))
+            .find_map(|d| d.detect(&Content::new(b"GRIB\x00\x00\x00\x02")))
             .expect("GRIB magic is recognised");
         assert_eq!(*profile.format(), DataFormat::Grib);
     }

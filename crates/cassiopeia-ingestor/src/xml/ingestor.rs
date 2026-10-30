@@ -90,7 +90,7 @@ mod tests {
         xml::{error::XmlIngestError, ingestor::XmlIngestor},
     };
     use cassiopeia_common::{channel::ChannelSender, format::DataFormat, signal::Signal};
-    use cassiopeia_data_profiler::profile::Profile;
+    use cassiopeia_data_profiler::{encoding_hint::EncodingHint, profile::Profile};
     use cassiopeia_ir::{
         payload::{BytesPayload, CollectedPayload, FilePayload, ProfiledPayload},
         record::Record,
@@ -141,7 +141,7 @@ mod tests {
         let path = dir.path().join("data.xml");
         File::create(&path).unwrap().write_all(contents).unwrap();
         let payload = ProfiledPayload::new(
-            CollectedPayload::File(FilePayload::new(path, Some(DataFormat::Xml))),
+            CollectedPayload::File(FilePayload::new(path, Some(DataFormat::Xml), EncodingHint::NONE)),
             Profile::new(DataFormat::Xml, media_type!(APPLICATION / XML), 0.6),
         );
         (dir, payload)
@@ -195,7 +195,7 @@ mod tests {
     #[test]
     fn a_bytes_payload_is_rejected() {
         let payload = ProfiledPayload::new(
-            CollectedPayload::Bytes(BytesPayload::new(ARSO_ONE_STATION.to_vec(), Some(DataFormat::Xml))),
+            CollectedPayload::Bytes(BytesPayload::new(ARSO_ONE_STATION.to_vec(), Some(DataFormat::Xml), EncodingHint::NONE)),
             Profile::new(DataFormat::Xml, media_type!(APPLICATION / XML), 0.6),
         );
         let result = XmlIngestor::from_payload(payload, 8);

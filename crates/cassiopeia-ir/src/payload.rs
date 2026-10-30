@@ -1,5 +1,5 @@
 use cassiopeia_common::format::DataFormat;
-use cassiopeia_data_profiler::profile::Profile;
+use cassiopeia_data_profiler::{encoding_hint::EncodingHint, profile::Profile};
 use getset::Getters;
 use std::path::PathBuf;
 
@@ -20,6 +20,8 @@ pub struct FilePayload {
     path: PathBuf,
     /// The format the collector already knows, when it could infer one.
     format_hint: Option<DataFormat>,
+    /// What the data's source says about its character encoding.
+    encoding_hint: EncodingHint,
 }
 
 /// An in-memory payload: data is stored as raw bytes.
@@ -30,6 +32,8 @@ pub struct BytesPayload {
     data: Vec<u8>,
     /// The format the collector already knows, when it could infer one.
     format_hint: Option<DataFormat>,
+    /// What the data's source says about its character encoding.
+    encoding_hint: EncodingHint,
 }
 
 /// Data after the Profiler stage: the format is now known.
@@ -43,10 +47,14 @@ pub struct ProfiledPayload {
 }
 
 impl FilePayload {
-    /// Builds a file payload from its path and optional format hint.
+    /// Builds a file payload from its path, optional format hint, and encoding hint.
     #[must_use]
-    pub const fn new(path: PathBuf, format_hint: Option<DataFormat>) -> FilePayload {
-        FilePayload { path, format_hint }
+    pub const fn new(path: PathBuf, format_hint: Option<DataFormat>, encoding_hint: EncodingHint) -> FilePayload {
+        FilePayload {
+            path,
+            format_hint,
+            encoding_hint,
+        }
     }
 
     /// Consumes the payload and returns the owned path.
@@ -57,10 +65,14 @@ impl FilePayload {
 }
 
 impl BytesPayload {
-    /// Builds a bytes payload from its raw bytes and optional format hint.
+    /// Builds a bytes payload from its raw bytes, optional format hint, and encoding hint.
     #[must_use]
-    pub const fn new(data: Vec<u8>, format_hint: Option<DataFormat>) -> BytesPayload {
-        BytesPayload { data, format_hint }
+    pub const fn new(data: Vec<u8>, format_hint: Option<DataFormat>, encoding_hint: EncodingHint) -> BytesPayload {
+        BytesPayload {
+            data,
+            format_hint,
+            encoding_hint,
+        }
     }
 }
 
@@ -87,30 +99,40 @@ impl CollectedPayload {
             CollectedPayload::Bytes(b) => b.format_hint,
         }
     }
+
+    /// Returns what the payload's source says about its character encoding.
+    #[must_use]
+    pub const fn encoding_hint(&self) -> &EncodingHint {
+        match self {
+            CollectedPayload::File(f) => &f.encoding_hint,
+            CollectedPayload::Bytes(b) => &b.encoding_hint,
+        }
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use crate::payload::{BytesPayload, CollectedPayload, FilePayload};
     use cassiopeia_common::format::DataFormat;
+    use cassiopeia_data_profiler::encoding_hint::EncodingHint;
     use pretty_assertions::assert_eq;
     use std::path::PathBuf;
 
     #[test]
     fn a_file_payload_exposes_its_format_hint() {
-        let payload = CollectedPayload::File(FilePayload::new(PathBuf::from("data.csv"), Some(DataFormat::Csv)));
+        let payload = CollectedPayload::File(FilePayload::new(PathBuf::from("data.csv"), Some(DataFormat::Csv), EncodingHint::NONE));
         assert_eq!(payload.format_hint(), Some(DataFormat::Csv));
     }
 
     #[test]
     fn a_bytes_payload_without_a_hint_returns_none() {
-        let payload = CollectedPayload::Bytes(BytesPayload::new(vec![1, 2, 3], None));
+        let payload = CollectedPayload::Bytes(BytesPayload::new(vec![1, 2, 3], None, EncodingHint::NONE));
         assert_eq!(payload.format_hint(), None);
     }
 
     #[test]
     fn into_path_yields_the_owned_path() {
-        let payload = FilePayload::new(PathBuf::from("data.csv"), None);
+        let payload = FilePayload::new(PathBuf::from("data.csv"), None, EncodingHint::NONE);
         assert_eq!(payload.into_path(), PathBuf::from("data.csv"));
     }
 }
