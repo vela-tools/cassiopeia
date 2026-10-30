@@ -291,7 +291,7 @@ Source text that reads as no date-time is not emitted as a malformed qualifier: 
 }
 ```
 
-The member is merged across the records that contribute to one entity, the greatest instant winning, and never cleared by a record that declares none. It behaves exactly like the attribute qualifier on unreadable source text, except that the loss is named with the entity id under the `expander-expiry-unreadable` code.
+Within one mapping, the member follows the record Cassiopeia keeps for the entity (clause 4.22): a temporal record that supersedes another replaces its expiry, a static record merged into another overrides it only when it declares one, and a kept series holds the furthest expiry among its observations. Across the mappings that contribute to one entity, the member is joined as clause 4.5.5.3 joins versions of one entity: it is dropped when any mapping contributes none, and otherwise the furthest instant wins. It behaves exactly like the attribute qualifier on unreadable source text, except that the loss is named under the `expander-expiry-unreadable` code once per entity type, with the first entity that lost it as an example and a count of the records that did.
 
 ### unitCode
 

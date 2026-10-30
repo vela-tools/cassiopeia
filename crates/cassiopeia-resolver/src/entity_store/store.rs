@@ -75,7 +75,8 @@ pub type StoredUnit = SmallVec<[AssembledFragment; 1]>;
 pub struct AssembledFragments {
     /// The entity's scope, when one was stored.
     pub scope: Option<NgsiLdScope>,
-    /// The entity's `expiresAt`, when one was stored (ETSI GS CIM 009 v1.9.1 clause 4.5.1).
+    /// The entity's `expiresAt` (ETSI GS CIM 009 v1.9.1 clause 4.5.1), joined from the expiries its
+    /// mappings contribute (see [`join`](crate::entity_store::mapping_expiry::join)).
     pub expires_at: Option<DateTime<Utc>>,
     /// One fragment-list per emit-unit.
     pub units: Vec<StoredUnit>,
@@ -202,7 +203,7 @@ pub(crate) mod tests {
         entity_store::store::{EntityStore, FragmentWrite},
         mapping_id::MappingId,
     };
-    use cassiopeia_mapping::source_reads::SourceReads;
+    use cassiopeia_mapping::{observed_at::ObservedAt, source_reads::SourceReads};
     use cassiopeia_ngsi_ld::entity::scope::{NgsiLdScope, ScopeBuf};
     use chrono::{DateTime, TimeZone, Utc};
     use pretty_assertions::assert_eq;
@@ -230,9 +231,22 @@ pub(crate) mod tests {
     /// `epoch_seconds` is `None`.
     fn write_expiring(base_id: &Urn, mapping: u32, epoch_seconds: Option<i64>) -> FragmentWrite<'static> {
         FragmentWrite {
-            expires_at: epoch_seconds.map(|seconds| Utc.timestamp_opt(seconds, 0).single().unwrap()),
+            expires_at: epoch_seconds.map(instant),
             ..write(base_id, mapping, &[])
         }
+    }
+
+    /// A write like [`write_expiring`] from a temporal mapping, observed at `observed_at`.
+    fn write_observed(base_id: &Urn, mapping: u32, observed_at: &str, epoch_seconds: Option<i64>) -> FragmentWrite<'static> {
+        FragmentWrite {
+            temporal: true,
+            observed_at: Some(ObservedAt::new(observed_at)),
+            ..write_expiring(base_id, mapping, epoch_seconds)
+        }
+    }
+
+    fn instant(seconds: i64) -> DateTime<Utc> {
+        Utc.timestamp_opt(seconds, 0).single().unwrap()
     }
 
     /// Cross-backend contract every [`EntityStore`] must honour: the scopes every fragment of one id
@@ -261,29 +275,79 @@ pub(crate) mod tests {
         assert_eq!(store.assemble_entity(&unscoped).unwrap().scope, None);
     }
 
-    /// Cross-backend contract every [`EntityStore`] must honour: one entity carries one `expiresAt`
-    /// (ETSI GS CIM 009 v1.9.1 clause 4.5.1), so of every instant its fragments declare the greatest
-    /// wins and a fragment without one clears nothing. The merge spans separate writes as well as one
-    /// batch, whichever order the fragments arrive in, and an id none of whose fragments declares an
-    /// expiry assembles without one. Every backend calls this so all of them are held to identical
-    /// behaviour.
-    pub(crate) fn assert_merges_expiries_per_id(store: &dyn EntityStore) {
-        let expiring: Urn = "urn:ngsi-ld:Camera:1".parse().unwrap();
-        let unexpiring: Urn = "urn:ngsi-ld:Camera:2".parse().unwrap();
-        let instant = |seconds: i64| -> DateTime<Utc> { Utc.timestamp_opt(seconds, 0).single().unwrap() };
+    /// Cross-backend contract every [`EntityStore`] must honour: the expiries the mappings of one id
+    /// contribute are joined as clause 4.5.5.3 of ETSI GS CIM 009 v1.9.1 joins the entity-level
+    /// `expiresAt` of several versions of one entity. When every mapping declares one the furthest
+    /// wins, when any mapping declares none the entity has none, whichever order the mappings
+    /// arrive in and across separate writes as well as one batch, and an id whose records declare
+    /// no expiry assembles without one. Every backend calls this so all of them are held to
+    /// identical behaviour.
+    pub(crate) fn assert_joins_expiries_across_mappings(store: &dyn EntityStore) {
+        let every_mapping: Urn = "urn:ngsi-ld:Camera:1".parse().unwrap();
+        let one_mapping: Urn = "urn:ngsi-ld:Camera:2".parse().unwrap();
+        let no_mapping: Urn = "urn:ngsi-ld:Camera:3".parse().unwrap();
 
-        store.store_fragment(write_expiring(&expiring, 1, Some(100))).unwrap();
+        store.store_fragment(write_expiring(&every_mapping, 1, Some(100))).unwrap();
+        store.store_fragment(write_expiring(&one_mapping, 1, None)).unwrap();
         store
             .store_fragment_batch(vec![
-                write_expiring(&expiring, 2, Some(300)),
-                write_expiring(&expiring, 1, None),
-                write_expiring(&expiring, 3, Some(200)),
-                write_expiring(&unexpiring, 1, None),
+                write_expiring(&every_mapping, 2, Some(300)),
+                write_expiring(&one_mapping, 2, Some(300)),
+                write_expiring(&no_mapping, 1, None),
             ])
             .unwrap();
-        store.store_fragment(write_expiring(&expiring, 2, Some(250))).unwrap();
+        store.store_fragment(write_expiring(&every_mapping, 3, Some(200))).unwrap();
 
-        assert_eq!(store.assemble_entity(&expiring).unwrap().expires_at, Some(instant(300)));
-        assert_eq!(store.assemble_entity(&unexpiring).unwrap().expires_at, None);
+        assert_eq!(store.assemble_entity(&every_mapping).unwrap().expires_at, Some(instant(300)));
+        assert_eq!(store.assemble_entity(&one_mapping).unwrap().expires_at, None);
+        assert_eq!(store.assemble_entity(&no_mapping).unwrap().expires_at, None);
+    }
+
+    /// Contract every current-state [`EntityStore`] must honour: a mapping's expiry follows the
+    /// record the store retains for it, since `expiresAt` says when the stored entity is to be
+    /// deleted (ETSI GS CIM 009 v1.9.1 clause 4.22). A temporal record that supersedes the retained
+    /// one replaces its expiry, a shorter one and an absent one alike, while a stale record changes
+    /// nothing; a static record merged into the retained one overrides its expiry only when it
+    /// declares one. Both hold across separate writes as well as within one batch.
+    pub(crate) fn assert_expiry_follows_the_retained_record(store: &dyn EntityStore) {
+        let shortened: Urn = "urn:ngsi-ld:Camera:1".parse().unwrap();
+        let cleared: Urn = "urn:ngsi-ld:Camera:2".parse().unwrap();
+        let refined: Urn = "urn:ngsi-ld:Camera:3".parse().unwrap();
+
+        store.store_fragment(write_observed(&shortened, 1, "2026-04-03T22:00:00Z", Some(300))).unwrap();
+        store
+            .store_fragment_batch(vec![
+                write_observed(&shortened, 1, "2026-04-03T22:10:00Z", Some(100)),
+                write_observed(&shortened, 1, "2026-04-03T22:05:00Z", Some(500)),
+                write_observed(&cleared, 1, "2026-04-03T22:00:00Z", Some(300)),
+                write_observed(&cleared, 1, "2026-04-03T22:10:00Z", None),
+                write_expiring(&refined, 1, Some(300)),
+                write_expiring(&refined, 1, Some(100)),
+            ])
+            .unwrap();
+        store.store_fragment(write_expiring(&refined, 1, None)).unwrap();
+
+        assert_eq!(store.assemble_entity(&shortened).unwrap().expires_at, Some(instant(100)));
+        assert_eq!(store.assemble_entity(&cleared).unwrap().expires_at, None);
+        assert_eq!(store.assemble_entity(&refined).unwrap().expires_at, Some(instant(100)));
+    }
+
+    /// Contract every series [`EntityStore`] must honour: a mapping's observations contribute the
+    /// expiry furthest in the future, an observation declaring none clearing nothing, since the
+    /// stored series is due for deletion only once its last observation is (ETSI GS CIM 009 v1.9.1
+    /// clause 4.22). This holds across separate writes as well as within one batch.
+    pub(crate) fn assert_series_keeps_the_furthest_expiry_per_mapping(store: &dyn EntityStore) {
+        let id: Urn = "urn:ngsi-ld:Camera:1".parse().unwrap();
+
+        store.store_fragment(write_observed(&id, 1, "2026-04-03T22:00:00Z", Some(100))).unwrap();
+        store
+            .store_fragment_batch(vec![
+                write_observed(&id, 1, "2026-04-03T22:05:00Z", Some(300)),
+                write_observed(&id, 1, "2026-04-03T22:10:00Z", None),
+            ])
+            .unwrap();
+        store.store_fragment(write_observed(&id, 1, "2026-04-03T22:15:00Z", Some(200))).unwrap();
+
+        assert_eq!(store.assemble_entity(&id).unwrap().expires_at, Some(instant(300)));
     }
 }

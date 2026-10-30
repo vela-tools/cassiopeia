@@ -1,8 +1,8 @@
 use crate::{
     entity_store::{
-        concurrent_expiries::ConcurrentExpiries,
         concurrent_scopes::ConcurrentScopes,
         error::Result,
+        mapping_expiry::{MappingExpiry, join},
         merge::deep_merge,
         store::{AssembledFragment, AssembledFragments, EntityStore, FragmentWrite, StoredUnit},
         supersession::supersedes,
@@ -13,6 +13,7 @@ use crate::{
 };
 use ahash::{AHashMap, RandomState};
 use cassiopeia_mapping::{observed_at::ObservedAt, source_reads::SourceReads};
+use chrono::{DateTime, Utc};
 use dashmap::DashMap;
 use serde_json::Value;
 use std::{num::NonZeroU64, sync::Arc};
@@ -30,19 +31,31 @@ struct LatestFragment {
     records: NonZeroU64,
     /// The earliest field on which a merged record disagreed with the retained one.
     conflict: Option<FieldPath>,
+    /// The entity `expiresAt` the mapping's records contribute.
+    expires_at: MappingExpiry,
+}
+
+/// One record on its way into a mapping's slot: what the slot retains of it if it lands there.
+struct IncomingRecord {
+    /// The source record.
+    data: Value,
+    /// The record-level `observedAt`, for ranking it against the retained record.
+    observed_at: Option<ObservedAt>,
+    /// The entity `expiresAt` the record declares.
+    expires_at: Option<DateTime<Utc>>,
 }
 
 /// In-memory current-state entity store using [`DashMap`] for lock-free concurrent access.
 ///
 /// Each base [`Urn`] maps to one retained fragment per mapping: a temporal mapping keeps the
 /// greatest-`observedAt` record, a static mapping deep-merges its records. This is O(mappings) per id,
-/// so a temporal id's many observations never grow the stored footprint. The `exact-eq` feature of
-/// `urn-rs` makes `Urn`'s `Hash`/`Eq` cover the full normalized URN, so keys hash without a
-/// `to_string()` round-trip.
+/// so a temporal id's many observations never grow the stored footprint. Each slot carries the
+/// expiry its records contribute, and the entity's own is joined from them at assembly. The
+/// `exact-eq` feature of `urn-rs` makes `Urn`'s `Hash`/`Eq` cover the full normalized URN, so keys
+/// hash without a `to_string()` round-trip.
 #[derive(Clone, Debug, Default)]
 pub struct DashMapLatestEntityStore {
     scopes: ConcurrentScopes,
-    expiries: ConcurrentExpiries,
     data: Arc<DashMap<Urn, AHashMap<MappingId, LatestFragment>, RandomState>>,
 }
 
@@ -74,31 +87,33 @@ impl EntityStore for DashMapLatestEntityStore {
         // A repeated id is the common case: every later record of a mapping lands on a key that is
         // already present, so `get_mut` serves it without cloning a URN the map would discard, and
         // only the first record of an id pays for an owned key.
-        let unplaced = match self.data.get_mut(&base_id) {
-            Some(mut per_mapping) => merge_fragment(&mut per_mapping, mapping_id, source_data, temporal, observed_at, reads),
-            None => Some((source_data, observed_at)),
+        let incoming = IncomingRecord {
+            data: source_data,
+            observed_at,
+            expires_at,
         };
-        if let Some((source_data, observed_at)) = unplaced {
+        let unplaced = match self.data.get_mut(&base_id) {
+            Some(mut per_mapping) => merge_fragment(&mut per_mapping, mapping_id, incoming, temporal, reads),
+            None => Some(incoming),
+        };
+        if let Some(incoming) = unplaced {
             let mut per_mapping = self.data.entry(base_id.clone()).or_default();
             // A concurrent writer may have created the id between the miss and this insert, so the
             // merge rule is re-applied rather than assuming the mapping slot is still vacant.
-            if let Some((source_data, observed_at)) = merge_fragment(&mut per_mapping, mapping_id, source_data, temporal, observed_at, reads) {
+            if let Some(incoming) = merge_fragment(&mut per_mapping, mapping_id, incoming, temporal, reads) {
                 per_mapping.insert(
                     mapping_id,
                     LatestFragment {
-                        data: source_data,
-                        observed_at,
+                        data: incoming.data,
+                        observed_at: incoming.observed_at,
                         records: NonZeroU64::MIN,
                         conflict: None,
+                        expires_at: MappingExpiry::first(incoming.expires_at),
                     },
                 );
             }
         }
 
-        // The expiry merges first: it borrows the id, while the scope merge consumes it.
-        if let Some(expires_at) = expires_at {
-            self.expiries.merge(&base_id, expires_at);
-        }
         if let Some(scope) = scope {
             self.scopes.merge(base_id, scope);
         }
@@ -112,8 +127,9 @@ impl EntityStore for DashMapLatestEntityStore {
     fn assemble_entity(&self, base_id: &Urn) -> Result<AssembledFragments> {
         // Draining rather than reading: the scan visits each id once and the store is destroyed
         // straight after, so the retained records are moved into the emit-unit instead of copied.
-        let units = match self.data.remove(base_id) {
+        let (expires_at, units) = match self.data.remove(base_id) {
             Some((_id, per_mapping)) if !per_mapping.is_empty() => {
+                let expires_at = join(per_mapping.values().map(|fragment| fragment.expires_at));
                 let mut unit: StoredUnit = per_mapping
                     .into_iter()
                     .map(|(mapping_id, fragment)| AssembledFragment {
@@ -125,12 +141,11 @@ impl EntityStore for DashMapLatestEntityStore {
                     .collect();
                 // A stable join order keeps the assembled entity deterministic across runs.
                 unit.sort_by_key(|fragment| fragment.mapping_id);
-                vec![unit]
+                (expires_at, vec![unit])
             }
-            _ => Vec::new(),
+            _ => (None, Vec::new()),
         };
         let scope = self.scopes.get(base_id);
-        let expires_at = self.expiries.get(base_id);
         Ok(AssembledFragments { scope, expires_at, units })
     }
 
@@ -145,7 +160,6 @@ impl EntityStore for DashMapLatestEntityStore {
 
     fn clear(&self) -> Result<()> {
         self.scopes.clear();
-        self.expiries.clear();
         self.data.clear();
         Ok(())
     }
@@ -169,27 +183,28 @@ impl EntityStore for DashMapLatestEntityStore {
 fn merge_fragment(
     per_mapping: &mut AHashMap<MappingId, LatestFragment>,
     mapping_id: MappingId,
-    source_data: Value,
+    incoming: IncomingRecord,
     temporal: bool,
-    observed_at: Option<ObservedAt>,
     reads: &SourceReads,
-) -> Option<(Value, Option<ObservedAt>)> {
+) -> Option<IncomingRecord> {
     let Some(existing) = per_mapping.get_mut(&mapping_id) else {
-        return Some((source_data, observed_at));
+        return Some(incoming);
     };
 
     existing.records = existing.records.saturating_add(1);
     if temporal {
-        // A temporal mapping's records are observations of one id: keep the latest.
-        let new = observed_at.as_ref().map(ObservedAt::as_str);
+        // A temporal mapping's records are observations of one id: keep the latest, expiry and all.
+        let new = incoming.observed_at.as_ref().map(ObservedAt::as_str);
         if supersedes(new, existing.observed_at.as_ref().map(ObservedAt::as_str)) {
-            existing.data = source_data;
-            existing.observed_at = observed_at;
+            existing.data = incoming.data;
+            existing.observed_at = incoming.observed_at;
+            existing.expires_at.supersede(incoming.expires_at);
         }
     } else {
         // A static mapping's records refine one entity: merge them, remembering where they disagreed.
-        let conflict = deep_merge(&mut existing.data, &source_data, reads);
+        let conflict = deep_merge(&mut existing.data, &incoming.data, reads);
         existing.conflict = FieldPath::earliest(existing.conflict.take(), conflict);
+        existing.expires_at.refine(incoming.expires_at);
     }
     None
 }
@@ -202,7 +217,7 @@ mod tests {
             store::{
                 EntityStore,
                 FragmentWrite,
-                tests::{READS_EVERYTHING, assert_merges_expiries_per_id, assert_merges_scopes_per_id},
+                tests::{READS_EVERYTHING, assert_expiry_follows_the_retained_record, assert_joins_expiries_across_mappings, assert_merges_scopes_per_id},
             },
         },
         mapping_id::MappingId,
@@ -222,8 +237,13 @@ mod tests {
     }
 
     #[test]
-    fn the_greatest_expiry_of_every_fragment_of_an_id_is_kept() {
-        assert_merges_expiries_per_id(&DashMapLatestEntityStore::new());
+    fn the_expiries_of_an_id_s_mappings_are_joined() {
+        assert_joins_expiries_across_mappings(&DashMapLatestEntityStore::new());
+    }
+
+    #[test]
+    fn a_mapping_s_expiry_follows_the_record_it_retains() {
+        assert_expiry_follows_the_retained_record(&DashMapLatestEntityStore::new());
     }
 
     fn write(base_id: &Urn, data: serde_json::Value, mapping: u32, temporal: bool, observed_at: Option<&str>) -> FragmentWrite<'static> {

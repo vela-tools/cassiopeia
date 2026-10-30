@@ -103,8 +103,9 @@ impl UrnGenerator {
     /// missing or empty field: a record that carries no expiry contributes none, exactly as it
     /// contributes no scope. Resolved text is read in the same spellings as attribute date-times,
     /// and a number as a Unix epoch. Text that reads as no instant costs the record its expiry but
-    /// not the record itself; the loss is recorded in `unreadable` under `entity`, in parity with an
-    /// attribute qualifier that would not read (ETSI GS CIM 009 v1.9.1 clause 4.5.1).
+    /// not the record itself; the loss is recorded in `unreadable` under the mapping's entity type,
+    /// with `entity` as its exemplar, in parity with an attribute qualifier that would not read
+    /// (ETSI GS CIM 009 v1.9.1 clause 4.5.1).
     ///
     /// # Errors
     ///
@@ -122,7 +123,7 @@ impl UrnGenerator {
             Ok(Some(instant))
         } else {
             if let Some(text) = unreadable_text(&value) {
-                unreadable.record(entity, text.as_ref());
+                unreadable.record(mapping.data_model().entity_type(), entity, text.as_ref());
             }
             Ok(None)
         }

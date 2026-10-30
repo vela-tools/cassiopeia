@@ -735,9 +735,10 @@ mod tests {
         assert_eq!(fragments[0].inner().target_urn().to_string(), "urn:ngsi-ld:AirQualityObserved:S-1");
         let entries = expander.unreadable_expiries.into_entries();
         assert_eq!(entries.len(), 1);
-        assert_eq!(entries[0].0.to_string(), "urn:ngsi-ld:AirQualityObserved:S-1");
-        assert_eq!(entries[0].1.example.as_ref(), "the day after tomorrow");
-        assert_eq!(entries[0].1.occurrences.get(), 1);
+        assert_eq!(entries[0].0.as_str(), "AirQualityObserved");
+        assert_eq!(entries[0].1.exemplar.to_string(), "urn:ngsi-ld:AirQualityObserved:S-1");
+        assert_eq!(entries[0].1.unreadable.example.as_ref(), "the day after tomorrow");
+        assert_eq!(entries[0].1.unreadable.occurrences.get(), 1);
     }
 
     #[test]

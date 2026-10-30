@@ -515,17 +515,31 @@ mod tests {
     }
 
     #[test]
-    fn the_greatest_expiry_of_one_id_s_fragments_travels_on_every_assembled_unit() {
+    fn a_later_record_that_shortens_a_static_mapping_s_expiry_is_the_one_assembled() {
         let (resolver, mappings) = resolver_with(Box::new(DashMapLatestEntityStore::new()), &[SIMPLE]);
         let station = urn("urn:ngsi-ld:Station:1");
         let instant = |seconds: i64| Utc.timestamp_opt(seconds, 0).single().unwrap();
-        let first = Fragment::new(json!({"temperature": 20}), station.clone(), None, Some(instant(100)), None);
-        let second = Fragment::new(json!({"temperature": 21}), station.clone(), None, Some(instant(300)), None);
+        let first = Fragment::new(json!({"temperature": 20}), station.clone(), None, Some(instant(300)), None);
+        let second = Fragment::new(json!({"temperature": 21}), station.clone(), None, Some(instant(100)), None);
 
         resolver.resolve(Mapped::new(first, Arc::clone(&mappings[0]))).unwrap();
         resolver.resolve(Mapped::new(second, Arc::clone(&mappings[0]))).unwrap();
 
-        assert_eq!(only_unit(&resolver, &station).expires_at(), &Some(instant(300)));
+        assert_eq!(only_unit(&resolver, &station).expires_at(), &Some(instant(100)));
+    }
+
+    #[test]
+    fn a_second_mapping_without_an_expiry_leaves_the_assembled_entity_without_one() {
+        let (resolver, mappings) = resolver_with(Box::new(DashMapLatestEntityStore::new()), &[SIMPLE, OTHER]);
+        let station = urn("urn:ngsi-ld:Station:1");
+        let instant = Utc.timestamp_opt(300, 0).single().unwrap();
+        let expiring = Fragment::new(json!({"temperature": 20}), station.clone(), None, Some(instant), None);
+        let unexpiring = Fragment::new(json!({"name": "North"}), station.clone(), None, None, None);
+
+        resolver.resolve(Mapped::new(expiring, Arc::clone(&mappings[0]))).unwrap();
+        resolver.resolve(Mapped::new(unexpiring, Arc::clone(&mappings[1]))).unwrap();
+
+        assert_eq!(only_unit(&resolver, &station).expires_at(), &None);
     }
 
     #[test]

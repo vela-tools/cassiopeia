@@ -1,4 +1,4 @@
-use crate::{field_path::FieldPath, mapping_id::MappingId};
+use crate::{entity_store::mapping_expiry::MappingExpiry, field_path::FieldPath, mapping_id::MappingId};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::num::NonZeroU64;
@@ -23,4 +23,7 @@ pub struct StoredFragment {
     /// The earliest field on which the folded records disagreed, kept across batches so a conflict
     /// found in one batch is still reported after the next. Always `None` for a series observation.
     pub conflict: Option<FieldPath>,
+    /// The entity `expiresAt` the fragment's records contribute: the one folded into a
+    /// current-state slot, or the observation's own in a series.
+    pub expires_at: MappingExpiry,
 }
