@@ -1,9 +1,13 @@
 use strum::{Display, EnumCount, EnumIter};
 
-/// Why a source could not be brought into the pipeline as records.
+/// Why a source could not be brought into the pipeline as records, or was brought in with a shape
+/// other than the one it states.
 #[derive(Clone, Copy, Debug, Display, EnumCount, EnumIter, Eq, Hash, Ord, PartialEq, PartialOrd)]
 #[strum(serialize_all = "kebab-case")]
 pub enum IngestCode {
+    /// Columns of a tabular source asked for a record key another column holds, so each was read
+    /// by a generated key instead.
+    ColumnsRenamed,
     /// The source could not be fetched or opened.
     SourceUnavailable,
     /// The payload's format could not be determined from its content.
@@ -24,5 +28,6 @@ mod tests {
     #[test]
     fn an_ingest_code_renders_a_kebab_case_token() {
         assert_eq!(IngestCode::RecordsUnreadable.to_string(), "records-unreadable");
+        assert_eq!(IngestCode::ColumnsRenamed.to_string(), "columns-renamed");
     }
 }
