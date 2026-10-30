@@ -7,6 +7,7 @@ use crate::{
         header_rows::HeaderRows,
         preamble::Preamble,
         table::Table,
+        title::title_rows,
     },
 };
 use std::io::Read;
@@ -18,6 +19,7 @@ mod header;
 pub mod header_rows;
 pub mod preamble;
 mod table;
+mod title;
 
 /// Read granularity for [`CsvInspector::read_sample`].
 const CHUNK: usize = 64 * 1024;
@@ -118,6 +120,7 @@ impl CsvInspector {
                 let Some((headerless, full)) = Self::locate_table(sample, headerless) else {
                     continue;
                 };
+                let (headerless, full) = Self::below_titles(sample, headerless, full);
 
                 let header_signal = header_quality(&full);
                 let headed = Dialect {
@@ -197,6 +200,25 @@ impl CsvInspector {
             }
         }
         None
+    }
+
+    /// Extends `dialect`'s preamble over the title records at the top of `table` that are as wide as
+    /// the table, returning the dialect and the headerless table below them. A dialect whose table
+    /// starts with no such title, or whose preamble is already at [`MAX_PREAMBLE_RECORDS`], is
+    /// returned unchanged.
+    fn below_titles(sample: &[u8], mut dialect: Dialect, table: Table) -> (Dialect, Table) {
+        let preamble = dialect.preamble;
+        let titles = title_rows(&table).min(MAX_PREAMBLE_RECORDS.saturating_sub(preamble.records()));
+        if titles == 0 {
+            return (dialect, table);
+        }
+
+        dialect.preamble = Preamble::new(preamble.records() + titles);
+        if let Some(below) = Table::parse(sample, &dialect) {
+            return (dialect, below);
+        }
+        dialect.preamble = preamble;
+        (dialect, table)
     }
 
     /// Reads a dialect sample large enough to score a header, bounded by a hard byte ceiling.
@@ -429,5 +451,40 @@ mod tests {
             vec!["", "Zeit-NO2 MESZ", "NO2 HMW µg/m³", "Zeit-PM10 MESZ", "PM10 MW24 µg/m³", "PM10 HMW µg/m³"]
         );
         assert_eq!(reader.records().next().unwrap().unwrap()[0], *"STEF");
+    }
+
+    #[test]
+    fn a_title_padded_to_the_table_width_is_detected_as_a_preamble() {
+        // A spreadsheet export pads every row to the table's width, so the title has as many
+        // fields as the header and the field-count check alone cannot see it.
+        let sample = "Air quality report;;\nStation;NO2;O3\nSTEF;12,45;NE\nAKA;9,80;40,10\nTAB;NE;38,20\n";
+        let dialect = CsvInspector::new().inspect(sample.as_bytes(), &EncodingHint::NONE).unwrap();
+        let mut reader = dialect.reader(sample.as_bytes()).unwrap();
+
+        assert_eq!(dialect.preamble, Preamble::new(1));
+        assert_eq!(dialect.header_rows, HeaderRows::ONE);
+        assert_eq!(reader.headers().unwrap(), vec!["Station", "NO2", "O3"]);
+    }
+
+    #[test]
+    fn a_dense_title_as_wide_as_a_numeric_table_is_detected_as_a_preamble() {
+        let sample = "Lumes;v2.10;25.10.26\nStation;NO2;O3\nSTEF;12;54\nAKA;9;40\nTAB;7;38\n";
+        let dialect = CsvInspector::new().inspect(sample.as_bytes(), &EncodingHint::NONE).unwrap();
+        let mut reader = dialect.reader(sample.as_bytes()).unwrap();
+
+        assert_eq!(dialect.preamble, Preamble::new(1));
+        assert_eq!(reader.headers().unwrap(), vec!["Station", "NO2", "O3"]);
+        assert_eq!(reader.records().next().unwrap().unwrap(), vec!["STEF", "12", "54"]);
+    }
+
+    #[test]
+    fn a_padded_title_above_a_stacked_header_leaves_the_stacked_header_whole() {
+        let sample = "Lumes Wien;;;\n;Zeit-NO2;NO2;NO2\n;;HMW;MW24\n;MESZ;µg/m³;µg/m³\nSTEF;30.10.2026, 10:00;18,48;12,1\nTAB;30.10.2026, 10:00;NE;14,03\nKE;30.10.2026, 10:00;15,17;12,49\n";
+        let dialect = CsvInspector::new().inspect(sample.as_bytes(), &EncodingHint::NONE).unwrap();
+        let mut reader = dialect.reader(sample.as_bytes()).unwrap();
+
+        assert_eq!(dialect.preamble, Preamble::new(1));
+        assert_eq!(dialect.header_rows, HeaderRows::new(3));
+        assert_eq!(reader.headers().unwrap(), vec!["", "Zeit-NO2 MESZ", "NO2 HMW µg/m³", "NO2 MW24 µg/m³"]);
     }
 }

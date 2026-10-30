@@ -34,24 +34,48 @@ pub fn header_quality(table: &Table) -> f64 {
         return 0.0;
     }
 
-    let mut evidence = 0.0;
-    let mut typed_columns = 0usize;
+    let evidence = typed_evidence(table, 0);
+    if evidence.typed_columns > 0 {
+        return (to_f64(evidence.broken) - to_f64(evidence.conforming)) / to_f64(table.num_columns);
+    }
+
+    header_shape(first_row)
+}
+
+/// How one record of a table sits against the typed columns below it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct TypedEvidence {
+    /// The columns whose cells below the record carry a strong, non-textual type.
+    pub typed_columns: usize,
+    /// The typed columns where the record holds a text label, as a header does.
+    pub broken: usize,
+    /// The typed columns where the record holds a value of the column's own type, as a data row does.
+    pub conforming: usize,
+}
+
+/// Measures record `row` of `table` against the type each column takes in the records below it.
+pub fn typed_evidence(table: &Table, row: usize) -> TypedEvidence {
+    let mut evidence = TypedEvidence {
+        typed_columns: 0,
+        broken: 0,
+        conforming: 0,
+    };
     for column in &table.column_types {
-        let Some(dominant) = dominant_typed_pattern(column.get(1..).unwrap_or(&[])) else {
+        let Some(dominant) = dominant_typed_pattern(column.get(row + 1..).unwrap_or(&[])) else {
             continue;
         };
-        typed_columns += 1;
-        match column.first().copied().unwrap_or(DataType::Empty) {
+        evidence.typed_columns += 1;
+        match column.get(row).copied().unwrap_or(DataType::Empty) {
             // A text label sitting over a numeric or boolean column is header evidence.
-            DataType::Text | DataType::Empty => evidence += 1.0,
+            DataType::Text | DataType::Empty => evidence.broken += 1,
             // A boolean literal (`on`, `off`, `yes`, `no`, `true`, `false`, `y`, `n`) is a bare
-            // word that is equally a valid column label, so row 0 holding one over a boolean
+            // word that is equally a valid column label, so a record holding one over a boolean
             // column is genuinely ambiguous and must not be scored as a data row — a header named
             // `on` otherwise reads as data and the whole entity renders with a null id. It gives
             // no signal either way.
             DataType::Boolean => {}
-            // Row 0 fits the column's own type, so it reads as one more data row.
-            row0 if row0 == dominant => evidence -= 1.0,
+            // The record fits the column's own type, so it reads as one more data row.
+            cell if cell == dominant => evidence.conforming += 1,
             // Typed but a different type: inconclusive, contributes nothing.
             DataType::Integer
             | DataType::Float
@@ -65,12 +89,7 @@ pub fn header_quality(table: &Table) -> f64 {
             | DataType::Percentage => {}
         }
     }
-
-    if typed_columns > 0 {
-        return evidence / to_f64(table.num_columns);
-    }
-
-    header_shape(first_row)
+    evidence
 }
 
 /// Whether row 0 of a headerless `table` should still be read as a header: every cell is a label
@@ -130,7 +149,7 @@ pub fn continuation_rows(rows: &[StringRecord]) -> usize {
 }
 
 /// Whether every non-blank cell of `row` is a field label and none carries a typed value.
-fn is_label_row(row: &StringRecord) -> bool {
+pub fn is_label_row(row: &StringRecord) -> bool {
     row.iter()
         .map(str::trim)
         .all(|cell| cell.is_empty() || (is_field_label(cell) && matches!(DataType::detect(cell), DataType::Text | DataType::Boolean)))
