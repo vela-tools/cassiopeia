@@ -1,13 +1,7 @@
-use csv_core::{ReadRecordResult, Reader};
+use crate::record_end::skip_record;
+use csv_core::Reader;
 use serde::{Deserialize, Serialize};
 use std::io::{self, BufRead};
-
-/// Scratch bytes a preamble record's fields are parsed into and discarded from. A field longer than
-/// this is parsed across several calls, so the size bounds memory rather than the record length.
-const SCRATCH_FIELD_BYTES: usize = 1024;
-
-/// Scratch field-end slots for a preamble record; a wider record is parsed across several calls.
-const SCRATCH_FIELD_ENDS: usize = 64;
 
 /// The records above a CSV table that do not belong to it, such as a title line over the header.
 ///
@@ -42,22 +36,7 @@ impl Preamble {
     ///
     /// Returns the underlying [`io::Error`] when `input` cannot be read.
     pub(crate) fn skip<R: BufRead>(self, core: &mut Reader, input: &mut R) -> io::Result<()> {
-        (0..self.0).try_for_each(|_| skip_record(core, input))
-    }
-}
-
-/// Consumes one CSV record from `input`, discarding its fields, or nothing at end of input.
-fn skip_record<R: BufRead>(core: &mut Reader, input: &mut R) -> io::Result<()> {
-    let mut fields = [0u8; SCRATCH_FIELD_BYTES];
-    let mut ends = [0usize; SCRATCH_FIELD_ENDS];
-    loop {
-        let buffer = input.fill_buf()?;
-        let (result, consumed, _, _) = core.read_record(buffer, &mut fields, &mut ends);
-        input.consume(consumed);
-        match result {
-            ReadRecordResult::InputEmpty | ReadRecordResult::OutputFull | ReadRecordResult::OutputEndsFull => {}
-            ReadRecordResult::Record | ReadRecordResult::End => return Ok(()),
-        }
+        (0..self.0).try_for_each(|_| skip_record(core, input).map(drop))
     }
 }
 

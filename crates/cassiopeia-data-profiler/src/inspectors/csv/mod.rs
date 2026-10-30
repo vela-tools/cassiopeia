@@ -29,9 +29,14 @@ mod title;
 /// Scan granularity for [`CsvInspector::sample_of`].
 const CHUNK: usize = 64 * 1024;
 
-/// The fewest complete rows a sample must hold before header scoring can run: row 0 plus enough
-/// data rows for both the header hypothesis (which needs two full rows) and per-column typing.
-const MIN_SAMPLE_ROWS: usize = 5;
+/// The fewest lines a sample must hold before header scoring can run: row 0 plus enough data rows
+/// for both the header hypothesis (which needs two full rows) and per-column typing.
+///
+/// Lines stand in for records here because where a record ends depends on the quote, which is not
+/// detected yet. A quoted field with a line break makes a record span several lines, so a sample of
+/// very wide multi-line records can hold fewer records than this; it is then scored on fewer rows,
+/// and is still cut at a record boundary.
+const MIN_SAMPLE_LINES: usize = 5;
 
 /// Hard ceiling on the dialect sample. It bounds the read, and the scoring work of the candidate
 /// dialects, for a file whose rows are pathologically wide: a single row can exceed the soft
@@ -72,6 +77,15 @@ const CANDIDATE_QUOTES: [Quote; 3] = [Quote::Char(DialectByte::DOUBLE_QUOTE), Qu
 pub struct CsvInspector<'s> {
     statement: &'s DialectStatement,
     sample_size: usize,
+}
+
+/// Whether the dialect sample is the whole content or a leading part cut from it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum SampleExtent {
+    /// The sample is the whole content, so its last record is the file's last record.
+    Whole,
+    /// The sample was cut from the content, so its last record may be cut short.
+    Cut,
 }
 
 /// One reading of a sample: a candidate dialect, the table it reads, and how coherent that table is.
@@ -125,7 +139,8 @@ impl<'s> CsvInspector<'s> {
             .statement
             .encoding()
             .unwrap_or_else(|| CharacterEncoding::new(content.encoding_hint().encoding_of(bytes)));
-        let decoded = encoding.encoding().decode(self.sample_of(bytes)).0;
+        let (raw_sample, extent) = self.sample_of(bytes);
+        let decoded = encoding.encoding().decode(raw_sample).0;
         let sample = decoded.as_bytes();
         let terminator = self.statement.terminator().unwrap_or_else(|| Self::terminator_of(sample));
 
@@ -144,7 +159,13 @@ impl<'s> CsvInspector<'s> {
                     encoding,
                     notation: ValueNotation::PLAIN,
                 };
-                self.best_reading(sample, candidate)
+                // A quote decides which line breaks end a record, so a cut sample is trimmed to its
+                // complete records under each candidate, never at a line.
+                let records = match extent {
+                    SampleExtent::Whole => sample,
+                    SampleExtent::Cut => candidate.complete_records(sample),
+                };
+                self.best_reading(records, candidate)
             })
             .reduce(|best, reading| best.or_better(Some(reading)));
 
@@ -318,36 +339,38 @@ impl<'s> CsvInspector<'s> {
         (dialect, table)
     }
 
-    /// The leading bytes of `bytes` the dialect is scored on: large enough to score a header,
-    /// bounded by a hard byte ceiling, and cut after its last complete line so a half-sampled final
-    /// row cannot skew scoring.
+    /// The leading bytes of `bytes` the dialect is scored on, large enough to score a header and
+    /// bounded by a hard byte ceiling, and whether they are all of `bytes`.
     ///
-    /// A narrow CSV crosses [`MIN_SAMPLE_ROWS`] newlines well inside the soft target `sample_size`,
+    /// A narrow CSV crosses [`MIN_SAMPLE_LINES`] newlines well inside the soft target `sample_size`,
     /// so the sample stops at that target. A file whose rows are wider than the soft target keeps
-    /// sampling until it holds enough complete rows to tell a header from data, and
-    /// [`MAX_SAMPLE_BYTES`] caps a pathologically wide single row. Newlines are counted per chunk,
-    /// never by rescanning the sample, so the scan stays linear in the bytes sampled.
-    fn sample_of<'a>(&self, bytes: &'a [u8]) -> &'a [u8] {
+    /// sampling until it holds enough lines to tell a header from data, and [`MAX_SAMPLE_BYTES`]
+    /// caps a pathologically wide single row. Newlines are counted per chunk, never by rescanning
+    /// the sample, so the scan stays linear in the bytes sampled.
+    ///
+    /// A cut sample ends wherever its last chunk does, even inside a record or a character; each
+    /// candidate dialect trims it to its complete records with [`Dialect::complete_records`].
+    fn sample_of<'a>(&self, bytes: &'a [u8]) -> (&'a [u8], SampleExtent) {
         let mut end = 0usize;
         let mut newlines = 0usize;
         for chunk in bytes.chunks(CHUNK) {
             newlines += bytecount::count(chunk, b'\n');
             end += chunk.len();
-            if (end >= self.sample_size && newlines >= MIN_SAMPLE_ROWS) || end >= MAX_SAMPLE_BYTES {
+            if (end >= self.sample_size && newlines >= MIN_SAMPLE_LINES) || end >= MAX_SAMPLE_BYTES {
                 break;
             }
         }
-        let sample = &bytes[..end];
-        sample
-            .iter()
-            .rposition(|&byte| byte == b'\n')
-            .map_or(sample, |last_newline| &sample[..=last_newline])
+        let extent = if end < bytes.len() { SampleExtent::Cut } else { SampleExtent::Whole };
+        (&bytes[..end], extent)
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use crate::{content::Content, inspectors::csv::CsvInspector};
+    use crate::{
+        content::Content,
+        inspectors::csv::{CHUNK, CsvInspector},
+    };
     use cassiopeia_csv_dialect::{
         decimal_separator::DecimalSeparator,
         dialect_byte::DialectByte,
@@ -358,6 +381,7 @@ mod tests {
         statement::DialectStatement,
     };
     use pretty_assertions::assert_eq;
+    use std::fmt::Write;
 
     #[test]
     fn a_comma_delimited_file_with_headers_is_detected() {
@@ -417,8 +441,8 @@ mod tests {
     #[test]
     fn a_header_is_detected_when_the_first_data_row_exceeds_the_sample_size() {
         // The first data row is wider than the 32 KiB soft sample, so a single fixed read would see
-        // only the header line, score it as headerless, and ingest it as data. Row-aware sampling
-        // keeps reading until it holds enough complete rows to recognise the header. This mirrors
+        // only the header line, score it as headerless, and ingest it as data. Line-aware sampling
+        // keeps reading until it holds enough lines to recognise the header. This mirrors
         // the TMDB credits file, whose first row (Avatar) is ~40 KiB of quoted JSON.
         let mut sample = String::from("id,title,cast\n1,Avatar,\"");
         sample.push_str(&"x".repeat(40 * 1024));
@@ -426,6 +450,29 @@ mod tests {
         let dialect = CsvInspector::new(&DialectStatement::NOTHING).inspect(&Content::new(sample.as_bytes())).unwrap();
 
         assert_eq!(dialect.delimiter, DialectByte::COMMA);
+        assert_eq!(dialect.header_rows, HeaderRows::ONE);
+    }
+
+    #[test]
+    fn a_sample_cut_inside_a_quoted_line_break_keeps_the_quote_and_the_header() {
+        // Every note holds a line break, and the file is longer than one sample chunk, so the sample
+        // is cut inside the second line of a note. Cut at its last line, the sample would end in half
+        // a record, the double quote would fail to parse it, and the single quote would win with the
+        // header taken for a preamble.
+        let mut sample = String::from("station_identifier;observation_note;value\n");
+        let mut row = 0;
+        while sample.len() < CHUNK + 4096 {
+            writeln!(sample, "{row};\"first line of a long note\nsecond line of a long note\";{row}.5").unwrap();
+            row += 1;
+        }
+        let before_cut = &sample[..CHUNK];
+        assert!(before_cut.rsplit('\n').next().unwrap().starts_with("second line"));
+
+        let dialect = CsvInspector::new(&DialectStatement::NOTHING).inspect(&Content::new(sample.as_bytes())).unwrap();
+
+        assert_eq!(dialect.delimiter, DialectByte::SEMICOLON);
+        assert_eq!(dialect.quote_char, Quote::Char(DialectByte::DOUBLE_QUOTE));
+        assert_eq!(dialect.preamble, Preamble::NONE);
         assert_eq!(dialect.header_rows, HeaderRows::ONE);
     }
 
