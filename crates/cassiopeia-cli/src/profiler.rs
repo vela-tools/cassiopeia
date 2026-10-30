@@ -1,5 +1,5 @@
 use crate::{error::Result, profile_report::render_profile};
-use cassiopeia_data_profiler::profile_path;
+use cassiopeia_data_profiler::{encoding_hint::EncodingHint, profile_path};
 use cassiopeia_terminal_style::rendering::{Stream, detect_rendering};
 use std::{fs::metadata, path::Path};
 
@@ -12,7 +12,8 @@ use std::{fs::metadata, path::Path};
 ///
 /// Returns [`CliError`](crate::error::CliError) when the file's format cannot be detected.
 pub fn profile_file(file: &Path) -> Result<()> {
-    let profile = profile_path(file)?;
+    // A local file carries no source context, so its encoding is read from its content alone.
+    let profile = profile_path(file, &EncodingHint::NONE)?;
     let name = file
         .file_name()
         .map_or_else(|| file.display().to_string(), |name| name.to_string_lossy().into_owned());

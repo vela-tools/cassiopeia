@@ -103,7 +103,7 @@ impl Ingestor for GeoJsonIngestor {
 mod tests {
     use crate::{geojson::ingestor::GeoJsonIngestor, ingestor::Ingestor};
     use cassiopeia_common::{channel::ChannelSender, format::DataFormat, signal::Signal};
-    use cassiopeia_data_profiler::profile::Profile;
+    use cassiopeia_data_profiler::{encoding_hint::EncodingHint, profile::Profile};
     use cassiopeia_ir::{
         payload::{CollectedPayload, FilePayload, ProfiledPayload},
         record::Record,
@@ -118,7 +118,7 @@ mod tests {
         let path = dir.path().join("data.geojson");
         File::create(&path).unwrap().write_all(contents.as_bytes()).unwrap();
         let payload = ProfiledPayload::new(
-            CollectedPayload::File(FilePayload::new(path, Some(DataFormat::GeoJson))),
+            CollectedPayload::File(FilePayload::new(path, Some(DataFormat::GeoJson), EncodingHint::NONE)),
             Profile::new(DataFormat::GeoJson, media_type!(APPLICATION / GEO + JSON), 1.0),
         );
         (dir, payload)

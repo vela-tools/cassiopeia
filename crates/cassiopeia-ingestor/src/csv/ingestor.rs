@@ -222,6 +222,7 @@ mod tests {
     use crate::{csv::ingestor::CsvIngestor, ingestor::Ingestor};
     use cassiopeia_common::{channel::ChannelSender, format::DataFormat, signal::Signal};
     use cassiopeia_data_profiler::{
+        encoding_hint::EncodingHint,
         inspectors::csv::{
             CsvInspector,
             dialect::{Dialect, LineTerminator},
@@ -250,7 +251,10 @@ mod tests {
         if let Some(metadata) = metadata {
             profile = profile.with_metadata(metadata);
         }
-        let payload = ProfiledPayload::new(CollectedPayload::File(FilePayload::new(path, Some(DataFormat::Csv))), profile);
+        let payload = ProfiledPayload::new(
+            CollectedPayload::File(FilePayload::new(path, Some(DataFormat::Csv), EncodingHint::NONE)),
+            profile,
+        );
         (dir, payload)
     }
 
@@ -357,7 +361,7 @@ mod tests {
     #[test]
     fn the_inspected_dialect_ingests_a_titled_table_from_its_header() {
         let contents = "Lumes;v2.10;25.10.26-08:00:00\nStation;Zeit-NO2;NO2;O3\nSTEF;25.10.2026, 08:00;12;54\nTAB;25.10.2026, 08:00;NE;38\n";
-        let dialect = CsvInspector::new().inspect(contents.as_bytes()).unwrap();
+        let dialect = CsvInspector::new().inspect(contents.as_bytes(), &EncodingHint::NONE).unwrap();
         let (_dir, payload) = profiled_csv(contents, Some(FormatMetadata::Csv(CsvMetadata::new(dialect))));
         let records = ingest_all(payload);
 
@@ -370,7 +374,7 @@ mod tests {
     #[test]
     fn a_stacked_header_keys_columns_by_joined_names_and_a_blank_one_by_position() {
         let contents = "Lumes;v2.10;30.10.26-10:00:00\n;Zeit-NO2;NO2;Zeit-PM10;PM10;PM10\n;;HMW;;MW24;HMW\n;MESZ;µg/m³;MESZ;µg/m³;µg/m³\nSTEF;30.10.2026, 10:00;18,48;30.10.2026, 10:00;NE;NE\nTAB;30.10.2026, 10:00;NE;30.10.2026, 10:00;14,03;14,44\nKE;30.10.2026, 10:00;15,17;30.10.2026, 10:00;12,49;18,80\n";
-        let dialect = CsvInspector::new().inspect(contents.as_bytes()).unwrap();
+        let dialect = CsvInspector::new().inspect(contents.as_bytes(), &EncodingHint::NONE).unwrap();
         let (_dir, payload) = profiled_csv(contents, Some(FormatMetadata::Csv(CsvMetadata::new(dialect))));
         let records = ingest_all(payload);
         let tab = records[1].data();

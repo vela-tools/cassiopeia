@@ -159,7 +159,7 @@ impl<'a> SchemaDownloader<'a> {
 
         self.cache = Some(directory);
 
-        let path = outcome?;
+        let path = outcome?.into_path();
         // The cache key must own the URL; cloning it once per distinct fetched source is unavoidable.
         self.fetched.insert(url.clone(), path.clone());
         Ok(path)

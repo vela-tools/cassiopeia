@@ -10,7 +10,7 @@ use cassiopeia_common::{
     signal::Signal,
     telemetry::run::RunTelemetry,
 };
-use cassiopeia_data_profiler::{error::DataProfilerError, inspectors::inspect, profile::Profile};
+use cassiopeia_data_profiler::{content::Content, error::DataProfilerError, inspectors::inspect, profile::Profile};
 use cassiopeia_ir::payload::CollectedPayload;
 use mediatype::{MediaType, media_type};
 use std::{convert::Infallible, fs, sync::Arc};
@@ -61,9 +61,9 @@ fn profile_payload(format: DataFormat, payload: &CollectedPayload) -> Result<Pro
                     action: IoAction::Read,
                 })
             })?;
-            inspect(format, &bytes)?
+            inspect(format, &Content::hinted(&bytes, file.encoding_hint()))?
         }
-        CollectedPayload::Bytes(bytes) => inspect(format, bytes.data())?,
+        CollectedPayload::Bytes(bytes) => inspect(format, &Content::hinted(bytes.data(), bytes.encoding_hint()))?,
     };
     Ok(match metadata {
         Some(metadata) => profile.with_metadata(metadata),
@@ -83,7 +83,7 @@ mod tests {
         signal::Signal,
         telemetry::run::RunTelemetry,
     };
-    use cassiopeia_data_profiler::metadata::FormatMetadata;
+    use cassiopeia_data_profiler::{encoding_hint::EncodingHint, metadata::FormatMetadata};
     use cassiopeia_ir::payload::{BytesPayload, CollectedPayload, ProfiledPayload};
     use pretty_assertions::assert_eq;
     use std::sync::Arc;
@@ -92,7 +92,9 @@ mod tests {
     /// payload it emits.
     fn profile_one(format: DataFormat, data: Vec<u8>) -> ProfiledPayload {
         let (input_tx, input_rx) = channel(ChannelPolicy::Unbounded);
-        input_tx.send(Signal::Data(CollectedPayload::Bytes(BytesPayload::new(data, None)))).unwrap();
+        input_tx
+            .send(Signal::Data(CollectedPayload::Bytes(BytesPayload::new(data, None, EncodingHint::NONE))))
+            .unwrap();
         input_tx.send(Signal::Stop).unwrap();
         drop(input_tx);
 

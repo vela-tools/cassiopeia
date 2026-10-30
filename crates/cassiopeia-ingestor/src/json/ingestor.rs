@@ -128,7 +128,7 @@ mod tests {
         json::{error::JsonIngestError, ingestor::JsonIngestor},
     };
     use cassiopeia_common::{channel::ChannelSender, format::DataFormat, signal::Signal};
-    use cassiopeia_data_profiler::profile::Profile;
+    use cassiopeia_data_profiler::{encoding_hint::EncodingHint, profile::Profile};
     use cassiopeia_ir::{
         payload::{CollectedPayload, FilePayload, ProfiledPayload},
         record::Record,
@@ -144,7 +144,7 @@ mod tests {
         let path = dir.path().join("data.json");
         File::create(&path).unwrap().write_all(contents.as_bytes()).unwrap();
         let payload = ProfiledPayload::new(
-            CollectedPayload::File(FilePayload::new(path, Some(DataFormat::Json))),
+            CollectedPayload::File(FilePayload::new(path, Some(DataFormat::Json), EncodingHint::NONE)),
             Profile::new(DataFormat::Json, media_type!(APPLICATION / JSON), 1.0),
         );
         (dir, payload)

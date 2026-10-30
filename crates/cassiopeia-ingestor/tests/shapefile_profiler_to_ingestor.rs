@@ -12,7 +12,7 @@
 )]
 
 use cassiopeia_common::{channel::ChannelSender, collection::CollectionName, format::DataFormat, signal::Signal};
-use cassiopeia_data_profiler::profile_path;
+use cassiopeia_data_profiler::{encoding_hint::EncodingHint, profile_path};
 use cassiopeia_ingestor::{ingestor::Ingestor, shapefile::ingestor::ShapefileIngestor};
 use cassiopeia_ir::{
     payload::{CollectedPayload, FilePayload, ProfiledPayload},
@@ -67,10 +67,10 @@ fn zip_dir(dir: &Path, archive_path: &Path) {
 
 /// Profiles the path exactly as the pipeline would, asserts it is a shapefile, and pairs it with a payload.
 fn profiled(path: &Path) -> ProfiledPayload {
-    let profile = profile_path(path).unwrap();
+    let profile = profile_path(path, &EncodingHint::NONE).unwrap();
     assert_eq!(*profile.format(), DataFormat::Shapefile);
     ProfiledPayload::new(
-        CollectedPayload::File(FilePayload::new(path.to_path_buf(), Some(DataFormat::Shapefile))),
+        CollectedPayload::File(FilePayload::new(path.to_path_buf(), Some(DataFormat::Shapefile), EncodingHint::NONE)),
         profile,
     )
 }

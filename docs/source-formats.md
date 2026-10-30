@@ -61,6 +61,10 @@ Cassiopeia profiles the CSV before reading it. It detects the delimiter, the quo
 
 Cassiopeia keeps a header's text as written, accented characters and punctuation included, and replaces a newline inside a quoted header with a space. A field name that is not an identifier is read with bracket notation, as in `{{ this['NO2 HMW µg/m³'] }}`. A column whose header is blank is keyed by its zero-based position, as in a headerless file, so it is read as `{{ this['0'] }}`.
 
+### Character encoding
+
+Cassiopeia reads a CSV in the character encoding it detects and converts it to UTF-8, so a Windows-1252 or ISO-8859-2 file is read correctly rather than rejected. For a source fetched by URL, a `charset` the server declares in its `Content-Type` decides the encoding outright. Without one, the encoding is guessed from the content, and the domain the file is served from weighs the guess toward the encodings used in that region, as a browser does for an undeclared page. That settles files whose only non-ASCII characters are symbols. In Windows-1252, `µg/m³` and `°C` use bytes that ISO-8859-2 reads as the letters `ľ` and `ł`, and content alone cannot tell which was meant. Served from a `.at` or `.de` domain, such a file reads as Windows-1252. A local file has no such context, so its encoding comes from its content alone, and `cassiopeia profile` on a downloaded copy can report a different encoding than a run that reads the same file by URL.
+
 ### Preamble and stacked headers
 
 Some feeds put a title line above the table. Cassiopeia skips such leading rows as a preamble when each of them has a different number of fields from the table below. A title row with as many fields as the table cannot be told apart from it and is read as part of the table. The preamble is counted in CSV records, not lines, so a quoted title that spans two lines is one record and the header below it is read intact. The profile report shows it as `preamble 1 record`.

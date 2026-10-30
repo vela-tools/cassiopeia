@@ -1,4 +1,5 @@
 use crate::{
+    content::Content,
     error::Result,
     inspectors::{csv::CsvInspector, grib::GribInspector},
     metadata::{CsvMetadata, FormatMetadata},
@@ -8,7 +9,7 @@ use cassiopeia_common::format::DataFormat;
 pub mod csv;
 pub mod grib;
 
-/// Runs the structural inspector for `format` over `bytes`, extracting the format-specific metadata.
+/// Runs the structural inspector for `format` over `content`, extracting the format-specific metadata.
 ///
 /// This is the shared entry point both the auto-detect path (through each format's `Detector`) and the
 /// declared-format path (through the passthrough profiler) route to, so a format's inspector runs the
@@ -21,43 +22,45 @@ pub mod grib;
 /// # Errors
 ///
 /// Returns [`crate::error::DataProfilerError`] when the CSV dialect cannot be inspected.
-pub fn inspect(format: DataFormat, bytes: &[u8]) -> Result<Option<FormatMetadata>> {
+pub fn inspect(format: DataFormat, content: &Content<'_>) -> Result<Option<FormatMetadata>> {
     match format {
         DataFormat::Csv => {
-            let dialect = CsvInspector::new().inspect(bytes)?;
+            let dialect = CsvInspector::new().inspect(content.bytes(), content.encoding_hint())?;
             Ok(Some(FormatMetadata::Csv(CsvMetadata::new(dialect))))
         }
-        DataFormat::Grib => Ok(GribInspector::inspect(bytes).map(FormatMetadata::Grib)),
+        DataFormat::Grib => Ok(GribInspector::inspect(content.bytes()).map(FormatMetadata::Grib)),
         DataFormat::Auto | DataFormat::Json | DataFormat::GeoJson | DataFormat::Kml | DataFormat::Kmz | DataFormat::Shapefile | DataFormat::Xml => Ok(None),
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use crate::inspectors::inspect;
+    use crate::{content::Content, inspectors::inspect};
     use cassiopeia_common::format::DataFormat;
     use pretty_assertions::assert_eq;
 
     #[test]
     fn a_declared_csv_is_inspected_for_its_dialect() {
-        let metadata = inspect(DataFormat::Csv, b"id;name\n1;alpha\n2;beta\n").unwrap().unwrap();
+        let metadata = inspect(DataFormat::Csv, &Content::new(b"id;name\n1;alpha\n2;beta\n")).unwrap().unwrap();
         assert_eq!(metadata.as_csv().unwrap().dialect().delimiter, b';');
     }
 
     #[test]
     fn a_declared_grib_is_inspected_for_its_edition() {
-        let metadata = inspect(DataFormat::Grib, b"GRIB\x00\x00\x00\x02\x00\x00\x00\x00").unwrap().unwrap();
+        let metadata = inspect(DataFormat::Grib, &Content::new(b"GRIB\x00\x00\x00\x02\x00\x00\x00\x00"))
+            .unwrap()
+            .unwrap();
         assert!(metadata.as_grib().is_some());
     }
 
     #[test]
     fn a_self_describing_format_has_no_inspector() {
-        assert!(inspect(DataFormat::Json, b"{}").unwrap().is_none());
-        assert!(inspect(DataFormat::Shapefile, b"anything").unwrap().is_none());
+        assert!(inspect(DataFormat::Json, &Content::new(b"{}")).unwrap().is_none());
+        assert!(inspect(DataFormat::Shapefile, &Content::new(b"anything")).unwrap().is_none());
     }
 
     #[test]
     fn an_empty_declared_csv_surfaces_the_inspection_error() {
-        assert!(inspect(DataFormat::Csv, b"").is_err());
+        assert!(inspect(DataFormat::Csv, &Content::new(b"")).is_err());
     }
 }

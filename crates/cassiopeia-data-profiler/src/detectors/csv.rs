@@ -1,4 +1,5 @@
 use crate::{
+    content::Content,
     detectors::Detector,
     inspectors::csv::{CsvInspector, dialect::Dialect},
     metadata::{CsvMetadata, FormatMetadata},
@@ -14,9 +15,9 @@ use mediatype::media_type;
 pub struct CsvDetector;
 
 impl Detector for CsvDetector {
-    fn detect(&self, bytes: &[u8]) -> Option<Profile> {
-        let dialect = CsvInspector::new().inspect(bytes).ok()?;
-        if !dialect.header_rows.is_present() || !Self::has_header_and_record(bytes, &dialect) {
+    fn detect(&self, content: &Content<'_>) -> Option<Profile> {
+        let dialect = CsvInspector::new().inspect(content.bytes(), content.encoding_hint()).ok()?;
+        if !dialect.header_rows.is_present() || !Self::has_header_and_record(content.bytes(), &dialect) {
             return None;
         }
         Some(Profile::new(DataFormat::Csv, media_type!(TEXT / CSV), 0.9).with_metadata(FormatMetadata::Csv(CsvMetadata::new(dialect))))
@@ -40,16 +41,19 @@ impl CsvDetector {
 #[cfg(test)]
 mod tests {
     use crate::{
+        content::Content,
         detectors::{Detector, csv::CsvDetector},
+        encoding_hint::EncodingHint,
         inspectors::csv::{header_rows::HeaderRows, preamble::Preamble},
         metadata::FormatMetadata,
     };
     use cassiopeia_common::format::DataFormat;
     use pretty_assertions::assert_eq;
+    use url::Url;
 
     #[test]
     fn a_header_row_with_records_is_detected_as_csv() {
-        let profile = CsvDetector.detect(b"id,name,value\n1,alpha,10\n2,beta,20\n").unwrap();
+        let profile = CsvDetector.detect(&Content::new(b"id,name,value\n1,alpha,10\n2,beta,20\n")).unwrap();
         assert_eq!(*profile.format(), DataFormat::Csv);
         assert_eq!(profile.mime_type().to_string(), "text/csv");
         let metadata = profile.metadata().as_ref().and_then(FormatMetadata::as_csv).unwrap();
@@ -58,27 +62,45 @@ mod tests {
 
     #[test]
     fn a_header_only_buffer_with_no_records_is_rejected() {
-        assert!(CsvDetector.detect(b"id,name,value").is_none());
+        assert!(CsvDetector.detect(&Content::new(b"id,name,value")).is_none());
     }
 
     #[test]
     fn an_empty_buffer_is_rejected() {
-        assert!(CsvDetector.detect(b"").is_none());
+        assert!(CsvDetector.detect(&Content::new(b"")).is_none());
     }
 
     #[test]
     fn a_windows_1252_stacked_header_is_detected_as_csv() {
         let mut bytes = b"Lumes;v2.10\n;NO2;O3\n;HMW;HMW\n;\xb5g/m\xb3;\xb5g/m\xb3\n".to_vec();
         bytes.extend_from_slice(b"STEF;18,48;50,74\nTAB;NE;10,37\nKE;15,17;8,48\n");
-        let profile = CsvDetector.detect(&bytes).unwrap();
+        let profile = CsvDetector.detect(&Content::new(&bytes)).unwrap();
         let metadata = profile.metadata().as_ref().and_then(FormatMetadata::as_csv).unwrap();
 
         assert_eq!(metadata.dialect().header_rows, HeaderRows::new(3));
     }
 
     #[test]
+    fn an_austrian_source_reads_a_windows_1252_stacked_header_with_its_unit_symbols() {
+        // Vienna's air-quality feed: windows-1252 unit symbols that content alone reads as ISO-8859-2
+        // letters (`ľg/mł`). The domain the feed is served from settles the encoding.
+        let mut bytes = b"Lumes;v2.10\n;NO2;O3\n;HMW;HMW\n;\xb5g/m\xb3;\xb5g/m\xb3\n".to_vec();
+        bytes.extend_from_slice(b"STEF;18,48;50,74\nTAB;NE;10,37\nKE;15,17;8,48\n");
+        let hint = EncodingHint::for_remote_source(&Url::parse("https://www.wien.gv.at/ma22-lgb/umweltgut/lumesakt-v2.csv").unwrap(), None);
+        let profile = CsvDetector.detect(&Content::hinted(&bytes, &hint)).unwrap();
+        let dialect = profile.metadata().as_ref().and_then(FormatMetadata::as_csv).unwrap().dialect();
+        let decoded = dialect.character_encoding().decode(&bytes).0;
+        let mut reader = dialect.reader(decoded.as_bytes()).unwrap();
+
+        assert_eq!(dialect.encoding, "windows-1252");
+        assert_eq!(reader.headers().unwrap(), vec!["", "NO2 HMW µg/m³", "O3 HMW µg/m³"]);
+    }
+
+    #[test]
     fn a_titled_table_is_detected_as_csv_with_its_preamble() {
-        let profile = CsvDetector.detect(b"Lumes;v2.10\nStation;NO2;O3\nSTEF;12;54\nAKA;9;40\n").unwrap();
+        let profile = CsvDetector
+            .detect(&Content::new(b"Lumes;v2.10\nStation;NO2;O3\nSTEF;12;54\nAKA;9;40\n"))
+            .unwrap();
         let metadata = profile.metadata().as_ref().and_then(FormatMetadata::as_csv).unwrap();
 
         assert_eq!(metadata.dialect().preamble, Preamble::new(1));

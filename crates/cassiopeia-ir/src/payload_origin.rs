@@ -35,19 +35,20 @@ mod tests {
         payload::{BytesPayload, CollectedPayload, FilePayload},
         payload_origin::PayloadOrigin,
     };
+    use cassiopeia_data_profiler::encoding_hint::EncodingHint;
     use pretty_assertions::assert_eq;
     use std::path::PathBuf;
 
     #[test]
     fn a_file_payload_names_its_path() {
-        let payload = CollectedPayload::File(FilePayload::new(PathBuf::from("/data/stations.csv"), None));
+        let payload = CollectedPayload::File(FilePayload::new(PathBuf::from("/data/stations.csv"), None, EncodingHint::NONE));
 
         assert_eq!(PayloadOrigin::of(&payload).to_string(), "/data/stations.csv");
     }
 
     #[test]
     fn an_in_memory_payload_says_so_rather_than_naming_a_path() {
-        let payload = CollectedPayload::Bytes(BytesPayload::new(b"id,name".to_vec(), None));
+        let payload = CollectedPayload::Bytes(BytesPayload::new(b"id,name".to_vec(), None, EncodingHint::NONE));
 
         assert_eq!(PayloadOrigin::of(&payload), PayloadOrigin::Memory);
         assert_eq!(PayloadOrigin::of(&payload).to_string(), "an in-memory payload");

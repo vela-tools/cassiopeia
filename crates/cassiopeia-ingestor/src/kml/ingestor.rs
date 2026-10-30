@@ -216,7 +216,7 @@ impl Ingestor for KmlIngestor {
 mod tests {
     use crate::{ingestor::Ingestor, kml::ingestor::KmlIngestor};
     use cassiopeia_common::{channel::ChannelSender, collection::CollectionName, format::DataFormat, signal::Signal};
-    use cassiopeia_data_profiler::profile::Profile;
+    use cassiopeia_data_profiler::{encoding_hint::EncodingHint, profile::Profile};
     use cassiopeia_ir::{
         payload::{CollectedPayload, FilePayload, ProfiledPayload},
         record::Record,
@@ -243,7 +243,7 @@ mod tests {
         let path = dir.path().join("data.kml");
         File::create(&path).unwrap().write_all(contents.as_bytes()).unwrap();
         let payload = ProfiledPayload::new(
-            CollectedPayload::File(FilePayload::new(path, Some(DataFormat::Kml))),
+            CollectedPayload::File(FilePayload::new(path, Some(DataFormat::Kml), EncodingHint::NONE)),
             Profile::new(DataFormat::Kml, media_type!(APPLICATION / vnd::GOOGLE_EARTH_KML + XML), 1.0),
         );
         (dir, payload)
@@ -258,7 +258,7 @@ mod tests {
         archive.write_all(contents.as_bytes()).unwrap();
         archive.finish().unwrap();
         let payload = ProfiledPayload::new(
-            CollectedPayload::File(FilePayload::new(path, Some(DataFormat::Kmz))),
+            CollectedPayload::File(FilePayload::new(path, Some(DataFormat::Kmz), EncodingHint::NONE)),
             Profile::new(DataFormat::Kmz, media_type!(APPLICATION / vnd::GOOGLE_EARTH_KMZ), 1.0),
         );
         (dir, payload)

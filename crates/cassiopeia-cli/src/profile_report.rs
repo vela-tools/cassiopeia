@@ -129,6 +129,7 @@ const fn terminator_token(terminator: LineTerminator) -> &'static str {
 mod tests {
     use crate::profile_report::{byte_token, csv_line, grib_line, header_token, metadata_line, optional_byte_token, preamble_token, render_profile};
     use cassiopeia_data_profiler::{
+        encoding_hint::EncodingHint,
         inspectors::csv::{
             dialect::{Dialect, LineTerminator},
             header_rows::HeaderRows,
@@ -241,7 +242,7 @@ mod tests {
 
     #[test]
     fn the_report_leads_with_identity_then_format() {
-        let profile = profile_bytes(b"id,name,value\nA-17,Main,21.5\nA-18,North,20.9\n").unwrap();
+        let profile = profile_bytes(b"id,name,value\nA-17,Main,21.5\nA-18,North,20.9\n", &EncodingHint::NONE).unwrap();
         let report = render_profile("energy.csv", Some(133_744_204), &profile, Rendering::Plain);
         let mut lines = report.lines();
 
@@ -253,7 +254,7 @@ mod tests {
 
     #[test]
     fn a_report_omits_the_size_when_it_is_unknown() {
-        let profile = profile_bytes(b"id,name,value\nA-17,Main,21.5\nA-18,North,20.9\n").unwrap();
+        let profile = profile_bytes(b"id,name,value\nA-17,Main,21.5\nA-18,North,20.9\n", &EncodingHint::NONE).unwrap();
         let report = render_profile("energy.csv", None, &profile, Rendering::Plain);
 
         assert!(report.starts_with("energy.csv\n"));
@@ -261,7 +262,7 @@ mod tests {
 
     #[test]
     fn a_plain_report_carries_no_escape_codes() {
-        let profile = profile_bytes(b"id,name,value\nA-17,Main,21.5\nA-18,North,20.9\n").unwrap();
+        let profile = profile_bytes(b"id,name,value\nA-17,Main,21.5\nA-18,North,20.9\n", &EncodingHint::NONE).unwrap();
         let report = render_profile("energy.csv", Some(64), &profile, Rendering::Plain);
 
         assert!(!report.contains(ESCAPE));
