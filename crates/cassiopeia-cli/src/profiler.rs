@@ -1,5 +1,6 @@
 use crate::{error::Result, profile_report::render_profile};
-use cassiopeia_data_profiler::{encoding_hint::EncodingHint, profile_path};
+use cassiopeia_data_profiler::profile_path;
+use cassiopeia_encoding_detection::encoding_hint::EncodingHint;
 use cassiopeia_terminal_style::rendering::{Stream, detect_rendering};
 use std::{fs::metadata, path::Path};
 

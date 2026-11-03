@@ -1,0 +1,20 @@
+[package]
+name = "cassiopeia-encoding-detection"
+description = "Settles the character encoding of a source from its bytes and what its source says about them"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+chardetng = "1.0.0"
+encoding_rs = "0.8.42"
+mediatype = "0.23.0"
+url = "2.5.8"
+
+[dev-dependencies]
+pretty_assertions = "1.4.1"
+
+[lints]
+workspace = true

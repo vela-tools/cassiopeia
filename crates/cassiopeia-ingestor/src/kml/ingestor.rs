@@ -216,7 +216,8 @@ impl Ingestor for KmlIngestor {
 mod tests {
     use crate::{ingestor::Ingestor, kml::ingestor::KmlIngestor};
     use cassiopeia_common::{channel::ChannelSender, collection::CollectionName, format::DataFormat, signal::Signal};
-    use cassiopeia_data_profiler::{encoding_hint::EncodingHint, profile::Profile};
+    use cassiopeia_data_profiler::profile::Profile;
+    use cassiopeia_encoding_detection::encoding_hint::EncodingHint;
     use cassiopeia_ir::{
         payload::{CollectedPayload, FilePayload, ProfiledPayload},
         record::Record,

@@ -13,6 +13,7 @@ cassiopeia-configuration.workspace = true
 cassiopeia-csv-dialect.workspace = true
 cassiopeia-data-profiler.workspace = true
 cassiopeia-diagnostic.workspace = true
+cassiopeia-encoding-detection.workspace = true
 cassiopeia-mapping.workspace = true
 cassiopeia-ngsi-ld.workspace = true
 cassiopeia-reporter.workspace = true

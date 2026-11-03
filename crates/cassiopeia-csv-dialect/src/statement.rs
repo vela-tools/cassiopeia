@@ -5,6 +5,7 @@ use crate::{
     dialect_byte::DialectByte,
     error::DialectError,
     escape::Escape,
+    header_flag::HeaderFlag,
     header_rows::HeaderRows,
     header_statement::HeaderStatement,
     line_terminator::LineTerminator,
@@ -159,7 +160,7 @@ struct DialectStatementRaw {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     skip_rows: Option<Preamble>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    header: Option<bool>,
+    header: Option<HeaderFlag>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     header_rows: Option<HeaderRows>,
     #[serde(default, skip_serializing_if = "Option::is_none")]

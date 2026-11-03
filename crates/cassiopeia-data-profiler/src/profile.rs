@@ -40,6 +40,12 @@ impl Profile {
         self.metadata = Some(metadata);
         self
     }
+
+    /// Consumes the profile and returns its owned format-specific metadata, if any.
+    #[must_use]
+    pub fn into_metadata(self) -> Option<FormatMetadata> {
+        self.metadata
+    }
 }
 
 #[cfg(test)]
@@ -98,5 +104,23 @@ mod tests {
         let json = serde_json::to_value(&profile).unwrap();
 
         assert_eq!(json["metadata"]["Csv"]["dialect"]["delimiter"], ";");
+    }
+
+    #[test]
+    fn into_metadata_yields_the_attached_metadata_and_none_without_it() {
+        let dialect = Dialect {
+            delimiter: DialectByte::SEMICOLON,
+            quote_char: Quote::Char(DialectByte::DOUBLE_QUOTE),
+            preamble: Preamble::NONE,
+            header_rows: HeaderRows::ONE,
+            escape: Escape::Doubled,
+            terminator: LineTerminator::Lf,
+            encoding: CharacterEncoding::new(UTF_8),
+            notation: ValueNotation::PLAIN,
+        };
+        let profile = Profile::new(DataFormat::Csv, media_type!(TEXT / CSV), 0.9).with_metadata(FormatMetadata::Csv(CsvMetadata::new(dialect)));
+
+        assert!(matches!(profile.into_metadata(), Some(FormatMetadata::Csv(_))));
+        assert!(Profile::new(DataFormat::Json, media_type!(APPLICATION / JSON), 0.8).into_metadata().is_none());
     }
 }

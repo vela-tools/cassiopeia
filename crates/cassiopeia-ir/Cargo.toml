@@ -10,6 +10,7 @@ repository.workspace = true
 [dependencies]
 cassiopeia-common.workspace = true
 cassiopeia-data-profiler.workspace = true
+cassiopeia-encoding-detection.workspace = true
 cassiopeia-mapping.workspace = true
 cassiopeia-ngsi-ld.workspace = true
 chrono = { version = "0.4.45", features = ["serde"] }
@@ -27,6 +28,7 @@ urn-rs = { version = "0.9.2", features = ["serde"] }
 
 [dev-dependencies]
 cassiopeia-geometry.workspace = true
+mediatype = "0.23.0"
 pretty_assertions = "1.4.1"
 
 [lints]

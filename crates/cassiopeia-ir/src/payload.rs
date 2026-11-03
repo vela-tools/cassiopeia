@@ -1,5 +1,6 @@
 use cassiopeia_common::{format::DataFormat, input::Input};
-use cassiopeia_data_profiler::{encoding_hint::EncodingHint, profile::Profile};
+use cassiopeia_data_profiler::profile::Profile;
+use cassiopeia_encoding_detection::encoding_hint::EncodingHint;
 use getset::Getters;
 use std::path::PathBuf;
 use url::Url;
@@ -114,6 +115,12 @@ impl ProfiledPayload {
     pub fn into_payload(self) -> CollectedPayload {
         self.payload
     }
+
+    /// Consumes the profiled payload and returns the owned collected payload and its profile.
+    #[must_use]
+    pub fn into_parts(self) -> (CollectedPayload, Profile) {
+        (self.payload, self.profile)
+    }
 }
 
 impl CollectedPayload {
@@ -138,9 +145,11 @@ impl CollectedPayload {
 
 #[cfg(test)]
 mod tests {
-    use crate::payload::{BytesPayload, CollectedPayload, FilePayload};
+    use crate::payload::{BytesPayload, CollectedPayload, FilePayload, ProfiledPayload};
     use cassiopeia_common::{format::DataFormat, input::Input};
-    use cassiopeia_data_profiler::encoding_hint::EncodingHint;
+    use cassiopeia_data_profiler::profile::Profile;
+    use cassiopeia_encoding_detection::encoding_hint::EncodingHint;
+    use mediatype::media_type;
     use pretty_assertions::assert_eq;
     use std::path::PathBuf;
     use url::Url;
@@ -177,5 +186,16 @@ mod tests {
     fn into_path_yields_the_owned_path() {
         let payload = FilePayload::local(PathBuf::from("data.csv"), None, EncodingHint::NONE);
         assert_eq!(payload.into_path(), PathBuf::from("data.csv"));
+    }
+
+    #[test]
+    fn into_parts_yields_the_owned_payload_and_its_profile() {
+        let payload = CollectedPayload::Bytes(BytesPayload::new(vec![1, 2, 3], None, EncodingHint::NONE));
+        let profiled = ProfiledPayload::new(payload, Profile::new(DataFormat::Csv, media_type!(TEXT / CSV), 0.9));
+
+        let (payload, profile) = profiled.into_parts();
+
+        assert!(matches!(payload, CollectedPayload::Bytes(bytes) if bytes.data() == &[1, 2, 3]));
+        assert_eq!(*profile.format(), DataFormat::Csv);
     }
 }

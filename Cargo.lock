@@ -461,6 +461,7 @@ dependencies = [
  "cassiopeia-csv-dialect",
  "cassiopeia-data-profiler",
  "cassiopeia-diagnostic",
+ "cassiopeia-encoding-detection",
  "cassiopeia-mapping",
  "cassiopeia-ngsi-ld",
  "cassiopeia-reporter",
@@ -486,7 +487,7 @@ name = "cassiopeia-collector"
 version = "1.1.1"
 dependencies = [
  "cassiopeia-common",
- "cassiopeia-data-profiler",
+ "cassiopeia-encoding-detection",
  "cassiopeia-ir",
  "derive_more",
  "getset",
@@ -579,7 +580,7 @@ dependencies = [
  "bytecount",
  "cassiopeia-common",
  "cassiopeia-csv-dialect",
- "chardetng",
+ "cassiopeia-encoding-detection",
  "csv",
  "encoding_rs",
  "getset",
@@ -620,6 +621,17 @@ dependencies = [
  "etcetera",
  "is-docker",
  "pretty_assertions",
+]
+
+[[package]]
+name = "cassiopeia-encoding-detection"
+version = "1.1.1"
+dependencies = [
+ "chardetng",
+ "encoding_rs",
+ "mediatype",
+ "pretty_assertions",
+ "url",
 ]
 
 [[package]]
@@ -693,6 +705,7 @@ dependencies = [
  "cassiopeia-csv-column",
  "cassiopeia-csv-dialect",
  "cassiopeia-data-profiler",
+ "cassiopeia-encoding-detection",
  "cassiopeia-ir",
  "convert_case 0.12.0",
  "csv",
@@ -728,6 +741,7 @@ version = "1.1.1"
 dependencies = [
  "cassiopeia-common",
  "cassiopeia-data-profiler",
+ "cassiopeia-encoding-detection",
  "cassiopeia-geometry",
  "cassiopeia-mapping",
  "cassiopeia-ngsi-ld",
@@ -736,6 +750,7 @@ dependencies = [
  "foldhash",
  "getset",
  "indexmap 2.14.2",
+ "mediatype",
  "pretty_assertions",
  "serde",
  "serde_json",
@@ -873,6 +888,7 @@ dependencies = [
  "cassiopeia-common",
  "cassiopeia-csv-dialect",
  "cassiopeia-data-profiler",
+ "cassiopeia-encoding-detection",
  "cassiopeia-ir",
  "mediatype",
  "pretty_assertions",

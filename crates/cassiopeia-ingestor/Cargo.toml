@@ -45,6 +45,7 @@ grib2-full = ["dep:eccodes"]
 
 [dev-dependencies]
 cassiopeia-data-profiler.workspace = true
+cassiopeia-encoding-detection.workspace = true
 grib-core = "0.6.0"
 grib-writer = "0.6.0"
 mediatype = "0.23.0"

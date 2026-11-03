@@ -106,7 +106,8 @@ mod tests {
         telemetry::run::RunTelemetry,
     };
     use cassiopeia_csv_dialect::{dialect_byte::DialectByte, preamble::Preamble, statement::DialectStatement};
-    use cassiopeia_data_profiler::{encoding_hint::EncodingHint, metadata::FormatMetadata};
+    use cassiopeia_data_profiler::metadata::FormatMetadata;
+    use cassiopeia_encoding_detection::encoding_hint::EncodingHint;
     use cassiopeia_ir::payload::{BytesPayload, CollectedPayload, ProfiledPayload};
     use pretty_assertions::assert_eq;
     use std::sync::Arc;

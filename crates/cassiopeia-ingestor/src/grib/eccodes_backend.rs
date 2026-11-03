@@ -136,10 +136,10 @@ mod tests {
     };
     use cassiopeia_common::{channel::ChannelSender, format::DataFormat, signal::Signal};
     use cassiopeia_data_profiler::{
-        encoding_hint::EncodingHint,
         metadata::{FormatMetadata, GribEdition, GribMetadata},
         profile::Profile,
     };
+    use cassiopeia_encoding_detection::encoding_hint::EncodingHint;
     use cassiopeia_ir::{
         payload::{CollectedPayload, FilePayload, ProfiledPayload},
         record::Record,

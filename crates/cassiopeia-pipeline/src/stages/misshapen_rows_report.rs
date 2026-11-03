@@ -27,7 +27,7 @@ fn named(row: &MisshapenRow) -> String {
 ///
 /// The rows ride on the headline because the concise form shows nothing else, and a row number is
 /// what lets a reader find the row in the file.
-fn headline(source: &Input, table_fields: u64, named_rows: &[MisshapenRow], total: NonZeroU64) -> String {
+fn headline(source: &Input, table_fields: u64, misshapen: &MisshapenRows, total: NonZeroU64) -> String {
     let rows = match total.get() {
         1 => "1 row".to_owned(),
         count => format!("{count} rows"),
@@ -36,9 +36,8 @@ fn headline(source: &Input, table_fields: u64, named_rows: &[MisshapenRow], tota
         1 => "it was skipped",
         _ => "they were skipped",
     };
-    let listed = named_rows.iter().map(named).collect::<Vec<_>>().join("; ");
-    let rest = total.get().saturating_sub(u64::try_from(named_rows.len()).unwrap_or(u64::MAX));
-    let details = match rest {
+    let listed = misshapen.named().iter().map(named).collect::<Vec<_>>().join("; ");
+    let details = match misshapen.unnamed() {
         0 => listed,
         rest => format!("{listed}; and {rest} more"),
     };
@@ -62,7 +61,7 @@ pub(crate) fn report_misshapen_rows(sink: &dyn DiagnosticSink, source: &Input, r
         &DiagnosticBuilder::new(
             Severity::Warning,
             DiagnosticCode::Ingest(IngestCode::RowsMisshapen),
-            headline(source, first.table_fields, rows.named(), total),
+            headline(source, first.table_fields, rows, total),
         )
         // The diagnostic outlives the ingestor that names the source.
         .with_context(ContextField::Source(source.clone()))

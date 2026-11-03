@@ -87,10 +87,10 @@ mod tests {
         value_notation::ValueNotation,
     };
     use cassiopeia_data_profiler::{
-        encoding_hint::EncodingHint,
         metadata::{CsvMetadata, FormatMetadata, GribEdition, GribMetadata},
         profile_bytes,
     };
+    use cassiopeia_encoding_detection::encoding_hint::EncodingHint;
     use cassiopeia_terminal_style::rendering::Rendering;
     use encoding_rs::{UTF_8, WINDOWS_1252};
     use pretty_assertions::assert_eq;

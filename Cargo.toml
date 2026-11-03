@@ -101,6 +101,7 @@ cassiopeia-csv-dialect = { path = "crates/cassiopeia-csv-dialect" }
 cassiopeia-data-profiler = { path = "crates/cassiopeia-data-profiler" }
 cassiopeia-diagnostic = { path = "crates/cassiopeia-diagnostic" }
 cassiopeia-directories = { path = "crates/cassiopeia-directories" }
+cassiopeia-encoding-detection = { path = "crates/cassiopeia-encoding-detection" }
 cassiopeia-expander = { path = "crates/cassiopeia-expander" }
 cassiopeia-extractor = { path = "crates/cassiopeia-extractor" }
 cassiopeia-geometry = { path = "crates/cassiopeia-geometry" }

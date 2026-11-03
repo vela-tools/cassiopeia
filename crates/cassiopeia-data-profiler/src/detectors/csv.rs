@@ -53,7 +53,6 @@ mod tests {
     use crate::{
         content::Content,
         detectors::{Detector, csv::CsvDetector},
-        encoding_hint::EncodingHint,
         inspectors::csv::CsvInspector,
         metadata::FormatMetadata,
     };
@@ -65,6 +64,7 @@ mod tests {
         preamble::Preamble,
         statement::DialectStatement,
     };
+    use cassiopeia_encoding_detection::encoding_hint::EncodingHint;
     use pretty_assertions::assert_eq;
     use url::Url;
 

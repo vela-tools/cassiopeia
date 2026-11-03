@@ -8,24 +8,20 @@
 use crate::{
     content::Content,
     detectors::default_detectors,
-    encoding_hint::EncodingHint,
     error::{DataProfilerError, Result},
     profile::Profile,
 };
 use cassiopeia_common::error::io::{IoAction, IoError};
+use cassiopeia_encoding_detection::encoding_hint::EncodingHint;
 use memmap2::Mmap;
 use std::{fs::File, path::Path};
 
-mod bomless_utf16;
 pub mod content;
 pub mod detectors;
-mod encoding_evidence;
-pub mod encoding_hint;
 pub mod error;
 pub mod inspectors;
 pub mod metadata;
 pub mod profile;
-pub mod top_level_domain;
 
 /// Profiles a file at the given path to determine its data format.
 ///
@@ -108,9 +104,10 @@ pub fn profile_bytes(bytes: &[u8], encoding_hint: &EncodingHint) -> Result<Profi
 
 #[cfg(test)]
 mod tests {
-    use crate::{encoding_hint::EncodingHint, error::DataProfilerError, metadata::FormatMetadata, profile_bytes};
+    use crate::{error::DataProfilerError, metadata::FormatMetadata, profile_bytes};
     use cassiopeia_common::format::DataFormat;
     use cassiopeia_csv_dialect::dialect_byte::DialectByte;
+    use cassiopeia_encoding_detection::encoding_hint::EncodingHint;
     use pretty_assertions::assert_eq;
 
     #[test]
