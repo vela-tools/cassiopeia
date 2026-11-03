@@ -1,40 +1,82 @@
 use encoding_rs::{Encoding, UTF_16BE, UTF_16LE};
+use std::cmp::Ordering;
 
 /// The most leading bytes weighed: enough code units to see a file's delimiters and line ends,
 /// bounded so the check stays constant-time however large the file.
 const WINDOW: usize = 8 * 1024;
 
-/// The fewest code units in the window, as a fraction `1 / N`, that must hold a NUL in one half for
-/// the content to read as UTF-16. Every delimiter, quote, digit, and line end of a CSV is a code unit
-/// below U+0100, whose high byte is NUL, so even a table of Cyrillic or CJK names clears it.
-const MIN_NUL_SHARE: usize = 8;
+/// What the code units below U+0100 show when a window is read in one byte order.
+///
+/// A unit below U+0100 has a NUL high byte. Text holds such units only as printable Latin-1
+/// characters, tabs, and line ends. Binary content holds NUL units and control characters too.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+struct Reading {
+    /// Units that are a printable Latin-1 character, a tab, or a line end.
+    latin: usize,
+    /// Units that are a line end, LF or CR.
+    line_ends: usize,
+    /// Units that no text holds: NUL and every control character but tab, LF, and CR.
+    controls: usize,
+}
 
-/// How many times more NULs the one half of the code units must hold than the other.
-const MIN_NUL_RATIO: usize = 10;
+impl Reading {
+    /// Reads every unit of `units` with `unit`, which puts its two bytes in one byte order.
+    fn of(units: &[[u8; 2]], unit: fn([u8; 2]) -> u16) -> Reading {
+        units.iter().map(|&bytes| unit(bytes)).fold(Reading::default(), Reading::with)
+    }
 
-/// The UTF-16 byte order of `bytes` when they carry no byte order mark: the encoding whose code
-/// units put NUL in the high byte of a sizable share of them, and almost never in the low byte.
+    /// This reading with `unit` added to it.
+    fn with(self, unit: u16) -> Reading {
+        let Ok(byte) = u8::try_from(unit) else {
+            return self;
+        };
+        match byte {
+            b'\n' | b'\r' => Reading {
+                latin: self.latin + 1,
+                line_ends: self.line_ends + 1,
+                ..self
+            },
+            b'\t' => Reading { latin: self.latin + 1, ..self },
+            control if char::from(control).is_control() => Reading {
+                controls: self.controls + 1,
+                ..self
+            },
+            _printable => Reading { latin: self.latin + 1, ..self },
+        }
+    }
+
+    /// Whether the units read as text: some of them below U+0100, and none of those a control.
+    const fn is_text(self) -> bool {
+        self.controls == 0 && self.latin > 0
+    }
+}
+
+/// The UTF-16 byte order of `bytes` when they carry no byte order mark: the order in which the
+/// code units below U+0100 are all text, and which, when both are, reads more line ends.
 ///
 /// The WHATWG Encoding Standard recognises UTF-16 by its BOM alone, and `chardetng` never guesses
 /// it, since web pages are not sent as UTF-16 without one. Files are: a spreadsheet's "Unicode
-/// text" export is UTF-16LE, often with no BOM. A NUL byte is no character of text in any encoding `chardetng`
-/// guesses, so a file with NULs in every other byte, and an even byte count, is UTF-16 in the byte
-/// order those NULs mark. Binary content holds NULs at random in both halves and is not taken.
+/// text" export is UTF-16LE, often with no BOM. Every delimiter, quote, and line end of a CSV is a
+/// unit below U+0100, so the right order reads them as text however few they are among the cells,
+/// and a table of long CJK cells is recognised as surely as one of ASCII. Read in the wrong order,
+/// a CJK unit can fall below U+0100 too, but then as a Latin-1 letter or a C1 control, never as the
+/// line end each record ends with. Binary content holds NUL units and controls, and is not taken.
 pub fn bomless_utf16(bytes: &[u8]) -> Option<&'static Encoding> {
     if !bytes.len().is_multiple_of(2) {
         return None;
     }
     let (units, _) = bytes[..bytes.len().min(WINDOW)].as_chunks::<2>();
-    let (first_nuls, second_nuls) = units.iter().fold((0usize, 0usize), |(first, second), [low, high]| {
-        (first + usize::from(*low == 0), second + usize::from(*high == 0))
-    });
-    let marks = |nuls: usize, other: usize| nuls > 0 && nuls * MIN_NUL_SHARE >= units.len() && other * MIN_NUL_RATIO <= nuls;
-    if marks(second_nuls, first_nuls) {
-        Some(UTF_16LE)
-    } else if marks(first_nuls, second_nuls) {
-        Some(UTF_16BE)
-    } else {
-        None
+    let little = Reading::of(units, u16::from_le_bytes);
+    let big = Reading::of(units, u16::from_be_bytes);
+    match (little.is_text(), big.is_text()) {
+        (true, false) => Some(UTF_16LE),
+        (false, true) => Some(UTF_16BE),
+        (false, false) => None,
+        (true, true) => match (little.line_ends, little.latin).cmp(&(big.line_ends, big.latin)) {
+            Ordering::Greater => Some(UTF_16LE),
+            Ordering::Less => Some(UTF_16BE),
+            Ordering::Equal => None,
+        },
     }
 }
 
@@ -83,6 +125,40 @@ mod tests {
     #[test]
     fn nuls_in_both_halves_are_no_utf16() {
         assert_eq!(bomless_utf16(&[0, 0, 7, 0, 0, 9, 0, 0, 3, 0, 0, 4]), None);
+    }
+
+    fn cjk_table(rows: usize) -> String {
+        let cell: String = "一二三四五六七八九十丁七万丈三上下不与丐丑专且丕世丘丙业丛东丝"
+            .chars()
+            .cycle()
+            .take(300)
+            .collect();
+        (1..=rows).fold("编号,名称\n".to_owned(), |table, row| format!("{table}{row},{cell}\n"))
+    }
+
+    #[test]
+    fn a_table_of_long_cjk_cells_in_utf16le_reads_as_utf16le() {
+        let bytes = utf16le(&cjk_table(20));
+        let ascii = bytes.chunks(2).filter(|unit| unit[1] == 0).count();
+        assert!(ascii * 8 < bytes.len() / 2, "the table must be mostly CJK");
+
+        assert_eq!(bomless_utf16(&bytes), Some(UTF_16LE));
+    }
+
+    #[test]
+    fn a_table_of_long_cjk_cells_in_utf16be_reads_as_utf16be() {
+        assert_eq!(bomless_utf16(&utf16be(&cjk_table(20))), Some(UTF_16BE));
+    }
+
+    #[test]
+    fn a_single_line_without_a_line_end_reads_in_its_byte_order() {
+        assert_eq!(bomless_utf16(&utf16le("id,name")), Some(UTF_16LE));
+        assert_eq!(bomless_utf16(&utf16be("id,name")), Some(UTF_16BE));
+    }
+
+    #[test]
+    fn a_control_character_below_u_0100_is_no_utf16_text() {
+        assert_eq!(bomless_utf16(&utf16le("id,name\n1,\u{1}Ada\n")), None);
     }
 
     #[test]
