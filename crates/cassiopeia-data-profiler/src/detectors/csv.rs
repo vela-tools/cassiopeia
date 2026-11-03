@@ -124,6 +124,11 @@ mod tests {
     }
 
     #[test]
+    fn plain_prose_under_a_one_word_heading_is_not_detected_as_csv() {
+        assert!(CsvDetector.detect(&Content::new(b"Introduction\nThis is a text.\nMore text here.\n")).is_none());
+    }
+
+    #[test]
     fn a_utf_16le_file_without_a_byte_order_mark_is_detected_as_csv_in_utf_16le() {
         let bytes: Vec<u8> = "id,name\n1,Čapek\n2,Grace\n".encode_utf16().flat_map(u16::to_le_bytes).collect();
         let profile = CsvDetector.detect(&Content::new(&bytes)).unwrap();

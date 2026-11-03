@@ -29,9 +29,11 @@ pub mod data_type;
 pub mod error;
 mod escape_evidence;
 mod header;
+mod missing_value;
 #[cfg(test)]
 mod preamble_cases;
 mod reading;
+mod sentence;
 mod table;
 mod table_shape;
 mod title;
@@ -804,6 +806,59 @@ mod tests {
         assert_eq!(dialect.preamble, Preamble::new(1));
         assert_eq!(dialect.header_rows, HeaderRows::new(3));
         assert_eq!(reader.headers().unwrap(), vec!["", "Zeit-NO2 MESZ", "NO2 HMW µg/m³", "NO2 MW24 µg/m³"]);
+    }
+
+    #[test]
+    fn a_first_data_row_with_a_blank_cell_stays_a_data_row() {
+        let sample = "name,city,country\nAda,,UK\nGrace,London,UK\nLinus,Helsinki,FI\nEdsger,Rotterdam,NL\n";
+        let dialect = CsvInspector::new(&DialectStatement::NOTHING).inspect(&Content::new(sample.as_bytes())).unwrap();
+        let mut reader = dialect.reader(sample.as_bytes()).unwrap();
+
+        assert_eq!(dialect.header_rows, HeaderRows::ONE);
+        assert_eq!(reader.headers().unwrap(), vec!["name", "city", "country"]);
+        assert_eq!(reader.records().next().unwrap().unwrap(), vec!["Ada", "", "UK"]);
+    }
+
+    #[test]
+    fn a_first_data_row_of_a_key_a_blank_and_a_missing_marker_stays_a_data_row() {
+        let sample = "Station;NO2;O3\nTAB;;NE\nSTEF;12,45;54,55\nAKA;9,80;40,10\nKE;15,17;8,48\n";
+        let dialect = CsvInspector::new(&DialectStatement::NOTHING).inspect(&Content::new(sample.as_bytes())).unwrap();
+        let mut reader = dialect.reader(sample.as_bytes()).unwrap();
+
+        assert_eq!(dialect.header_rows, HeaderRows::ONE);
+        assert_eq!(reader.headers().unwrap(), vec!["Station", "NO2", "O3"]);
+        assert_eq!(reader.records().next().unwrap().unwrap(), vec!["TAB", "", "NE"]);
+    }
+
+    #[test]
+    fn a_first_data_row_of_distinct_missing_markers_does_not_make_the_header_a_title() {
+        let sample = "Station;NO2;O3\nTAB;NE;n/a\nSTEF;12;54\nAKA;9;40\nKE;15;8\n";
+        let dialect = CsvInspector::new(&DialectStatement::NOTHING).inspect(&Content::new(sample.as_bytes())).unwrap();
+        let mut reader = dialect.reader(sample.as_bytes()).unwrap();
+
+        assert_eq!(dialect.preamble, Preamble::NONE);
+        assert_eq!(dialect.header_rows, HeaderRows::ONE);
+        assert_eq!(reader.headers().unwrap(), vec!["Station", "NO2", "O3"]);
+        assert_eq!(reader.records().next().unwrap().unwrap(), vec!["TAB", "NE", "n/a"]);
+    }
+
+    #[test]
+    fn a_pandas_header_with_a_blank_index_label_is_the_header_not_a_title() {
+        let sample = ";Mayor\nVienna;Ludwig\nGraz;Kahr\nLinz;Prammer\n";
+        let dialect = CsvInspector::new(&DialectStatement::NOTHING).inspect(&Content::new(sample.as_bytes())).unwrap();
+        let mut reader = dialect.reader(sample.as_bytes()).unwrap();
+
+        assert_eq!(dialect.preamble, Preamble::NONE);
+        assert_eq!(dialect.header_rows, HeaderRows::ONE);
+        assert_eq!(reader.headers().unwrap(), vec!["", "Mayor"]);
+        assert_eq!(reader.records().next().unwrap().unwrap(), vec!["Vienna", "Ludwig"]);
+    }
+
+    #[test]
+    fn plain_prose_under_a_one_word_heading_is_no_table() {
+        let inspected = CsvInspector::new(&DialectStatement::NOTHING).inspect(&Content::new(b"Introduction\nThis is a text.\nMore text here.\n"));
+
+        assert!(inspected.is_err());
     }
 
     /// A table whose rows are plain ASCII well past the dialect sample, then one row carrying `name`.

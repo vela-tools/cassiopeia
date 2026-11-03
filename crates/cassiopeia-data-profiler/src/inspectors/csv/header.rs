@@ -1,5 +1,6 @@
 use crate::inspectors::csv::{
     data_type::DataType,
+    missing_value::is_missing_value_marker,
     table::{Table, to_f64},
 };
 use ::csv::StringRecord;
@@ -60,11 +61,17 @@ pub fn typed_evidence(table: &Table, row: usize) -> TypedEvidence {
         broken: 0,
         conforming: 0,
     };
-    for column in &table.column_types {
+    let record = table.records.get(row);
+    for (index, column) in table.column_types.iter().enumerate() {
         let Some(dominant) = dominant_typed_pattern(column.get(row + 1..).unwrap_or(&[])) else {
             continue;
         };
         evidence.typed_columns += 1;
+        // A missing-value marker (`n/a`, `NE`) stands in for a value of the column's type, so a
+        // data row holding one is no label: it gives no signal either way.
+        if record.and_then(|record| record.get(index)).is_some_and(is_missing_value_marker) {
+            continue;
+        }
         match column.get(row).copied().unwrap_or(DataType::Empty) {
             // A text label sitting over a numeric or boolean column is header evidence.
             DataType::Text | DataType::Empty => evidence.broken += 1,
@@ -135,17 +142,17 @@ pub fn looks_like_header_row(table: &Table) -> bool {
 ///
 /// A continuation record qualifies the header's columns, such as an aggregation (`HMW`) or a unit
 /// (`µg/m³`). Two traits separate it from data. Every non-blank cell reads as a label, and no cell
-/// carries a typed value. And it is sparse where the data is dense: it leaves blank at least one
-/// column that every data record below the header fills, as a stacked header leaves its key
-/// column's label blank. An all-text table of short values has no such column, so its first data
-/// records are never taken for header. At least one data record must remain below the header.
+/// carries a typed value. And it leaves the key column blank: its first cell is blank, while every
+/// data record below the header fills the first column, as a stacked header labels only the columns
+/// it qualifies. A data record with a blank cell further along, a missing value, still fills its
+/// key, so it is never taken for header. At least one data record must remain below the header.
 pub fn continuation_rows(rows: &[StringRecord]) -> usize {
     let labelled = rows.iter().take(MAX_CONTINUATION_ROWS).take_while(|row| is_label_row(row)).count();
     let Some(data) = rows.get(labelled..).filter(|data| !data.is_empty()) else {
         return 0;
     };
 
-    rows[..labelled].iter().take_while(|row| leaves_dense_column_blank(row, data)).count()
+    rows[..labelled].iter().take_while(|row| leaves_key_column_blank(row, data)).count()
 }
 
 /// Whether every non-blank cell of `row` is a field label and none carries a typed value.
@@ -155,11 +162,10 @@ pub fn is_label_row(row: &StringRecord) -> bool {
         .all(|cell| cell.is_empty() || (is_field_label(cell) && matches!(DataType::detect(cell), DataType::Text | DataType::Boolean)))
 }
 
-/// Whether `row` is blank in some column that every record of `data` fills.
-fn leaves_dense_column_blank(row: &StringRecord, data: &[StringRecord]) -> bool {
-    row.iter()
-        .enumerate()
-        .any(|(column, cell)| cell.trim().is_empty() && data.iter().all(|record| record.get(column).is_some_and(|value| !value.trim().is_empty())))
+/// Whether `row` is blank in the first column, which every record of `data` fills.
+fn leaves_key_column_blank(row: &StringRecord, data: &[StringRecord]) -> bool {
+    let is_filled = |record: &StringRecord| record.get(0).is_some_and(|cell| !cell.trim().is_empty());
+    !is_filled(row) && data.iter().all(is_filled)
 }
 
 /// The dominant type of a column's data cells, but only when that type is a strong, non-textual
@@ -292,10 +298,31 @@ mod tests {
     }
 
     #[test]
-    fn a_label_row_that_leaves_no_dense_column_blank_is_data() {
+    fn a_label_row_that_fills_its_key_column_is_data() {
         let rows = records(&["STEF;MESZ;NE", "TAB;30.10.2026, 10:00;12,5", "AKA;30.10.2026, 10:00;9,8"]);
 
         assert_eq!(continuation_rows(&rows), 0);
+    }
+
+    #[test]
+    fn a_first_data_row_missing_a_value_past_its_key_is_not_a_continuation_row() {
+        let rows = records(&["Ada;;UK", "Grace;London;UK", "Linus;Helsinki;FI", "Edsger;Rotterdam;NL"]);
+
+        assert_eq!(continuation_rows(&rows), 0);
+    }
+
+    #[test]
+    fn a_first_data_row_of_text_and_missing_values_is_not_a_continuation_row() {
+        let rows = records(&["TAB;;NE", "STEF;12,45;54,55", "AKA;9,80;40,10", "KE;15,17;8,48"]);
+
+        assert_eq!(continuation_rows(&rows), 0);
+    }
+
+    #[test]
+    fn a_unit_row_leaving_the_key_column_blank_is_a_continuation_row() {
+        let rows = records(&[";ppb;ppb", "STEF;12;54", "AKA;9;40"]);
+
+        assert_eq!(continuation_rows(&rows), 1);
     }
 
     #[test]

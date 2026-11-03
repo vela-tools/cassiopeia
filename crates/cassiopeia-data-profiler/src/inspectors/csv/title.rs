@@ -13,8 +13,8 @@ const MIN_BROKEN_COLUMNS: usize = 2;
 /// Counts the leading records of `table` that are titles above its header rather than part of it,
 /// for records as wide as the table, which the field-count preamble check cannot see.
 ///
-/// Two shapes are recognised. A caption record fills at most one cell with text and leaves the
-/// rest blank, as a spreadsheet export pads a title to the table's width (`Air quality;;;`); a run
+/// Two shapes are recognised. A caption record fills at most its first cell, with text, and leaves
+/// the rest blank, as a spreadsheet export pads a title to the table's width (`Air quality;;;`); a run
 /// of captions directly above a label row of at least two cells is a title block. A dense title
 /// fills its cells but sits above a header row that breaks the typed columns below it the way only a
 /// header does: every cell a distinct label, none blank, and at least [`MIN_BROKEN_COLUMNS`] typed
@@ -34,9 +34,15 @@ pub fn title_rows(table: &Table) -> usize {
     if table.records.len() > titles + 1 { titles } else { 0 }
 }
 
-/// Whether `record` fills at most one cell, with text rather than a typed value.
+/// Whether `record` fills at most its first cell, with text rather than a typed value.
+///
+/// A title starts at the left edge and is padded to the right. A header that fills only a later
+/// cell, such as `;Mayor` from a pandas export whose index column has no name, is no caption.
 fn is_caption(record: &StringRecord) -> bool {
-    filled_cells(record) <= 1 && record.iter().all(|cell| matches!(DataType::detect(cell), DataType::Text | DataType::Empty))
+    record.iter().skip(1).all(|cell| cell.trim().is_empty())
+        && record
+            .get(0)
+            .is_none_or(|cell| matches!(DataType::detect(cell), DataType::Text | DataType::Empty))
 }
 
 /// Whether record `row` of `table` is a title above a header row that only a header could be.
@@ -123,6 +129,16 @@ mod tests {
     #[test]
     fn a_dense_title_over_an_all_text_table_is_not_detected() {
         assert_eq!(title_rows(&table("Lumes;v2.10;25.10.26\nStation;NO2;O3\nSTEF;12,45;NE\nAKA;9,80;40,10\n")), 0);
+    }
+
+    #[test]
+    fn a_header_whose_only_label_follows_a_blank_index_label_is_not_a_caption() {
+        assert_eq!(title_rows(&table(";Mayor\nVienna;Ludwig\nGraz;Kahr\nLinz;Prammer\n")), 0);
+    }
+
+    #[test]
+    fn a_header_above_a_first_data_row_of_distinct_missing_markers_has_no_title_rows() {
+        assert_eq!(title_rows(&table("Station;NO2;O3\nTAB;NE;n/a\nSTEF;12;54\nAKA;9;40\nKE;15;8\n")), 0);
     }
 
     #[test]
