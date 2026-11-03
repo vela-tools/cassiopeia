@@ -1,11 +1,15 @@
-use crate::{error::PipelineError, pipeline_stage::PipelineStage, stages::renamed_columns_report::report_renamed_columns};
+use crate::{
+    error::PipelineError,
+    pipeline_stage::PipelineStage,
+    stages::{misshapen_rows_report::report_misshapen_rows, renamed_columns_report::report_renamed_columns},
+};
 use cassiopeia_common::{
     batch::Batch,
     channel::{ChannelPolicy, ChannelReceiver, ChannelSender, channel_with_telemetry},
     format::DataFormat,
     signal::Signal,
     stage::Stage,
-    telemetry::{channel_boundary::ChannelBoundary, run::RunTelemetry},
+    telemetry::{channel_boundary::ChannelBoundary, run::RunTelemetry, stage_metrics::StageTelemetry},
 };
 use cassiopeia_ingestor::{
     csv::ingestor::CsvIngestor,
@@ -29,18 +33,30 @@ use std::{collections::HashMap, sync::Arc, thread::spawn};
 /// (resolved away by the profiler before this point) has no entry and cannot reach an ingestor.
 type IngestorFactory = fn(ProfiledPayload, usize, &dyn DiagnosticSink) -> Result<PreparedIngestor, IngestorError>;
 
-/// An ingestor ready to run, and how many warnings building it reported.
+/// Reports to the sink what an ingestor met while it read its source, once it has read all of it,
+/// and returns how many warnings that was.
+type AfterIngest = Box<dyn FnOnce(&dyn DiagnosticSink) -> u64>;
+
+/// An ingestor ready to run, how many warnings building it reported, and what is left to report
+/// once it has run.
 struct PreparedIngestor {
     /// The ingestor.
     ingestor: Box<dyn Ingestor>,
     /// How many warnings building it reported.
     warnings: u64,
+    /// What the ingestor gathers while it runs, reported once it has run; `None` for an ingestor
+    /// that gathers nothing.
+    after_ingest: Option<AfterIngest>,
 }
 
 impl PreparedIngestor {
-    /// An ingestor whose building reported nothing.
+    /// An ingestor whose building reported nothing and that gathers nothing while it runs.
     fn quiet(ingestor: Box<dyn Ingestor>) -> PreparedIngestor {
-        PreparedIngestor { ingestor, warnings: 0 }
+        PreparedIngestor {
+            ingestor,
+            warnings: 0,
+            after_ingest: None,
+        }
     }
 }
 
@@ -71,9 +87,13 @@ pub(crate) fn spawn_ingestor_bank(
         (DataFormat::Csv, |payload, batch, sink| {
             let ingestor = CsvIngestor::from_payload(payload, batch)?;
             let warnings = report_renamed_columns(sink, ingestor.path(), ingestor.renamed_columns());
+            let misshapen = ingestor.misshapen_rows();
+            // The ingestor gives up its path when it runs, while the report names the file after.
+            let path = ingestor.path().to_path_buf();
             Ok(PreparedIngestor {
                 ingestor: Box::new(ingestor),
                 warnings,
+                after_ingest: Some(Box::new(move |sink: &dyn DiagnosticSink| report_misshapen_rows(sink, &path, &misshapen.lock()))),
             })
         }),
         (DataFormat::Json, |payload, batch, _| {
@@ -142,14 +162,18 @@ fn run_ingestor_lane(
             Signal::Data(profiled) => {
                 profiler_stage.inc_by(1);
                 match factory(profiled, batch_size, reporter) {
-                    Ok(PreparedIngestor { ingestor, warnings }) => {
-                        if warnings > 0 {
-                            ingestor_telemetry.warning(warnings);
-                            telemetry.add_warnings(warnings);
-                        }
+                    Ok(PreparedIngestor {
+                        ingestor,
+                        warnings,
+                        after_ingest,
+                    }) => {
+                        count_warnings(&ingestor_telemetry, telemetry, warnings);
                         let service = ingestor_telemetry.service_span();
                         ingest_one(ingestor, channel_policy, shared_tx, telemetry);
                         drop(service);
+                        if let Some(after_ingest) = after_ingest {
+                            count_warnings(&ingestor_telemetry, telemetry, after_ingest(reporter));
+                        }
                     }
                     Err(error) => {
                         ingestor_telemetry.failed(1);
@@ -173,6 +197,14 @@ fn run_ingestor_lane(
     // The lane owns its input channel: releasing it here is what closes this format's route, so the
     // receiver is consumed rather than borrowed even though the loop only reads through it.
     drop(ingestor_rx);
+}
+
+/// Counts `warnings` against the ingestor stage and the run, when there are any.
+fn count_warnings(stage: &StageTelemetry, run: &RunTelemetry, warnings: u64) {
+    if warnings > 0 {
+        stage.warning(warnings);
+        run.add_warnings(warnings);
+    }
 }
 
 /// Runs one ingestor to completion, forwarding its record batches onto the shared output.

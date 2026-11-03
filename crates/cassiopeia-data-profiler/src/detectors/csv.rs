@@ -6,7 +6,7 @@ use crate::{
     profile::Profile,
 };
 use cassiopeia_common::format::DataFormat;
-use cassiopeia_csv_dialect::{dialect::Dialect, statement::DialectStatement};
+use cassiopeia_csv_dialect::{dialect::Dialect, misshapen_row::MisshapenRow, statement::DialectStatement};
 use mediatype::media_type;
 
 /// Detects delimited text by parsing a header row and a small sample of records.
@@ -35,7 +35,16 @@ impl CsvDetector {
         let Ok(headers) = reader.headers() else {
             return false;
         };
-        !headers.is_empty() && reader.records().next().is_some_and(|record| record.is_ok())
+        // The ingestor skips a misshapen row, so the first record that is not one decides.
+        !headers.is_empty()
+            && reader
+                .records()
+                .find(|record| {
+                    record
+                        .as_ref()
+                        .map_or_else(|error| MisshapenRow::of(error, dialect.preamble).is_none(), |_| true)
+                })
+                .is_some_and(|record| record.is_ok())
     }
 }
 
@@ -45,12 +54,34 @@ mod tests {
         content::Content,
         detectors::{Detector, csv::CsvDetector},
         encoding_hint::EncodingHint,
+        inspectors::csv::CsvInspector,
         metadata::FormatMetadata,
     };
     use cassiopeia_common::format::DataFormat;
-    use cassiopeia_csv_dialect::{dialect_byte::DialectByte, header_rows::HeaderRows, preamble::Preamble};
+    use cassiopeia_csv_dialect::{dialect_byte::DialectByte, header_rows::HeaderRows, preamble::Preamble, statement::DialectStatement};
     use pretty_assertions::assert_eq;
     use url::Url;
+
+    #[test]
+    fn a_file_with_a_footer_note_and_a_ragged_row_is_detected_as_csv() {
+        let profile = CsvDetector
+            .detect(&Content::new(b"id;name;value\n1;a;10\n2;b\n3;c;30\n4;d;40\nSource: City statistics office\n"))
+            .unwrap();
+
+        let metadata = profile.metadata().as_ref().and_then(FormatMetadata::as_csv).unwrap();
+        assert_eq!(metadata.dialect().delimiter, DialectByte::SEMICOLON);
+        assert_eq!(metadata.dialect().header_rows, HeaderRows::ONE);
+        assert_eq!(metadata.dialect().preamble, Preamble::NONE);
+    }
+
+    #[test]
+    fn a_first_data_row_that_is_misshapen_does_not_hide_the_rows_below_it() {
+        let dialect = CsvInspector::new(&DialectStatement::NOTHING)
+            .inspect(&Content::new(b"id;name;value\n1;a;10\n2;b;20\n3;c;30\n"))
+            .unwrap();
+
+        assert!(CsvDetector::has_header_and_record(b"id;name;value\n1;a\n2;b;20\n", &dialect));
+    }
 
     #[test]
     fn a_header_row_with_records_is_detected_as_csv() {

@@ -8,6 +8,8 @@ pub enum IngestCode {
     /// Columns of a tabular source asked for a record key another column holds, so each was read
     /// by a generated key instead.
     ColumnsRenamed,
+    /// Rows of a tabular source had another number of fields than the table, so each was skipped.
+    RowsMisshapen,
     /// The source could not be fetched or opened.
     SourceUnavailable,
     /// The payload's format could not be determined from its content.
@@ -29,5 +31,6 @@ mod tests {
     fn an_ingest_code_renders_a_kebab_case_token() {
         assert_eq!(IngestCode::RecordsUnreadable.to_string(), "records-unreadable");
         assert_eq!(IngestCode::ColumnsRenamed.to_string(), "columns-renamed");
+        assert_eq!(IngestCode::RowsMisshapen.to_string(), "rows-misshapen");
     }
 }

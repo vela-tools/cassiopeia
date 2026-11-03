@@ -26,6 +26,7 @@ geojson = "1.0.0"
 grib = { version = "0.20.2", default-features = false, features = ["ccsds-unpack-with-rust-aec", "jpeg2000-unpack-with-hayro", "png-unpack-with-png-crate", "time-calculation"] }
 indexmap = "2.14.2"
 kml = { version = "0.15.0", features = ["geo-types"] }
+parking_lot = "0.13.0"
 quick-xml = { version = "0.42.0", features = ["encoding"] }
 serde = "1.0.229"
 serde_json = { version = "1.0.154", features = ["preserve_order"] }

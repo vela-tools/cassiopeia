@@ -615,11 +615,15 @@ mod tests {
 
     #[test]
     fn a_ragged_row_below_the_header_does_not_turn_the_header_into_a_preamble() {
-        // Rows 0 to 2 share the table's width, so they cannot be a preamble; the file stays
-        // undetectable rather than silently losing its header.
+        // Rows 0 to 2 share the table's width, so they cannot be a preamble; the ragged row is
+        // skipped and the header stays the header.
         let sample = "id;name\n1;alpha\n2;beta\n3;gamma;extra\n4;delta\n5;epsilon\n";
 
-        assert!(CsvInspector::new(&DialectStatement::NOTHING).inspect(&Content::new(sample.as_bytes())).is_err());
+        let dialect = CsvInspector::new(&DialectStatement::NOTHING).inspect(&Content::new(sample.as_bytes())).unwrap();
+
+        assert_eq!(dialect.delimiter, DialectByte::SEMICOLON);
+        assert_eq!(dialect.preamble, Preamble::NONE);
+        assert_eq!(dialect.header_rows, HeaderRows::ONE);
     }
 
     #[test]
