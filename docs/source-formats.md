@@ -82,6 +82,9 @@ Some feeds put a title line above the table. Cassiopeia skips such leading rows 
 
 A header can also span several rows, such as a name row, an aggregation row, and a unit row. Cassiopeia treats a row directly below the header as part of it when every non-blank cell is a short label with no number or date in it, and the row leaves blank a column that every data row fills, as a stacked header usually leaves its station or key column unlabelled. Each column's non-blank header cells are joined from top to bottom with a space, so `NO2` over `HMW` over `µg/m³` becomes the field `NO2 HMW µg/m³`. Two columns that share a name but differ in a lower row, such as `PM10 MW24 µg/m³` and `PM10 HMW µg/m³`, become distinct fields. The profile report shows the header as `headerRows 3`. A header spans at most four rows.
 
+> [!WARNING]
+> Cassiopeia does not detect footer rows below a table, such as a `Total;;60` sum row or a `Source: …` note. Remove them before ingesting. A footer row narrower or wider than the table stops the run: during profiling if the file is small, or at the footer line after the rows above it were ingested if it is large. A footer row as wide as the table, such as `Total;;60`, is not detected at all and is mapped as data.
+
 ### Value inference
 
 Cassiopeia converts CSV fields to JSON values as it reads them:
