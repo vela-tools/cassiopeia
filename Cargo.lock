@@ -731,7 +731,7 @@ dependencies = [
  "geo-types",
  "geojson",
  "grib",
- "grib-core",
+ "grib-core 0.7.0",
  "grib-writer",
  "indexmap 2.14.2",
  "kml",
@@ -2501,6 +2501,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "grib-core"
+version = "0.7.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "acdc599fa5e73c10b7e62cbe41c33d966777f67002ec31bbb44464cafea829f6"
+dependencies = [
+ "thiserror 2.0.21",
+]
+
+[[package]]
 name = "grib-template-derive"
 version = "0.2.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2524,7 +2533,7 @@ version = "0.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "422008bea42faa6097b3a49ad54d9459bdcda59bba0212bc548a8ca22591bac4"
 dependencies = [
- "grib-core",
+ "grib-core 0.6.0",
 ]
 
 [[package]]
