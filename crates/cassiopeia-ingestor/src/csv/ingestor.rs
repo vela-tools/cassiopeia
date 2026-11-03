@@ -466,6 +466,17 @@ mod tests {
     }
 
     #[test]
+    fn the_inspected_dialect_ingests_the_one_data_row_of_a_titled_all_text_table() {
+        let (_dir, payload) = inspected("Lumes;v2.10\nStation;NO2;O3\nSTEF;12,45;54,55\n");
+        let records = ingest_all(payload);
+
+        assert_eq!(records.len(), 1);
+        assert_eq!(records[0].data().get("Station"), Some(&Value::String("STEF".to_string())));
+        assert_eq!(records[0].data().get("NO2"), Some(&Value::String("12,45".to_string())));
+        assert_eq!(records[0].data().get("O3"), Some(&Value::String("54,55".to_string())));
+    }
+
+    #[test]
     fn a_file_whose_lines_end_with_a_lone_carriage_return_ingests_a_record_per_line() {
         let (_dir, payload) = inspected(b"id,name\r1,Ada\r2,Grace\r");
         let records = ingest_all(payload);

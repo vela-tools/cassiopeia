@@ -14,6 +14,8 @@ pub struct Table {
     pub num_columns: usize,
     /// The number of parsed records.
     pub num_rows: usize,
+    /// The number of header records the dialect read above the parsed records.
+    pub header_records: usize,
     /// The number of records skipped because their field count differs from the table's.
     pub misshapen_rows: usize,
 }
@@ -55,6 +57,7 @@ impl Table {
             column_types,
             num_columns,
             num_rows,
+            header_records: dialect.header_rows.records(),
             misshapen_rows,
         })
     }
@@ -72,7 +75,11 @@ impl Table {
         score += self.type_uniformity() * 30.0;
         let col_bonus = to_f64(self.num_columns).min(20.0) / 20.0;
         score += col_bonus * 10.0;
-        if self.num_rows <= 1 {
+        // A candidate that reads the sample as a single record has most likely swallowed it whole,
+        // such as a wrong quote spanning every line break. A header over one data row is two
+        // records, so the header records count too, or the header hypothesis of a table with one
+        // data row would always lose to the headerless reading of the same records.
+        if self.num_rows + self.header_records <= 1 {
             score -= 20.0;
         }
 
@@ -223,6 +230,32 @@ mod tests {
         let ragged = Table::parse(b"1;a;10\n2;b\n2;b;20\n3;c;30\n", &semicolon_dialect(Preamble::NONE)).unwrap();
 
         assert!(even.score() > ragged.score());
+    }
+
+    #[test]
+    fn a_header_over_one_data_row_scores_as_the_same_two_records_read_headerless() {
+        let sample = b"Station;NO2;O3\nSTEF;12,45;54,55\n";
+        let headerless = Table::parse(sample, &semicolon_dialect(Preamble::NONE)).unwrap();
+        let headed = Table::parse(
+            sample,
+            &Dialect {
+                header_rows: HeaderRows::ONE,
+                ..semicolon_dialect(Preamble::NONE)
+            },
+        )
+        .unwrap();
+
+        assert_eq!(headed.num_rows, 1);
+        assert_eq!(headed.header_records, 1);
+        assert!((headed.score() - headerless.score()).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn a_single_record_without_a_header_scores_below_the_same_record_over_a_second() {
+        let single = Table::parse(b"STEF;12,45;54,55\n", &semicolon_dialect(Preamble::NONE)).unwrap();
+        let double = Table::parse(b"STEF;12,45;54,55\nAKA;9,80;40,10\n", &semicolon_dialect(Preamble::NONE)).unwrap();
+
+        assert!(single.score() < double.score());
     }
 
     #[test]
