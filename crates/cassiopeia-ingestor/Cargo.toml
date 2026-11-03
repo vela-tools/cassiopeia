@@ -18,7 +18,7 @@ cassiopeia-ir.workspace = true
 convert_case = "0.12.0"
 csv = "1.4.0"
 dbase = { version = "0.8.0", features = ["encoding_rs", "yore"] }
-eccodes = { version = "0.15.1", default-features = false, optional = true }
+eccodes = { version = "2.50.0", default-features = false, optional = true }
 encoding_rs = "0.8.42"
 encoding_rs_rw = "0.4.3"
 geo-types = "0.7.20"
