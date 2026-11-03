@@ -134,7 +134,7 @@ Every member is optional. A member you state wins, and Cassiopeia still detects 
 | `delimiter` | The one character that separates fields, such as `","`, `";"`, or `"\t"`. |
 | `quote` | The one character that encloses a field, or `"none"` to turn quoting off. It must differ from the delimiter. |
 | `escape` | How a quote inside a quoted field is written: `"double"` for a doubled quote (`""`), as RFC 4180 has it, or the one character written in front of it, such as `"\\"` for `\"`. Under an escape character, a doubled quote is still read as one quote, and the character after the escape is always taken literally, so `\\` reads as `\` and `\n` as `n`. |
-| `skipRows` | The number of rows above the header to skip. Rows are counted as CSV records, so a quoted title that spans two lines is one row. |
+| `skipRows` | The number of rows above the header to skip. Rows are counted as CSV records, so a quoted title that spans two lines is one row. A blank line is not a record and is never counted, so a title, a blank line, and the header below them is `skipRows: 1`; `skipRows: 2` would skip the header too. |
 | `header` | `false` for a file without a header, whose columns are then read by position. `true` states that the file has a header and leaves its row count to detection. |
 | `headerRows` | The number of rows the header spans. Each column's non-blank header cells are joined with a space, so `NO2` over `HMW` over `µg/m³` becomes the field `NO2 HMW µg/m³`. A lower header row of another width is joined over the columns it reaches. |
 | `terminator` | `"lf"`, `"crlf"`, or `"cr"` (a lone carriage return, as classic Mac OS ends lines). |

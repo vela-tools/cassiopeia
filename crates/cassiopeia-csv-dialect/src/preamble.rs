@@ -8,7 +8,7 @@ use std::io::{self, BufRead};
 /// The count is in logical CSV records, never physical lines. A quoted field may hold a line break
 /// (RFC 4180 clause 2.6), so one preamble record can span several lines; counting records lets every
 /// reader of a profiled file, which all parse through the same CSV state machine, skip exactly the
-/// same bytes. It is counted in `u64`, as the `csv` crate counts the records of a file, so it adds
+/// same bytes. A blank line holds no record, so it is never counted. It is counted in `u64`, as the `csv` crate counts the records of a file, so it adds
 /// to a record's position without conversion.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(transparent)]
@@ -71,6 +71,11 @@ mod tests {
         let input = b"\"Lumes report\ngenerated 25.10.26\";v2.10\na;b\n1;2\n";
 
         assert_eq!(remainder_after(Preamble::new(1), input), "a;b\n1;2\n");
+    }
+
+    #[test]
+    fn a_blank_line_below_a_title_is_not_a_preamble_record() {
+        assert_eq!(remainder_after(Preamble::new(2), b"Lumes report\n\na;b\n1;2\n"), "1;2\n");
     }
 
     #[test]
