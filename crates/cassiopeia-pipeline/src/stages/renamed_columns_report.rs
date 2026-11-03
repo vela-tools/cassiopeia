@@ -7,6 +7,7 @@ use cassiopeia_diagnostic::{
     severity::Severity,
 };
 use cassiopeia_reporter::reporter::DiagnosticSink;
+use std::num::NonZeroU64;
 
 /// How many renames the headline names before it counts the rest, so a header that repeats a name
 /// dozens of times still fits on one line.
@@ -36,26 +37,27 @@ fn headline(source: &Input, renamed: &[RenamedColumn]) -> String {
     format!("The header of `{source}` gives more than one column the same record key, so {columns} renamed: {details}")
 }
 
-/// Names a CSV file's renamed columns in one warning and returns how many warnings that was: one
-/// when any column was renamed, none otherwise.
+/// Names a CSV file's renamed columns in one warning and returns how many columns that was.
 ///
-/// One diagnostic per file however many columns were renamed, since the renames share one cause: the
-/// file's header. The file is named by its `source`, so a downloaded one is named by its URL, the
+/// One diagnostic per file, carrying every renamed column as an occurrence, since the renames share
+/// one cause: the file's header. Counting the columns rather than the diagnostic keeps the run's
+/// warning count in the same unit as every other report, which counts the items it warns about. The file is named by its `source`, so a downloaded one is named by its URL, the
 /// same in every run, rather than by the temporary copy it was read from.
 pub(crate) fn report_renamed_columns(sink: &dyn DiagnosticSink, source: &Input, renamed: &[RenamedColumn]) -> u64 {
-    if renamed.is_empty() {
+    let Some(total) = u64::try_from(renamed.len()).ok().and_then(NonZeroU64::new) else {
         return 0;
-    }
+    };
 
     let builder = renamed.iter().fold(
         DiagnosticBuilder::new(Severity::Warning, DiagnosticCode::Ingest(IngestCode::ColumnsRenamed), headline(source, renamed))
             // The diagnostic outlives the ingestor that names the source.
-            .with_context(ContextField::Source(source.clone())),
+            .with_context(ContextField::Source(source.clone()))
+            .with_occurrences(total),
         // The diagnostic outlives the ingestor's column keys, so each rename is copied into it.
         |builder, column| builder.with_context(ContextField::RenamedColumn(column.clone())),
     );
     sink.report(&builder.build());
-    1
+    total.get()
 }
 
 #[cfg(test)]
@@ -114,7 +116,7 @@ mod tests {
     }
 
     #[test]
-    fn several_renamed_columns_of_one_file_are_still_one_warning() {
+    fn several_renamed_columns_of_one_file_are_one_warning_counting_every_column() {
         let sink = RecordingReporter::new();
 
         let total = report_renamed_columns(
@@ -124,8 +126,9 @@ mod tests {
         );
 
         let reported = sink.diagnostics();
-        assert_eq!(total, 1);
+        assert_eq!(total, 2);
         assert_eq!(reported.len(), 1);
+        assert_eq!(reported[0].occurrences, 2);
         assert_eq!(
             reported[0].headline,
             "The header of `/data/values.csv` gives more than one column the same record key, so 2 columns were renamed: column 3 `value` is read as `value@3`, as column 2 keeps `value`; column 4 `2` is read as `2@4`, as column 1 keeps `2`"
@@ -152,6 +155,7 @@ mod tests {
             reported[0].headline,
             "The header of `/data/units.csv` gives more than one column the same record key, so 5 columns were renamed: column 2 `Unit` is read as `Unit@2`, as column 1 keeps `Unit`; column 3 `Unit` is read as `Unit@3`, as column 1 keeps `Unit`; column 4 `Unit` is read as `Unit@4`, as column 1 keeps `Unit`; and 2 more"
         );
+        assert_eq!(reported[0].occurrences, 5);
         let defining: Vec<ContextField> = columns
             .into_iter()
             .map(ContextField::RenamedColumn)
