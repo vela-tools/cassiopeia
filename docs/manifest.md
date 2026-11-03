@@ -138,9 +138,12 @@ Every member is optional. A member you state wins, and Cassiopeia still detects 
 | `header` | `false` for a file without a header, whose columns are then read by position. `true` states that the file has a header and leaves its row count to detection. |
 | `headerRows` | The number of rows the header spans. Each column's non-blank header cells are joined with a space, so `NO2` over `HMW` over `µg/m³` becomes the field `NO2 HMW µg/m³`. |
 | `terminator` | `"lf"`, `"crlf"`, or `"cr"` (a lone carriage return, as classic Mac OS ends lines). |
-| `encoding` | A label from the WHATWG Encoding Standard, such as `"utf-8"`, `"windows-1252"`, or `"iso-8859-2"`. The standard reads `"latin1"` as `windows-1252`. |
+| `encoding` | A label from the WHATWG Encoding Standard, such as `"utf-8"`, `"windows-1252"`, or `"iso-8859-2"`. The standard reads `"latin1"` as `windows-1252`. A byte order mark at the start of the file wins over it. |
 | `decimalSeparator` | `"."`, the default, or `","`, which reads `12,45` as the number 12.45. Under `","`, a value with a full stop, such as the date `25.10.2026`, stays a string. |
 | `nullValues` | Values read as missing, such as `["NE", "---"]`, besides an empty field and `\N`. |
+
+> [!NOTE]
+> A stated `encoding` wins over a `charset` the server declares, over the source's domain, and over detection, with one exception: a byte order mark. A file that starts with a UTF-8, UTF-16LE, or UTF-16BE byte order mark is always read in the encoding the mark names, and the run reports that encoding, even when `encoding` states another. Every decoder of the WHATWG encodings reads a marked file this way, so a stated encoding cannot change how its bytes are decoded. Cassiopeia does not warn when the two disagree.
 
 Cassiopeia rejects `header: false` together with a `headerRows` above 0, and `header: true` together with `headerRows: 0`. It also rejects an `escape` together with `quote: "none"`, since no field is quoted, and an `escape` character equal to the quote, since a quote escaped by itself is a doubled quote, stated as `"double"`. Detection never sets `decimalSeparator` or `nullValues`, because nothing in a file tells a decimal comma or a missing-value token apart from text.
 

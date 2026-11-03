@@ -23,6 +23,7 @@ use cassiopeia_csv_dialect::{
     statement::DialectStatement,
     value_notation::ValueNotation,
 };
+use encoding_rs::Encoding;
 
 pub mod data_type;
 pub mod error;
@@ -119,12 +120,21 @@ impl<'s> CsvInspector<'s> {
     ///
     /// A table of several columns is looked for first; a file that no candidate splits into
     /// columns, such as a plain list of names, is then read as a table of one column.
+    ///
+    /// A byte order mark names the encoding even over a stated one. Every decoder of the web's
+    /// encodings sniffs the mark ahead of any label (WHATWG Encoding Standard, `decode`), the
+    /// ingestor's included, so the file is read in the mark's encoding whatever the manifest says,
+    /// and the dialect reports the encoding the file is actually read in.
     pub fn inspect(&self, content: &Content<'_>) -> Result<Dialect, CsvInspectError> {
+        let bytes = content.bytes();
+        let marked = Encoding::for_bom(bytes).map(|(encoding, _)| CharacterEncoding::new(encoding));
         if let Some(dialect) = self.statement.whole_dialect() {
-            return Ok(dialect);
+            return Ok(Dialect {
+                encoding: marked.unwrap_or(dialect.encoding),
+                ..dialect
+            });
         }
 
-        let bytes = content.bytes();
         if bytes.is_empty() {
             return Err(CsvInspectError::EmptyInput);
         }
@@ -132,9 +142,8 @@ impl<'s> CsvInspector<'s> {
         // Transcode the sample to UTF-8 before scoring, so a non-UTF-8 file (Windows-1252, Latin-1,
         // ...) does not fail record parsing on its first non-ASCII byte. The encoding is carried on
         // the dialect for the ingestor to reuse.
-        let encoding = self
-            .statement
-            .encoding()
+        let encoding = marked
+            .or_else(|| self.statement.encoding())
             .unwrap_or_else(|| CharacterEncoding::new(content.encoding_hint().encoding_of(bytes)));
         let (raw_sample, extent) = self.sample_of(bytes);
         let decoded = encoding.encoding().decode(raw_sample).0;
@@ -423,7 +432,7 @@ mod tests {
         quote::Quote,
         statement::DialectStatement,
     };
-    use encoding_rs::UTF_16LE;
+    use encoding_rs::{UTF_8, UTF_16LE, WINDOWS_1252};
     use pretty_assertions::assert_eq;
     use std::fmt::Write;
 
@@ -768,6 +777,40 @@ mod tests {
 
     fn stated(statement: serde_json::Value) -> DialectStatement {
         serde_json::from_value(statement).unwrap()
+    }
+
+    #[test]
+    fn a_byte_order_mark_names_the_encoding_over_a_stated_one() {
+        let statement = stated(serde_json::json!({"encoding": "windows-1252"}));
+        let mut bytes = vec![0xff, 0xfe];
+        bytes.extend("id,name\n1,Čapek\n2,Grace\n".encode_utf16().flat_map(u16::to_le_bytes));
+        let dialect = CsvInspector::new(&statement).inspect(&Content::new(&bytes)).unwrap();
+
+        assert_eq!(dialect.character_encoding(), UTF_16LE);
+        assert_eq!(dialect.delimiter, DialectByte::COMMA);
+    }
+
+    #[test]
+    fn a_byte_order_mark_names_the_encoding_of_a_wholly_stated_dialect() {
+        let statement = stated(serde_json::json!({
+            "delimiter": ",",
+            "quote": "\"",
+            "skipRows": 0,
+            "headerRows": 1,
+            "terminator": "lf",
+            "encoding": "windows-1252",
+        }));
+        let dialect = CsvInspector::new(&statement).inspect(&Content::new(b"\xef\xbb\xbfid,name\n1,Ada\n")).unwrap();
+
+        assert_eq!(dialect.character_encoding(), UTF_8);
+    }
+
+    #[test]
+    fn a_stated_encoding_holds_for_a_file_without_a_byte_order_mark() {
+        let statement = stated(serde_json::json!({"encoding": "windows-1252"}));
+        let dialect = CsvInspector::new(&statement).inspect(&Content::new(b"id,name\n1,Caf\xe9\n2,Grace\n")).unwrap();
+
+        assert_eq!(dialect.character_encoding(), WINDOWS_1252);
     }
 
     #[test]
