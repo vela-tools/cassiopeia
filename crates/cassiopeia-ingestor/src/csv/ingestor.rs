@@ -461,6 +461,21 @@ mod tests {
     }
 
     #[test]
+    fn a_pipe_table_padded_for_reading_is_keyed_and_valued_without_its_padding() {
+        let contents = "id | name | count\n1 | Ada | 36\n2 | Grace | 45\n";
+        let dialect = CsvInspector::new(&DialectStatement::NOTHING)
+            .inspect(&Content::new(contents.as_bytes()))
+            .unwrap();
+        let (_dir, payload) = profiled_csv(contents, Some(FormatMetadata::Csv(CsvMetadata::new(dialect))));
+        let records = ingest_all(payload);
+
+        assert_eq!(records.len(), 2);
+        assert_eq!(records[0].data().get("id"), Some(&Value::Number(1.into())));
+        assert_eq!(records[0].data().get("name"), Some(&Value::String("Ada".to_string())));
+        assert_eq!(records[1].data().get("count"), Some(&Value::Number(45.into())));
+    }
+
+    #[test]
     fn the_inspected_preamble_of_a_quoted_two_line_title_ingests_the_first_data_row_intact() {
         // Five line feeds but four CSV records: the inspector and the ingestor must both count the
         // quoted title as one record, or the header or the first data row is lost.

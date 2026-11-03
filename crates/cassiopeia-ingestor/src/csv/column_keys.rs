@@ -99,11 +99,13 @@ impl ColumnKeys {
 
     /// Normalizes a header for use as a record key.
     ///
-    /// A quoted header field may hold an embedded newline (RFC 4180 clause 2.6); folding it to a
-    /// space keeps the key on one line. The header is otherwise preserved verbatim: its Unicode
-    /// and punctuation are addressable directly from a mapping, so no transliteration is applied.
+    /// The spaces around a header are dropped, as they are around a value: a table padded for
+    /// reading, such as `id | name`, is keyed `id` and `name`, not `id ` and ` name`. A quoted
+    /// header field may hold an embedded newline (RFC 4180 clause 2.6); folding it to a space keeps
+    /// the key on one line. The header is otherwise preserved verbatim: its Unicode and punctuation
+    /// are addressable directly from a mapping, so no transliteration is applied.
     fn clean_header(header: &str) -> String {
-        header.replace('\n', " ")
+        header.trim().replace('\n', " ")
     }
 
     /// The rename of each column that does not keep the key it asks for, in column order.
@@ -172,6 +174,22 @@ mod tests {
 
         assert_eq!(texts(&keys), ["id", "NO2 HMW", "2", "O3"]);
         assert_eq!(keys.renamed(), []);
+    }
+
+    #[test]
+    fn the_spaces_padding_a_header_are_not_part_of_its_key() {
+        let keys = keys_of(&["id ", " name ", "\tcity"]);
+
+        assert_eq!(texts(&keys), ["id", "name", "city"]);
+        assert_eq!(keys.renamed(), []);
+    }
+
+    #[test]
+    fn a_header_that_differs_from_another_only_by_padding_repeats_it() {
+        let keys = keys_of(&["value", " value "]);
+
+        assert_eq!(texts(&keys), ["value", "value@2"]);
+        assert_eq!(keys.renamed(), [renamed("value", 0, 1, "value@2")]);
     }
 
     #[test]
