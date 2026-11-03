@@ -6,9 +6,10 @@ use typed_builder::TypedBuilder;
 ///
 /// Absent from the output section means current-state: each id is written once, carrying the latest
 /// observation of every attribute with `observedAt` kept as a qualifier. A present block selects a
-/// richer temporal shape.
+/// richer temporal shape. A key the block does not define is refused, so a misspelt one is an error
+/// rather than silently ignored.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Getters, TypedBuilder)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct ManifestTemporal {
     /// How temporal attributes are represented. `series` folds each id's observations into one
     /// `EntityTemporal` whose temporal attributes are instance arrays.
@@ -44,6 +45,13 @@ mod tests {
         let encoded = serde_json::to_string(&temporal).unwrap();
         assert!(encoded.contains("series"));
         assert_eq!(serde_json::from_str::<ManifestTemporal>(&encoded).unwrap(), temporal);
+    }
+
+    #[test]
+    fn a_temporal_block_with_a_misspelt_key_is_rejected_as_an_unknown_field() {
+        let error = serde_json::from_str::<ManifestTemporal>(r#"{"representation": "series", "representaton": "series"}"#).unwrap_err();
+
+        assert!(error.to_string().contains("unknown field `representaton`"), "{error}");
     }
 
     #[test]

@@ -8,7 +8,7 @@ Run one with `--manifest`:
 cassiopeia map --manifest manifest.json5
 ~~~
 
-Manifests are JSON5 documents, so comments, trailing commas, and unquoted keys are allowed. The `.json5` extension is conventional. Field names use camelCase. The top level, `output`, and `output.validation` reject unknown keys, so a misspelled field produces an error instead of being silently ignored.
+Manifests are JSON5 documents, so comments, trailing commas, and unquoted keys are allowed. The `.json5` extension is conventional. Field names use camelCase. The top level, `output`, `output.validation`, and `output.temporal` reject unknown keys, so a misspelled field produces an error instead of being silently ignored.
 
 ## Top-level structure
 
@@ -290,7 +290,7 @@ retry: {
 
 ## What makes a manifest invalid
 
-Cassiopeia rejects a manifest when `inputs` is empty, an input has both or neither of `mapping` and `mappings`, `mappings` is empty or names the same collection twice, `mappings` is used with a format that does not support collections, `dialect` is used on an input that does not declare `format: "csv"`, `headers` is used on an input with a local `source`, a `${NAME}` is malformed or names a variable that is not set, a local `source` reads an environment variable, or any field has a value outside its accepted set. Because the top level, `output`, and `output.validation` reject unknown keys, a stray or misspelled field there is also an error, and so is a setting of the other destination, such as `directory` on a `context-broker` output.
+Cassiopeia rejects a manifest when `inputs` is empty, an input has both or neither of `mapping` and `mappings`, `mappings` is empty or names the same collection twice, `mappings` is used with a format that does not support collections, `dialect` is used on an input that does not declare `format: "csv"`, `headers` is used on an input with a local `source`, a `${NAME}` is malformed or names a variable that is not set, a local `source` reads an environment variable, or any field has a value outside its accepted set. Because the top level, `output`, `output.validation`, and `output.temporal` reject unknown keys, a stray or misspelled field there is also an error, and so is a setting of the other destination, such as `directory` on a `context-broker` output.
 
 ## Next steps
 
