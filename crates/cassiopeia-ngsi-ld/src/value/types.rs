@@ -1,3 +1,4 @@
+use crate::value::finite_float::FiniteFloat;
 use cassiopeia_geometry::geometry::NgsiLdGeometry;
 use chrono::{DateTime, Utc};
 use compact_str::CompactString;
@@ -59,11 +60,16 @@ impl Serialize for Value {
     }
 }
 
+/// An NGSI-LD number: an integer when it fits `i64`, otherwise a float.
+///
+/// The float is always finite, because JSON has no number for any other (RFC 8259 clause 6).
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(untagged)]
 pub enum Number {
+    /// A whole number that fits `i64`.
     Integer(i64),
-    Float(f64),
+    /// A finite float.
+    Float(FiniteFloat),
 }
 
 /// A value of one of the three time value data types of ETSI GS CIM 009 v1.9.1 clause 4.6.3.
@@ -180,8 +186,8 @@ mod tests {
 
     #[test]
     fn display_renders_a_float_in_its_shortest_form() {
-        assert_eq!(Value::from(3.0).to_string(), "3");
-        assert_eq!(Value::from(2.5).to_string(), "2.5");
+        assert_eq!(Value::try_from(3.0).unwrap().to_string(), "3");
+        assert_eq!(Value::try_from(2.5).unwrap().to_string(), "2.5");
     }
 
     #[test]

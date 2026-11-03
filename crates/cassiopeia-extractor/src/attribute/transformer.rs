@@ -203,7 +203,12 @@ impl Transformer {
             Value::String(text) => text
                 .parse::<i64>()
                 .ok()
-                .or_else(|| text.parse::<f64>().ok().and_then(|float| Value::from(float).to_integer()))
+                .or_else(|| {
+                    text.parse::<f64>()
+                        .ok()
+                        .and_then(|float| Value::try_from(float).ok())
+                        .and_then(|parsed| parsed.to_integer())
+                })
                 .map(Value::from),
             Value::Boolean(_) | Value::Number(_) | Value::Temporal(_) | Value::Geospatial(_) | Value::Array(_) | Value::Object(_) => {
                 value.to_integer().map(Value::from)
@@ -214,9 +219,9 @@ impl Transformer {
     /// Coerces the merged value to a float, accepting a comma as a decimal separator.
     fn coerce_float(value: &Value) -> Option<Value> {
         match value {
-            Value::String(text) => parse_decimal(text.as_str()).map(Value::from),
+            Value::String(text) => parse_decimal(text.as_str()).and_then(|float| Value::try_from(float).ok()),
             Value::Boolean(_) | Value::Number(_) | Value::Temporal(_) | Value::Geospatial(_) | Value::Array(_) | Value::Object(_) => {
-                value.to_float().map(Value::from)
+                value.to_float().and_then(|float| Value::try_from(float).ok())
             }
         }
     }
@@ -358,7 +363,7 @@ mod tests {
     fn a_lone_numeric_part_keeps_its_type_under_a_float_transformation() {
         let value = converted(smallvec![json!(25.5)], ValueConversion::Transform(Transformation::Float), None);
 
-        assert_eq!(value, Some(Value::Number(Number::Float(25.5))));
+        assert_eq!(value, Some(Value::try_from(25.5).unwrap()));
     }
 
     #[test]
@@ -379,7 +384,7 @@ mod tests {
     fn a_comma_decimal_string_parses_as_a_float() {
         let value = converted(smallvec![json!("1,5")], ValueConversion::Transform(Transformation::Float), None);
 
-        assert_eq!(value, Some(Value::Number(Number::Float(1.5))));
+        assert_eq!(value, Some(Value::try_from(1.5).unwrap()));
     }
 
     #[test]

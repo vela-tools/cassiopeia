@@ -4,7 +4,7 @@ use crate::value::{
 };
 use geojson::GeometryValue;
 use serde::{Deserialize, Serialize};
-use serde_json::{Map, Number as JsonNumber, Value as JsonValue};
+use serde_json::{Map, Value as JsonValue};
 
 /// One JSON object, as raw JSON that NGSI-LD never interprets.
 pub type JsonObject = Map<String, JsonValue>;
@@ -75,31 +75,25 @@ impl TryFrom<Value> for JsonPayload {
     type Error = JsonPayloadError;
 
     fn try_from(value: Value) -> Result<JsonPayload, JsonPayloadError> {
-        JsonPayload::try_from(raw_json(value)?)
+        JsonPayload::try_from(raw_json(value))
     }
 }
 
 /// The raw JSON a value serializes to, built without an intermediate encoding.
 ///
-/// # Errors
-/// Returns [`JsonPayloadError::NonFiniteNumber`] for a float JSON has no number for (RFC 8259
+/// Every value has a JSON form: a float is always finite, so it is always a JSON number (RFC 8259
 /// clause 6).
-fn raw_json(value: Value) -> Result<JsonValue, JsonPayloadError> {
-    Ok(match value {
+fn raw_json(value: Value) -> JsonValue {
+    match value {
         Value::Boolean(b) => JsonValue::Bool(b),
         Value::Number(Number::Integer(i)) => JsonValue::Number(i.into()),
-        Value::Number(Number::Float(f)) => JsonValue::Number(JsonNumber::from_f64(f).ok_or(JsonPayloadError::NonFiniteNumber)?),
+        Value::Number(Number::Float(f)) => JsonValue::from(f.get()),
         Value::String(text) => JsonValue::String(text.into()),
         Value::Temporal(temporal) => JsonValue::String(temporal.text().to_string()),
         Value::Geospatial(geometry) => JsonValue::from(&GeometryValue::from(geometry.as_ref())),
-        Value::Array(items) => JsonValue::Array(items.into_iter().map(raw_json).collect::<Result<Vec<JsonValue>, JsonPayloadError>>()?),
-        Value::Object(members) => JsonValue::Object(
-            members
-                .into_iter()
-                .map(|(key, member)| raw_json(member).map(|member| (key.into(), member)))
-                .collect::<Result<JsonObject, JsonPayloadError>>()?,
-        ),
-    })
+        Value::Array(items) => JsonValue::Array(items.into_iter().map(raw_json).collect()),
+        Value::Object(members) => JsonValue::Object(members.into_iter().map(|(key, member)| (key.into(), raw_json(member))).collect()),
+    }
 }
 
 #[cfg(test)]
@@ -107,9 +101,8 @@ mod tests {
     use crate::value::{
         json_payload::JsonPayload,
         json_payload_error::{JsonPayloadError, JsonShape},
-        types::{Value, ValueObject},
+        types::Value,
     };
-    use compact_str::CompactString;
     use pretty_assertions::assert_eq;
     use serde_json::{Value as JsonValue, json};
 
@@ -176,14 +169,6 @@ mod tests {
             JsonPayload::try_from(Value::Boolean(true)),
             Err(JsonPayloadError::NotAnObject { found: JsonShape::Boolean })
         );
-    }
-
-    #[test]
-    fn a_value_holding_a_non_finite_float_is_refused() {
-        let mut members = ValueObject::default();
-        members.insert(CompactString::from("reading"), Value::from(f64::NAN));
-
-        assert_eq!(JsonPayload::try_from(Value::Object(Box::new(members))), Err(JsonPayloadError::NonFiniteNumber));
     }
 
     #[test]

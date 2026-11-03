@@ -1,7 +1,9 @@
 pub mod convert;
+pub mod finite_float;
 pub mod geo;
 pub mod json_payload;
 pub mod json_payload_error;
+pub mod non_finite_float;
 pub mod null_in_json;
 pub mod omitted_nulls;
 pub mod parsing;

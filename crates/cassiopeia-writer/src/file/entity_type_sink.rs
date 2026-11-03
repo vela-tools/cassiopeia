@@ -264,7 +264,9 @@ mod parity_tests {
         let mut nested = IndexMap::default();
         nested.insert(
             NameBuf::new("accuracy").unwrap(),
-            Box::new(NgsiLdAttributeWrapper::single(NgsiLdAttribute::Property(NgsiLdProperty::new(0.95)))),
+            Box::new(NgsiLdAttributeWrapper::single(NgsiLdAttribute::Property(NgsiLdProperty::new(
+                Value::try_from(0.95).unwrap(),
+            )))),
         );
 
         let mut property = NgsiLdProperty::new(Value::try_from(json!(21.5)).unwrap());

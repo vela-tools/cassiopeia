@@ -171,7 +171,7 @@ impl TemporalValue {
     pub fn from_number(number: &Number) -> Option<TemporalValue> {
         match *number {
             Number::Integer(whole) => Self::from_epoch(whole),
-            Number::Float(value) => Self::from_fractional_epoch(value),
+            Number::Float(value) => Self::from_fractional_epoch(value.get()),
         }
     }
 
@@ -198,7 +198,10 @@ impl TemporalValue {
 
 #[cfg(test)]
 mod tests {
-    use crate::value::types::{Number, TemporalValue};
+    use crate::value::{
+        finite_float::FiniteFloat,
+        types::{Number, TemporalValue},
+    };
     use chrono::{DateTime, Duration, TimeZone, Utc};
     use pretty_assertions::assert_eq;
 
@@ -390,6 +393,11 @@ mod tests {
         })
     }
 
+    /// A float number, which every literal here is finite enough to be.
+    fn float(value: f64) -> Number {
+        Number::Float(FiniteFloat::try_from(value).unwrap())
+    }
+
     /// The instant `2026-04-03T22:00:20Z`, 1775253620 seconds after the epoch.
     fn epoch_instant() -> DateTime<Utc> {
         Utc.with_ymd_and_hms(2026, 4, 3, 22, 0, 20).unwrap()
@@ -415,28 +423,22 @@ mod tests {
 
     #[test]
     fn a_whole_float_epoch_reads_like_the_integer() {
-        assert_eq!(epoch(&Number::Float(1_775_253_620.0)), Some(epoch_instant()));
+        assert_eq!(epoch(&float(1_775_253_620.0)), Some(epoch_instant()));
     }
 
     #[test]
     fn a_fractional_epoch_keeps_its_fraction_as_a_number_and_as_text() {
         let expected = epoch_instant() + Duration::milliseconds(500);
 
-        assert_eq!(epoch(&Number::Float(1_775_253_620.5)), Some(expected));
-        assert_eq!(epoch(&Number::Float(1_775_253_620_500.0)), Some(expected));
+        assert_eq!(epoch(&float(1_775_253_620.5)), Some(expected));
+        assert_eq!(epoch(&float(1_775_253_620_500.0)), Some(expected));
         assert_eq!(instant("1775253620.5"), Some(expected));
     }
 
     #[test]
     fn a_number_too_small_for_an_epoch_is_not_an_instant() {
         assert_eq!(epoch(&Number::Integer(2026)), None);
-        assert_eq!(epoch(&Number::Float(2026.5)), None);
+        assert_eq!(epoch(&float(2026.5)), None);
         assert_eq!(instant("2026.5"), None);
-    }
-
-    #[test]
-    fn a_number_that_is_not_finite_is_not_an_instant() {
-        assert_eq!(epoch(&Number::Float(f64::NAN)), None);
-        assert_eq!(epoch(&Number::Float(f64::INFINITY)), None);
     }
 }

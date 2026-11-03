@@ -94,7 +94,7 @@ impl Value {
             Value::Boolean(b) => Some(*b),
             Value::String(s) => parse_boolean(s),
             Value::Number(Number::Integer(i)) => Some(*i != 0),
-            Value::Number(Number::Float(f)) => Some(is_nonzero(*f)),
+            Value::Number(Number::Float(f)) => Some(is_nonzero(f.get())),
             Value::Temporal(_) | Value::Geospatial(_) | Value::Array(_) | Value::Object(_) => None,
         }
     }
@@ -104,7 +104,7 @@ impl Value {
     pub fn to_integer(&self) -> Option<i64> {
         match self {
             Value::Number(Number::Integer(i)) => Some(*i),
-            Value::Number(Number::Float(f)) => f.to_i64(),
+            Value::Number(Number::Float(f)) => f.get().to_i64(),
             Value::String(s) => parse_integer(s),
             Value::Boolean(b) => Some(i64::from(*b)),
             Value::Temporal(TemporalValue::DateTime(dt) | TemporalValue::Date(dt) | TemporalValue::Time(dt)) => Some(dt.timestamp()),
@@ -117,7 +117,7 @@ impl Value {
     pub fn to_float(&self) -> Option<f64> {
         match self {
             Value::Number(Number::Integer(i)) => i.to_f64(),
-            Value::Number(Number::Float(f)) => Some(*f),
+            Value::Number(Number::Float(f)) => Some(f.get()),
             Value::String(s) => parse_float(s),
             Value::Boolean(b) => Some(if *b { 1.0 } else { 0.0 }),
             Value::Temporal(TemporalValue::DateTime(dt) | TemporalValue::Date(dt) | TemporalValue::Time(dt)) => dt

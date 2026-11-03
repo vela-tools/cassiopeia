@@ -146,7 +146,7 @@ mod tests {
         entity::{attribute::NgsiLdAttributeKind, name::NameBuf},
         value::{
             json_payload_error::{JsonPayloadError, JsonShape},
-            types::{Number, TemporalValue, Value},
+            types::{TemporalValue, Value},
         },
     };
     use cassiopeia_unreadable_timestamps::{attribute_loss::AttributeLoss, timestamp_loss::TimestampLoss};
@@ -251,7 +251,7 @@ mod tests {
         let (result, _) = extractor.extract(mapped, &DroppedAttributes::new()).unwrap().into_parts();
         let values = result.values().as_ref().expect("values set");
 
-        assert_eq!(values.get(&name("temperature")), Some(&single(Value::Number(Number::Float(25.5)))));
+        assert_eq!(values.get(&name("temperature")), Some(&single(Value::try_from(25.5).unwrap())));
     }
 
     #[test]
@@ -628,8 +628,8 @@ mod tests {
         assert_eq!(
             values.get(&name("temperatureMax")),
             Some(&ResolvedAttribute::Instances(vec![
-                Some(AttributeContent::Value(Value::Number(Number::Float(10.0)))),
-                Some(AttributeContent::Value(Value::Number(Number::Float(12.0)))),
+                Some(AttributeContent::Value(Value::try_from(10.0).unwrap())),
+                Some(AttributeContent::Value(Value::try_from(12.0).unwrap())),
             ]))
         );
 

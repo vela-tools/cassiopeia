@@ -278,7 +278,7 @@ mod tests {
         let mapping = mapping(
             r#"{ version: "v4", dataModel: "Sensor", identity: { entityName: "S-{{ id }}" }, attributes: { temperature: { source: "{{ t }}", transformation: "float" } } }"#,
         );
-        let value_map = values(vec![("temperature", single(Value::Number(Number::Float(25.5))))]);
+        let value_map = values(vec![("temperature", single(Value::try_from(25.5).unwrap()))]);
         let entity = Entity::new(urn("urn:ngsi-ld:Sensor:1"), json!({}), None, None, IndexMap::default(), Some(value_map));
 
         let result = NgsiLdTransformer::new()
@@ -291,7 +291,7 @@ mod tests {
         let NgsiLdAttribute::Property(property) = attr.as_ref() else {
             panic!("expected a property");
         };
-        assert_eq!(property.value, Value::Number(Number::Float(25.5)));
+        assert_eq!(property.value, Value::try_from(25.5).unwrap());
     }
 
     #[test]
@@ -358,7 +358,7 @@ mod tests {
         let mapping = mapping(
             r#"{ version: "v4", dataModel: "Sensor", identity: { entityName: "S-{{ id }}" }, attributes: { temperature: { source: "{{ t }}", transformation: "float", properties: { observedAt: { source: "{{ ts }}" } } } } }"#,
         );
-        let value_map = values(vec![("temperature", single(Value::Number(Number::Float(20.0))))]);
+        let value_map = values(vec![("temperature", single(Value::try_from(20.0).unwrap()))]);
         let mut metadata = IndexMap::default();
         let mut shared = IndexMap::default();
         shared.insert(name("observedAt"), qualifier(json!("2026-04-03T22:00:20Z")));
@@ -398,7 +398,7 @@ mod tests {
         let mapping = mapping(
             r#"{ version: "v4", dataModel: "Sensor", identity: { entityName: "S-{{ id }}" }, attributes: { temperature: { source: "{{ t }}", transformation: "float", properties: { expiresAt: { source: "{{ until }}" } } } } }"#,
         );
-        let value_map = values(vec![("temperature", single(Value::Number(Number::Float(20.0))))]);
+        let value_map = values(vec![("temperature", single(Value::try_from(20.0).unwrap()))]);
         let mut metadata = IndexMap::default();
         let mut shared = IndexMap::default();
         shared.insert(name("expiresAt"), qualifier(json!(expires_at)));
@@ -424,7 +424,7 @@ mod tests {
         let mapping = mapping(
             r#"{ version: "v4", dataModel: "Sensor", identity: { entityName: "S-{{ id }}" }, attributes: { temperature: { source: "{{ t }}", transformation: "float", properties: { observedAt: { source: "{{ ts }}" } } } } }"#,
         );
-        let value_map = values(vec![("temperature", single(Value::Number(Number::Float(20.0))))]);
+        let value_map = values(vec![("temperature", single(Value::try_from(20.0).unwrap()))]);
         let mut metadata = IndexMap::default();
         let mut shared = IndexMap::default();
         shared.insert(name("observedAt"), qualifier(json!(observed_at)));
@@ -562,7 +562,7 @@ mod tests {
         // leave no instance behind (ETSI GS CIM 009 v1.9.1 clause 4.5.5).
         let value_map = values(vec![(
             "temperature",
-            instances(vec![Some(Value::Number(Number::Float(1.0))), None, Some(Value::Number(Number::Float(3.0)))]),
+            instances(vec![Some(Value::try_from(1.0).unwrap()), None, Some(Value::try_from(3.0).unwrap())]),
         )]);
         let mut per_item = IndexMap::default();
         let entry = |urn: &str| SubAttributes::from_iter([(name("datasetId"), qualifier(json!(urn)))]);
@@ -1092,7 +1092,7 @@ mod tests {
 
     /// A sensor entity whose temperature carries the given `observedAt` and `unitCode`.
     fn qualified_entity(id: &str, observed_at: &str, unit_code: &str) -> Entity {
-        let value_map = values(vec![("temperature", single(Value::Number(Number::Float(20.0))))]);
+        let value_map = values(vec![("temperature", single(Value::try_from(20.0).unwrap()))]);
         let mut shared = IndexMap::default();
         shared.insert(name("observedAt"), qualifier(json!(observed_at)));
         shared.insert(name("unitCode"), qualifier(json!(unit_code)));

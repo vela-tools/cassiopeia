@@ -1,4 +1,6 @@
 use crate::value::{
+    finite_float::FiniteFloat,
+    non_finite_float::NonFiniteFloat,
     null_in_json::NullInJson,
     omitted_nulls::OmittedNulls,
     types::{Number, TemporalValue, Value, ValueObject},
@@ -27,8 +29,13 @@ impl Value {
 }
 
 /// Reads a JSON number as a [`Number`]: an integer when it fits `i64`, otherwise a float.
+///
+/// A JSON number is always finite (RFC 8259 clause 6), so the float check refuses nothing here.
 fn json_number(number: &serde_json::Number) -> Option<Number> {
-    number.as_i64().map(Number::Integer).or_else(|| number.as_f64().map(Number::Float))
+    number
+        .as_i64()
+        .map(Number::Integer)
+        .or_else(|| number.as_f64().and_then(|float| FiniteFloat::try_from(float).ok()).map(Number::Float))
 }
 
 impl From<i64> for Value {
@@ -37,9 +44,19 @@ impl From<i64> for Value {
     }
 }
 
-impl From<f64> for Value {
-    fn from(f: f64) -> Self {
+impl From<FiniteFloat> for Value {
+    fn from(f: FiniteFloat) -> Self {
         Value::Number(Number::Float(f))
+    }
+}
+
+/// Reads a float as a number value, refusing `NaN` and the infinities, for which JSON has no number
+/// (RFC 8259 clause 6).
+impl TryFrom<f64> for Value {
+    type Error = NonFiniteFloat;
+
+    fn try_from(f: f64) -> Result<Value, NonFiniteFloat> {
+        FiniteFloat::try_from(f).map(Value::from)
     }
 }
 
@@ -114,6 +131,8 @@ impl TryFrom<JsonValue> for Value {
 #[cfg(test)]
 mod tests {
     use crate::value::{
+        finite_float::FiniteFloat,
+        non_finite_float::NonFiniteFloat,
         null_in_json::NullInJson,
         omitted_nulls::OmittedNulls,
         types::{Number, Value},
@@ -157,14 +176,28 @@ mod tests {
     #[test]
     fn an_epoch_number_value_parses_to_an_instant() {
         assert!(Value::from(1_775_253_620_i64).try_parse_datetime().is_some());
-        assert!(Value::from(1_775_253_620.5).try_parse_datetime().is_some());
+        assert!(Value::try_from(1_775_253_620.5).unwrap().try_parse_datetime().is_some());
         assert_eq!(Value::from(2026_i64).try_parse_datetime(), None);
     }
 
     #[test]
     fn json_numbers_read_as_integers_or_floats() {
         assert_eq!(Value::try_from(json!(42)).unwrap(), Value::Number(Number::Integer(42)));
-        assert_eq!(Value::try_from(json!(1.5)).unwrap(), Value::Number(Number::Float(1.5)));
+        assert_eq!(
+            Value::try_from(json!(1.5)).unwrap(),
+            Value::Number(Number::Float(FiniteFloat::try_from(1.5).unwrap()))
+        );
+    }
+
+    #[test]
+    fn a_finite_float_becomes_a_number_value() {
+        assert_eq!(Value::try_from(1.5), Ok(Value::Number(Number::Float(FiniteFloat::try_from(1.5).unwrap()))));
+    }
+
+    #[test]
+    fn a_float_that_is_not_finite_is_no_value() {
+        assert_eq!(Value::try_from(f64::INFINITY), Err(NonFiniteFloat(f64::INFINITY)));
+        assert!(Value::try_from(f64::NAN).is_err());
     }
 
     #[test]

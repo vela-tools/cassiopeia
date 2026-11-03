@@ -187,7 +187,7 @@ mod tests {
     fn every_instance_of_a_multi_instance_attribute_is_written() {
         let entity = entity_with(
             "temperature",
-            NgsiLdAttributeWrapper::Multi(vec![property(Value::from(1.5)), property(Value::String(CompactString::new("")))]),
+            NgsiLdAttributeWrapper::Multi(vec![property(Value::try_from(1.5).unwrap()), property(Value::String(CompactString::new("")))]),
         );
 
         assert_eq!(written(&entity, NgsiLdRepresentation::Concise, "temperature"), Some(json!([1.5, ""])));

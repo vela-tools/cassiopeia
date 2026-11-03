@@ -33,9 +33,6 @@ pub enum JsonPayloadError {
         /// What the value is instead.
         found: JsonShape,
     },
-    /// A transformed value held a float that JSON has no number for (RFC 8259 clause 6).
-    #[error("a JsonProperty's `json` cannot hold a number that is not finite")]
-    NonFiniteNumber,
     /// The value is an array holding something other than an object.
     #[error("a JsonProperty's `json` array holds only objects, but this one holds {found}")]
     ItemNotAnObject {

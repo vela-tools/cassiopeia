@@ -152,7 +152,7 @@ mod tests {
     use cassiopeia_mapping::{mapping::Mapping, template::runner::TemplateRunner};
     use cassiopeia_ngsi_ld::{
         entity::{attribute::NgsiLdAttributeKind, name::NameBuf},
-        value::types::{Number, Value},
+        value::types::Value,
     };
     use cassiopeia_reporter::reporter::Reporter;
     use indexmap::IndexMap;
@@ -194,7 +194,7 @@ mod tests {
         let urn: Urn = format!("urn:ngsi-ld:Sensor:{id}").parse().unwrap();
         let values = IndexMap::from_iter([(
             name("temperature"),
-            ResolvedAttribute::Single(AttributeContent::Value(Value::Number(Number::Float(20.0)))),
+            ResolvedAttribute::Single(AttributeContent::Value(Value::try_from(20.0).unwrap())),
         )]);
         let shared = IndexMap::from_iter([(
             name("observedAt"),

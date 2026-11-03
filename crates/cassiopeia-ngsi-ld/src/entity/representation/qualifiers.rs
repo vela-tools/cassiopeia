@@ -111,16 +111,19 @@ pub(crate) fn serialize_nested<M: SerializeMap>(map: &mut M, attributes: &Nested
 
 #[cfg(test)]
 mod tests {
-    use crate::entity::{
-        attribute::{NestedAttributes, NgsiLdAttribute, NgsiLdAttributeWrapper, property::NgsiLdProperty},
-        name::NameBuf,
-        representation::{ReprAdapter, qualifiers::serialize_nested},
+    use crate::{
+        entity::{
+            attribute::{NestedAttributes, NgsiLdAttribute, NgsiLdAttributeWrapper, property::NgsiLdProperty},
+            name::NameBuf,
+            representation::{ReprAdapter, qualifiers::serialize_nested},
+        },
+        value::types::Value,
     };
     use cassiopeia_common::representation::NgsiLdRepresentation;
     use indexmap::IndexMap;
     use pretty_assertions::assert_eq;
     use serde::{Serialize, Serializer, ser::SerializeMap};
-    use serde_json::Value;
+    use serde_json::Value as JsonValue;
 
     // Serializes a single nested attribute through `serialize_nested` and returns the resulting map.
     struct NestedOnly(NestedAttributes);
@@ -138,11 +141,13 @@ mod tests {
         let mut nested = IndexMap::default();
         nested.insert(
             NameBuf::new("accuracy").unwrap(),
-            Box::new(NgsiLdAttributeWrapper::single(NgsiLdAttribute::Property(NgsiLdProperty::new(0.5)))),
+            Box::new(NgsiLdAttributeWrapper::single(NgsiLdAttribute::Property(NgsiLdProperty::new(
+                Value::try_from(0.5).unwrap(),
+            )))),
         );
 
         let value = serde_json::to_value(NestedOnly(nested)).unwrap();
-        assert_eq!(value.get("accuracy"), Some(&Value::from(0.5)));
+        assert_eq!(value.get("accuracy"), Some(&JsonValue::from(0.5)));
     }
 
     #[test]

@@ -138,7 +138,11 @@ mod tests {
 
     #[test]
     fn a_property_sub_attribute_has_no_object_type() {
-        let sub = SubAttribute::new(NgsiLdAttributeKind::Property, AttributeContent::Value(Value::from(0.5)), IndexMap::default());
+        let sub = SubAttribute::new(
+            NgsiLdAttributeKind::Property,
+            AttributeContent::Value(Value::try_from(0.5).unwrap()),
+            IndexMap::default(),
+        );
 
         assert_eq!(sub.object_type(), &None);
     }

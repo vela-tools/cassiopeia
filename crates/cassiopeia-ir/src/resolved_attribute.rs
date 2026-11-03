@@ -27,9 +27,9 @@ mod tests {
     #[test]
     fn a_missing_instance_keeps_its_place_through_a_round_trip() {
         let resolved = ResolvedAttribute::Instances(vec![
-            Some(AttributeContent::Value(Value::from(1.0))),
+            Some(AttributeContent::Value(Value::try_from(1.0).unwrap())),
             None,
-            Some(AttributeContent::Value(Value::from(3.0))),
+            Some(AttributeContent::Value(Value::try_from(3.0).unwrap())),
         ]);
         let decoded: ResolvedAttribute = serde_json::from_str(&serde_json::to_string(&resolved).unwrap()).unwrap();
 
