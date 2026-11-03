@@ -1,5 +1,4 @@
 pub mod atomic_writer;
-pub mod backoff;
 pub mod batch_job;
 pub mod batch_reconciliation;
 pub mod batch_result;

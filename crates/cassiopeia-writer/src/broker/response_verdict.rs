@@ -1,5 +1,5 @@
 use crate::broker::{batch_result::BatchOperationResult, broker_rejection::BrokerRejection, problem_details::ProblemDetails};
-use cassiopeia_common::captured_body::CapturedBody;
+use cassiopeia_common::{captured_body::CapturedBody, http_retry::transient_status::is_transient};
 use http::StatusCode;
 
 /// How a broker response maps onto the writer's accounting, derived purely from the status and body.
@@ -66,7 +66,7 @@ pub fn interpret_response(status: StatusCode, body: &CapturedBody, entity_count:
     if status == StatusCode::PAYLOAD_TOO_LARGE {
         return ResponseVerdict::TooLarge { problem };
     }
-    if status == StatusCode::TOO_MANY_REQUESTS || status.is_server_error() {
+    if is_transient(status) {
         return ResponseVerdict::Retryable { status, problem };
     }
     match problem {

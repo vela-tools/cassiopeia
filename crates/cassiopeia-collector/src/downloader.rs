@@ -2,10 +2,22 @@ use crate::{
     downloaded_file::DownloadedFile,
     error::{CollectorError, ERROR_BODY_CAP},
 };
-use cassiopeia_common::{captured_body::CapturedBody, masked_url::MaskedUrl, request_header::RequestHeaders, user_agent::UserAgent};
+use cassiopeia_common::{
+    captured_body::CapturedBody,
+    http_retry::{
+        backoff::{BackoffSleep, DEFAULT_MAX_ATTEMPTS, retry_delay, sleep_or_shutdown},
+        retry_after::RetryAfter,
+        transient_status::is_transient,
+    },
+    masked_url::MaskedUrl,
+    request_header::RequestHeaders,
+    user_agent::UserAgent,
+};
+use http::StatusCode;
 use mediatype::MediaTypeBuf;
 use reqwest::{blocking::Client, header::CONTENT_TYPE};
-use std::{fs::File, io::Write, path::Path};
+use std::{fs::File, io::Write, path::Path, sync::atomic::AtomicBool};
+use tracing::debug;
 
 /// Fetches remote sources over HTTP, announcing every request with one fixed `User-Agent` and
 /// attaching the same user-supplied headers to each.
@@ -18,24 +30,46 @@ pub struct Downloader {
     user_agent: UserAgent,
     /// The headers attached to every request, typically carrying the source's API key.
     headers: RequestHeaders,
+    /// The process-wide shutdown flag, which ends a wait between attempts.
+    shutdown: &'static AtomicBool,
     /// The blocking HTTP client, built on the first download and reused by every later one.
     client: Option<Client>,
 }
 
+/// One answer a server gave to a download request, read in full.
+struct Answer {
+    /// The status the server answered with.
+    status: StatusCode,
+    /// The URL the answer was served from after any redirects, masked as the requested one is.
+    served_from: MaskedUrl,
+    /// The media type the server declared, when it declared one that parses.
+    content_type: Option<MediaTypeBuf>,
+    /// The least wait the server asked for before the next request.
+    retry_after: Option<RetryAfter>,
+    /// The body: the resource on a success, the server's explanation otherwise.
+    body: CapturedBody,
+}
+
 impl Downloader {
     /// Creates a downloader that identifies itself as `user_agent`, attaches `headers` to every
-    /// request, and has not yet touched the network.
+    /// request, stops waiting to retry once `shutdown` is set, and has not yet touched the network.
     #[must_use]
-    pub const fn new(user_agent: UserAgent, headers: RequestHeaders) -> Downloader {
+    pub const fn new(user_agent: UserAgent, headers: RequestHeaders, shutdown: &'static AtomicBool) -> Downloader {
         Downloader {
             user_agent,
             headers,
+            shutdown,
             client: None,
         }
     }
 
     /// Downloads a single file from `url` to `dest`, returning that path with the URL it was served
     /// from after any redirects and the media type the server declared for it.
+    ///
+    /// A server that answers `429` or a `5xx` is asked again with backoff, waiting at least the
+    /// `Retry-After` it sent, up to [`DEFAULT_MAX_ATTEMPTS`] attempts in all; its last answer is the
+    /// failure once they are spent, or once shutdown cuts a wait short. Any other non-success status
+    /// fails at once, since sending the same request again cannot change it.
     ///
     /// Every URL a failure names is masked as `url` is, and a transport failure is stripped of the
     /// URL reqwest would quote, which is the request URL secrets and all.
@@ -47,16 +81,60 @@ impl Downloader {
     /// when the server answers with a non-success status, and [`CollectorError::Io`] when the
     /// response body cannot be written to `dest`.
     pub fn download_to_file(&mut self, url: &MaskedUrl, dest: &Path) -> Result<DownloadedFile, CollectorError> {
+        let mut attempt: u32 = 1;
+        let answer = loop {
+            let answer = self.ask(url)?;
+            if !is_transient(answer.status) || attempt >= DEFAULT_MAX_ATTEMPTS {
+                break answer;
+            }
+            let delay = retry_delay(attempt, answer.retry_after);
+            debug!(
+                "{url} answered {}; retrying in {delay:?} (attempt {attempt} of {DEFAULT_MAX_ATTEMPTS})",
+                answer.status
+            );
+            if sleep_or_shutdown(delay, self.shutdown) == BackoffSleep::ShutdownRequested {
+                break answer;
+            }
+            attempt += 1;
+        };
+
+        // A 4xx/5xx answers with an error page, not the resource; treating that body as the download
+        // would silently write garbage in place of the file, so a non-success status is a failure.
+        if !answer.status.is_success() {
+            return Err(CollectorError::HttpStatus {
+                // The error owns the URL, while the caller keeps the one it asked for.
+                url: Box::new(url.clone()),
+                status: answer.status,
+                body: Box::new(answer.body.echo(ERROR_BODY_CAP)),
+            });
+        }
+        let body = answer.body.bytes();
+        let mut file = File::create(dest).map_err(|source| CollectorError::Io {
+            source,
+            path: dest.to_path_buf(),
+        })?;
+        file.write_all(body).map_err(|source| CollectorError::Io {
+            source,
+            path: dest.to_path_buf(),
+        })?;
+        file.flush().map_err(|source| CollectorError::Io {
+            source,
+            path: dest.to_path_buf(),
+        })?;
+        Ok(DownloadedFile::new(dest.to_path_buf(), answer.served_from, answer.content_type))
+    }
+
+    /// Sends one request for `url` and reads the whole answer, whatever its status.
+    ///
+    /// The status is checked by the caller rather than through `error_for_status`, which consumes the
+    /// response and throws the body away, and that body is the server's only explanation of a refusal.
+    fn ask(&mut self, url: &MaskedUrl) -> Result<Answer, CollectorError> {
         let response = self.client()?.get(url.url().as_str()).send().map_err(|source| CollectorError::Http {
             source: source.without_url(),
             // The error owns the URL after the borrowed request is dropped.
             url: Box::new(url.clone()),
         })?;
 
-        // A 4xx/5xx answers with an error page, not the resource; treating that body as the download
-        // would silently write garbage in place of the file, so a non-success status is a failure. The
-        // status is checked here rather than through `error_for_status`, which consumes the response and
-        // throws the body away, and that body is the server's only explanation of the refusal.
         let status = response.status();
         // The body consumes the response, while the download keeps naming where it was served from.
         let served_from = url.led_to(response.url().clone());
@@ -66,6 +144,7 @@ impl Downloader {
             .get(CONTENT_TYPE)
             .and_then(|value| value.to_str().ok())
             .and_then(|value| value.parse::<MediaTypeBuf>().ok());
+        let retry_after = RetryAfter::from_headers(response.headers());
         let body = match response.bytes() {
             Ok(bytes) => CapturedBody::capped(bytes.to_vec(), ERROR_BODY_CAP.max(bytes.len())),
             Err(source) => {
@@ -79,28 +158,13 @@ impl Downloader {
                 CapturedBody::unreadable(&source.without_url())
             }
         };
-        if !status.is_success() {
-            return Err(CollectorError::HttpStatus {
-                // The error owns the URL, while the caller keeps the one it asked for.
-                url: Box::new(url.clone()),
-                status,
-                body: Box::new(body.echo(ERROR_BODY_CAP)),
-            });
-        }
-        let body = body.bytes();
-        let mut file = File::create(dest).map_err(|source| CollectorError::Io {
-            source,
-            path: dest.to_path_buf(),
-        })?;
-        file.write_all(body).map_err(|source| CollectorError::Io {
-            source,
-            path: dest.to_path_buf(),
-        })?;
-        file.flush().map_err(|source| CollectorError::Io {
-            source,
-            path: dest.to_path_buf(),
-        })?;
-        Ok(DownloadedFile::new(dest.to_path_buf(), served_from, content_type))
+        Ok(Answer {
+            status,
+            served_from,
+            content_type,
+            retry_after,
+            body,
+        })
     }
 
     /// The HTTP client, built with this downloader's `User-Agent` and headers on first use and reused
@@ -146,8 +210,12 @@ mod tests {
         io::{Read as _, Write as _},
         net::TcpListener,
         str::FromStr,
-        sync::mpsc::{Receiver, channel},
+        sync::{
+            atomic::AtomicBool,
+            mpsc::{Receiver, channel},
+        },
         thread,
+        time::{Duration, Instant},
     };
     use tempfile::TempDir;
     use url::Url;
@@ -202,12 +270,23 @@ mod tests {
         text
     }
 
+    /// A shutdown flag never set, so every wait between attempts runs to its end.
+    static RUNNING: AtomicBool = AtomicBool::new(false);
+
+    /// A shutdown flag already set, so every wait between attempts ends at once.
+    static STOPPING: AtomicBool = AtomicBool::new(true);
+
     fn downloader() -> Downloader {
-        Downloader::new(UserAgent::from("cassiopeia/test".to_owned()), RequestHeaders::default())
+        Downloader::new(UserAgent::from("cassiopeia/test".to_owned()), RequestHeaders::default(), &RUNNING)
     }
 
     fn downloader_with_headers(headers: Vec<RequestHeader>) -> Downloader {
-        Downloader::new(UserAgent::from("cassiopeia/test".to_owned()), RequestHeaders::new(headers))
+        Downloader::new(UserAgent::from("cassiopeia/test".to_owned()), RequestHeaders::new(headers), &RUNNING)
+    }
+
+    /// The URL of the one resource a mock server serves in these tests.
+    fn feed(server: &mockito::ServerGuard) -> MaskedUrl {
+        MaskedUrl::plain(Url::parse(&format!("{}/feed.csv", server.url())).expect("a valid URL"))
     }
 
     #[test]
@@ -276,7 +355,7 @@ mod tests {
     #[test]
     fn a_refused_download_writes_no_file() {
         // A 4xx answers with an error page, not the resource; writing it would leave garbage behind.
-        let (url, _requests) = serve_once("500 Internal Server Error", "upstream unavailable");
+        let (url, _requests) = serve_once("404 Not Found", "no such feed");
         let directory = TempDir::new().expect("a temporary directory");
         let destination = directory.path().join("Sensor.json");
 
@@ -407,5 +486,97 @@ mod tests {
         let downloaded = downloader().download_to_file(&url, &directory.path().join("feed.csv")).expect("a download");
 
         assert!(downloaded.content_type().is_none());
+    }
+
+    #[test]
+    fn a_source_that_answers_too_many_requests_is_asked_again_until_it_serves_the_file() {
+        let mut server = mockito::Server::new();
+        let limited = server.mock("GET", "/feed.csv").with_status(429).expect(1).create();
+        let delivered = server.mock("GET", "/feed.csv").with_status(200).with_body("id;name\n").expect(1).create();
+        let directory = TempDir::new().expect("a temporary directory");
+
+        let downloaded = downloader()
+            .download_to_file(&feed(&server), &directory.path().join("feed.csv"))
+            .expect("a download");
+
+        limited.assert();
+        delivered.assert();
+        assert_eq!(read_to_string(downloaded.path()).expect("the written file"), "id;name\n");
+    }
+
+    #[test]
+    fn a_source_that_keeps_failing_fails_with_its_last_answer_once_the_attempts_are_spent() {
+        let mut server = mockito::Server::new();
+        let failing = server.mock("GET", "/feed.csv").with_status(503).with_body("upstream busy").expect(3).create();
+        let directory = TempDir::new().expect("a temporary directory");
+        let destination = directory.path().join("feed.csv");
+
+        let error = downloader().download_to_file(&feed(&server), &destination).expect_err("a failure");
+
+        failing.assert();
+        let CollectorError::HttpStatus { status, body, .. } = error else {
+            panic!("expected a status failure");
+        };
+        assert_eq!(status.as_u16(), 503);
+        assert_eq!(body.text(), "upstream busy");
+        assert!(!destination.exists());
+    }
+
+    #[test]
+    fn a_client_error_other_than_too_many_requests_is_not_asked_again() {
+        let mut server = mockito::Server::new();
+        let refused = server.mock("GET", "/feed.csv").with_status(403).with_body("key revoked").expect(1).create();
+        let directory = TempDir::new().expect("a temporary directory");
+
+        let error = downloader()
+            .download_to_file(&feed(&server), &directory.path().join("feed.csv"))
+            .expect_err("a refusal");
+
+        refused.assert();
+        assert!(matches!(error, CollectorError::HttpStatus { status, .. } if status.as_u16() == 403));
+    }
+
+    #[test]
+    fn the_next_attempt_waits_at_least_the_retry_after_the_source_sent() {
+        let mut server = mockito::Server::new();
+        let limited = server
+            .mock("GET", "/feed.csv")
+            .with_status(503)
+            .with_header("Retry-After", "2")
+            .expect(1)
+            .create();
+        let delivered = server.mock("GET", "/feed.csv").with_status(200).with_body("id;name\n").expect(1).create();
+        let warm = server.mock("GET", "/warm.csv").with_status(200).expect(1).create();
+        let directory = TempDir::new().expect("a temporary directory");
+        let mut downloader = downloader();
+        // The first request also builds the HTTP client, which takes long enough to blur the wait.
+        let warm_url = MaskedUrl::plain(Url::parse(&format!("{}/warm.csv", server.url())).expect("a valid URL"));
+        downloader.download_to_file(&warm_url, &directory.path().join("warm.csv")).expect("a download");
+        let started = Instant::now();
+
+        downloader
+            .download_to_file(&feed(&server), &directory.path().join("feed.csv"))
+            .expect("a download");
+
+        warm.assert();
+        limited.assert();
+        delivered.assert();
+        // The first backoff is 1s, so only the server's own `Retry-After` makes the wait 2s.
+        assert!(started.elapsed() >= Duration::from_secs(2), "waited {:?}", started.elapsed());
+    }
+
+    #[test]
+    fn a_requested_shutdown_ends_the_wait_and_fails_with_the_last_answer() {
+        let mut server = mockito::Server::new();
+        let failing = server.mock("GET", "/feed.csv").with_status(503).expect(1).create();
+        let directory = TempDir::new().expect("a temporary directory");
+        let mut downloader = Downloader::new(UserAgent::from("cassiopeia/test".to_owned()), RequestHeaders::default(), &STOPPING);
+
+        let error = downloader
+            .download_to_file(&feed(&server), &directory.path().join("feed.csv"))
+            .expect_err("a failure");
+
+        failing.assert();
+        assert!(matches!(error, CollectorError::HttpStatus { status, .. } if status.as_u16() == 503));
     }
 }

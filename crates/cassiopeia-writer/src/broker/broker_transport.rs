@@ -1,5 +1,5 @@
 use crate::broker::{http2_prior_knowledge::Http2PriorKnowledge, tuning::BrokerTuning};
-use cassiopeia_common::{masked_url::MaskedUrl, user_agent::UserAgent};
+use cassiopeia_common::{http_retry::backoff::DEFAULT_MAX_ATTEMPTS, masked_url::MaskedUrl, user_agent::UserAgent};
 use std::time::Duration;
 
 /// The default number of background sender threads, sized so a handful in retry-backoff cannot
@@ -16,10 +16,6 @@ const DEFAULT_TCP_KEEPALIVE: Duration = Duration::from_mins(1);
 /// The default reqwest idle-connection pool size per host: one idle connection per worker plus
 /// headroom for a worker cycling through a reconnect.
 const DEFAULT_POOL_MAX_IDLE_PER_HOST: usize = 16;
-
-/// The default retry ceiling. Three attempts at the capped backoff (1s + 2s + 4s ≈ 7s) bound the
-/// worst-case per-job block; the controller handles sustained distress by shrinking the target.
-const DEFAULT_MAX_RETRIES: u32 = 3;
 
 /// The multiplier on `sender_threads` for the default channel capacity, so the main thread does not
 /// block on `send()` while workers are mid-flight.
@@ -63,7 +59,9 @@ impl BrokerTransport {
             tcp_keepalive: DEFAULT_TCP_KEEPALIVE,
             sender_threads,
             channel_capacity: sender_threads * DEFAULT_CHANNEL_CAPACITY_MULTIPLIER,
-            max_retries: DEFAULT_MAX_RETRIES,
+            // The controller handles sustained distress by shrinking the target, so a batch takes the
+            // same attempts as any other request before it is split.
+            max_retries: DEFAULT_MAX_ATTEMPTS,
             http2_prior_knowledge: Http2PriorKnowledge::default(),
             tuning: BrokerTuning::default(),
         }

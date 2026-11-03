@@ -301,7 +301,7 @@ Header values are treated as secrets by the writer and are not included in its d
 
 ## Broker delivery behavior
 
-The broker writer retries transport failures, HTTP 429 responses, and server-side 5xx responses with backoff. It can split a failed array request into smaller requests, allowing a batch that is too large for the broker to make progress without discarding every entity. A 413 response is treated as a size signal and causes the same split behavior.
+The broker writer retries transport failures, HTTP 429 responses, and server-side 5xx responses with backoff. When a 429 or 5xx carries a `Retry-After` header (RFC 9110 section 10.2.3), the next attempt waits at least that long. A remote input is retried under the same rule, as the [manifest guide](manifest.md#retried-requests) describes. It can split a failed array request into smaller requests, allowing a batch that is too large for the broker to make progress without discarding every entity. A 413 response is treated as a size signal and causes the same split behavior.
 
 The writer does not retry or split other client-side 4xx responses because they usually indicate a request, schema, authentication, or tenant configuration problem. It reports those entities as failed. A single entity that still fails after retry and splitting is also counted as failed.
 
