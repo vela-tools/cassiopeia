@@ -1,0 +1,17 @@
+[package]
+name = "cassiopeia-csv-column"
+description = "A CSV column as a record reads it: its one-based number, its key, and the rename that keeps two colliding keys apart"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+derive_more = { version = "2.1.1", features = ["as_ref", "display", "from"] }
+
+[dev-dependencies]
+pretty_assertions = "1.4.1"
+
+[lints]
+workspace = true

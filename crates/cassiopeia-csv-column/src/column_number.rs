@@ -15,7 +15,7 @@ impl ColumnNumber {
 
 #[cfg(test)]
 mod tests {
-    use crate::csv::column_number::ColumnNumber;
+    use crate::column_number::ColumnNumber;
     use pretty_assertions::assert_eq;
 
     #[test]

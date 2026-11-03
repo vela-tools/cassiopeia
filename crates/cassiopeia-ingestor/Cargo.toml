@@ -11,13 +11,13 @@ repository.workspace = true
 bytecount = "0.6.9"
 cassiopeia-common.workspace = true
 cassiopeia-crs.workspace = true
+cassiopeia-csv-column.workspace = true
 cassiopeia-csv-dialect.workspace = true
 cassiopeia-data-profiler.workspace = true
 cassiopeia-ir.workspace = true
 convert_case = "0.12.0"
 csv = "1.4.0"
 dbase = { version = "0.8.0", features = ["encoding_rs", "yore"] }
-derive_more = { version = "2.1.1", features = ["as_ref", "display", "from"] }
 eccodes = { version = "0.15.1", default-features = false, optional = true }
 encoding_rs = "0.8.42"
 encoding_rs_rw = "0.4.3"

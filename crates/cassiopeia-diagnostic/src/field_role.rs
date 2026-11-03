@@ -27,7 +27,8 @@ impl ContextField {
             | ContextFieldKind::InstancePath
             | ContextFieldKind::SchemaPath
             | ContextFieldKind::Keyword
-            | ContextFieldKind::Detail => FieldRole::Defining,
+            | ContextFieldKind::Detail
+            | ContextFieldKind::RenamedColumn => FieldRole::Defining,
             ContextFieldKind::Entities
             | ContextFieldKind::SourcePath
             | ContextFieldKind::Attempt
@@ -49,6 +50,7 @@ mod tests {
         schema_keyword::SchemaKeyword,
     };
     use cassiopeia_common::captured_body::CapturedBody;
+    use cassiopeia_csv_column::{column_key::ColumnKey, column_number::ColumnNumber, renamed_column::RenamedColumn};
     use cassiopeia_ngsi_ld::entity::name::NameBuf;
     use http::StatusCode;
     use iri_rs::IriBuf;
@@ -69,6 +71,12 @@ mod tests {
             ContextField::SchemaPath(JsonPointer::new("/properties/dateObserved/format")),
             ContextField::Keyword(SchemaKeyword::Format),
             ContextField::Detail(Detail::new("not a valid DateTime")),
+            ContextField::RenamedColumn(RenamedColumn {
+                wanted: ColumnKey::from("value".to_owned()),
+                holder: ColumnNumber::of_index(1),
+                column: ColumnNumber::of_index(2),
+                key: ColumnKey::from("value@3".to_owned()),
+            }),
             ContextField::Entities {
                 first: IriBuf::new("urn:ngsi-ld:A:1".to_owned()).unwrap(),
                 additional: 99,

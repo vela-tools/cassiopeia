@@ -1,5 +1,6 @@
 use crate::{detail::Detail, json_pointer::JsonPointer, schema_keyword::SchemaKeyword};
 use cassiopeia_common::captured_body::CapturedBody;
+use cassiopeia_csv_column::renamed_column::RenamedColumn;
 use cassiopeia_ngsi_ld::entity::name::NameBuf;
 use http::StatusCode;
 use iri_rs::IriBuf;
@@ -36,6 +37,9 @@ pub enum ContextField {
     Keyword(SchemaKeyword),
     /// The peer's own explanation of the failure.
     Detail(Detail),
+    /// A CSV column read by a key other than the one its header asks for, because another column
+    /// already holds that key.
+    RenamedColumn(RenamedColumn),
     /// The entities a diagnostic covers: the first one named, the rest counted.
     Entities {
         /// The first entity's identifier.
