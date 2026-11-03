@@ -42,9 +42,12 @@ impl EncodingHint {
 
     /// The encoding of a source whose content is `bytes`, all of it.
     ///
-    /// A declared `charset` wins outright: the `Content-Type` parameter defines the encoding of a
-    /// `text/csv` body (RFC 4180 clause 3, RFC 9110 clause 8.3.2). Content that is valid UTF-8
-    /// throughout is UTF-8, pure ASCII included. Otherwise the encoding is detected from the content,
+    /// A byte order mark wins over everything else: the WHATWG Encoding Standard's `decode` algorithm
+    /// (clause 6) sniffs it ahead of any label, and the ingestor's decoder honours it the same way,
+    /// so a UTF-16 file with a BOM is reported as the encoding it is read in. Otherwise a declared
+    /// `charset` wins: the `Content-Type` parameter defines the encoding of a `text/csv` body
+    /// (RFC 4180 clause 3, RFC 9110 clause 8.3.2). Content that is valid UTF-8 throughout is UTF-8,
+    /// pure ASCII included. Otherwise the encoding is detected from the content,
     /// with the top-level domain weighing the guess toward the encodings native to its region, as a
     /// browser weighs an undeclared page. ISO-2022-JP detection is denied, since it is only reliable
     /// in a browser context.
@@ -56,6 +59,9 @@ impl EncodingHint {
     /// to well under a second however large the file.
     #[must_use]
     pub fn encoding_of(&self, bytes: &[u8]) -> &'static Encoding {
+        if let Some((encoding, _)) = Encoding::for_bom(bytes) {
+            return encoding;
+        }
         if let Some(declared) = self.declared {
             return declared;
         }
@@ -74,7 +80,7 @@ impl EncodingHint {
 #[cfg(test)]
 mod tests {
     use crate::encoding_hint::EncodingHint;
-    use encoding_rs::{ISO_8859_2, UTF_8, WINDOWS_1252};
+    use encoding_rs::{ISO_8859_2, UTF_8, UTF_16BE, UTF_16LE, WINDOWS_1252};
     use mediatype::MediaTypeBuf;
     use pretty_assertions::assert_eq;
     use url::Url;
@@ -123,6 +129,38 @@ mod tests {
         let hint = remote("https://www.wien.gv.at/feed.csv", Some("text/csv; charset=x-unknown"));
 
         assert_eq!(hint.encoding_of(WINDOWS_1252_UNITS), WINDOWS_1252);
+    }
+
+    /// `id;name\n1;Café\n` in UTF-16LE behind its byte order mark.
+    fn utf_16le_with_bom() -> Vec<u8> {
+        let mut bytes = vec![0xff, 0xfe];
+        bytes.extend("id;name\n1;Café\n".encode_utf16().flat_map(u16::to_le_bytes));
+        bytes
+    }
+
+    #[test]
+    fn a_utf_16le_byte_order_mark_is_read_as_utf_16le_without_a_hint() {
+        assert_eq!(EncodingHint::NONE.encoding_of(&utf_16le_with_bom()), UTF_16LE);
+    }
+
+    #[test]
+    fn a_utf_16be_byte_order_mark_is_read_as_utf_16be_without_a_hint() {
+        let mut bytes = vec![0xfe, 0xff];
+        bytes.extend("id;name\n1;Café\n".encode_utf16().flat_map(u16::to_be_bytes));
+
+        assert_eq!(EncodingHint::NONE.encoding_of(&bytes), UTF_16BE);
+    }
+
+    #[test]
+    fn a_byte_order_mark_wins_over_a_declared_charset() {
+        let hint = remote("https://www.wien.gv.at/feed.csv", Some("text/csv; charset=windows-1252"));
+
+        assert_eq!(hint.encoding_of(&utf_16le_with_bom()), UTF_16LE);
+    }
+
+    #[test]
+    fn a_utf_8_byte_order_mark_is_read_as_utf_8() {
+        assert_eq!(EncodingHint::NONE.encoding_of(b"\xef\xbb\xbfid;name\n1;Caf\xc3\xa9\n"), UTF_8);
     }
 
     #[test]
