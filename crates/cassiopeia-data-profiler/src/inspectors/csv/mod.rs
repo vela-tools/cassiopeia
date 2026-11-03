@@ -29,6 +29,8 @@ pub mod data_type;
 pub mod error;
 mod escape_evidence;
 mod header;
+#[cfg(test)]
+mod preamble_cases;
 mod reading;
 mod table;
 mod table_shape;
