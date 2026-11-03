@@ -70,7 +70,7 @@ fn profiled(path: &Path) -> ProfiledPayload {
     let profile = profile_path(path, &EncodingHint::NONE).unwrap();
     assert_eq!(*profile.format(), DataFormat::Shapefile);
     ProfiledPayload::new(
-        CollectedPayload::File(FilePayload::new(path.to_path_buf(), Some(DataFormat::Shapefile), EncodingHint::NONE)),
+        CollectedPayload::File(FilePayload::local(path.to_path_buf(), Some(DataFormat::Shapefile), EncodingHint::NONE)),
         profile,
     )
 }

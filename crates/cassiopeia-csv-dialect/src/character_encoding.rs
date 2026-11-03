@@ -1,13 +1,15 @@
 use crate::error::DialectError;
 use derive_more::Display;
-use encoding_rs::Encoding;
+use encoding_rs::{Encoding, REPLACEMENT};
 use serde::{Deserialize, Serialize};
 
 /// The character encoding a CSV file is decoded from.
 ///
 /// A manifest states it by any label of the WHATWG Encoding Standard, such as `latin1` or `utf-8`;
 /// it is written back by the encoding's canonical name, so `latin1` reads back as `windows-1252`,
-/// the encoding the standard maps that label to.
+/// the encoding the standard maps that label to. A label the standard maps to its `replacement`
+/// encoding, such as `iso-2022-kr`, is rejected: that encoding decodes any file to a single
+/// replacement character, so no file could be read in it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Display, Serialize, Deserialize)]
 #[display("{}", _0.name())]
 #[serde(try_from = "String", into = "&'static str")]
@@ -31,9 +33,11 @@ impl TryFrom<String> for CharacterEncoding {
     type Error = DialectError;
 
     fn try_from(label: String) -> Result<CharacterEncoding, DialectError> {
-        Encoding::for_label(label.as_bytes())
-            .map(CharacterEncoding)
-            .ok_or(DialectError::UnknownEncoding(label))
+        match Encoding::for_label(label.as_bytes()) {
+            Some(encoding) if encoding == REPLACEMENT => Err(DialectError::UndecodableEncoding(label)),
+            Some(encoding) => Ok(CharacterEncoding(encoding)),
+            None => Err(DialectError::UnknownEncoding(label)),
+        }
     }
 }
 
@@ -61,6 +65,18 @@ mod tests {
         assert_eq!(
             CharacterEncoding::try_from("klingon".to_owned()),
             Err(DialectError::UnknownEncoding("klingon".to_owned()))
+        );
+    }
+
+    #[test]
+    fn a_label_of_the_replacement_encoding_is_rejected() {
+        assert_eq!(
+            CharacterEncoding::try_from("iso-2022-kr".to_owned()),
+            Err(DialectError::UndecodableEncoding("iso-2022-kr".to_owned()))
+        );
+        assert_eq!(
+            CharacterEncoding::try_from("hz-gb-2312".to_owned()),
+            Err(DialectError::UndecodableEncoding("hz-gb-2312".to_owned()))
         );
     }
 

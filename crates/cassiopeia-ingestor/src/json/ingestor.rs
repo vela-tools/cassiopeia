@@ -144,7 +144,7 @@ mod tests {
         let path = dir.path().join("data.json");
         File::create(&path).unwrap().write_all(contents.as_bytes()).unwrap();
         let payload = ProfiledPayload::new(
-            CollectedPayload::File(FilePayload::new(path, Some(DataFormat::Json), EncodingHint::NONE)),
+            CollectedPayload::File(FilePayload::local(path, Some(DataFormat::Json), EncodingHint::NONE)),
             Profile::new(DataFormat::Json, media_type!(APPLICATION / JSON), 1.0),
         );
         (dir, payload)

@@ -9,7 +9,7 @@ use url::Url;
 ///
 /// A `file:` URL is normalised into `Local` at parse time, so a consumer never has to consider a
 /// remote variant that is secretly local.
-#[derive(Debug, Clone, PartialEq, Eq, Display)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Display)]
 pub enum Input {
     /// A path on the local filesystem.
     #[display("{}", _0.display())]

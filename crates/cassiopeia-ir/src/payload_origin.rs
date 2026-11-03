@@ -41,7 +41,7 @@ mod tests {
 
     #[test]
     fn a_file_payload_names_its_path() {
-        let payload = CollectedPayload::File(FilePayload::new(PathBuf::from("/data/stations.csv"), None, EncodingHint::NONE));
+        let payload = CollectedPayload::File(FilePayload::local(PathBuf::from("/data/stations.csv"), None, EncodingHint::NONE));
 
         assert_eq!(PayloadOrigin::of(&payload).to_string(), "/data/stations.csv");
     }

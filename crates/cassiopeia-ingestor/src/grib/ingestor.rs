@@ -286,7 +286,7 @@ mod tests {
         let path = dir.path().join("data.grib2");
         File::create(&path).unwrap().write_all(&bytes).unwrap();
         ProfiledPayload::new(
-            CollectedPayload::File(FilePayload::new(path, Some(DataFormat::Grib), EncodingHint::NONE)),
+            CollectedPayload::File(FilePayload::local(path, Some(DataFormat::Grib), EncodingHint::NONE)),
             Profile::new(DataFormat::Grib, media_type!(APPLICATION / OCTET_STREAM), 1.0),
         )
     }
@@ -448,7 +448,7 @@ mod tests {
         // decoder, so the rejection surfaces at ingest time as a typed edition error.
         File::create(&path).unwrap().write_all(b"GRIB\x00\x00\x1c\x01\x00\x00\x00\x00").unwrap();
         let payload = ProfiledPayload::new(
-            CollectedPayload::File(FilePayload::new(path, Some(DataFormat::Grib), EncodingHint::NONE)),
+            CollectedPayload::File(FilePayload::local(path, Some(DataFormat::Grib), EncodingHint::NONE)),
             Profile::new(DataFormat::Grib, media_type!(APPLICATION / OCTET_STREAM), 1.0)
                 .with_metadata(FormatMetadata::Grib(GribMetadata::new(GribEdition::V1))),
         );
@@ -466,7 +466,7 @@ mod tests {
         // Edition octet 9: no decoder exists for it in either build.
         File::create(&path).unwrap().write_all(b"GRIB\x00\x00\x1c\x09\x00\x00\x00\x00").unwrap();
         let payload = ProfiledPayload::new(
-            CollectedPayload::File(FilePayload::new(path, Some(DataFormat::Grib), EncodingHint::NONE)),
+            CollectedPayload::File(FilePayload::local(path, Some(DataFormat::Grib), EncodingHint::NONE)),
             Profile::new(DataFormat::Grib, media_type!(APPLICATION / OCTET_STREAM), 1.0),
         );
 

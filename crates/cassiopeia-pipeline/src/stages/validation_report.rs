@@ -1,5 +1,6 @@
 //! Accumulation and serialization of the validator stage's failure report.
 
+use cassiopeia_common::input::Input;
 use cassiopeia_diagnostic::{
     code::{diagnostic_code::DiagnosticCode, run_code::RunCode},
     context_field::ContextField,
@@ -77,7 +78,7 @@ impl ReportCollector {
         reporter.report(
             &DiagnosticBuilder::new(Severity::Error, DiagnosticCode::Run(RunCode::ReportUnwritable), headline)
                 .because(error)
-                .with_context(ContextField::SourcePath(self.path.clone()))
+                .with_context(ContextField::Source(Input::Local(self.path.clone())))
                 .build(),
         );
     }

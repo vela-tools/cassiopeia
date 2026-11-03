@@ -9,7 +9,7 @@ use crate::{
     record_end::{RecordEnd, skip_record},
     value_notation::ValueNotation,
 };
-use csv::{Reader, ReaderBuilder, StringRecord};
+use csv::{ErrorKind, Reader, ReaderBuilder, StringRecord};
 use encoding_rs::Encoding;
 use serde::Serialize;
 use std::io::{BufRead, Read};
@@ -44,6 +44,18 @@ impl Dialect {
         self.encoding.encoding()
     }
 
+    /// Whether the delimiter, the quote, and the escape byte are distinct characters, as each must be
+    /// to play its own part: a delimiter that is also the quote or the escape would split a field
+    /// where it was meant to quote or escape one. Doubling has no byte of its own, and disabled
+    /// quoting none either, so neither can collide.
+    #[must_use]
+    pub fn has_distinct_bytes(&self) -> bool {
+        let delimiter = Some(self.delimiter.byte());
+        let quote = self.quote_char.byte();
+        let escape = self.escape.byte();
+        (quote.is_none() || quote != delimiter) && (escape.is_none() || (escape != delimiter && escape != quote))
+    }
+
     /// Opens `input`, already decoded to UTF-8 with [`Self::character_encoding`], as CSV under this
     /// dialect: skips the preamble, joins a stacked header into one row of field names, and returns a
     /// reader whose next record is the first data row.
@@ -69,12 +81,20 @@ impl Dialect {
     /// Reads the header records and joins each column's non-blank cells, top to bottom, with a
     /// space: a name row `NO2`, an aggregation row `HMW`, and a unit row `µg/m³` give the field name
     /// `NO2 HMW µg/m³`. A column whose header cells are all blank gets an empty name.
+    ///
+    /// The first header record sets the table's width. A later header record of another width is
+    /// still joined by position, over the columns it reaches, rather than failing the file: a unit
+    /// row a spreadsheet wrote one cell short names the columns it has. The `csv` reader fills the
+    /// record before it checks its width, so the record holds the row's cells either way.
     fn joined_header<R: Read>(&self, reader: &mut Reader<R>) -> csv::Result<StringRecord> {
         let mut names: Vec<String> = reader.headers()?.iter().map(|cell| cell.trim().to_owned()).collect();
         let mut row = StringRecord::new();
         for _ in 1..self.header_rows.records() {
-            if !reader.read_record(&mut row)? {
-                break;
+            match reader.read_record(&mut row) {
+                Ok(true) => {}
+                Ok(false) => break,
+                Err(error) if matches!(error.kind(), ErrorKind::UnequalLengths { .. }) => {}
+                Err(error) => return Err(error),
             }
             for (name, cell) in names.iter_mut().zip(row.iter()) {
                 let cell = cell.trim();
@@ -232,6 +252,61 @@ mod tests {
         assert_eq!(
             reader.records().next().unwrap().unwrap(),
             vec!["STEF", "30.10.2026, 10:00", "18,48", "12,48", "12,27"]
+        );
+    }
+
+    #[test]
+    fn a_stacked_header_row_one_cell_short_is_joined_over_the_columns_it_reaches() {
+        let input = "Station;NO2;O3\n;HMW;HMW\n;µg/m³\nSTEF;18,48;50,74\nTAB;NE;10,37\n";
+        let dialect = Dialect {
+            header_rows: HeaderRows::new(3),
+            ..semicolon_dialect(Preamble::NONE)
+        };
+        let mut reader = dialect.reader(input.as_bytes()).unwrap();
+        let records: Vec<_> = reader.records().map(Result::unwrap).collect();
+
+        assert_eq!(reader.headers().unwrap(), vec!["Station", "NO2 HMW µg/m³", "O3 HMW"]);
+        assert_eq!(records, vec![vec!["STEF", "18,48", "50,74"], vec!["TAB", "NE", "10,37"]]);
+    }
+
+    #[test]
+    fn a_stacked_header_row_one_cell_long_is_joined_and_its_extra_cell_dropped() {
+        let input = "Station;NO2\n;HMW;extra\nSTEF;18,48\n";
+        let dialect = Dialect {
+            header_rows: HeaderRows::new(2),
+            ..semicolon_dialect(Preamble::NONE)
+        };
+        let mut reader = dialect.reader(input.as_bytes()).unwrap();
+
+        assert_eq!(reader.headers().unwrap(), vec!["Station", "NO2 HMW"]);
+        assert_eq!(reader.records().next().unwrap().unwrap(), vec!["STEF", "18,48"]);
+    }
+
+    #[test]
+    fn a_dialect_whose_delimiter_is_its_quote_or_escape_has_no_distinct_bytes() {
+        let quote_delimiter = Dialect {
+            delimiter: DialectByte::DOUBLE_QUOTE,
+            ..semicolon_dialect(Preamble::NONE)
+        };
+        let escape_delimiter = Dialect {
+            delimiter: DialectByte::BACKSLASH,
+            ..backslash_dialect(Preamble::NONE)
+        };
+
+        assert!(!quote_delimiter.has_distinct_bytes());
+        assert!(!escape_delimiter.has_distinct_bytes());
+    }
+
+    #[test]
+    fn a_dialect_of_a_delimiter_a_quote_and_doubling_has_distinct_bytes() {
+        assert!(semicolon_dialect(Preamble::NONE).has_distinct_bytes());
+        assert!(backslash_dialect(Preamble::NONE).has_distinct_bytes());
+        assert!(
+            Dialect {
+                quote_char: Quote::Disabled,
+                ..semicolon_dialect(Preamble::NONE)
+            }
+            .has_distinct_bytes()
         );
     }
 

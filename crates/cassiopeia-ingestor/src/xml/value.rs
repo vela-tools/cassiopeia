@@ -103,7 +103,8 @@ fn decode_to_utf8(bytes: &[u8]) -> Result<Cow<'_, str>, XmlIngestError> {
 }
 
 /// Reads the encoding named by the XML declaration, if the document opens with one naming a label
-/// that maps to a supported encoding. The declaration is ASCII, so it decodes before any non-ASCII
+/// that maps to a supported encoding. A label of the Encoding Standard's `replacement` encoding names
+/// none, since that encoding decodes the whole document to one replacement character. The declaration is ASCII, so it decodes before any non-ASCII
 /// content the parser would otherwise choke on.
 fn declared_encoding(bytes: &[u8]) -> Option<&'static Encoding> {
     let mut reader = Reader::from_reader(bytes);
@@ -112,7 +113,7 @@ fn declared_encoding(bytes: &[u8]) -> Option<&'static Encoding> {
         return None;
     };
     let label = declaration.encoding()?.ok()?;
-    Encoding::for_label(label.as_bytes())
+    Encoding::for_label_no_replacement(label.as_bytes())
 }
 
 /// An element under construction as the pull parser descends through its children.

@@ -120,7 +120,10 @@ mod tests {
         middleware::dedup::DeduplicatingReporter,
         reporter::{DiagnosticSink, MessageLog, ProgressReporter, ProgressStage, RunSummary, StageReporter},
     };
-    use cassiopeia_common::telemetry::run::{RunTelemetry, TelemetrySnapshot};
+    use cassiopeia_common::{
+        input::Input,
+        telemetry::run::{RunTelemetry, TelemetrySnapshot},
+    };
     use cassiopeia_diagnostic::{
         code::{broker_code::BrokerCode, diagnostic_code::DiagnosticCode, ingest_code::IngestCode, schema_code::SchemaCode},
         context_field::ContextField,
@@ -263,7 +266,7 @@ mod tests {
 
     fn skipped_rows(path: &str) -> Diagnostic {
         DiagnosticBuilder::new(Severity::Warning, DiagnosticCode::Ingest(IngestCode::RowsMisshapen), "rows were skipped")
-            .with_context(ContextField::SourcePath(PathBuf::from(path)))
+            .with_context(ContextField::Source(Input::Local(PathBuf::from(path))))
             .build()
     }
 

@@ -1,3 +1,4 @@
+use cassiopeia_common::input::Input;
 use cassiopeia_csv_dialect::misshapen_row::MisshapenRow;
 use cassiopeia_diagnostic::{
     code::{diagnostic_code::DiagnosticCode, ingest_code::IngestCode},
@@ -7,7 +8,7 @@ use cassiopeia_diagnostic::{
 };
 use cassiopeia_ingestor::csv::misshapen_rows::MisshapenRows;
 use cassiopeia_reporter::reporter::DiagnosticSink;
-use std::{num::NonZeroU64, path::Path};
+use std::num::NonZeroU64;
 
 /// `count` fields, in words.
 fn fields(count: u64) -> String {
@@ -22,11 +23,11 @@ fn named(row: &MisshapenRow) -> String {
     format!("row {} has {}", row.row, fields(row.fields))
 }
 
-/// The one-line summary: the file, the table's field count, the named rows, and the rest counted.
+/// The one-line summary: the source, the table's field count, the named rows, and the rest counted.
 ///
 /// The rows ride on the headline because the concise form shows nothing else, and a row number is
 /// what lets a reader find the row in the file.
-fn headline(path: &Path, table_fields: u64, named_rows: &[MisshapenRow], total: NonZeroU64) -> String {
+fn headline(source: &Input, table_fields: u64, named_rows: &[MisshapenRow], total: NonZeroU64) -> String {
     let rows = match total.get() {
         1 => "1 row".to_owned(),
         count => format!("{count} rows"),
@@ -42,8 +43,7 @@ fn headline(path: &Path, table_fields: u64, named_rows: &[MisshapenRow], total: 
         rest => format!("{listed}; and {rest} more"),
     };
     format!(
-        "The table in `{}` has {} per row, but {rows} had another number, so {skipped}: {details}",
-        path.display(),
+        "The table in `{source}` has {} per row, but {rows} had another number, so {skipped}: {details}",
         fields(table_fields)
     )
 }
@@ -51,8 +51,9 @@ fn headline(path: &Path, table_fields: u64, named_rows: &[MisshapenRow], total: 
 /// Names a CSV file's skipped rows in one warning and returns how many rows that was.
 ///
 /// One diagnostic per file, carrying every skipped row as an occurrence, since the rows share one
-/// cause: they do not fit the file's table.
-pub(crate) fn report_misshapen_rows(sink: &dyn DiagnosticSink, path: &Path, rows: &MisshapenRows) -> u64 {
+/// cause: they do not fit the file's table. The file is named by its `source`, so a downloaded one
+/// is named by its URL, the same in every run, rather than by the temporary copy it was read from.
+pub(crate) fn report_misshapen_rows(sink: &dyn DiagnosticSink, source: &Input, rows: &MisshapenRows) -> u64 {
     let (Some(total), Some(first)) = (NonZeroU64::new(rows.total()), rows.named().first()) else {
         return 0;
     };
@@ -61,9 +62,10 @@ pub(crate) fn report_misshapen_rows(sink: &dyn DiagnosticSink, path: &Path, rows
         &DiagnosticBuilder::new(
             Severity::Warning,
             DiagnosticCode::Ingest(IngestCode::RowsMisshapen),
-            headline(path, first.table_fields, rows.named(), total),
+            headline(source, first.table_fields, rows.named(), total),
         )
-        .with_context(ContextField::SourcePath(path.to_path_buf()))
+        // The diagnostic outlives the ingestor that names the source.
+        .with_context(ContextField::Source(source.clone()))
         .with_occurrences(total)
         .build(),
     );
@@ -73,6 +75,7 @@ pub(crate) fn report_misshapen_rows(sink: &dyn DiagnosticSink, path: &Path, rows
 #[cfg(test)]
 mod tests {
     use crate::{stages::misshapen_rows_report::report_misshapen_rows, test_reporter::RecordingReporter};
+    use cassiopeia_common::input::Input;
     use cassiopeia_csv_dialect::{misshapen_row::MisshapenRow, row_number::RowNumber};
     use cassiopeia_diagnostic::{
         code::{diagnostic_code::DiagnosticCode, ingest_code::IngestCode},
@@ -80,7 +83,8 @@ mod tests {
     };
     use cassiopeia_ingestor::csv::misshapen_rows::MisshapenRows;
     use pretty_assertions::assert_eq;
-    use std::path::{Path, PathBuf};
+    use std::path::PathBuf;
+    use url::Url;
 
     fn rows(skipped: &[(u64, u64)]) -> MisshapenRows {
         let mut rows = MisshapenRows::default();
@@ -98,7 +102,7 @@ mod tests {
     fn a_file_without_skipped_rows_says_nothing_and_counts_nothing() {
         let sink = RecordingReporter::new();
 
-        assert_eq!(report_misshapen_rows(&sink, Path::new("/data/values.csv"), &rows(&[])), 0);
+        assert_eq!(report_misshapen_rows(&sink, &Input::Local(PathBuf::from("/data/values.csv")), &rows(&[])), 0);
         assert!(sink.diagnostics().is_empty());
     }
 
@@ -106,7 +110,7 @@ mod tests {
     fn one_skipped_row_is_one_warning_naming_the_file_the_row_and_both_widths() {
         let sink = RecordingReporter::new();
 
-        let total = report_misshapen_rows(&sink, Path::new("/data/values.csv"), &rows(&[(5, 1)]));
+        let total = report_misshapen_rows(&sink, &Input::Local(PathBuf::from("/data/values.csv")), &rows(&[(5, 1)]));
 
         let reported = sink.diagnostics();
         assert_eq!(total, 1);
@@ -118,27 +122,43 @@ mod tests {
             "The table in `/data/values.csv` has 3 fields per row, but 1 row had another number, so it was skipped: row 6 has 1 field"
         );
         assert_eq!(reported[0].occurrences, 1);
-        assert_eq!(reported[0].defining, [ContextField::SourcePath(PathBuf::from("/data/values.csv"))]);
+        assert_eq!(reported[0].defining, [ContextField::Source(Input::Local(PathBuf::from("/data/values.csv")))]);
         assert_eq!(reported[0].incidental, []);
+    }
+
+    #[test]
+    fn a_downloaded_file_is_named_by_its_url() {
+        let sink = RecordingReporter::new();
+        let source = Input::Remote(Url::parse("https://example.org/feed.csv").unwrap());
+
+        report_misshapen_rows(&sink, &source, &rows(&[(5, 1)]));
+
+        let reported = sink.diagnostics();
+        assert!(reported[0].headline.starts_with("The table in `https://example.org/feed.csv` has 3 fields"));
+        assert_eq!(reported[0].defining, [ContextField::Source(source)]);
     }
 
     #[test]
     fn two_files_skipping_the_same_rows_are_two_findings_each_naming_its_file() {
         let sink = RecordingReporter::new();
 
-        report_misshapen_rows(&sink, Path::new("/data/monday.csv"), &rows(&[(5, 1)]));
-        report_misshapen_rows(&sink, Path::new("/data/tuesday.csv"), &rows(&[(5, 1)]));
+        report_misshapen_rows(&sink, &Input::Local(PathBuf::from("/data/monday.csv")), &rows(&[(5, 1)]));
+        report_misshapen_rows(&sink, &Input::Local(PathBuf::from("/data/tuesday.csv")), &rows(&[(5, 1)]));
 
         let reported = sink.diagnostics();
-        assert_eq!(reported[0].defining, [ContextField::SourcePath(PathBuf::from("/data/monday.csv"))]);
-        assert_eq!(reported[1].defining, [ContextField::SourcePath(PathBuf::from("/data/tuesday.csv"))]);
+        assert_eq!(reported[0].defining, [ContextField::Source(Input::Local(PathBuf::from("/data/monday.csv")))]);
+        assert_eq!(reported[1].defining, [ContextField::Source(Input::Local(PathBuf::from("/data/tuesday.csv")))]);
     }
 
     #[test]
     fn many_skipped_rows_are_one_warning_naming_the_first_and_counting_every_row() {
         let sink = RecordingReporter::new();
 
-        let total = report_misshapen_rows(&sink, Path::new("/data/values.csv"), &rows(&[(2, 2), (4, 4), (6, 2), (8, 2), (9, 1)]));
+        let total = report_misshapen_rows(
+            &sink,
+            &Input::Local(PathBuf::from("/data/values.csv")),
+            &rows(&[(2, 2), (4, 4), (6, 2), (8, 2), (9, 1)]),
+        );
 
         let reported = sink.diagnostics();
         assert_eq!(total, 5);

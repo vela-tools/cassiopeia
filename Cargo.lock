@@ -742,6 +742,7 @@ dependencies = [
  "smallvec",
  "smart-default",
  "thiserror 2.0.21",
+ "url",
  "urn-rs",
 ]
 

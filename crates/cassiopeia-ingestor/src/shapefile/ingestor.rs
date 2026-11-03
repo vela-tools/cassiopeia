@@ -193,7 +193,7 @@ mod tests {
     /// Builds a profiled payload pointing at a bare `.shp` on disk.
     fn bare_payload(shp_path: &Path) -> ProfiledPayload {
         ProfiledPayload::new(
-            CollectedPayload::File(FilePayload::new(shp_path.to_path_buf(), Some(DataFormat::Shapefile), EncodingHint::NONE)),
+            CollectedPayload::File(FilePayload::local(shp_path.to_path_buf(), Some(DataFormat::Shapefile), EncodingHint::NONE)),
             Profile::new(DataFormat::Shapefile, media_type!(APPLICATION / OCTET_STREAM), 1.0),
         )
     }
@@ -214,7 +214,7 @@ mod tests {
         }
         archive.finish().unwrap();
         ProfiledPayload::new(
-            CollectedPayload::File(FilePayload::new(archive_path.to_path_buf(), Some(DataFormat::Shapefile), EncodingHint::NONE)),
+            CollectedPayload::File(FilePayload::local(archive_path.to_path_buf(), Some(DataFormat::Shapefile), EncodingHint::NONE)),
             Profile::new(DataFormat::Shapefile, media_type!(APPLICATION / OCTET_STREAM), 1.0),
         )
     }

@@ -31,7 +31,7 @@ impl ContextField {
             | ContextFieldKind::Keyword
             | ContextFieldKind::Detail
             | ContextFieldKind::RenamedColumn
-            | ContextFieldKind::SourcePath => FieldRole::Defining,
+            | ContextFieldKind::Source => FieldRole::Defining,
             ContextFieldKind::Entities
             | ContextFieldKind::Attempt
             | ContextFieldKind::PayloadBytes
@@ -51,7 +51,7 @@ mod tests {
         json_pointer::JsonPointer,
         schema_keyword::SchemaKeyword,
     };
-    use cassiopeia_common::captured_body::CapturedBody;
+    use cassiopeia_common::{captured_body::CapturedBody, input::Input};
     use cassiopeia_csv_column::{column_key::ColumnKey, column_number::ColumnNumber, renamed_column::RenamedColumn};
     use cassiopeia_ngsi_ld::entity::name::NameBuf;
     use http::StatusCode;
@@ -83,7 +83,7 @@ mod tests {
                 first: IriBuf::new("urn:ngsi-ld:A:1".to_owned()).unwrap(),
                 additional: 99,
             },
-            ContextField::SourcePath(PathBuf::from("/data/air.csv")),
+            ContextField::Source(Input::Local(PathBuf::from("/data/air.csv"))),
             ContextField::Attempt { attempt: 2, limit: 3 },
             ContextField::PayloadBytes(4096),
             ContextField::BodyEcho(CapturedBody::capped(b"<html>".to_vec(), 2048)),
