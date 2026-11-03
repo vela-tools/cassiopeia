@@ -4,7 +4,15 @@ use crate::cli::{
     validator::ValidatorArgs,
     writer::WriterArgs,
 };
-use cassiopeia_common::{channel::ChannelPolicy, format::DataFormat, input::Input, pipeline_mode::PipelineMode, run_var::RunVar, store_kind::StoreKind};
+use cassiopeia_common::{
+    channel::ChannelPolicy,
+    format::DataFormat,
+    input::Input,
+    pipeline_mode::PipelineMode,
+    request_header::RequestHeader,
+    run_var::RunVar,
+    store_kind::StoreKind,
+};
 use cassiopeia_manifest::failure_policy::FailurePolicy;
 use clap::{ArgAction, Args};
 use std::{num::NonZeroUsize, path::PathBuf, str::FromStr};
@@ -32,8 +40,9 @@ fn parse_channel_capacity(value: &str) -> Result<ChannelPolicy, String> {
 /// instead. The ids are clap argument ids (the field names of the flattened argument structs). Engine
 /// knobs that merely tune *how* the pipeline executes are deliberately absent, so they stay usable
 /// with a manifest.
-const INLINE_RUN_FLAGS: [&str; 35] = [
+const INLINE_RUN_FLAGS: [&str; 36] = [
     "input",
+    "input_headers",
     "mapping",
     "format_type",
     "writer_type",
@@ -49,7 +58,7 @@ const INLINE_RUN_FLAGS: [&str; 35] = [
     "temporal_representation",
     "tenant",
     "user_agent",
-    "headers",
+    "output_headers",
     "link_header",
     "kind",
     "url",
@@ -87,6 +96,12 @@ pub struct MapArgs {
     /// Data source file path or URL.
     #[arg(short, long, value_parser = Input::from_str, required_unless_present = "manifest", help_heading = "Input")]
     pub input: Option<Input>,
+
+    /// Extra HTTP header sent when fetching a remote input, written as `Name: Value`; repeat for
+    /// several. Typically carries an API key, e.g. `--input-header "X-Api-Key: <key>"`. Refused for a
+    /// local input.
+    #[arg(long = "input-header", action = ArgAction::Append, help_heading = "Input", value_name = "NAME: VALUE")]
+    pub input_headers: Vec<RequestHeader>,
 
     /// JSON5 mapping file defining the transformation rules.
     #[arg(short, long, required_unless_present = "manifest", help_heading = "Input", value_name = "FILE")]

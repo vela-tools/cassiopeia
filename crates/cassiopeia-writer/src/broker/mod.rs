@@ -21,11 +21,11 @@ pub mod http2_prior_knowledge;
 pub mod metrics;
 pub mod post;
 pub mod problem_details;
-pub mod request_headers;
 pub mod request_shape;
 pub mod response_verdict;
 pub mod sender;
 pub mod serialize;
+pub mod tenant_header;
 pub mod tuning;
 
 #[cfg(test)]

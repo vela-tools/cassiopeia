@@ -15,10 +15,10 @@ use crate::{
 };
 use cassiopeia_common::{
     broker_atomicity::BrokerAtomicity,
-    broker_header::BrokerHeaders,
     context::mode::AtContextMode,
     destination_kind::DestinationKind,
     file_framing::FileFraming,
+    request_header::RequestHeaders,
     run_var::run_vars_to_map,
 };
 use cassiopeia_manifest::{
@@ -49,7 +49,8 @@ pub fn manifest_from_map_args(args: &MapArgs) -> Result<Manifest> {
         .source(source)
         .mapping_binding(MappingBinding::Single { mapping })
         .format(args.format_type.to_option())
-        .build();
+        .build()
+        .with_headers(RequestHeaders::new(args.input_headers.clone()))?;
     let inputs = Inputs::new(vec![input])?;
 
     let context = args.context.resolve()?;
@@ -76,7 +77,8 @@ pub fn manifest_from_gen_args(args: &ManifestGenArgs) -> Result<Manifest> {
         .source(args.input.clone())
         .mapping_binding(MappingBinding::Single { mapping: args.mapping.clone() })
         .format(args.format_type.to_option())
-        .build();
+        .build()
+        .with_headers(RequestHeaders::new(args.input_headers.clone()))?;
     let inputs = Inputs::new(vec![input])?;
 
     let output = build_gen_output(args)?;
@@ -134,7 +136,7 @@ fn broker_destination(broker: &BrokerArgs) -> Result<Destination> {
         url,
         tenant: broker.tenant.clone(),
         user_agent: broker.user_agent.clone(),
-        headers: BrokerHeaders::new(broker.headers.clone()),
+        headers: RequestHeaders::new(broker.output_headers.clone()),
         context_delivery: ContextDelivery::from_link_header(broker.link_header),
         operation: broker.broker_operation,
         upsert_mode: broker.upsert_mode,
@@ -198,6 +200,7 @@ mod tests {
             manifest::{ManifestGenArgs, ManifestSubcommand},
             map::MapArgs,
         },
+        error::Error,
         manifest_build::{build_destination, build_gen_output, manifest_from_gen_args, manifest_from_map_args},
     };
     use cassiopeia_common::{
@@ -205,10 +208,12 @@ mod tests {
         broker_atomicity::BrokerAtomicity,
         broker_operation::BrokerOperationKind,
         file_framing::FileFraming,
+        request_header::RequestHeaders,
         schema_source::SchemaSource,
         upsert_mode::UpsertMode,
     };
     use cassiopeia_manifest::{
+        error::ManifestError,
         failure_policy::FailurePolicy,
         output::{
             ManifestOutput,
@@ -219,7 +224,7 @@ mod tests {
     };
     use clap::Parser;
     use pretty_assertions::assert_eq;
-    use std::path::PathBuf;
+    use std::path::{Path, PathBuf};
 
     /// Parses a `map` command line, returning its flattened arguments.
     fn map_args(command_line: &[&str]) -> MapArgs {
@@ -808,5 +813,210 @@ mod tests {
             output.temporal().as_ref().map(ManifestTemporal::representation),
             Some(&TemporalRepresentation::Series)
         );
+    }
+
+    /// The headers a destination sends to its broker, as lowercase name and value pairs.
+    fn broker_header_pairs(destination: &Destination) -> Vec<(String, String)> {
+        let Destination::ContextBroker { headers, .. } = destination else {
+            panic!("expected a context-broker destination");
+        };
+        header_pairs(headers)
+    }
+
+    /// The headers of a set, as lowercase name and value pairs.
+    fn header_pairs(headers: &RequestHeaders) -> Vec<(String, String)> {
+        headers
+            .iter()
+            .map(|header| (header.name().to_string(), header.value().to_str().unwrap().to_owned()))
+            .collect()
+    }
+
+    #[test]
+    fn output_header_flags_become_the_broker_headers() {
+        let args = map_args(&[
+            "cassiopeia",
+            "map",
+            "-i",
+            "data.csv",
+            "-m",
+            "map.json5",
+            "--writer",
+            "context-broker",
+            "--broker-url",
+            "http://localhost:1026/",
+            "--output-header",
+            "Authorization: Bearer t",
+            "--output-header",
+            "X-Api-Key: k",
+        ]);
+
+        let destination = build_destination(&args.writer).unwrap();
+
+        assert_eq!(
+            broker_header_pairs(&destination),
+            vec![("authorization".to_owned(), "Bearer t".to_owned()), ("x-api-key".to_owned(), "k".to_owned())]
+        );
+    }
+
+    #[test]
+    fn the_hidden_header_alias_still_sets_a_broker_header() {
+        let args = map_args(&[
+            "cassiopeia",
+            "map",
+            "-i",
+            "data.csv",
+            "-m",
+            "map.json5",
+            "--writer",
+            "context-broker",
+            "--broker-url",
+            "http://localhost:1026/",
+            "--header",
+            "Authorization: Bearer t",
+        ]);
+
+        let destination = build_destination(&args.writer).unwrap();
+
+        assert_eq!(broker_header_pairs(&destination), vec![("authorization".to_owned(), "Bearer t".to_owned())]);
+    }
+
+    #[test]
+    fn the_header_alias_is_hidden_from_the_help() {
+        let help = Cli::try_parse_from(["cassiopeia", "map", "--help"]).unwrap_err().to_string();
+
+        assert!(help.contains("--output-header"), "{help}");
+        assert!(help.contains("--input-header"), "{help}");
+        assert!(!help.contains("--header"), "{help}");
+    }
+
+    #[test]
+    fn input_header_flags_become_the_remote_inputs_headers() {
+        let args = map_args(&[
+            "cassiopeia",
+            "map",
+            "-i",
+            "https://api.example/records",
+            "-m",
+            "map.json5",
+            "--input-header",
+            "Authorization: Apikey k",
+            "--input-header",
+            "X-Client-Name: c",
+        ]);
+
+        let manifest = manifest_from_map_args(&args).unwrap();
+
+        let input = manifest.inputs().iter().next().unwrap();
+        assert_eq!(
+            header_pairs(input.headers()),
+            vec![
+                ("authorization".to_owned(), "Apikey k".to_owned()),
+                ("x-client-name".to_owned(), "c".to_owned())
+            ]
+        );
+    }
+
+    #[test]
+    fn input_headers_do_not_reach_the_broker() {
+        let args = map_args(&[
+            "cassiopeia",
+            "map",
+            "-i",
+            "https://api.example/records",
+            "-m",
+            "map.json5",
+            "--writer",
+            "context-broker",
+            "--broker-url",
+            "http://localhost:1026/",
+            "--input-header",
+            "X-Api-Key: k",
+        ]);
+
+        let destination = build_destination(&args.writer).unwrap();
+
+        assert_eq!(broker_header_pairs(&destination), Vec::<(String, String)>::new());
+    }
+
+    #[test]
+    fn an_input_header_on_a_local_input_is_refused() {
+        let args = map_args(&[
+            "cassiopeia",
+            "map",
+            "-i",
+            "data.csv",
+            "-m",
+            "map.json5",
+            "--input-header",
+            "X-Api-Key: secret-key",
+        ]);
+
+        let error = manifest_from_map_args(&args).unwrap_err();
+
+        assert!(matches!(&error, Error::Manifest(ManifestError::HeadersOnLocalSource { path }) if path.as_path() == Path::new("data.csv")));
+        assert!(!error.to_string().contains("secret-key"), "{error}");
+    }
+
+    #[test]
+    fn an_input_header_conflicts_with_a_manifest() {
+        let result = Cli::try_parse_from(["cassiopeia", "map", "--manifest", "run.json5", "--input-header", "X-Api-Key: k"]);
+
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn a_malformed_input_header_is_rejected_by_the_parser() {
+        let result = Cli::try_parse_from([
+            "cassiopeia",
+            "map",
+            "-i",
+            "https://api.example/records",
+            "-m",
+            "map.json5",
+            "--input-header",
+            "no-colon",
+        ]);
+
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn the_generate_command_records_the_input_headers() {
+        let args = gen_args(&[
+            "cassiopeia",
+            "manifest",
+            "generate",
+            "-i",
+            "https://api.example/records",
+            "-m",
+            "map.json5",
+            "--input-header",
+            "X-Api-Key: k",
+        ]);
+
+        let manifest = manifest_from_gen_args(&args).unwrap();
+
+        let input = manifest.inputs().iter().next().unwrap();
+        assert_eq!(header_pairs(input.headers()), vec![("x-api-key".to_owned(), "k".to_owned())]);
+    }
+
+    #[test]
+    fn the_generate_command_refuses_an_input_header_on_a_local_input() {
+        let args = gen_args(&[
+            "cassiopeia",
+            "manifest",
+            "generate",
+            "-i",
+            "data.csv",
+            "-m",
+            "map.json5",
+            "--input-header",
+            "X-Api-Key: k",
+        ]);
+
+        assert!(matches!(
+            manifest_from_gen_args(&args).unwrap_err(),
+            Error::Manifest(ManifestError::HeadersOnLocalSource { .. })
+        ));
     }
 }

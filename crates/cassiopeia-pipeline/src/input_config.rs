@@ -1,6 +1,6 @@
 use crate::error::Result;
 use cassiopeia_collector::{file_extension::FileExtension, source::CollectorSource};
-use cassiopeia_common::{context::mode::AtContextMode, format::DataFormat, schema_source::SchemaSource};
+use cassiopeia_common::{context::mode::AtContextMode, format::DataFormat, request_header::RequestHeaders, schema_source::SchemaSource};
 use cassiopeia_csv_dialect::statement::DialectStatement;
 use cassiopeia_manifest::{input::ManifestInput, mapping_binding::MappingBinding};
 use serde_json::{Map, Value};
@@ -8,8 +8,9 @@ use serde_json::{Map, Value};
 /// The extension used to name a downloaded source whose format is not declared.
 const DEFAULT_EXTENSION: &str = "dat";
 
-/// One input lane resolved from a manifest input: where to collect from, its declared format, how
-/// its records are routed to mappings, and any per-input `@context` override.
+/// One input lane resolved from a manifest input: where to collect from and with which request
+/// headers, its declared format, how its records are routed to mappings, and any per-input
+/// `@context` override.
 ///
 /// Each lane runs collector -> profiler -> ingestor -> expander independently before all lanes
 /// merge at the resolver. A lane is read exactly once regardless of how many mappings its binding
@@ -17,6 +18,8 @@ const DEFAULT_EXTENSION: &str = "dat";
 pub(crate) struct InputConfig {
     /// The source the collector reads.
     pub(crate) collector_source: CollectorSource,
+    /// The headers the collector attaches to every request that fetches the source.
+    pub(crate) headers: RequestHeaders,
     /// The declared format, or `None` to auto-detect.
     pub(crate) format_override: Option<DataFormat>,
     /// What the input states about a CSV source's dialect; nothing when it states no `dialect`.
@@ -53,6 +56,8 @@ pub(crate) fn build_input_config(input: &ManifestInput, effective_global: &Map<S
 
     Ok(InputConfig {
         collector_source,
+        // The lane owns its headers, while the manifest keeps its own.
+        headers: input.headers().clone(),
         format_override,
         // The lane owns its statement, while the manifest keeps its own.
         dialect: input.dialect().clone().unwrap_or_default(),
@@ -78,7 +83,11 @@ fn merge_vars(effective_global: &Map<String, Value>, per_input: Option<&Map<Stri
 #[cfg(test)]
 mod tests {
     use crate::input_config::build_input_config;
-    use cassiopeia_common::{format::DataFormat, input::Input};
+    use cassiopeia_common::{
+        format::DataFormat,
+        input::Input,
+        request_header::{RequestHeader, RequestHeaders},
+    };
     use cassiopeia_csv_dialect::{dialect_byte::DialectByte, statement::DialectStatement};
     use cassiopeia_manifest::{input::ManifestInput, mapping_binding::MappingBinding};
     use pretty_assertions::assert_eq;
@@ -94,6 +103,30 @@ mod tests {
             })
             .format(format.to_option())
             .build()
+    }
+
+    #[test]
+    fn a_remote_inputs_headers_carry_through_to_the_lane() {
+        let headers = RequestHeaders::new(vec![RequestHeader::new("X-Api-Key", "k").unwrap()]);
+        let input = ManifestInput::builder()
+            .source(Input::from_str("https://api.example/records").unwrap())
+            .mapping_binding(MappingBinding::Single {
+                mapping: PathBuf::from("mapping.json5"),
+            })
+            .build()
+            .with_headers(headers.clone())
+            .unwrap();
+
+        let config = build_input_config(&input, &Map::new()).unwrap();
+
+        assert_eq!(config.headers, headers);
+    }
+
+    #[test]
+    fn an_input_without_headers_gives_its_lane_none() {
+        let config = build_input_config(&manifest_input(DataFormat::Csv), &Map::new()).unwrap();
+
+        assert!(config.headers.is_empty());
     }
 
     #[test]

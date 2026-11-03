@@ -2,9 +2,9 @@ use crate::output::context_delivery::ContextDelivery;
 use cassiopeia_common::{
     attribute_overwrite::AttributeOverwrite,
     broker_atomicity::BrokerAtomicity,
-    broker_header::BrokerHeaders,
     broker_operation::BrokerOperationKind,
     file_framing::FileFraming,
+    request_header::RequestHeaders,
     tenant::Tenant,
     upsert_mode::UpsertMode,
     user_agent::UserAgent,
@@ -46,8 +46,8 @@ pub enum Destination {
         user_agent: Option<UserAgent>,
 
         /// Extra HTTP headers attached to every request, typically carrying broker credentials.
-        #[serde(default, skip_serializing_if = "BrokerHeaders::is_empty")]
-        headers: BrokerHeaders,
+        #[serde(default, skip_serializing_if = "RequestHeaders::is_empty")]
+        headers: RequestHeaders,
 
         /// How `@context` is attached to each request.
         #[serde(default)]

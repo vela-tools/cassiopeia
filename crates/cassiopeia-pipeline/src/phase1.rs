@@ -63,6 +63,8 @@ impl Pipeline {
                 input.collector_source.clone(),
                 input.format_override,
                 self.config.default_user_agent.clone(),
+                // The lane configuration is borrowed and reused every cycle, so the collector owns a copy.
+                input.headers.clone(),
             ));
             let collector_rx = spawn_collector_thread(collector, channel_policy, Arc::clone(&env.telemetry));
 

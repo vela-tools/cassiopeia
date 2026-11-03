@@ -2,13 +2,14 @@ use crate::{
     downloaded_file::DownloadedFile,
     error::{CollectorError, ERROR_BODY_CAP},
 };
-use cassiopeia_common::{captured_body::CapturedBody, user_agent::UserAgent};
+use cassiopeia_common::{captured_body::CapturedBody, request_header::RequestHeaders, user_agent::UserAgent};
 use mediatype::MediaTypeBuf;
 use reqwest::{blocking::Client, header::CONTENT_TYPE};
 use std::{fs::File, io::Write, path::Path};
 use url::Url;
 
-/// Fetches remote sources over HTTP, announcing every request with one fixed `User-Agent`.
+/// Fetches remote sources over HTTP, announcing every request with one fixed `User-Agent` and
+/// attaching the same user-supplied headers to each.
 ///
 /// The HTTP client is built on the first download rather than at construction: a blocking reqwest
 /// client eagerly spawns its own runtime thread, and a run whose sources are all local files never
@@ -16,16 +17,22 @@ use url::Url;
 pub struct Downloader {
     /// The identifier every request announces itself with.
     user_agent: UserAgent,
+    /// The headers attached to every request, typically carrying the source's API key.
+    headers: RequestHeaders,
     /// The blocking HTTP client, built on the first download and reused by every later one.
     client: Option<Client>,
 }
 
 impl Downloader {
-    /// Creates a downloader that identifies itself as `user_agent` and has not yet touched the
-    /// network.
+    /// Creates a downloader that identifies itself as `user_agent`, attaches `headers` to every
+    /// request, and has not yet touched the network.
     #[must_use]
-    pub const fn new(user_agent: UserAgent) -> Downloader {
-        Downloader { user_agent, client: None }
+    pub const fn new(user_agent: UserAgent, headers: RequestHeaders) -> Downloader {
+        Downloader {
+            user_agent,
+            headers,
+            client: None,
+        }
     }
 
     /// Downloads a single file from `url` to `dest`, returning that path with the URL it was served
@@ -89,7 +96,8 @@ impl Downloader {
         Ok(DownloadedFile::new(dest.to_path_buf(), served_from, content_type))
     }
 
-    /// The HTTP client, built with this downloader's `User-Agent` on first use and reused after.
+    /// The HTTP client, built with this downloader's `User-Agent` and headers on first use and reused
+    /// after.
     fn client(&mut self) -> Result<&Client, CollectorError> {
         let client = match self.client.take() {
             Some(client) => client,
@@ -101,6 +109,7 @@ impl Downloader {
             // servers send an uncompressed body in full frames, so the download asks for that instead.
             None => Client::builder()
                 .user_agent(self.user_agent.as_str())
+                .default_headers(self.headers.sensitive().collect())
                 .no_gzip()
                 .build()
                 .map_err(|source| CollectorError::ClientInit { source })?,
@@ -113,7 +122,10 @@ impl Downloader {
 #[cfg(test)]
 mod tests {
     use crate::{downloader::Downloader, error::CollectorError};
-    use cassiopeia_common::user_agent::UserAgent;
+    use cassiopeia_common::{
+        request_header::{RequestHeader, RequestHeaders},
+        user_agent::UserAgent,
+    };
     use pretty_assertions::assert_eq;
     use std::{
         fs::read_to_string,
@@ -154,7 +166,11 @@ mod tests {
     }
 
     fn downloader() -> Downloader {
-        Downloader::new(UserAgent::from("cassiopeia/test".to_owned()))
+        Downloader::new(UserAgent::from("cassiopeia/test".to_owned()), RequestHeaders::default())
+    }
+
+    fn downloader_with_headers(headers: Vec<RequestHeader>) -> Downloader {
+        Downloader::new(UserAgent::from("cassiopeia/test".to_owned()), RequestHeaders::new(headers))
     }
 
     #[test]
@@ -206,6 +222,50 @@ mod tests {
 
         let request = requests.recv().expect("the served request");
         assert!(request.contains("user-agent: cassiopeia/test"), "request was: {request}");
+    }
+
+    #[test]
+    fn a_download_sends_every_configured_header() {
+        let (url, requests) = serve_once("200 OK", "{}");
+        let directory = TempDir::new().expect("a temporary directory");
+        let mut downloader = downloader_with_headers(vec![
+            RequestHeader::new("Authorization", "Apikey replace-me").expect("a valid header"),
+            RequestHeader::new("X-Client-Name", "cassiopeia-test").expect("a valid header"),
+        ]);
+
+        downloader.download_to_file(&url, &directory.path().join("Sensor.json")).expect("a download");
+
+        let request = requests.recv().expect("the served request");
+        assert!(request.contains("authorization: Apikey replace-me\r\n"), "request was: {request}");
+        assert!(request.contains("x-client-name: cassiopeia-test\r\n"), "request was: {request}");
+    }
+
+    #[test]
+    fn a_reused_downloader_sends_the_headers_on_every_request() {
+        let (first, first_requests) = serve_once("200 OK", "{}");
+        let (second, second_requests) = serve_once("200 OK", "{}");
+        let directory = TempDir::new().expect("a temporary directory");
+        let mut downloader = downloader_with_headers(vec![RequestHeader::new("X-Api-Key", "replace-me").expect("a valid header")]);
+
+        downloader.download_to_file(&first, &directory.path().join("a.json")).expect("a download");
+        downloader.download_to_file(&second, &directory.path().join("b.json")).expect("a download");
+
+        for requests in [first_requests, second_requests] {
+            let request = requests.recv().expect("the served request");
+            assert!(request.contains("x-api-key: replace-me\r\n"), "request was: {request}");
+        }
+    }
+
+    #[test]
+    fn a_download_without_configured_headers_sends_none_of_them() {
+        let (url, requests) = serve_once("200 OK", "{}");
+        let directory = TempDir::new().expect("a temporary directory");
+
+        downloader().download_to_file(&url, &directory.path().join("Sensor.json")).expect("a download");
+
+        let request = requests.recv().expect("the served request").to_ascii_lowercase();
+        assert!(!request.contains("authorization"), "request was: {request}");
+        assert!(!request.contains("x-api-key"), "request was: {request}");
     }
 
     #[test]

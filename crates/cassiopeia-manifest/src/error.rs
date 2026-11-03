@@ -47,6 +47,14 @@ pub enum ManifestError {
     #[error("An input's 'dialect' describes a CSV source, so the input must declare 'format: \"csv\"'")]
     DialectWithoutCsvFormat,
 
+    /// An input declared request headers on a local file source, which is read without any request
+    /// to send them on.
+    #[error("The input '{}' is a local file, so it cannot declare 'headers'; headers are sent only when fetching a URL", path.display())]
+    HeadersOnLocalSource {
+        /// The local path the input reads.
+        path: PathBuf,
+    },
+
     /// The manifest could not be serialized to JSON prior to formatting.
     #[error("Failed to serialize the manifest")]
     Serialize(#[from] serde_json::Error),

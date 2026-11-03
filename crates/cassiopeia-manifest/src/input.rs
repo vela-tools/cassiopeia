@@ -2,7 +2,7 @@ use crate::{
     error::ManifestError,
     mapping_binding::{CollectionMapping, MappingBinding},
 };
-use cassiopeia_common::{context::mode::AtContextMode, format::DataFormat, input::Input, schema_source::SchemaSource};
+use cassiopeia_common::{context::mode::AtContextMode, format::DataFormat, input::Input, request_header::RequestHeaders, schema_source::SchemaSource};
 use cassiopeia_csv_dialect::statement::DialectStatement;
 use getset::Getters;
 use serde::{Deserialize, Serialize};
@@ -56,6 +56,32 @@ pub struct ManifestInput {
     #[builder(default = None)]
     #[getset(get = "pub")]
     vars: Option<serde_json::Map<String, serde_json::Value>>,
+
+    /// Extra HTTP headers sent on every request that fetches this source, typically carrying an API
+    /// key. Only a remote source may declare any, so the builder leaves the set empty and
+    /// [`ManifestInput::with_headers`] attaches it once the source is known to be remote.
+    #[builder(default, setter(skip))]
+    #[getset(get = "pub")]
+    headers: RequestHeaders,
+}
+
+impl ManifestInput {
+    /// Attaches the headers sent on every request that fetches this input's source.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ManifestError::HeadersOnLocalSource`] when `headers` is not empty and the source is
+    /// a local file, which is read without any request to carry them.
+    pub fn with_headers(self, headers: RequestHeaders) -> Result<ManifestInput, ManifestError> {
+        if let Input::Local(path) = &self.source
+            && !headers.is_empty()
+        {
+            // The error names the path, while the input it came from is dropped.
+            return Err(ManifestError::HeadersOnLocalSource { path: path.clone() });
+        }
+
+        Ok(ManifestInput { headers, ..self })
+    }
 }
 
 /// The on-the-wire shape of a manifest input, before its mapping binding is validated.
@@ -81,6 +107,8 @@ struct ManifestInputRaw {
     schema: Option<SchemaSource>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     vars: Option<serde_json::Map<String, serde_json::Value>>,
+    #[serde(default, skip_serializing_if = "RequestHeaders::is_empty")]
+    headers: RequestHeaders,
 }
 
 impl TryFrom<ManifestInputRaw> for ManifestInput {
@@ -92,7 +120,7 @@ impl TryFrom<ManifestInputRaw> for ManifestInput {
             return Err(ManifestError::DialectWithoutCsvFormat);
         }
 
-        Ok(ManifestInput {
+        ManifestInput {
             source: raw.source,
             mapping_binding,
             format: raw.format,
@@ -100,7 +128,9 @@ impl TryFrom<ManifestInputRaw> for ManifestInput {
             context: raw.context,
             schema: raw.schema,
             vars: raw.vars,
-        })
+            headers: RequestHeaders::default(),
+        }
+        .with_headers(raw.headers)
     }
 }
 
@@ -120,6 +150,7 @@ impl From<ManifestInput> for ManifestInputRaw {
             context: input.context,
             schema: input.schema,
             vars: input.vars,
+            headers: input.headers,
         }
     }
 }
@@ -163,10 +194,18 @@ mod tests {
         input::{ManifestInput, ManifestInputRaw},
         mapping_binding::{CollectionMapping, MappingBinding},
     };
-    use cassiopeia_common::{collection::CollectionName, context::mode::AtContextMode, format::DataFormat, input::Input, schema_source::SchemaSource};
+    use cassiopeia_common::{
+        collection::CollectionName,
+        context::mode::AtContextMode,
+        format::DataFormat,
+        input::Input,
+        request_header::{RequestHeader, RequestHeaders},
+        schema_source::SchemaSource,
+    };
     use cassiopeia_csv_dialect::{dialect_byte::DialectByte, preamble::Preamble};
     use pretty_assertions::assert_eq;
-    use std::path::PathBuf;
+    use std::path::{Path, PathBuf};
+    use url::Url;
 
     fn parse(json: &str) -> Result<ManifestInput, serde_json::Error> {
         serde_json::from_str(json)
@@ -326,7 +365,131 @@ mod tests {
             context: None,
             schema: None,
             vars: None,
+            headers: RequestHeaders::default(),
         };
         assert!(matches!(ManifestInput::try_from(raw), Err(ManifestError::ConflictingMappingBinding)));
+    }
+
+    fn remote_input() -> ManifestInput {
+        ManifestInput::builder()
+            .source(Input::Remote(Url::parse("https://api.example/records").unwrap()))
+            .mapping_binding(MappingBinding::Single {
+                mapping: PathBuf::from("record.json5"),
+            })
+            .build()
+    }
+
+    fn api_key_headers() -> RequestHeaders {
+        RequestHeaders::new(vec![RequestHeader::new("X-Api-Key", "secret-key").unwrap()])
+    }
+
+    #[test]
+    fn a_remote_input_reads_its_headers_in_order() {
+        let input = parse(r#"{"source": "https://api.example/records", "mapping": "m.json5", "headers": {"Authorization": "Apikey k", "X-Client-Name": "c"}}"#)
+            .unwrap();
+
+        let headers: Vec<_> = input
+            .headers()
+            .iter()
+            .map(|header| (header.name().as_str(), header.value().to_str().unwrap()))
+            .collect();
+        assert_eq!(headers, vec![("authorization", "Apikey k"), ("x-client-name", "c")]);
+    }
+
+    #[test]
+    fn an_input_without_headers_carries_an_empty_set() {
+        let input = parse(r#"{"source": "https://api.example/records", "mapping": "m.json5"}"#).unwrap();
+
+        assert!(input.headers().is_empty());
+    }
+
+    #[test]
+    fn headers_on_a_local_source_are_rejected_without_echoing_the_value() {
+        let error = parse(r#"{"source": "data/a.csv", "mapping": "m.json5", "headers": {"X-Api-Key": "secret-key"}}"#).unwrap_err();
+
+        assert!(
+            error.to_string().contains("'data/a.csv' is a local file, so it cannot declare 'headers'"),
+            "{error}"
+        );
+        assert!(!error.to_string().contains("secret-key"), "{error}");
+    }
+
+    #[test]
+    fn headers_on_a_file_url_source_are_rejected() {
+        let error = parse(r#"{"source": "file:///tmp/a.csv", "mapping": "m.json5", "headers": {"X-Api-Key": "k"}}"#).unwrap_err();
+
+        assert!(error.to_string().contains("is a local file"), "{error}");
+    }
+
+    #[test]
+    fn an_empty_headers_map_on_a_local_source_is_accepted() {
+        let input = parse(r#"{"source": "data/a.csv", "mapping": "m.json5", "headers": {}}"#).unwrap();
+
+        assert!(input.headers().is_empty());
+    }
+
+    #[test]
+    fn an_invalid_header_name_is_rejected() {
+        let error = parse(r#"{"source": "https://api.example/records", "mapping": "m.json5", "headers": {"bad name": "k"}}"#).unwrap_err();
+
+        assert!(error.to_string().contains("invalid request header name: bad name"), "{error}");
+    }
+
+    #[test]
+    fn input_headers_round_trip_through_serialization() {
+        let input = parse(r#"{"source": "https://api.example/records", "mapping": "m.json5", "headers": {"X-Api-Key": "k"}}"#).unwrap();
+
+        let json = serde_json::to_string(&input).unwrap();
+        assert!(json.contains(r#""headers":{"x-api-key":"k"}"#), "{json}");
+        assert_eq!(parse(&json).unwrap(), input);
+    }
+
+    #[test]
+    fn an_input_without_headers_serializes_no_headers_field() {
+        let json = serde_json::to_string(&remote_input()).unwrap();
+
+        assert!(!json.contains("headers"), "{json}");
+    }
+
+    #[test]
+    fn attaching_headers_to_a_remote_input_keeps_them() {
+        let input = remote_input().with_headers(api_key_headers()).unwrap();
+
+        assert_eq!(input.headers(), &api_key_headers());
+    }
+
+    #[test]
+    fn attaching_headers_to_a_local_input_is_a_typed_error() {
+        let input = ManifestInput::builder()
+            .source(Input::Local(PathBuf::from("data/a.csv")))
+            .mapping_binding(MappingBinding::Single {
+                mapping: PathBuf::from("m.json5"),
+            })
+            .build();
+
+        let error = input.with_headers(api_key_headers()).unwrap_err();
+
+        assert!(matches!(error, ManifestError::HeadersOnLocalSource { path } if path.as_path() == Path::new("data/a.csv")));
+    }
+
+    #[test]
+    fn attaching_no_headers_to_a_local_input_is_accepted() {
+        let input = ManifestInput::builder()
+            .source(Input::Local(PathBuf::from("data/a.csv")))
+            .mapping_binding(MappingBinding::Single {
+                mapping: PathBuf::from("m.json5"),
+            })
+            .build();
+
+        assert!(input.with_headers(RequestHeaders::default()).unwrap().headers().is_empty());
+    }
+
+    #[test]
+    fn the_debug_output_of_an_input_never_contains_a_header_value() {
+        let input = remote_input().with_headers(api_key_headers()).unwrap();
+
+        let rendered = format!("{input:?}");
+        assert!(rendered.contains("x-api-key"), "{rendered}");
+        assert!(!rendered.contains("secret-key"), "{rendered}");
     }
 }

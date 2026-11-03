@@ -156,10 +156,10 @@ docker run --rm \
       --mapping /data/reading.json5 \
       --writer context-broker \
       --broker-url http://host.docker.internal:1026/ \
-      --header "Authorization: Bearer replace-me"
+      --output-header "Authorization: Bearer replace-me"
 ```
 
-Pass broker credentials with `--header`, just as you would on the host. The [output guide](output.md#send-to-a-context-broker) covers broker operations and delivery options.
+Pass broker credentials with `--output-header`, and a source's API key with `--input-header`, just as you would on the host. The [output guide](output.md#send-to-a-context-broker) covers broker operations and delivery options.
 
 ## Configuration and environment
 

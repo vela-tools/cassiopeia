@@ -1,12 +1,11 @@
-use cassiopeia_common::{broker_header::BrokerHeaders, tenant::Tenant};
+use cassiopeia_common::tenant::Tenant;
 use cassiopeia_diagnostic::{
     code::{broker_code::BrokerCode, diagnostic_code::DiagnosticCode},
     diagnostic_builder::DiagnosticBuilder,
     severity::Severity,
 };
 use cassiopeia_reporter::reporter::DiagnosticSink;
-use reqwest::header::{HeaderName, HeaderValue};
-use std::sync::Arc;
+use reqwest::header::HeaderValue;
 
 /// Resolves the tenant into an `NGSILD-Tenant` header, reporting and omitting it when the value is
 /// not a legal header value.
@@ -32,22 +31,9 @@ pub fn tenant_header(tenant: Option<&Tenant>, sink: &dyn DiagnosticSink) -> Opti
     None
 }
 
-/// Marks every credential header sensitive so hyper keeps it out of connection logs.
-#[must_use]
-pub fn sensitive_auth_headers(headers: &BrokerHeaders) -> Arc<[(HeaderName, HeaderValue)]> {
-    headers
-        .iter()
-        .map(|header| {
-            let mut value = header.value().clone();
-            value.set_sensitive(true);
-            (header.name().clone(), value)
-        })
-        .collect()
-}
-
 #[cfg(test)]
 mod tests {
-    use crate::broker::{request_headers::tenant_header, test_reporter::TestReporter};
+    use crate::broker::{tenant_header::tenant_header, test_reporter::TestReporter};
     use cassiopeia_common::tenant::Tenant;
     use pretty_assertions::assert_eq;
     use std::str::FromStr;

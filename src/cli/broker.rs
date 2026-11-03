@@ -1,7 +1,7 @@
 use cassiopeia_common::{
     attribute_overwrite::AttributeOverwrite,
-    broker_header::BrokerHeader,
     broker_operation::BrokerOperationKind,
+    request_header::RequestHeader,
     tenant::Tenant,
     upsert_mode::UpsertMode,
     user_agent::UserAgent,
@@ -86,9 +86,16 @@ pub struct BrokerArgs {
     pub user_agent: Option<UserAgent>,
 
     /// Extra HTTP header for Context Broker requests, written as `Name: Value`; repeat for several.
-    /// Typically carries credentials, e.g. `--header "Authorization: Bearer <token>"`.
-    #[arg(long = "header", action = ArgAction::Append, conflicts_with = "output", help_heading = "Output", value_name = "NAME: VALUE")]
-    pub headers: Vec<BrokerHeader>,
+    /// Typically carries credentials, e.g. `--output-header "Authorization: Bearer <token>"`.
+    #[arg(
+        long = "output-header",
+        alias = "header",
+        action = ArgAction::Append,
+        conflicts_with = "output",
+        help_heading = "Output",
+        value_name = "NAME: VALUE"
+    )]
+    pub output_headers: Vec<RequestHeader>,
 
     /// Send the `@context` via a Link header instead of embedding it in the body.
     #[arg(
