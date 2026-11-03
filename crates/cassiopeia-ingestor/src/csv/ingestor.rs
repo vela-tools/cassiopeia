@@ -8,15 +8,14 @@ use crate::{
     error::IngestorError,
     ingestor::Ingestor,
 };
-use ::csv::{Reader, StringRecord};
+use ::csv::StringRecord;
 use cassiopeia_common::{channel::ChannelSender, input::Input, signal::Signal};
 use cassiopeia_csv_column::{column_key::ColumnKey, renamed_column::RenamedColumn};
 use cassiopeia_csv_dialect::{
     decimal_separator::DecimalSeparator,
     dialect::Dialect,
     line_terminator::LineTerminator,
-    misshapen_row::MisshapenRow,
-    preamble::Preamble,
+    table_reader::{TableReader, TableRowError},
     value_notation::ValueNotation,
 };
 use cassiopeia_data_profiler::metadata::{CsvMetadata, FormatMetadata};
@@ -41,8 +40,8 @@ use tracing::{info, warn};
 /// A file decoded to UTF-8 from its profiled encoding, its lines counted.
 type DecodedFile = BufReader<LineCountingReader<DecodingReader<BufReader<File>>>>;
 
-/// A CSV reader over a [`DecodedFile`].
-type DecodedFileReader = Reader<DecodedFile>;
+/// A CSV table reader over a [`DecodedFile`].
+type DecodedFileReader = TableReader<DecodedFile>;
 
 /// Ingestor for CSV data.
 ///
@@ -61,8 +60,6 @@ pub struct CsvIngestor {
     encoding: &'static Encoding,
     /// How the file writes its values: its decimal separator and null tokens.
     notation: ValueNotation,
-    /// The records above the table, which count toward the row a misshapen record sits on.
-    preamble: Preamble,
     /// The rows skipped so far because their field count differs from the table's, shared with
     /// whoever reports them once the file has been read.
     misshapen: Arc<Mutex<MisshapenRows>>,
@@ -91,9 +88,7 @@ impl CsvIngestor {
         let mut reader = Self::table_reader(decoded, dialect.as_ref(), encoding, &path)?;
         let column_keys = Self::column_keys(&mut reader, dialect.as_ref(), encoding, &path)?;
 
-        // An unprofiled file has no preamble skipped, and states no notation, so its values are read
-        // in the plain one.
-        let preamble = dialect.as_ref().map_or(Preamble::NONE, |dialect| dialect.preamble);
+        // An unprofiled file states no notation, so its values are read in the plain one.
         let notation = dialect.map_or(ValueNotation::PLAIN, |dialect| dialect.notation);
 
         Ok(CsvIngestor {
@@ -103,7 +98,6 @@ impl CsvIngestor {
             column_keys,
             encoding,
             notation,
-            preamble,
             misshapen: Arc::default(),
             batch_size,
         })
@@ -139,7 +133,7 @@ impl CsvIngestor {
                     .reader(decoded)
                     .map_err(|source| CsvIngestError::reading(source, encoding, path, CsvRead::TableStart))
             }
-            None => Ok(Reader::from_reader(decoded)),
+            None => TableReader::with_csv_defaults(decoded).map_err(|source| CsvIngestError::reading(source, encoding, path, CsvRead::TableStart)),
         }
     }
 
@@ -279,13 +273,11 @@ impl Ingestor for CsvIngestor {
         for result in reader.records() {
             let record = match result {
                 Ok(record) => record,
-                Err(source) => match MisshapenRow::of(&source, self.preamble) {
-                    Some(row) => {
-                        self.misshapen.lock().record(row);
-                        continue;
-                    }
-                    None => return Err(CsvIngestError::reading(source, encoding, &self.path, CsvRead::Table).into()),
-                },
+                Err(TableRowError::Misshapen(row)) => {
+                    self.misshapen.lock().record(row);
+                    continue;
+                }
+                Err(TableRowError::Csv(source)) => return Err(CsvIngestError::reading(source, encoding, &self.path, CsvRead::Table).into()),
             };
             let data = match &self.column_keys {
                 Some(column_keys) => Self::keyed_by_header(column_keys.keys(), &record, &self.notation),
@@ -628,7 +620,7 @@ mod tests {
         profiled_csv(contents, Some(FormatMetadata::Csv(CsvMetadata::new(dialect))))
     }
 
-    fn skipped_row(above: u64, fields: u64, table_fields: u64) -> MisshapenRow {
+    fn skipped_row(above: u64, fields: usize, table_fields: usize) -> MisshapenRow {
         MisshapenRow {
             row: RowNumber::after(above),
             fields,
@@ -670,6 +662,30 @@ mod tests {
 
         assert_eq!(records.len(), 2);
         assert_eq!(misshapen.lock().named(), [skipped_row(2, 1, 2)]);
+    }
+
+    #[test]
+    fn a_header_ending_in_a_delimiter_ingests_every_row_without_one() {
+        let (_dir, payload) = inspected("id;name;value;\n1;a;10\n2;b;20\n3;c;30\n");
+        let ingestor = CsvIngestor::from_payload(payload, 8).unwrap();
+        let misshapen = ingestor.misshapen_rows();
+        let records = ingest(ingestor);
+
+        let values: Vec<_> = records.iter().filter_map(|record| record.data().get("value")).collect();
+        assert_eq!(values, [&Value::Number(10.into()), &Value::Number(20.into()), &Value::Number(30.into())]);
+        assert_eq!(misshapen.lock().total(), 0);
+    }
+
+    #[test]
+    fn rows_ending_in_a_delimiter_ingest_under_a_header_without_one_with_no_empty_column() {
+        let (_dir, payload) = inspected("id;name;value\n1;a;10;\n2;b;20;\n3;c;30;\n");
+        let ingestor = CsvIngestor::from_payload(payload, 8).unwrap();
+        let misshapen = ingestor.misshapen_rows();
+        let records = ingest(ingestor);
+
+        assert_eq!(records.len(), 3);
+        assert_eq!(data_keys(&records[0]), ["id", "name", "value"]);
+        assert_eq!(misshapen.lock().total(), 0);
     }
 
     #[test]

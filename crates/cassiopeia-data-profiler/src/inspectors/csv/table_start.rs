@@ -28,7 +28,6 @@ pub fn detected_table_start(sample: &[u8], candidate: Dialect, shape: TableShape
 fn locate_table(sample: &[u8], mut dialect: Dialect, shape: TableShape) -> Option<(Dialect, Table)> {
     let widths: Vec<usize> = dialect
         .reader_builder()
-        .flexible(true)
         .from_reader(sample)
         .records()
         .zip(0..=MAX_PREAMBLE_RECORDS)

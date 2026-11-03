@@ -11,7 +11,7 @@ use cassiopeia_reporter::reporter::DiagnosticSink;
 use std::num::NonZeroU64;
 
 /// `count` fields, in words.
-fn fields(count: u64) -> String {
+fn fields(count: usize) -> String {
     match count {
         1 => "1 field".to_owned(),
         count => format!("{count} fields"),
@@ -27,7 +27,7 @@ fn named(row: &MisshapenRow) -> String {
 ///
 /// The rows ride on the headline because the concise form shows nothing else, and a row number is
 /// what lets a reader find the row in the file.
-fn headline(source: &Input, table_fields: u64, misshapen: &MisshapenRows, total: NonZeroU64) -> String {
+fn headline(source: &Input, table_fields: usize, misshapen: &MisshapenRows, total: NonZeroU64) -> String {
     let rows = match total.get() {
         1 => "1 row".to_owned(),
         count => format!("{count} rows"),
@@ -85,7 +85,7 @@ mod tests {
     use std::path::PathBuf;
     use url::Url;
 
-    fn rows(skipped: &[(u64, u64)]) -> MisshapenRows {
+    fn rows(skipped: &[(u64, usize)]) -> MisshapenRows {
         let mut rows = MisshapenRows::default();
         for &(above, fields) in skipped {
             rows.record(MisshapenRow {

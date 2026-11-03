@@ -6,7 +6,7 @@ use crate::{
     profile::Profile,
 };
 use cassiopeia_common::format::DataFormat;
-use cassiopeia_csv_dialect::{dialect::Dialect, misshapen_row::MisshapenRow, statement::DialectStatement};
+use cassiopeia_csv_dialect::{dialect::Dialect, statement::DialectStatement, table_reader::TableRowError};
 use mediatype::media_type;
 
 /// Detects delimited text by parsing a header row and a small sample of records.
@@ -39,11 +39,7 @@ impl CsvDetector {
         !headers.is_empty()
             && reader
                 .records()
-                .find(|record| {
-                    record
-                        .as_ref()
-                        .map_or_else(|error| MisshapenRow::of(error, dialect.preamble).is_none(), |_| true)
-                })
+                .find(|record| !matches!(record, Err(TableRowError::Misshapen(_))))
                 .is_some_and(|record| record.is_ok())
     }
 }
@@ -87,6 +83,35 @@ mod tests {
             .unwrap();
 
         assert!(CsvDetector::has_header_and_record(b"id;name;value\n1;a\n2;b;20\n", &dialect));
+    }
+
+    #[test]
+    fn a_header_ending_in_a_delimiter_over_rows_without_one_is_detected_as_csv_with_its_header() {
+        let profile = CsvDetector.detect(&Content::new(b"a,b,c,\n1,x,3.5\n4,y,6.5\n7,z,9.5\n")).unwrap();
+        let metadata = profile.metadata().as_ref().and_then(FormatMetadata::as_csv).unwrap();
+
+        assert_eq!(metadata.dialect().delimiter, DialectByte::COMMA);
+        assert_eq!(metadata.dialect().preamble, Preamble::NONE);
+        assert_eq!(metadata.dialect().header_rows, HeaderRows::ONE);
+    }
+
+    #[test]
+    fn a_semicolon_header_ending_in_a_delimiter_over_comma_decimals_is_detected_with_its_delimiter() {
+        let profile = CsvDetector.detect(&Content::new(b"a;b;c;\n1;x;3,5\n4;y;6,5\n7;z;9,5\n")).unwrap();
+        let metadata = profile.metadata().as_ref().and_then(FormatMetadata::as_csv).unwrap();
+
+        assert_eq!(metadata.dialect().delimiter, DialectByte::SEMICOLON);
+        assert_eq!(metadata.dialect().header_rows, HeaderRows::ONE);
+    }
+
+    #[test]
+    fn rows_ending_in_a_delimiter_under_a_header_without_one_are_detected_as_csv_with_its_header() {
+        let profile = CsvDetector.detect(&Content::new(b"a;b;c\n1;x;3,5;\n4;y;6,5;\n7;z;9,5;\n")).unwrap();
+        let metadata = profile.metadata().as_ref().and_then(FormatMetadata::as_csv).unwrap();
+
+        assert_eq!(metadata.dialect().delimiter, DialectByte::SEMICOLON);
+        assert_eq!(metadata.dialect().preamble, Preamble::NONE);
+        assert_eq!(metadata.dialect().header_rows, HeaderRows::ONE);
     }
 
     #[test]
