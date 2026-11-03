@@ -1,6 +1,6 @@
 use crate::inspectors::csv::{data_type::DataType, sentence::is_sentence, table_shape::TableShape};
 use ::csv::StringRecord;
-use cassiopeia_csv_dialect::{dialect::Dialect, misshapen_row::MisshapenRow};
+use cassiopeia_csv_dialect::{dialect::Dialect, table_reader::TableRowError};
 use std::collections::HashMap;
 
 /// A sample parsed under one candidate dialect, with every cell typed for uniformity scoring.
@@ -24,8 +24,8 @@ impl Table {
     /// Parses `sample` under `dialect` into a table, skipping its preamble and, when the dialect
     /// reads one, its header row.
     ///
-    /// A record whose field count differs from the first one is skipped as a [`MisshapenRow`], as
-    /// the ingestor skips it, and counted against the table's consistency. Returns `None` when the
+    /// A record that does not fit the width of the first one, empty trailing fields aside, is skipped
+    /// as misshapen, as the ingestor skips it, and counted against the table's consistency. Returns `None` when the
     /// sample holds no records, a record fails to parse for any other reason, or the misshapen
     /// records are not outnumbered by the rest: then the first record is no row of the table, such
     /// as a title line above it, and the table starts further down.
@@ -35,10 +35,8 @@ impl Table {
         for result in dialect.reader(sample).ok()?.records() {
             match result {
                 Ok(record) => records.push(record),
-                Err(error) => {
-                    MisshapenRow::of(&error, dialect.preamble)?;
-                    misshapen_rows += 1;
-                }
+                Err(TableRowError::Misshapen(_)) => misshapen_rows += 1,
+                Err(TableRowError::Csv(_)) => return None,
             }
         }
         let records = records;
@@ -83,13 +81,29 @@ impl Table {
         sentences * 2 > total
     }
 
+    /// The columns the table is scored on: every column but the empty ones at its end.
+    ///
+    /// A delimiter at the end of every line, or of the header line alone, leaves an empty last
+    /// column that holds no data, so it neither counts toward the table's width nor lowers its
+    /// uniformity, and a dialect that reads such a file is scored on the table it holds.
+    fn scored_columns(&self) -> &[Vec<DataType>] {
+        let empty = self
+            .column_types
+            .iter()
+            .rev()
+            .take_while(|column| column.iter().all(|cell| *cell == DataType::Empty))
+            .count();
+        &self.column_types[..self.column_types.len() - empty]
+    }
+
     /// Scores how coherent the table is, independent of whether row 0 is a header. The header
     /// decision is made separately and weighed in by the caller.
     pub fn score(&self) -> f64 {
+        let columns = self.scored_columns();
         let mut score = 0.0;
         score += self.column_consistency() * 40.0;
-        score += self.type_uniformity() * 30.0;
-        let col_bonus = to_f64(self.num_columns).min(20.0) / 20.0;
+        score += type_uniformity(columns) * 30.0;
+        let col_bonus = to_f64(columns.len()).min(20.0) / 20.0;
         score += col_bonus * 10.0;
         // A candidate that reads the sample as a single record has most likely swallowed it whole,
         // such as a wrong quote spanning every line break. A header over one data row is two
@@ -99,9 +113,9 @@ impl Table {
             score -= 20.0;
         }
 
-        let empty_cols = self.column_types.iter().filter(|col| col.iter().all(|t| *t == DataType::Empty)).count();
-        if self.num_columns > 0 {
-            score -= (to_f64(empty_cols) / to_f64(self.num_columns)) * 15.0;
+        let empty_cols = columns.iter().filter(|col| col.iter().all(|t| *t == DataType::Empty)).count();
+        if !columns.is_empty() {
+            score -= (to_f64(empty_cols) / to_f64(columns.len())) * 15.0;
         }
 
         // A field still wrapped in matching quotes means the quote candidate under test left the
@@ -138,28 +152,30 @@ impl Table {
         let total = self.num_rows + self.misshapen_rows;
         if total == 0 { 0.0 } else { to_f64(self.num_rows) / to_f64(total) }
     }
+}
 
-    fn type_uniformity(&self) -> f64 {
-        if self.column_types.is_empty() {
-            return 0.0;
-        }
-
-        let mut total_uniformity = 0.0;
-        for col_types in &self.column_types {
-            let non_empty: Vec<&DataType> = col_types.iter().filter(|t| **t != DataType::Empty).collect();
-            if non_empty.is_empty() {
-                continue;
-            }
-            let mut type_counts: HashMap<&DataType, usize> = HashMap::new();
-            for t in &non_empty {
-                *type_counts.entry(t).or_insert(0) += 1;
-            }
-            let max_count = type_counts.values().max().copied().unwrap_or(0);
-            total_uniformity += to_f64(max_count) / to_f64(non_empty.len());
-        }
-
-        total_uniformity / to_f64(self.column_types.len())
+/// How uniformly typed `columns` are: the mean, over the columns, of the share of a column's
+/// non-empty cells that have its most common type.
+fn type_uniformity(columns: &[Vec<DataType>]) -> f64 {
+    if columns.is_empty() {
+        return 0.0;
     }
+
+    let mut total_uniformity = 0.0;
+    for col_types in columns {
+        let non_empty: Vec<&DataType> = col_types.iter().filter(|t| **t != DataType::Empty).collect();
+        if non_empty.is_empty() {
+            continue;
+        }
+        let mut type_counts: HashMap<&DataType, usize> = HashMap::new();
+        for t in &non_empty {
+            *type_counts.entry(t).or_insert(0) += 1;
+        }
+        let max_count = type_counts.values().max().copied().unwrap_or(0);
+        total_uniformity += to_f64(max_count) / to_f64(non_empty.len());
+    }
+
+    total_uniformity / to_f64(columns.len())
 }
 
 /// Converts a count to `f64` for ratio scoring, saturating at `u32::MAX`.
@@ -238,6 +254,15 @@ mod tests {
     #[test]
     fn misshapen_rows_as_many_as_the_rest_fail_the_parse() {
         assert!(Table::parse(b"1;a;10\n2;b\n3;c;30\n4\n", &semicolon_dialect(Preamble::NONE)).is_none());
+    }
+
+    #[test]
+    fn an_empty_last_column_a_trailing_delimiter_leaves_does_not_lower_the_score() {
+        let plain = Table::parse(b"id;name;value\n1;a;10\n2;b;20\n", &semicolon_dialect(Preamble::NONE)).unwrap();
+        let trailing = Table::parse(b"id;name;value;\n1;a;10\n2;b;20\n", &semicolon_dialect(Preamble::NONE)).unwrap();
+
+        assert_eq!(trailing.num_columns, 4);
+        assert!((trailing.score() - plain.score()).abs() < f64::EPSILON);
     }
 
     #[test]

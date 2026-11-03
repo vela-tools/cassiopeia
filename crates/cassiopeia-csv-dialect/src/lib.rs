@@ -18,4 +18,5 @@ pub mod quote;
 mod record_end;
 pub mod row_number;
 pub mod statement;
+pub mod table_reader;
 pub mod value_notation;

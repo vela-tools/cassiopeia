@@ -7,9 +7,10 @@ use crate::{
     preamble::Preamble,
     quote::Quote,
     record_end::{RecordEnd, skip_record},
+    table_reader::TableReader,
     value_notation::ValueNotation,
 };
-use csv::{ErrorKind, Reader, ReaderBuilder, StringRecord};
+use csv::{Reader, ReaderBuilder, StringRecord};
 use csv_core::{Reader as CoreReader, ReaderBuilder as CoreReaderBuilder};
 use encoding_rs::Encoding;
 use serde::Serialize;
@@ -59,7 +60,8 @@ impl Dialect {
 
     /// Opens `input`, already decoded to UTF-8 with [`Self::character_encoding`], as CSV under this
     /// dialect: skips the preamble, joins a stacked header into one row of field names, and returns a
-    /// reader whose next record is the first data row.
+    /// reader whose next row is the first data row, each row brought to the table's width or
+    /// reported as misshapen.
     ///
     /// Every parse of a profiled CSV goes through here, the dialect inspector's candidate scoring,
     /// the detector, and the ingestor alike, so they all agree on where the table starts, what its
@@ -69,14 +71,14 @@ impl Dialect {
     ///
     /// Returns a [`csv::Error`] when `input` cannot be read while skipping the preamble or when a
     /// header record cannot be parsed.
-    pub fn reader<R: BufRead>(&self, mut input: R) -> csv::Result<Reader<R>> {
+    pub fn reader<R: BufRead>(&self, mut input: R) -> csv::Result<TableReader<R>> {
         self.preamble.skip(&mut self.core_reader(), &mut input)?;
         let mut reader = self.reader_builder().from_reader(input);
         if self.header_rows.records() > 1 {
             let names = self.joined_header(&mut reader)?;
             reader.set_headers(names);
         }
-        Ok(reader)
+        TableReader::new(reader, self.preamble)
     }
 
     /// Reads the header records and joins each column's non-blank cells, top to bottom, with a
@@ -85,17 +87,13 @@ impl Dialect {
     ///
     /// The first header record sets the table's width. A later header record of another width is
     /// still joined by position, over the columns it reaches, rather than failing the file: a unit
-    /// row a spreadsheet wrote one cell short names the columns it has. The `csv` reader fills the
-    /// record before it checks its width, so the record holds the row's cells either way.
+    /// row a spreadsheet wrote one cell short names the columns it has.
     fn joined_header<R: Read>(&self, reader: &mut Reader<R>) -> csv::Result<StringRecord> {
         let mut names: Vec<String> = reader.headers()?.iter().map(|cell| cell.trim().to_owned()).collect();
         let mut row = StringRecord::new();
         for _ in 1..self.header_rows.records() {
-            match reader.read_record(&mut row) {
-                Ok(true) => {}
-                Ok(false) => break,
-                Err(error) if matches!(error.kind(), ErrorKind::UnequalLengths { .. }) => {}
-                Err(error) => return Err(error),
+            if !reader.read_record(&mut row)? {
+                break;
             }
             for (name, cell) in names.iter_mut().zip(row.iter()) {
                 let cell = cell.trim();
@@ -131,8 +129,9 @@ impl Dialect {
         &sample[..complete]
     }
 
-    /// The table reader configuration: non-flexible, so a record whose field count differs from the
-    /// first one is a parse error. It does not skip the preamble; [`Self::reader`] does that first.
+    /// The table reader configuration: flexible, so a record of any field count is read, and
+    /// [`TableReader`] decides whether it fits the table. It does not skip the preamble;
+    /// [`Self::reader`] does that first.
     ///
     /// Both readers leave `double_quote` on whatever the escape, so a doubled quote reads as one
     /// under an escape byte too; `csv_core` checks for the escape byte only after the quote.
@@ -142,6 +141,7 @@ impl Dialect {
         builder
             .delimiter(self.delimiter.byte())
             .has_headers(self.header_rows.is_present())
+            .flexible(true)
             .terminator(self.terminator.as_csv())
             .escape(self.escape.byte());
         match self.quote_char.byte() {
