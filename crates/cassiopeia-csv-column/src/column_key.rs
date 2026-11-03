@@ -11,7 +11,7 @@ pub struct ColumnKey(String);
 
 #[cfg(test)]
 mod tests {
-    use crate::csv::column_key::ColumnKey;
+    use crate::column_key::ColumnKey;
     use pretty_assertions::assert_eq;
 
     #[test]

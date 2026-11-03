@@ -89,6 +89,7 @@ fn qualifier(field: &ContextField) -> Option<String> {
         | ContextField::SchemaPath(_)
         | ContextField::Keyword(_)
         | ContextField::Detail(_)
+        | ContextField::RenamedColumn(_)
         | ContextField::Entities { .. }
         | ContextField::SourcePath(_)
         | ContextField::Attempt { .. }
@@ -111,6 +112,7 @@ const fn explanation(field: &ContextField) -> Option<&str> {
         | ContextField::InstancePath(_)
         | ContextField::SchemaPath(_)
         | ContextField::Keyword(_)
+        | ContextField::RenamedColumn(_)
         | ContextField::Entities { .. }
         | ContextField::SourcePath(_)
         | ContextField::Attempt { .. }
@@ -171,6 +173,7 @@ fn field_row(field: &ContextField) -> (&'static str, String) {
         ContextField::SchemaPath(pointer) => ("schema", pointer.as_str().to_owned()),
         ContextField::Keyword(keyword) => ("keyword", keyword.to_string()),
         ContextField::Detail(detail) => ("detail", detail.as_str().to_owned()),
+        ContextField::RenamedColumn(renamed) => ("renamed", renamed.to_string()),
         ContextField::Entities { first, additional } => (
             "entities",
             if *additional == 0 {
@@ -203,8 +206,9 @@ fn body_value(body: &CapturedBody) -> String {
 #[cfg(test)]
 mod tests {
     use crate::backend::terminal::diagnostic_lines::diagnostic_lines;
+    use cassiopeia_csv_column::{column_key::ColumnKey, column_number::ColumnNumber, renamed_column::RenamedColumn};
     use cassiopeia_diagnostic::{
-        code::{broker_code::BrokerCode, diagnostic_code::DiagnosticCode, schema_code::SchemaCode},
+        code::{broker_code::BrokerCode, diagnostic_code::DiagnosticCode, ingest_code::IngestCode, schema_code::SchemaCode},
         context_field::ContextField,
         detail::Detail,
         diagnostic::Diagnostic,
@@ -293,6 +297,34 @@ mod tests {
         assert_eq!(
             diagnostic_lines(&diagnostic, Verbosity::Concise, Rendering::Plain),
             vec!["\u{d7} Broker worker thread panicked".to_owned()]
+        );
+    }
+
+    #[test]
+    fn renamed_columns_are_listed_only_in_the_verbose_form() {
+        let diagnostic = DiagnosticBuilder::new(
+            Severity::Warning,
+            DiagnosticCode::Ingest(IngestCode::ColumnsRenamed),
+            "The header of `/data/values.csv` gives more than one column the same record key",
+        )
+        .with_context(ContextField::RenamedColumn(RenamedColumn {
+            wanted: ColumnKey::from("value".to_owned()),
+            holder: ColumnNumber::of_index(1),
+            column: ColumnNumber::of_index(2),
+            key: ColumnKey::from("value@3".to_owned()),
+        }))
+        .build();
+
+        assert_eq!(
+            diagnostic_lines(&diagnostic, Verbosity::Concise, Rendering::Plain),
+            vec!["! The header of `/data/values.csv` gives more than one column the same record key".to_owned()]
+        );
+        assert_eq!(
+            diagnostic_lines(&diagnostic, Verbosity::Full, Rendering::Plain),
+            vec![
+                "! The header of `/data/values.csv` gives more than one column the same record key".to_owned(),
+                "  \u{2570}\u{2500} renamed     column 3 `value` is read as `value@3`, as column 2 keeps `value`".to_owned(),
+            ]
         );
     }
 

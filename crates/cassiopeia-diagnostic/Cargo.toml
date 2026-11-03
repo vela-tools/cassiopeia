@@ -9,6 +9,7 @@ repository.workspace = true
 
 [dependencies]
 cassiopeia-common.workspace = true
+cassiopeia-csv-column.workspace = true
 cassiopeia-ngsi-ld.workspace = true
 dashmap = "6.2.1"
 derive_more = { version = "2.1.1", features = ["as_ref", "display", "from"] }

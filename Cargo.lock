@@ -551,6 +551,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "cassiopeia-csv-column"
+version = "1.1.1"
+dependencies = [
+ "derive_more",
+ "pretty_assertions",
+]
+
+[[package]]
 name = "cassiopeia-csv-dialect"
 version = "1.1.1"
 dependencies = [
@@ -592,6 +600,7 @@ name = "cassiopeia-diagnostic"
 version = "1.1.1"
 dependencies = [
  "cassiopeia-common",
+ "cassiopeia-csv-column",
  "cassiopeia-ngsi-ld",
  "dashmap",
  "derive_more",
@@ -681,13 +690,13 @@ dependencies = [
  "bytecount",
  "cassiopeia-common",
  "cassiopeia-crs",
+ "cassiopeia-csv-column",
  "cassiopeia-csv-dialect",
  "cassiopeia-data-profiler",
  "cassiopeia-ir",
  "convert_case 0.12.0",
  "csv",
  "dbase",
- "derive_more",
  "eccodes",
  "encoding_rs",
  "encoding_rs_rw",
@@ -821,6 +830,7 @@ dependencies = [
  "cassiopeia-batch-sink",
  "cassiopeia-collector",
  "cassiopeia-common",
+ "cassiopeia-csv-column",
  "cassiopeia-csv-dialect",
  "cassiopeia-diagnostic",
  "cassiopeia-expander",
@@ -874,6 +884,7 @@ version = "1.1.1"
 dependencies = [
  "anstyle",
  "cassiopeia-common",
+ "cassiopeia-csv-column",
  "cassiopeia-diagnostic",
  "cassiopeia-directories",
  "cassiopeia-terminal-style",

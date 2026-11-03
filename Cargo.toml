@@ -96,6 +96,7 @@ cassiopeia-collector = { path = "crates/cassiopeia-collector" }
 cassiopeia-common = { path = "crates/cassiopeia-common" }
 cassiopeia-configuration = { path = "crates/cassiopeia-configuration" }
 cassiopeia-crs = { path = "crates/cassiopeia-crs" }
+cassiopeia-csv-column = { path = "crates/cassiopeia-csv-column" }
 cassiopeia-csv-dialect = { path = "crates/cassiopeia-csv-dialect" }
 cassiopeia-data-profiler = { path = "crates/cassiopeia-data-profiler" }
 cassiopeia-diagnostic = { path = "crates/cassiopeia-diagnostic" }

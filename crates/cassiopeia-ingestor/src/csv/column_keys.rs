@@ -1,5 +1,5 @@
-use crate::csv::{column_key::ColumnKey, column_number::ColumnNumber, renamed_column::RenamedColumn};
 use ::csv::StringRecord;
+use cassiopeia_csv_column::{column_key::ColumnKey, column_number::ColumnNumber, renamed_column::RenamedColumn};
 use std::collections::HashMap;
 
 /// The record key of every column of a CSV header, no two alike, and the columns that had to be
@@ -38,7 +38,7 @@ struct WantedKey {
 /// The key a column is read by in place of the one it asks for, and the column holding that one.
 struct Rename {
     holder: usize,
-    key: String,
+    key: ColumnKey,
 }
 
 impl ColumnKeys {
@@ -55,7 +55,6 @@ impl ColumnKeys {
             .map(|(index, (wanted, rename))| match rename {
                 None => wanted.key,
                 Some(Rename { holder, key }) => {
-                    let key = ColumnKey::from(key);
                     renamed.push(RenamedColumn {
                         wanted: wanted.key,
                         holder: ColumnNumber::of_index(holder),
@@ -119,26 +118,35 @@ impl ColumnKeys {
         let mut renames: Vec<Option<Rename>> = Vec::with_capacity(wanted.len());
         for (index, column) in wanted.iter().enumerate() {
             let rename = match holders.get(column.key.as_ref()) {
-                Some(&holder) if holder != index => {
-                    let suffix = format!("@{}", ColumnNumber::of_index(index));
-                    let mut key = format!("{}{suffix}", column.key);
-                    while holders.contains_key(key.as_str()) || renames.iter().flatten().any(|rename| rename.key == key) {
-                        key.push_str(&suffix);
-                    }
-                    Some(Rename { holder, key })
-                }
+                Some(&holder) if holder != index => Some(Rename {
+                    holder,
+                    key: Self::generated_key(&column.key, index, &holders, &renames),
+                }),
                 Some(_) | None => None,
             };
             renames.push(rename);
         }
         renames
     }
+
+    /// The key the renamed column at `index` is read by: `wanted` with the `@<column number>` suffix,
+    /// appended again while the result is a key some header asks for or a key generated for an
+    /// earlier column.
+    fn generated_key(wanted: &ColumnKey, index: usize, holders: &HashMap<&str, usize>, earlier: &[Option<Rename>]) -> ColumnKey {
+        let suffix = format!("@{}", ColumnNumber::of_index(index));
+        let mut key = format!("{wanted}{suffix}");
+        while holders.contains_key(key.as_str()) || earlier.iter().flatten().any(|rename| AsRef::<str>::as_ref(&rename.key) == key) {
+            key.push_str(&suffix);
+        }
+        ColumnKey::from(key)
+    }
 }
 
 #[cfg(test)]
 mod tests {
-    use crate::csv::{column_key::ColumnKey, column_keys::ColumnKeys, column_number::ColumnNumber, renamed_column::RenamedColumn};
+    use crate::csv::column_keys::ColumnKeys;
     use ::csv::StringRecord;
+    use cassiopeia_csv_column::{column_key::ColumnKey, column_number::ColumnNumber, renamed_column::RenamedColumn};
     use pretty_assertions::assert_eq;
 
     fn keys_of(headers: &[&str]) -> ColumnKeys {

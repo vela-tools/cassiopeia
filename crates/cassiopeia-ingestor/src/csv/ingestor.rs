@@ -1,10 +1,11 @@
 use crate::{
-    csv::{column_key::ColumnKey, column_keys::ColumnKeys, error::CsvIngestError, line_counting_reader::LineCountingReader, renamed_column::RenamedColumn},
+    csv::{column_keys::ColumnKeys, error::CsvIngestError, line_counting_reader::LineCountingReader},
     error::IngestorError,
     ingestor::Ingestor,
 };
 use ::csv::{Reader, StringRecord};
 use cassiopeia_common::{channel::ChannelSender, signal::Signal};
+use cassiopeia_csv_column::{column_key::ColumnKey, renamed_column::RenamedColumn};
 use cassiopeia_csv_dialect::{decimal_separator::DecimalSeparator, dialect::Dialect, value_notation::ValueNotation};
 use cassiopeia_data_profiler::metadata::FormatMetadata;
 use cassiopeia_ir::{
@@ -253,11 +254,9 @@ impl Ingestor for CsvIngestor {
 
 #[cfg(test)]
 mod tests {
-    use crate::{
-        csv::{column_key::ColumnKey, column_number::ColumnNumber, ingestor::CsvIngestor, renamed_column::RenamedColumn},
-        ingestor::Ingestor,
-    };
+    use crate::{csv::ingestor::CsvIngestor, ingestor::Ingestor};
     use cassiopeia_common::{channel::ChannelSender, format::DataFormat, signal::Signal};
+    use cassiopeia_csv_column::{column_key::ColumnKey, column_number::ColumnNumber, renamed_column::RenamedColumn};
     use cassiopeia_csv_dialect::{
         character_encoding::CharacterEncoding,
         decimal_separator::DecimalSeparator,
