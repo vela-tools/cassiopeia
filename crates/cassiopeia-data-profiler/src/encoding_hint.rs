@@ -1,4 +1,4 @@
-use crate::{encoding_evidence::evidence_lines, top_level_domain::TopLevelDomain};
+use crate::{bomless_utf16::bomless_utf16, encoding_evidence::evidence_lines, top_level_domain::TopLevelDomain};
 use chardetng::{EncodingDetector, Iso2022JpDetection, Utf8Detection};
 use encoding_rs::{Encoding, UTF_8};
 use mediatype::{MediaTypeBuf, ReadParams, names::CHARSET};
@@ -46,7 +46,9 @@ impl EncodingHint {
     /// (clause 6) sniffs it ahead of any label, and the ingestor's decoder honours it the same way,
     /// so a UTF-16 file with a BOM is reported as the encoding it is read in. Otherwise a declared
     /// `charset` wins: the `Content-Type` parameter defines the encoding of a `text/csv` body
-    /// (RFC 4180 clause 3, RFC 9110 clause 8.3.2). Content that is valid UTF-8 throughout is UTF-8,
+    /// (RFC 4180 clause 3, RFC 9110 clause 8.3.2). Content whose every other byte is mostly NUL is
+    /// UTF-16 without a BOM, in the byte order the NULs mark; see [`bomless_utf16`]. It is checked
+    /// ahead of UTF-8, since NUL is valid UTF-8. Content that is valid UTF-8 throughout is UTF-8,
     /// pure ASCII included. Otherwise the encoding is detected from the content,
     /// with the top-level domain weighing the guess toward the encodings native to its region, as a
     /// browser weighs an undeclared page. ISO-2022-JP detection is denied, since it is only reliable
@@ -64,6 +66,9 @@ impl EncodingHint {
         }
         if let Some(declared) = self.declared {
             return declared;
+        }
+        if let Some(utf16) = bomless_utf16(bytes) {
+            return utf16;
         }
         if str::from_utf8(bytes).is_ok() {
             return UTF_8;
@@ -156,6 +161,21 @@ mod tests {
         let hint = remote("https://www.wien.gv.at/feed.csv", Some("text/csv; charset=windows-1252"));
 
         assert_eq!(hint.encoding_of(&utf_16le_with_bom()), UTF_16LE);
+    }
+
+    #[test]
+    fn utf_16le_without_a_byte_order_mark_is_read_as_utf_16le_without_a_hint() {
+        let bytes: Vec<u8> = "id;name\n1;Café\n".encode_utf16().flat_map(u16::to_le_bytes).collect();
+
+        assert_eq!(EncodingHint::NONE.encoding_of(&bytes), UTF_16LE);
+    }
+
+    #[test]
+    fn a_declared_charset_wins_over_the_nul_pattern_of_utf_16() {
+        let hint = remote("https://www.wien.gv.at/feed.csv", Some("text/csv; charset=windows-1252"));
+        let bytes: Vec<u8> = "id;name\n1;Cafe\n".encode_utf16().flat_map(u16::to_le_bytes).collect();
+
+        assert_eq!(hint.encoding_of(&bytes), WINDOWS_1252);
     }
 
     #[test]
