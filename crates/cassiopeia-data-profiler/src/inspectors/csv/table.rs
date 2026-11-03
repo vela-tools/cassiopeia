@@ -1,4 +1,4 @@
-use crate::inspectors::csv::{data_type::DataType, table_shape::TableShape};
+use crate::inspectors::csv::{data_type::DataType, sentence::is_sentence, table_shape::TableShape};
 use ::csv::StringRecord;
 use cassiopeia_csv_dialect::{dialect::Dialect, misshapen_row::MisshapenRow};
 use std::collections::HashMap;
@@ -63,8 +63,24 @@ impl Table {
     }
 
     /// Whether the table is tabular data of `shape`: a row, and as many columns as the shape takes.
-    pub const fn is_tabular(&self, shape: TableShape) -> bool {
-        shape.fits(self.num_columns) && self.num_rows > 0
+    ///
+    /// A single column is also no table when most of its cells are sentences. Every candidate
+    /// reads plain prose as one column, a line to a record, so that column is a text, not a list.
+    pub fn is_tabular(&self, shape: TableShape) -> bool {
+        let fits = shape.fits(self.num_columns) && self.num_rows > 0;
+        match shape {
+            TableShape::MultiColumn => fits,
+            TableShape::SingleColumn => fits && !self.reads_as_prose(),
+        }
+    }
+
+    /// Whether more than half of the table's non-blank cells are sentences.
+    fn reads_as_prose(&self) -> bool {
+        let cells = self.records.iter().flatten().filter(|cell| !cell.trim().is_empty());
+        let (sentences, total) = cells.fold((0usize, 0usize), |(sentences, total), cell| {
+            (sentences + usize::from(is_sentence(cell)), total + 1)
+        });
+        sentences * 2 > total
     }
 
     /// Scores how coherent the table is, independent of whether row 0 is a header. The header
@@ -278,6 +294,20 @@ mod tests {
         let table = Table::parse(b"a\nb\n", &semicolon_dialect(Preamble::NONE)).unwrap();
 
         assert!(!table.is_tabular(TableShape::MultiColumn));
+        assert!(table.is_tabular(TableShape::SingleColumn));
+    }
+
+    #[test]
+    fn a_single_column_of_sentences_is_not_tabular() {
+        let table = Table::parse(b"Introduction\nThis is a text.\nMore text here.\n", &semicolon_dialect(Preamble::NONE)).unwrap();
+
+        assert!(!table.is_tabular(TableShape::SingleColumn));
+    }
+
+    #[test]
+    fn a_single_column_with_one_sentence_among_names_is_tabular() {
+        let table = Table::parse(b"Ada\nGrace\nThis one is a sentence.\nLinus\n", &semicolon_dialect(Preamble::NONE)).unwrap();
+
         assert!(table.is_tabular(TableShape::SingleColumn));
     }
 
