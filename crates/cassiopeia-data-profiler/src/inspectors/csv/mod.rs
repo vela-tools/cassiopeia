@@ -237,11 +237,15 @@ impl<'s> CsvInspector<'s> {
     }
 
     /// The line terminator of `sample`: CRLF as soon as one line ends with it, a lone CR when the
-    /// sample has carriage returns but no line feed at all, and LF otherwise.
+    /// sample has more carriage returns than line feeds, and LF otherwise.
+    ///
+    /// The quote is not detected yet, so a line break inside a quoted field cannot be told from one
+    /// that ends a record; the more frequent byte is taken as the terminator, and the other as such a
+    /// quoted break. A CR-terminated file with a line feed in a quoted cell is still read by CR.
     fn terminator_of(sample: &[u8]) -> LineTerminator {
         if sample.windows(2).any(|w| w == b"\r\n") {
             LineTerminator::Crlf
-        } else if sample.contains(&b'\r') && !sample.contains(&b'\n') {
+        } else if bytecount::count(sample, b'\r') > bytecount::count(sample, b'\n') {
             LineTerminator::Cr
         } else {
             LineTerminator::Lf
@@ -452,6 +456,18 @@ mod tests {
         let dialect = CsvInspector::new(&DialectStatement::NOTHING).inspect(&Content::new(sample.as_bytes())).unwrap();
 
         assert_eq!(dialect.terminator, LineTerminator::Lf);
+    }
+
+    #[test]
+    fn a_line_feed_inside_a_file_of_lone_carriage_returns_leaves_the_terminator_cr() {
+        let sample = "id;note\r1;\"one\ntwo\"\r2;three\r3;four\r";
+        let dialect = CsvInspector::new(&DialectStatement::NOTHING).inspect(&Content::new(sample.as_bytes())).unwrap();
+        let mut reader = dialect.reader(sample.as_bytes()).unwrap();
+
+        assert_eq!(dialect.terminator, LineTerminator::Cr);
+        assert_eq!(dialect.header_rows, HeaderRows::ONE);
+        assert_eq!(reader.headers().unwrap(), vec!["id", "note"]);
+        assert_eq!(reader.records().next().unwrap().unwrap(), vec!["1", "one\ntwo"]);
     }
 
     #[test]
