@@ -1,11 +1,9 @@
 use crate::{
     metadata::EntityMetadata,
     relationships::{InstanceRelationships, NestedRelationships, Relationships},
+    resolved_attribute::ResolvedAttribute,
 };
-use cassiopeia_ngsi_ld::{
-    entity::{name::NameBuf, scope::NgsiLdScope},
-    value::types::Value as NgsiValue,
-};
+use cassiopeia_ngsi_ld::entity::{name::NameBuf, scope::NgsiLdScope};
 use chrono::{DateTime, Utc};
 use foldhash::fast::RandomState;
 use getset::{Getters, Setters};
@@ -16,10 +14,12 @@ use urn_rs::Urn;
 
 /// An entity's resolved attribute values, keyed by attribute name in declaration order.
 ///
+/// An attribute that resolved to nothing has no entry.
+///
 /// The keys are attribute names a mapping declared, and every attribute of every record is inserted
 /// and then removed here, so the map hashes with `foldhash` rather than the standard library's
 /// `SipHash`.
-pub type AttributeValues = IndexMap<NameBuf, NgsiValue, RandomState>;
+pub type AttributeValues = IndexMap<NameBuf, ResolvedAttribute, RandomState>;
 
 /// The owned constituent parts of an [`Entity`], produced by [`Entity::into_parts`].
 ///
@@ -129,8 +129,10 @@ impl Entity {
 #[cfg(test)]
 mod tests {
     use crate::{
+        attribute_content::AttributeContent,
         entity::{Entity, EntityParts},
         relationship_path::RelationshipPath,
+        resolved_attribute::ResolvedAttribute,
     };
     use cassiopeia_ngsi_ld::{entity::name::NameBuf, value::types::Value as NgsiValue};
     use indexmap::IndexMap;
@@ -174,7 +176,10 @@ mod tests {
     fn set_values_and_metadata_are_reflected_by_the_getters() {
         let mut entity = Entity::new(urn(), json!({}), None, None, IndexMap::default(), None);
         let mut values = IndexMap::default();
-        values.insert(NameBuf::new("temperature").expect("valid"), NgsiValue::Boolean(true));
+        values.insert(
+            NameBuf::new("temperature").expect("valid"),
+            ResolvedAttribute::Single(AttributeContent::Value(NgsiValue::Boolean(true))),
+        );
         entity.set_values(Some(values.clone()));
         assert_eq!(entity.values().as_ref(), Some(&values));
     }

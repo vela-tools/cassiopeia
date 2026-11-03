@@ -10,18 +10,32 @@
 //! not authorise converting in
 //! [`DroppedGeometries`](crate::dropped_geometries::DroppedGeometries), text that reads as no
 //! date-time in
-//! [`UnreadableTimestamps`](cassiopeia_unreadable_timestamps::unreadable_timestamps::UnreadableTimestamps).
-//! An attribute whose template fails to render against the record is dropped the same way, and
-//! recorded in [`UnresolvedTemplates`](crate::unresolved_templates::UnresolvedTemplates). All three
-//! sinks travel together as [`DroppedAttributes`](crate::dropped_attributes::DroppedAttributes).
-//! Either way the entity still reaches the writer and the run can report what it lost.
+//! [`UnreadableTimestamps`](cassiopeia_unreadable_timestamps::unreadable_timestamps::UnreadableTimestamps),
+//! and a `JsonProperty` source that is no JSON object in
+//! [`RefusedJsonPayloads`](crate::refused_json_payloads::RefusedJsonPayloads). An attribute whose
+//! template fails to render against the record is dropped the same way, and recorded in
+//! [`UnresolvedTemplates`](crate::unresolved_templates::UnresolvedTemplates).
+//!
+//! No value holds a null: NGSI-LD admits none anywhere in an entity (ETSI GS CIM 009 v1.9.1 clause
+//! 4.5.0), so a null nested in a source value is left out of it and recorded in
+//! [`DroppedNulls`](crate::dropped_nulls::DroppedNulls), while the attribute is kept. Only a
+//! `JsonProperty` keeps its source's nulls, because its `json` member is a JSON literal that NGSI-LD
+//! never interprets (clause 4.5.24.2).
+//!
+//! All the sinks travel together as
+//! [`DroppedAttributes`](crate::dropped_attributes::DroppedAttributes). Either way the entity still
+//! reaches the writer and the run can report what it lost.
 
 pub mod attribute;
 pub mod dropped_attributes;
 pub mod dropped_geometries;
 pub mod dropped_geometry;
+pub mod dropped_null;
+pub mod dropped_nulls;
 pub mod entity_extractor;
 pub mod error;
 pub mod extractor;
+pub mod refused_json_payload;
+pub mod refused_json_payloads;
 pub mod unresolved_template;
 pub mod unresolved_templates;

@@ -1,5 +1,6 @@
 use crate::metadata::MetadataSummary;
 use cassiopeia_geometry::geometry::NgsiLdGeometry;
+use cassiopeia_ir::attribute_content::AttributeContent;
 use cassiopeia_ngsi_ld::{
     entity::{
         attribute::{
@@ -16,7 +17,7 @@ use cassiopeia_ngsi_ld::{
         builder::attribute::{IntoAttributeWrapper, PropertyBuilder, RelationshipBuilder},
         name::NameBuf,
     },
-    value::types::Value,
+    value::{json_payload::JsonPayload, types::Value},
 };
 use iri_rs::IriBuf;
 use langtag::LangTagBuf;
@@ -91,7 +92,8 @@ pub fn build_geo_property(geometry: NgsiLdGeometry, meta: MetadataSummary) -> Ng
 /// Builds a `LanguageProperty` from a value that is an object of language tag to text.
 ///
 /// A value that is not an object yields no attribute: a `languageMap` is defined only over a set of
-/// language-tagged strings (ETSI GS CIM 009 v1.9.1 clause 4.5.18).
+/// language-tagged strings (ETSI GS CIM 009 v1.9.1 clause 4.5.18). Neither does an object in which no
+/// entry is a well-formed tag with text: an empty `languageMap` carries no value at all.
 #[must_use]
 pub fn build_language_property(value: Value, meta: MetadataSummary) -> Option<NgsiLdAttributeWrapper> {
     let mut language_map = LanguageMap::default();
@@ -104,9 +106,12 @@ pub fn build_language_property(value: Value, meta: MetadataSummary) -> Option<Ng
                 }
             }
         }
-        Value::Null | Value::Boolean(_) | Value::Number(_) | Value::String(_) | Value::Temporal(_) | Value::Geospatial(_) | Value::Array(_) => {
+        Value::Boolean(_) | Value::Number(_) | Value::String(_) | Value::Temporal(_) | Value::Geospatial(_) | Value::Array(_) => {
             return None;
         }
+    }
+    if language_map.is_empty() {
+        return None;
     }
 
     let mut property = NgsiLdLanguageProperty::new(language_map);
@@ -140,7 +145,7 @@ pub fn build_vocab_property(value: &Value, meta: MetadataSummary) -> Option<Ngsi
 pub fn build_list_property(value: Value, meta: MetadataSummary) -> NgsiLdAttributeWrapper {
     let has_value_list = match value {
         Value::Array(values) => values,
-        Value::Null | Value::Boolean(_) | Value::Number(_) | Value::String(_) | Value::Temporal(_) | Value::Geospatial(_) | Value::Object(_) => vec![value],
+        Value::Boolean(_) | Value::Number(_) | Value::String(_) | Value::Temporal(_) | Value::Geospatial(_) | Value::Object(_) => vec![value],
     };
 
     let mut property = NgsiLdListProperty::new(has_value_list);
@@ -152,10 +157,10 @@ pub fn build_list_property(value: Value, meta: MetadataSummary) -> NgsiLdAttribu
     NgsiLdAttributeWrapper::single(NgsiLdAttribute::ListProperty(property))
 }
 
-/// Builds a `JsonProperty` carrying the value verbatim.
+/// Builds a `JsonProperty` carrying its raw JSON verbatim.
 #[must_use]
-pub fn build_json_property(value: Value, meta: MetadataSummary) -> NgsiLdAttributeWrapper {
-    let mut property = NgsiLdJsonProperty::new(value);
+pub fn build_json_property(payload: JsonPayload, meta: MetadataSummary) -> NgsiLdAttributeWrapper {
+    let mut property = NgsiLdJsonProperty::new(payload);
     property.observed_at = meta.observed_at;
     property.expires_at = meta.expires_at;
     property.dataset_id = meta.dataset_id;
@@ -177,24 +182,46 @@ pub fn build_list_relationship(objects: Vec<Urn>, object_type: Option<NameBuf>, 
     NgsiLdAttributeWrapper::single(NgsiLdAttribute::ListRelationship(relationship))
 }
 
-/// Builds one sub-attribute from the NGSI-LD kind it was declared as, its value, its target type (for
-/// a relationship), and its own metadata.
+/// Builds one sub-attribute from the NGSI-LD kind it was declared as, its content, its target type
+/// (for a relationship), and its own metadata.
 ///
 /// A sub-attribute is the serialization of a Property or any of its subclasses, and of a Relationship
 /// (ETSI GS CIM 009 v1.9.1 clause 4.5.2.2 with 4.5.3), so every kind is dispatched to its own builder
-/// and keeps the kind it declared rather than being flattened. A builder that rejects its value (a
+/// and keeps the kind it declared rather than being flattened. A builder that rejects its content (a
 /// non-IRI `VocabProperty`, a non-object `LanguageProperty`, a `Relationship` whose value is not a
-/// valid URN, an empty `ListRelationship`) yields `None`, dropping the sub-attribute rather than
-/// emitting it malformed. A `GeoProperty` is built only around a geometry the extraction stage
-/// already typed under its own `geometry` policy; nothing is parsed here. `object_type` is consulted
-/// only by the two relationship kinds.
+/// valid URN, an empty `ListRelationship`, a `JsonProperty` whose content is no raw JSON, or any other
+/// kind whose content is raw JSON rather than a value) yields `None`, dropping the sub-attribute
+/// rather than emitting it malformed. A `GeoProperty` is built only around a geometry the extraction
+/// stage already typed under its own `geometry` policy; nothing is parsed here. `object_type` is
+/// consulted only by the two relationship kinds.
 #[must_use]
-pub fn build_sub_attribute(kind: NgsiLdAttributeKind, value: Value, object_type: Option<NameBuf>, meta: MetadataSummary) -> Option<NgsiLdAttributeWrapper> {
+pub fn build_sub_attribute(
+    kind: NgsiLdAttributeKind,
+    content: AttributeContent,
+    object_type: Option<NameBuf>,
+    meta: MetadataSummary,
+) -> Option<NgsiLdAttributeWrapper> {
+    let value = match content {
+        AttributeContent::Value(value) => value,
+        AttributeContent::Json(payload) => {
+            return match kind {
+                NgsiLdAttributeKind::JsonProperty => Some(build_json_property(payload, meta)),
+                NgsiLdAttributeKind::Property
+                | NgsiLdAttributeKind::GeoProperty
+                | NgsiLdAttributeKind::ListProperty
+                | NgsiLdAttributeKind::VocabProperty
+                | NgsiLdAttributeKind::LanguageProperty
+                | NgsiLdAttributeKind::Relationship
+                | NgsiLdAttributeKind::ListRelationship => None,
+            };
+        }
+    };
     match kind {
         NgsiLdAttributeKind::Property => Some(build_property(value, meta)),
         NgsiLdAttributeKind::GeoProperty => value.into_geometry().map(|geometry| build_geo_property(geometry, meta)),
         NgsiLdAttributeKind::ListProperty => Some(build_list_property(value, meta)),
-        NgsiLdAttributeKind::JsonProperty => Some(build_json_property(value, meta)),
+        // A `JsonProperty` carries raw JSON, never a Value.
+        NgsiLdAttributeKind::JsonProperty => None,
         NgsiLdAttributeKind::VocabProperty => build_vocab_property(&value, meta),
         NgsiLdAttributeKind::LanguageProperty => build_language_property(value, meta),
         NgsiLdAttributeKind::Relationship => {
@@ -231,12 +258,16 @@ mod tests {
         metadata::MetadataSummary,
     };
     use cassiopeia_geometry::geometry::NgsiLdGeometry;
+    use cassiopeia_ir::attribute_content::AttributeContent;
     use cassiopeia_ngsi_ld::{
         entity::{
             attribute::{NgsiLdAttribute, NgsiLdAttributeKind, NgsiLdAttributeWrapper, property::NgsiLdProperty},
             name::NameBuf,
         },
-        value::types::{Number, Value},
+        value::{
+            json_payload::JsonPayload,
+            types::{Number, Value},
+        },
     };
     use chrono::{DateTime, TimeZone, Utc};
     use indexmap::IndexMap;
@@ -269,7 +300,7 @@ mod tests {
     fn a_property_and_a_relationship_carry_their_expires_at_qualifier() {
         let expires_at = Utc.with_ymd_and_hms(2026, 10, 25, 13, 0, 0).unwrap();
 
-        let NgsiLdAttributeWrapper::Single(property) = build_property(Value::from(json!("ok")), expiring_meta(expires_at)) else {
+        let NgsiLdAttributeWrapper::Single(property) = build_property(Value::try_from(json!("ok")).unwrap(), expiring_meta(expires_at)) else {
             panic!("expected a single property");
         };
         let NgsiLdAttribute::Property(property) = property.as_ref() else {
@@ -339,7 +370,7 @@ mod tests {
     fn a_geo_property_sub_attribute_keeps_the_geometry_extraction_typed_it_as() {
         let wrapper = build_sub_attribute(
             NgsiLdAttributeKind::GeoProperty,
-            Value::Geospatial(Box::new(clockwise_square())),
+            AttributeContent::Value(Value::Geospatial(Box::new(clockwise_square()))),
             None,
             empty_meta(),
         )
@@ -355,11 +386,10 @@ mod tests {
         for value in [
             Value::String("not a geometry".into()),
             Value::String(r#"{"type":"Point","coordinates":[1.5,2.5]}"#.into()),
-            Value::from(json!({"type": "Point", "coordinates": [1.5, 2.5]})),
-            Value::Null,
+            Value::try_from(json!({"type": "Point", "coordinates": [1.5, 2.5]})).unwrap(),
         ] {
             assert!(
-                build_sub_attribute(NgsiLdAttributeKind::GeoProperty, value.clone(), None, empty_meta()).is_none(),
+                build_sub_attribute(NgsiLdAttributeKind::GeoProperty, AttributeContent::Value(value.clone()), None, empty_meta()).is_none(),
                 "{value:?}"
             );
         }
@@ -385,7 +415,7 @@ mod tests {
     fn a_relationship_sub_attribute_carries_its_object_and_object_type() {
         let wrapper = build_sub_attribute(
             NgsiLdAttributeKind::Relationship,
-            Value::String("urn:ngsi-ld:Character:JackSparrow".into()),
+            AttributeContent::Value(Value::String("urn:ngsi-ld:Character:JackSparrow".into())),
             Some(name("Character")),
             empty_meta(),
         )
@@ -403,7 +433,15 @@ mod tests {
 
     #[test]
     fn a_relationship_sub_attribute_rejects_a_non_urn_value() {
-        assert!(build_sub_attribute(NgsiLdAttributeKind::Relationship, Value::String("not a urn".into()), None, empty_meta()).is_none());
+        assert!(
+            build_sub_attribute(
+                NgsiLdAttributeKind::Relationship,
+                AttributeContent::Value(Value::String("not a urn".into())),
+                None,
+                empty_meta()
+            )
+            .is_none()
+        );
     }
 
     #[test]
@@ -425,7 +463,10 @@ mod tests {
 
         let wrapper = build_sub_attribute(
             NgsiLdAttributeKind::ListRelationship,
-            Value::Array(vec![Value::String("urn:ngsi-ld:Person:1".into()), Value::String("urn:ngsi-ld:Person:2".into())]),
+            AttributeContent::Value(Value::Array(vec![
+                Value::String("urn:ngsi-ld:Person:1".into()),
+                Value::String("urn:ngsi-ld:Person:2".into()),
+            ])),
             Some(name("Person")),
             meta,
         )
@@ -444,6 +485,56 @@ mod tests {
 
     #[test]
     fn an_empty_list_relationship_sub_attribute_is_dropped() {
-        assert!(build_sub_attribute(NgsiLdAttributeKind::ListRelationship, Value::Array(vec![]), Some(name("Person")), empty_meta()).is_none());
+        assert!(
+            build_sub_attribute(
+                NgsiLdAttributeKind::ListRelationship,
+                AttributeContent::Value(Value::Array(vec![])),
+                Some(name("Person")),
+                empty_meta()
+            )
+            .is_none()
+        );
+    }
+
+    #[test]
+    fn a_json_property_sub_attribute_carries_its_raw_json_with_a_nested_null() {
+        let payload = JsonPayload::try_from(json!({"maybe": null})).unwrap();
+        let wrapper =
+            build_sub_attribute(NgsiLdAttributeKind::JsonProperty, AttributeContent::Json(payload.clone()), None, empty_meta()).expect("json property built");
+
+        let NgsiLdAttributeWrapper::Single(attr) = wrapper else {
+            panic!("expected a single json property");
+        };
+        let NgsiLdAttribute::JsonProperty(property) = attr.as_ref() else {
+            panic!("expected a json property");
+        };
+        assert_eq!(property.has_json, payload);
+    }
+
+    #[test]
+    fn a_json_property_sub_attribute_whose_content_is_a_value_is_dropped() {
+        assert!(
+            build_sub_attribute(
+                NgsiLdAttributeKind::JsonProperty,
+                AttributeContent::Value(Value::Boolean(true)),
+                None,
+                empty_meta()
+            )
+            .is_none()
+        );
+    }
+
+    #[test]
+    fn a_property_sub_attribute_whose_content_is_raw_json_is_dropped() {
+        let payload = JsonPayload::try_from(json!({"a": 1})).unwrap();
+
+        assert!(build_sub_attribute(NgsiLdAttributeKind::Property, AttributeContent::Json(payload), None, empty_meta()).is_none());
+    }
+
+    #[test]
+    fn a_language_property_whose_object_holds_no_tagged_text_is_dropped_rather_than_empty() {
+        let value = Value::try_from(json!({"not a tag!": "hello", "en": 7})).unwrap();
+
+        assert!(build_language_property(value, empty_meta()).is_none());
     }
 }

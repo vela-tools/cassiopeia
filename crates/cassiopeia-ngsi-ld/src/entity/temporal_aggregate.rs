@@ -191,7 +191,7 @@ mod tests {
         },
         value::types::Value,
     };
-    use cassiopeia_common::{representation::NgsiLdRepresentation, skip_null::NgsiLdSkipNull};
+    use cassiopeia_common::representation::NgsiLdRepresentation;
     use cassiopeia_geometry::geometry::NgsiLdGeometry;
     use chrono::{DateTime, Utc};
     use pretty_assertions::assert_eq;
@@ -208,7 +208,7 @@ mod tests {
 
     /// A one-attribute observation: a temporal `maxSustainedWind` Property stamped at `observed_at`.
     fn wind_observation(value: f64, observed_at: &str) -> NgsiLdEntity {
-        let mut property = NgsiLdProperty::new(Value::from(json!(value)));
+        let mut property = NgsiLdProperty::new(Value::try_from(json!(value)).unwrap());
         property.observed_at = Some(at(observed_at));
         let mut entity = NgsiLdEntity::new(storm_id(), NameBuf::new("TropicalCyclone").unwrap());
         entity.attributes.insert(
@@ -261,7 +261,11 @@ mod tests {
 
         assert_eq!(
             wind_series(&entity),
-            vec![Value::from(json!(45.0)), Value::from(json!(50.0)), Value::from(json!(65.0))]
+            vec![
+                Value::try_from(json!(45.0)).unwrap(),
+                Value::try_from(json!(50.0)).unwrap(),
+                Value::try_from(json!(65.0)).unwrap()
+            ]
         );
     }
 
@@ -279,10 +283,10 @@ mod tests {
         assert_eq!(
             wind_series(&entity),
             vec![
-                Value::from(json!(45.0)),
-                Value::from(json!(46.0)),
-                Value::from(json!(47.0)),
-                Value::from(json!(50.0))
+                Value::try_from(json!(45.0)).unwrap(),
+                Value::try_from(json!(46.0)).unwrap(),
+                Value::try_from(json!(47.0)).unwrap(),
+                Value::try_from(json!(50.0)).unwrap()
             ]
         );
     }
@@ -290,7 +294,7 @@ mod tests {
     #[test]
     fn a_static_attribute_is_kept_once_as_a_single_instance() {
         // `name` carries no observedAt, so it stays one value across observations rather than an array.
-        let name_instance = || NgsiLdAttributeWrapper::single(NgsiLdAttribute::Property(NgsiLdProperty::new(Value::from(json!("KATRINA")))));
+        let name_instance = || NgsiLdAttributeWrapper::single(NgsiLdAttribute::Property(NgsiLdProperty::new(Value::try_from(json!("KATRINA")).unwrap())));
         let mut first = wind_observation(50.0, "2005-08-25T18:00:00Z");
         first.attributes.insert(NameBuf::new("name").unwrap(), name_instance());
         let mut second = wind_observation(45.0, "2005-08-25T12:00:00Z");
@@ -336,7 +340,7 @@ mod tests {
         aggregate.push(wind_observation(50.0, "2005-08-25T18:00:00Z"));
         let entity = aggregate.finish();
 
-        let json = entity.to_json(NgsiLdRepresentation::Normalized, NgsiLdSkipNull::Skip).unwrap();
+        let json = entity.to_json(NgsiLdRepresentation::Normalized).unwrap();
         let instances = json
             .get("maxSustainedWind")
             .expect("the serialized attribute")

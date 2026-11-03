@@ -12,7 +12,7 @@ use crate::entity::{
     name::NameBuf,
     representation::{ReprAdapter, SerializeRepr},
 };
-use cassiopeia_common::{representation::NgsiLdRepresentation, skip_null::NgsiLdSkipNull};
+use cassiopeia_common::representation::NgsiLdRepresentation;
 use chrono::{DateTime, Utc};
 use foldhash::fast::RandomState;
 use indexmap::IndexMap;
@@ -47,32 +47,16 @@ impl NgsiLdAttributeWrapper {
     pub fn single(attribute: NgsiLdAttribute) -> NgsiLdAttributeWrapper {
         NgsiLdAttributeWrapper::Single(Box::new(attribute))
     }
-
-    /// Whether null-handling drops this occurrence entirely, so its key is omitted from the parent
-    /// object. A [`NgsiLdAttributeWrapper::Multi`] is dropped only when every instance is null-like.
-    #[must_use]
-    pub(crate) fn is_skipped(&self, skip_null: NgsiLdSkipNull) -> bool {
-        if skip_null != NgsiLdSkipNull::Skip {
-            return false;
-        }
-        match self {
-            NgsiLdAttributeWrapper::Single(attr) => attr.is_null_like(),
-            NgsiLdAttributeWrapper::Multi(attrs) => attrs.iter().all(NgsiLdAttribute::is_null_like),
-        }
-    }
 }
 
 impl SerializeRepr for NgsiLdAttributeWrapper {
-    fn serialize_repr<S: Serializer>(&self, serializer: S, representation: NgsiLdRepresentation, skip_null: NgsiLdSkipNull) -> Result<S::Ok, S::Error> {
+    fn serialize_repr<S: Serializer>(&self, serializer: S, representation: NgsiLdRepresentation) -> Result<S::Ok, S::Error> {
         match self {
-            NgsiLdAttributeWrapper::Single(attr) => attr.serialize_repr(serializer, representation, skip_null),
+            NgsiLdAttributeWrapper::Single(attr) => attr.serialize_repr(serializer, representation),
             NgsiLdAttributeWrapper::Multi(attrs) => {
                 let mut seq = serializer.serialize_seq(None)?;
                 for attr in attrs {
-                    if skip_null == NgsiLdSkipNull::Skip && attr.is_null_like() {
-                        continue;
-                    }
-                    seq.serialize_element(&ReprAdapter::new(attr, representation, skip_null))?;
+                    seq.serialize_element(&ReprAdapter::new(attr, representation))?;
                 }
                 seq.end()
             }
@@ -99,24 +83,6 @@ pub enum NgsiLdAttribute {
 }
 
 impl NgsiLdAttribute {
-    /// Whether null-handling treats this instance as empty (a null or empty value / empty map), so
-    /// skip-null omits it. A vocab property always carries a valid, non-empty IRI by construction;
-    /// relationships reference an object and are never "empty"; a geo property carries one of the
-    /// six geometry types clause 4.7 admits, which has no null or empty form: a value that carried
-    /// no geometry never became a geo property in the first place.
-    #[must_use]
-    pub(crate) fn is_null_like(&self) -> bool {
-        match self {
-            NgsiLdAttribute::Property(p) => p.value.is_null() || p.value.is_empty_string(),
-            NgsiLdAttribute::LanguageProperty(lp) => lp.language_map.is_empty(),
-            NgsiLdAttribute::ListProperty(lp) => lp.has_value_list.is_empty(),
-            NgsiLdAttribute::JsonProperty(jp) => jp.has_json.is_null() || jp.has_json.is_empty_string(),
-            NgsiLdAttribute::GeoProperty(_) | NgsiLdAttribute::VocabProperty(_) | NgsiLdAttribute::Relationship(_) | NgsiLdAttribute::ListRelationship(_) => {
-                false
-            }
-        }
-    }
-
     /// The instant this instance was observed, if it is a temporal instance.
     ///
     /// Every attribute kind carries an optional `observedAt` (NGSI-LD 4.8), so temporal
@@ -137,16 +103,16 @@ impl NgsiLdAttribute {
 }
 
 impl SerializeRepr for NgsiLdAttribute {
-    fn serialize_repr<S: Serializer>(&self, serializer: S, representation: NgsiLdRepresentation, skip_null: NgsiLdSkipNull) -> Result<S::Ok, S::Error> {
+    fn serialize_repr<S: Serializer>(&self, serializer: S, representation: NgsiLdRepresentation) -> Result<S::Ok, S::Error> {
         match self {
-            NgsiLdAttribute::Property(p) => p.serialize_repr(serializer, representation, skip_null),
-            NgsiLdAttribute::Relationship(r) => r.serialize_repr(serializer, representation, skip_null),
-            NgsiLdAttribute::GeoProperty(g) => g.serialize_repr(serializer, representation, skip_null),
-            NgsiLdAttribute::ListRelationship(lr) => lr.serialize_repr(serializer, representation, skip_null),
-            NgsiLdAttribute::LanguageProperty(lp) => lp.serialize_repr(serializer, representation, skip_null),
-            NgsiLdAttribute::VocabProperty(vp) => vp.serialize_repr(serializer, representation, skip_null),
-            NgsiLdAttribute::ListProperty(lp) => lp.serialize_repr(serializer, representation, skip_null),
-            NgsiLdAttribute::JsonProperty(jp) => jp.serialize_repr(serializer, representation, skip_null),
+            NgsiLdAttribute::Property(p) => p.serialize_repr(serializer, representation),
+            NgsiLdAttribute::Relationship(r) => r.serialize_repr(serializer, representation),
+            NgsiLdAttribute::GeoProperty(g) => g.serialize_repr(serializer, representation),
+            NgsiLdAttribute::ListRelationship(lr) => lr.serialize_repr(serializer, representation),
+            NgsiLdAttribute::LanguageProperty(lp) => lp.serialize_repr(serializer, representation),
+            NgsiLdAttribute::VocabProperty(vp) => vp.serialize_repr(serializer, representation),
+            NgsiLdAttribute::ListProperty(lp) => lp.serialize_repr(serializer, representation),
+            NgsiLdAttribute::JsonProperty(jp) => jp.serialize_repr(serializer, representation),
         }
     }
 }
@@ -169,79 +135,61 @@ mod tests {
     use crate::{
         entity::{
             NgsiLdEntity,
-            attribute::{NgsiLdAttribute, NgsiLdAttributeWrapper, geo_property::NgsiLdGeoProperty, property::NgsiLdProperty},
+            attribute::{NgsiLdAttribute, NgsiLdAttributeWrapper, property::NgsiLdProperty},
             name::NameBuf,
             representation::NgsiLdSerializable,
         },
-        value::types::{Number, TemporalValue, Value},
+        value::types::Value,
     };
-    use cassiopeia_common::{representation::NgsiLdRepresentation, skip_null::NgsiLdSkipNull};
-    use cassiopeia_geometry::geometry::NgsiLdGeometry;
-    use chrono::{TimeZone, Utc};
+    use cassiopeia_common::representation::NgsiLdRepresentation;
     use compact_str::CompactString;
     use pretty_assertions::assert_eq;
+    use serde_json::{Value as JsonValue, json};
     use urn_rs::Urn;
 
     fn property(value: Value) -> NgsiLdAttribute {
         NgsiLdAttribute::Property(NgsiLdProperty::new(value))
     }
 
-    #[test]
-    fn a_null_or_empty_string_property_is_null_like() {
-        assert!(property(Value::Null).is_null_like());
-        assert!(property(Value::String(CompactString::new(""))).is_null_like());
-    }
-
-    #[test]
-    fn a_property_carrying_any_other_scalar_is_kept() {
-        assert!(!property(Value::String(CompactString::new("x"))).is_null_like());
-        assert!(!property(Value::Boolean(false)).is_null_like());
-        assert!(!property(Value::Number(Number::Integer(0))).is_null_like());
-        assert!(!property(Value::Number(Number::Float(0.0))).is_null_like());
-        let instant = Utc.with_ymd_and_hms(2026, 4, 3, 22, 0, 20).unwrap();
-        assert!(!property(Value::Temporal(TemporalValue::DateTime(instant))).is_null_like());
-        let point = NgsiLdGeometry::Point {
-            coordinates: [14.5, 46.05].into(),
-        };
-        assert!(!property(Value::Geospatial(Box::new(point))).is_null_like());
-    }
-
-    #[test]
-    fn a_geo_property_is_always_kept_because_a_geometry_has_no_null_form() {
-        let geo = NgsiLdAttribute::GeoProperty(NgsiLdGeoProperty::new(NgsiLdGeometry::Point {
-            coordinates: [14.5, 46.05].into(),
-        }));
-
-        assert!(!geo.is_null_like());
-    }
-
-    #[test]
-    fn an_empty_container_property_is_kept_rather_than_treated_as_null() {
-        // An empty array and an empty object are values, not absences: skip-null must leave both in
-        // place, the way an attribute carrying `[]` or `{}` has always been emitted.
-        assert!(!property(Value::Array(Vec::new())).is_null_like());
-        assert!(!property(Value::Object(Box::default())).is_null_like());
-    }
-
-    #[test]
-    fn skip_null_serialization_keeps_a_property_whose_value_is_an_empty_array() {
+    fn entity_with(name: &str, wrapper: NgsiLdAttributeWrapper) -> NgsiLdEntity {
         let id: Urn = "urn:ngsi-ld:Sensor:1".parse().expect("valid urn");
-        let entity = NgsiLdEntity::builder(id, NameBuf::new("Sensor").expect("valid name"))
-            .attribute(
-                NameBuf::new("readings").expect("valid name"),
-                NgsiLdAttributeWrapper::single(property(Value::Array(Vec::new()))),
-            )
-            .attribute(
-                NameBuf::new("absent").expect("valid name"),
-                NgsiLdAttributeWrapper::single(property(Value::Null)),
-            )
-            .build();
+        NgsiLdEntity::builder(id, NameBuf::new("Sensor").expect("valid name"))
+            .attribute(NameBuf::new(name).expect("valid name"), wrapper)
+            .build()
+    }
 
-        let json = entity
-            .to_json(NgsiLdRepresentation::Normalized, NgsiLdSkipNull::Skip)
-            .expect("entity serializes");
+    fn written(entity: &NgsiLdEntity, representation: NgsiLdRepresentation, name: &str) -> Option<JsonValue> {
+        entity.to_json(representation).expect("entity serializes").get(name).cloned()
+    }
 
-        assert_eq!(json.get("readings").and_then(|attr| attr.get("value")), Some(&serde_json::json!([])));
-        assert!(json.get("absent").is_none());
+    #[test]
+    fn a_property_whose_value_is_an_empty_string_is_written_in_every_representation() {
+        let entity = entity_with("label", NgsiLdAttributeWrapper::single(property(Value::String(CompactString::new("")))));
+
+        assert_eq!(
+            written(&entity, NgsiLdRepresentation::Normalized, "label"),
+            Some(json!({"type": "Property", "value": ""}))
+        );
+        assert_eq!(written(&entity, NgsiLdRepresentation::Concise, "label"), Some(json!("")));
+        assert_eq!(written(&entity, NgsiLdRepresentation::Simplified, "label"), Some(json!("")));
+    }
+
+    #[test]
+    fn a_property_whose_value_is_an_empty_array_or_object_is_written() {
+        let entity = entity_with("readings", NgsiLdAttributeWrapper::single(property(Value::Array(Vec::new()))));
+        assert_eq!(written(&entity, NgsiLdRepresentation::Simplified, "readings"), Some(json!([])));
+
+        let entity = entity_with("reading", NgsiLdAttributeWrapper::single(property(Value::Object(Box::default()))));
+        assert_eq!(written(&entity, NgsiLdRepresentation::Simplified, "reading"), Some(json!({})));
+    }
+
+    #[test]
+    fn every_instance_of_a_multi_instance_attribute_is_written() {
+        let entity = entity_with(
+            "temperature",
+            NgsiLdAttributeWrapper::Multi(vec![property(Value::from(1.5)), property(Value::String(CompactString::new("")))]),
+        );
+
+        assert_eq!(written(&entity, NgsiLdRepresentation::Concise, "temperature"), Some(json!([1.5, ""])));
     }
 }

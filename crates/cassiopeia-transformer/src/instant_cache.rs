@@ -52,7 +52,7 @@ mod tests {
     use serde_json::{Value as JsonValue, json};
 
     fn as_value(json: JsonValue) -> Value {
-        Value::from(json)
+        Value::try_from(json).unwrap()
     }
 
     #[test]
@@ -99,7 +99,6 @@ mod tests {
 
         assert_eq!(cache.instant(&as_value(json!(2026))), None);
         assert_eq!(cache.instant(&as_value(json!(true))), None);
-        assert_eq!(cache.instant(&as_value(json!(null))), None);
         assert!(cache.instant(&as_value(json!({"at": "2026-04-03T22:00:20Z"}))).is_none());
         assert!(cache.instant(&as_value(json!("not a timestamp"))).is_none());
     }

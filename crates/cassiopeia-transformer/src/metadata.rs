@@ -72,6 +72,12 @@ fn record_unreadable(loss: TimestampLoss, attribute: &NameBuf, value: &Value, un
     }
 }
 
+/// The NGSI-LD Value a qualifier sub-attribute carries; a qualifier declared as raw JSON carries
+/// none.
+fn qualifier(sub: &SubAttribute) -> Option<&Value> {
+    sub.value().as_value()
+}
+
 /// An empty summary: no qualifiers and no sub-attributes.
 fn empty_summary() -> MetadataSummary {
     MetadataSummary {
@@ -96,24 +102,24 @@ fn empty_summary() -> MetadataSummary {
 fn summary_from(props: &SubAttributes, attribute: &NameBuf, cache: &mut QualifierCache<'_>, unreadable: &UnreadableTimestamps) -> MetadataSummary {
     let mut summary = empty_summary();
 
-    if let Some(observed_at) = props.get("observedAt").map(SubAttribute::value) {
+    if let Some(observed_at) = props.get("observedAt").and_then(qualifier) {
         match cache.instant(observed_at) {
             Some(datetime) => summary.observed_at = Some(datetime),
             None => record_unreadable(TimestampLoss::ObservedAt, attribute, observed_at, unreadable),
         }
     }
-    if let Some(expires_at) = props.get("expiresAt").map(SubAttribute::value) {
+    if let Some(expires_at) = props.get("expiresAt").and_then(qualifier) {
         match cache.instant(expires_at) {
             Some(datetime) => summary.expires_at = Some(datetime),
             None => record_unreadable(TimestampLoss::ExpiresAt, attribute, expires_at, unreadable),
         }
     }
-    if let Some(unit_code) = props.get("unitCode").map(SubAttribute::value).and_then(Value::as_str) {
+    if let Some(unit_code) = props.get("unitCode").and_then(qualifier).and_then(Value::as_str) {
         summary.unit_code = cache.unit_code(unit_code);
     }
     // An invalid `datasetId` is dropped rather than emitted malformed: the qualifier is optional
     // (NGSI-LD 4.5.5) and must be a URI.
-    if let Some(dataset_id) = props.get("datasetId").map(SubAttribute::value).and_then(Value::as_str) {
+    if let Some(dataset_id) = props.get("datasetId").and_then(qualifier).and_then(Value::as_str) {
         summary.dataset_id = dataset_id.parse().ok();
     }
 
@@ -142,7 +148,7 @@ mod tests {
     };
     use cassiopeia_batch_sink::batch_sink::BatchSink;
     use cassiopeia_geometry::geometry::NgsiLdGeometry;
-    use cassiopeia_ir::{metadata::MetadataStorage, sub_attribute::SubAttribute};
+    use cassiopeia_ir::{attribute_content::AttributeContent, metadata::MetadataStorage, sub_attribute::SubAttribute};
     use cassiopeia_ngsi_ld::{
         entity::{
             attribute::{NgsiLdAttribute, NgsiLdAttributeKind, NgsiLdAttributeWrapper},
@@ -161,7 +167,7 @@ mod tests {
     }
 
     fn sub(kind: NgsiLdAttributeKind, value: JsonValue) -> SubAttribute {
-        SubAttribute::new(kind, Value::from(value), IndexMap::default())
+        SubAttribute::new(kind, AttributeContent::Value(Value::try_from(value).unwrap()), IndexMap::default())
     }
 
     fn attribute(summary: &MetadataSummary, key: &str) -> NgsiLdAttribute {
@@ -213,7 +219,10 @@ mod tests {
     /// The summary for a `temperature` whose only qualifier is the `observedAt` `value`.
     fn summary_with_observed_at(value: Value, unreadable: &UnreadableTimestamps) -> MetadataSummary {
         let mut shared = IndexMap::default();
-        shared.insert(name("observedAt"), SubAttribute::new(NgsiLdAttributeKind::Property, value, IndexMap::default()));
+        shared.insert(
+            name("observedAt"),
+            SubAttribute::new(NgsiLdAttributeKind::Property, AttributeContent::Value(value), IndexMap::default()),
+        );
         let mut metadata = IndexMap::default();
         metadata.insert(name("temperature"), MetadataStorage::shared(shared));
 
@@ -267,10 +276,10 @@ mod tests {
     }
 
     #[test]
-    fn a_null_observed_at_is_absent_rather_than_unreadable() {
+    fn a_blank_observed_at_is_absent_rather_than_unreadable() {
         let unreadable = UnreadableTimestamps::new();
 
-        let summary = summary_with_observed_at(Value::Null, &unreadable);
+        let summary = summary_with_observed_at(Value::String("  ".into()), &unreadable);
 
         assert_eq!(summary.observed_at, None);
         assert!(unreadable.is_empty());
@@ -279,7 +288,10 @@ mod tests {
     /// The summary for a `temperature` whose only qualifier is the `expiresAt` `value`.
     fn summary_with_expires_at(value: Value, unreadable: &UnreadableTimestamps) -> MetadataSummary {
         let mut shared = IndexMap::default();
-        shared.insert(name("expiresAt"), SubAttribute::new(NgsiLdAttributeKind::Property, value, IndexMap::default()));
+        shared.insert(
+            name("expiresAt"),
+            SubAttribute::new(NgsiLdAttributeKind::Property, AttributeContent::Value(value), IndexMap::default()),
+        );
         let mut metadata = IndexMap::default();
         metadata.insert(name("temperature"), MetadataStorage::shared(shared));
 
@@ -296,7 +308,7 @@ mod tests {
     fn an_expires_at_is_lifted_as_an_instant_rather_than_left_a_sub_attribute() {
         let unreadable = UnreadableTimestamps::new();
 
-        let summary = summary_with_expires_at(Value::from(json!("2026-10-25T13:00:00Z")), &unreadable);
+        let summary = summary_with_expires_at(Value::try_from(json!("2026-10-25T13:00:00Z")).unwrap(), &unreadable);
 
         assert_eq!(summary.expires_at, Some(Utc.with_ymd_and_hms(2026, 10, 25, 13, 0, 0).unwrap()));
         assert!(summary.custom_attributes.is_empty());
@@ -318,7 +330,7 @@ mod tests {
     fn an_expires_at_that_reads_as_no_instant_is_recorded_under_its_own_loss() {
         let unreadable = UnreadableTimestamps::new();
 
-        let summary = summary_with_expires_at(Value::from(json!("tomorrow")), &unreadable);
+        let summary = summary_with_expires_at(Value::try_from(json!("tomorrow")).unwrap(), &unreadable);
 
         assert_eq!(summary.expires_at, None);
         assert!(summary.custom_attributes.is_empty());
@@ -335,10 +347,10 @@ mod tests {
     }
 
     #[test]
-    fn a_null_expires_at_is_absent_rather_than_unreadable() {
+    fn a_blank_expires_at_is_absent_rather_than_unreadable() {
         let unreadable = UnreadableTimestamps::new();
 
-        let summary = summary_with_expires_at(Value::Null, &unreadable);
+        let summary = summary_with_expires_at(Value::String("  ".into()), &unreadable);
 
         assert_eq!(summary.expires_at, None);
         assert!(unreadable.is_empty());
@@ -506,7 +518,7 @@ mod tests {
             name("footprint"),
             SubAttribute::new(
                 NgsiLdAttributeKind::GeoProperty,
-                Value::Geospatial(Box::new(clockwise.clone())),
+                AttributeContent::Value(Value::Geospatial(Box::new(clockwise.clone()))),
                 IndexMap::default(),
             ),
         );
@@ -551,7 +563,7 @@ mod tests {
         inner.insert(name("billingOrder"), sub(NgsiLdAttributeKind::Property, json!(0)));
         let relationship = SubAttribute::new_relationship(
             NgsiLdAttributeKind::Relationship,
-            Value::from(json!("urn:ngsi-ld:Character:JackSparrow")),
+            Value::try_from(json!("urn:ngsi-ld:Character:JackSparrow")).unwrap(),
             Some(name("Character")),
             inner,
         );
@@ -583,7 +595,11 @@ mod tests {
         let mut shared = IndexMap::default();
         shared.insert(
             name("level"),
-            SubAttribute::new(NgsiLdAttributeKind::VocabProperty, Value::from(json!("https://example.org/level/high")), inner),
+            SubAttribute::new(
+                NgsiLdAttributeKind::VocabProperty,
+                AttributeContent::Value(Value::try_from(json!("https://example.org/level/high")).unwrap()),
+                inner,
+            ),
         );
         let mut metadata = IndexMap::default();
         metadata.insert(name("sugars"), MetadataStorage::shared(shared));

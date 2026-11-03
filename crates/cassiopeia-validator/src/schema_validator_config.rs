@@ -1,4 +1,4 @@
-use cassiopeia_common::{representation::NgsiLdRepresentation, skip_null::NgsiLdSkipNull};
+use cassiopeia_common::representation::NgsiLdRepresentation;
 use cassiopeia_ngsi_ld::{data_model::DataModelRepository, entity::name::NameBuf};
 use std::{collections::HashMap, path::PathBuf};
 
@@ -17,6 +17,4 @@ pub struct SchemaValidatorConfig {
     pub custom_schemas: HashMap<NameBuf, PathBuf>,
     /// The NGSI-LD representation entities are serialized in before validation.
     pub representation: NgsiLdRepresentation,
-    /// Whether null-valued attributes are skipped during serialization.
-    pub skip_null: NgsiLdSkipNull,
 }

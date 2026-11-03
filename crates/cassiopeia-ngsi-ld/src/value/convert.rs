@@ -1,4 +1,8 @@
-use crate::value::types::{Number, TemporalValue, Value, ValueObject};
+use crate::value::{
+    null_in_json::NullInJson,
+    omitted_nulls::OmittedNulls,
+    types::{Number, TemporalValue, Value, ValueObject},
+};
 use chrono::{DateTime, Utc};
 use compact_str::CompactString;
 use serde_json::Value as JsonValue;
@@ -14,7 +18,7 @@ impl Value {
             Value::Temporal(TemporalValue::DateTime(dt) | TemporalValue::Date(dt) | TemporalValue::Time(dt)) => return Some(*dt),
             Value::String(s) => TemporalValue::try_parse(s),
             Value::Number(number) => TemporalValue::from_number(number),
-            Value::Null | Value::Boolean(_) | Value::Geospatial(_) | Value::Array(_) | Value::Object(_) => None,
+            Value::Boolean(_) | Value::Geospatial(_) | Value::Array(_) | Value::Object(_) => None,
         };
         parsed.map(|t| match t {
             TemporalValue::DateTime(dt) | TemporalValue::Date(dt) | TemporalValue::Time(dt) => dt,
@@ -45,78 +49,108 @@ impl From<bool> for Value {
     }
 }
 
-impl From<JsonValue> for Value {
-    fn from(json: JsonValue) -> Self {
+impl Value {
+    /// Reads a JSON document as an NGSI-LD value, leaving out every null it holds.
+    ///
+    /// `null` is no NGSI-LD Value (ETSI GS CIM 009 v1.9.1 clause 3.1), and none of an entity's
+    /// members admits one, at any depth: JSON-LD expansion removes a null entry or list item without
+    /// a word (clauses 4.5.0 and 5.2.1), so a broker would store something other than what was
+    /// written. Leaving the null out here keeps the same members and items a broker would keep, and
+    /// counts each one left out in `omitted`, so the loss is reported where it happens instead of
+    /// vanishing on the broker.
+    ///
+    /// A top-level null is no value at all and yields `None`. It is not counted: a field the record
+    /// does not carry is an absent attribute, not a loss inside one.
+    pub fn from_json(json: JsonValue, omitted: &mut OmittedNulls) -> Option<Value> {
         match json {
-            JsonValue::Null => Value::Null,
-            JsonValue::Bool(b) => Value::Boolean(b),
-            JsonValue::Number(n) => json_number(&n).map_or(Value::Null, Value::Number),
-            JsonValue::String(s) => Value::String(CompactString::from(s)),
-            JsonValue::Array(arr) => Value::Array(arr.into_iter().map(Value::from).collect()),
-            JsonValue::Object(obj) => {
-                let mut map = ValueObject::default();
-                for (k, v) in obj {
-                    map.insert(CompactString::from(k), Value::from(v));
+            JsonValue::Null => None,
+            JsonValue::Bool(b) => Some(Value::Boolean(b)),
+            JsonValue::Number(n) => json_number(&n).map(Value::Number),
+            JsonValue::String(s) => Some(Value::String(CompactString::from(s))),
+            JsonValue::Array(items) => Some(Value::Array(
+                items
+                    .into_iter()
+                    .filter_map(|item| {
+                        if item.is_null() {
+                            omitted.array_items += 1;
+                            return None;
+                        }
+                        Value::from_json(item, omitted)
+                    })
+                    .collect(),
+            )),
+            JsonValue::Object(members) => {
+                let mut object = ValueObject::default();
+                for (key, member) in members {
+                    if member.is_null() {
+                        omitted.object_members += 1;
+                        continue;
+                    }
+                    if let Some(value) = Value::from_json(member, omitted) {
+                        object.insert(CompactString::from(key), value);
+                    }
                 }
-                Value::Object(Box::new(map))
+                Some(Value::Object(Box::new(object)))
             }
         }
     }
 }
 
-impl From<Value> for JsonValue {
-    fn from(val: Value) -> Self {
-        match val {
-            Value::Null => JsonValue::Null,
-            Value::Boolean(b) => JsonValue::Bool(b),
-            Value::Number(n) => match n {
-                Number::Integer(i) => JsonValue::Number(i.into()),
-                Number::Float(f) => serde_json::Number::from_f64(f).map_or(JsonValue::Null, JsonValue::Number),
-            },
-            Value::String(s) => JsonValue::String(s.to_string()),
-            Value::Temporal(t) => JsonValue::String(t.text().to_string()),
-            Value::Geospatial(g) => serde_json::to_value(g).unwrap_or(JsonValue::Null),
-            Value::Array(arr) => JsonValue::Array(arr.into_iter().map(JsonValue::from).collect()),
-            Value::Object(obj) => {
-                let mut map = serde_json::Map::new();
-                for (k, v) in *obj {
-                    map.insert(k.to_string(), JsonValue::from(v));
-                }
-                JsonValue::Object(map)
-            }
-        }
+/// Reads a JSON document that holds no null anywhere as an NGSI-LD value.
+///
+/// The strict counterpart of [`Value::from_json`], for a caller that holds JSON it expects to be
+/// a valid NGSI-LD Value as it stands, so that a null in it is a mistake to surface rather than a
+/// member to leave out.
+impl TryFrom<JsonValue> for Value {
+    type Error = NullInJson;
+
+    fn try_from(json: JsonValue) -> Result<Value, NullInJson> {
+        let mut omitted = OmittedNulls::default();
+        let value = Value::from_json(json, &mut omitted).ok_or(NullInJson)?;
+        if omitted.is_empty() { Ok(value) } else { Err(NullInJson) }
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use crate::value::types::{Number, Value};
+    use crate::value::{
+        null_in_json::NullInJson,
+        omitted_nulls::OmittedNulls,
+        types::{Number, Value},
+    };
+    use compact_str::CompactString;
     use pretty_assertions::assert_eq;
     use serde_json::json;
 
+    fn read(json: serde_json::Value) -> (Option<Value>, OmittedNulls) {
+        let mut omitted = OmittedNulls::default();
+        let value = Value::from_json(json, &mut omitted);
+        (value, omitted)
+    }
+
     #[test]
     fn an_rfc_3339_string_value_parses_to_an_instant() {
-        assert!(Value::from(json!("2026-04-03T22:00:20Z")).try_parse_datetime().is_some());
-        assert!(Value::from(json!("2026-04-03")).try_parse_datetime().is_some());
-        assert!(Value::from(json!("not a timestamp")).try_parse_datetime().is_none());
+        assert!(Value::try_from(json!("2026-04-03T22:00:20Z")).unwrap().try_parse_datetime().is_some());
+        assert!(Value::try_from(json!("2026-04-03")).unwrap().try_parse_datetime().is_some());
+        assert!(Value::try_from(json!("not a timestamp")).unwrap().try_parse_datetime().is_none());
     }
 
     #[test]
     fn an_epoch_number_value_parses_to_the_same_instant_as_its_text() {
         assert_eq!(
-            Value::from(json!(1_775_253_620)).try_parse_datetime(),
-            Value::from(json!("1775253620")).try_parse_datetime()
+            Value::try_from(json!(1_775_253_620)).unwrap().try_parse_datetime(),
+            Value::try_from(json!("1775253620")).unwrap().try_parse_datetime()
         );
         assert_eq!(
-            Value::from(json!(1_775_253_620.5)).try_parse_datetime(),
-            Value::from(json!("1775253620.5")).try_parse_datetime()
+            Value::try_from(json!(1_775_253_620.5)).unwrap().try_parse_datetime(),
+            Value::try_from(json!("1775253620.5")).unwrap().try_parse_datetime()
         );
     }
 
     #[test]
     fn a_value_shaped_as_no_instant_parses_to_none() {
-        for value in [json!(true), json!(null), json!(["2026-04-03T22:00:20Z"]), json!({"at": "2026-04-03T22:00:20Z"})] {
-            assert!(Value::from(value.clone()).try_parse_datetime().is_none(), "{value}");
+        for value in [json!(true), json!(["2026-04-03T22:00:20Z"]), json!({"at": "2026-04-03T22:00:20Z"})] {
+            assert!(Value::try_from(value.clone()).unwrap().try_parse_datetime().is_none(), "{value}");
         }
     }
 
@@ -128,14 +162,81 @@ mod tests {
     }
 
     #[test]
-    fn json_numbers_round_trip_as_integers_or_floats() {
-        assert_eq!(Value::from(json!(42)), Value::Number(Number::Integer(42)));
-        assert_eq!(Value::from(json!(1.5)), Value::Number(Number::Float(1.5)));
+    fn json_numbers_read_as_integers_or_floats() {
+        assert_eq!(Value::try_from(json!(42)).unwrap(), Value::Number(Number::Integer(42)));
+        assert_eq!(Value::try_from(json!(1.5)).unwrap(), Value::Number(Number::Float(1.5)));
     }
 
     #[test]
-    fn a_json_array_round_trips_through_value() {
-        let value = Value::from(json!([1, "two", true]));
-        assert_eq!(serde_json::Value::from(value), json!([1, "two", true]));
+    fn a_top_level_null_is_no_value_and_is_not_counted_as_omitted() {
+        let (value, omitted) = read(json!(null));
+
+        assert_eq!(value, None);
+        assert_eq!(omitted, OmittedNulls::default());
+    }
+
+    #[test]
+    fn a_null_array_item_is_left_out_and_counted() {
+        let (value, omitted) = read(json!(["a", null, "b"]));
+
+        assert_eq!(value, Some(Value::try_from(json!(["a", "b"])).unwrap()));
+        assert_eq!(
+            omitted,
+            OmittedNulls {
+                array_items: 1,
+                object_members: 0,
+            }
+        );
+    }
+
+    #[test]
+    fn a_null_object_member_is_left_out_and_counted() {
+        let (value, omitted) = read(json!({"value": 21.5, "unit": null}));
+
+        assert_eq!(value, Some(Value::try_from(json!({"value": 21.5})).unwrap()));
+        assert_eq!(
+            omitted,
+            OmittedNulls {
+                array_items: 0,
+                object_members: 1,
+            }
+        );
+    }
+
+    #[test]
+    fn nulls_nested_at_any_depth_are_left_out_and_counted_together() {
+        let (value, omitted) = read(json!({"a": [null, {"b": null, "c": [1, null]}]}));
+
+        assert_eq!(value, Some(Value::try_from(json!({"a": [{"c": [1]}]})).unwrap()));
+        assert_eq!(
+            omitted,
+            OmittedNulls {
+                array_items: 2,
+                object_members: 1,
+            }
+        );
+    }
+
+    #[test]
+    fn an_empty_string_is_kept_as_a_value() {
+        let (value, omitted) = read(json!(""));
+
+        assert_eq!(value, Some(Value::String(CompactString::new(""))));
+        assert!(omitted.is_empty());
+    }
+
+    #[test]
+    fn the_strict_conversion_refuses_json_holding_a_null_anywhere() {
+        assert_eq!(Value::try_from(json!(null)), Err(NullInJson));
+        assert_eq!(Value::try_from(json!(["a", null])), Err(NullInJson));
+        assert_eq!(Value::try_from(json!({"value": 21.5, "unit": null})), Err(NullInJson));
+    }
+
+    #[test]
+    fn the_strict_conversion_accepts_json_holding_no_null() {
+        assert_eq!(
+            Value::try_from(json!([1, "two", true])).unwrap(),
+            Value::Array(vec![Value::from(1_i64), Value::String(CompactString::from("two")), Value::Boolean(true)])
+        );
     }
 }

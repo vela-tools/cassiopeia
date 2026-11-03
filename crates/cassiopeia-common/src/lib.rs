@@ -3,7 +3,7 @@
 //! This crate holds the small, dependency-light types every stage of the pipeline agrees on: the
 //! [`signal::Signal`] envelope that carries data and control between stages, the source
 //! [`format::DataFormat`] and [`input::Input`] descriptors, the NGSI-LD output knobs
-//! ([`representation::NgsiLdRepresentation`], [`skip_null::NgsiLdSkipNull`],
+//! ([`representation::NgsiLdRepresentation`],
 //! [`context::mode::AtContextMode`]), the resolver [`store_kind::StoreKind`], and the foundation IO
 //! and input error enums. It depends on nothing else in the workspace so every other crate can
 //! depend on it.
@@ -34,7 +34,6 @@ pub mod run;
 pub mod run_var;
 pub mod schema_source;
 pub mod signal;
-pub mod skip_null;
 pub mod stage;
 pub mod store_kind;
 pub mod telemetry;

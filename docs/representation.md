@@ -24,9 +24,9 @@ Set the validation representation per run in either of the same two places as th
 - the manifest `output.validation.representation` field, and
 - the `--validation-representation` flag (`normalized`, `concise`, or `simplified`) on a command-line run.
 
-Use `--validation-skip-null` or `output.validation.skipNull` (`skip` or `include`) alongside it. A command-line flag overrides the manifest, which overrides the simplified default.
+A command-line flag overrides the manifest, which overrides the simplified default.
 
-The whole validation cluster, including mode, custom schema, representation, skip-null, and report path, lives under `output.validation`. The representation used for validation is separate from the representation Cassiopeia writes.
+The whole validation cluster, including mode, custom schema, representation, and report path, lives under `output.validation`. The representation used for validation is separate from the representation Cassiopeia writes.
 
 ## The two settings are independent
 

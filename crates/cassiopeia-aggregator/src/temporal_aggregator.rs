@@ -47,7 +47,7 @@ impl Aggregator for TemporalAggregator {
 #[cfg(test)]
 mod tests {
     use crate::{aggregator::Aggregator, temporal_aggregator::TemporalAggregator};
-    use cassiopeia_common::{representation::NgsiLdRepresentation, skip_null::NgsiLdSkipNull};
+    use cassiopeia_common::representation::NgsiLdRepresentation;
     use cassiopeia_geometry::geometry::NgsiLdGeometry;
     use cassiopeia_ngsi_ld::{
         entity::{
@@ -73,7 +73,7 @@ mod tests {
 
     /// A temporal `maxSustainedWind` observation for `id`, stamped at `observed_at`.
     fn wind_observation(id: &str, value: f64, observed_at: &str) -> NgsiLdEntity {
-        let mut property = NgsiLdProperty::new(Value::from(json!(value)));
+        let mut property = NgsiLdProperty::new(Value::try_from(json!(value)).unwrap());
         property.observed_at = Some(at(observed_at));
         let mut entity = NgsiLdEntity::new(urn(id), NameBuf::new("TropicalCyclone").unwrap());
         entity.attributes.insert(
@@ -85,7 +85,7 @@ mod tests {
 
     /// A static `name` instance carrying no `observedAt`.
     fn name_instance() -> NgsiLdAttributeWrapper {
-        NgsiLdAttributeWrapper::single(NgsiLdAttribute::Property(NgsiLdProperty::new(Value::from(json!("KATRINA")))))
+        NgsiLdAttributeWrapper::single(NgsiLdAttribute::Property(NgsiLdProperty::new(Value::try_from(json!("KATRINA")).unwrap())))
     }
 
     /// A temporal `location` `GeoProperty` observation for `id`.
@@ -120,7 +120,7 @@ mod tests {
 
         // Serialize so the assertion uses the public wire shape; the instances must be a `Multi`
         // ordered ascending by `observedAt` regardless of arrival order.
-        let json = folded.to_json(NgsiLdRepresentation::Normalized, NgsiLdSkipNull::Skip).unwrap();
+        let json = folded.to_json(NgsiLdRepresentation::Normalized).unwrap();
         let instances = json
             .get("maxSustainedWind")
             .expect("the serialized attribute")

@@ -6,7 +6,6 @@ use cassiopeia_common::{
     error::io::{IoAction, IoError},
     file_framing::FileFraming,
     representation::NgsiLdRepresentation,
-    skip_null::NgsiLdSkipNull,
 };
 use cassiopeia_ngsi_ld::entity::{NgsiLdEntity, name::NameBuf, representation::ReprAdapter};
 use std::{
@@ -69,14 +68,8 @@ impl EntityTypeSink {
     ///
     /// # Errors
     /// Returns a [`WriterError`] when SIMD serialization fails.
-    pub(crate) fn serialize_entity(
-        entity: &NgsiLdEntity,
-        representation: NgsiLdRepresentation,
-        skip_null: NgsiLdSkipNull,
-        framing: FileFraming,
-        capacity_hint: usize,
-    ) -> Result<Vec<u8>> {
-        let adapter = ReprAdapter::new(entity, representation, skip_null);
+    pub(crate) fn serialize_entity(entity: &NgsiLdEntity, representation: NgsiLdRepresentation, framing: FileFraming, capacity_hint: usize) -> Result<Vec<u8>> {
+        let adapter = ReprAdapter::new(entity, representation);
 
         let mut serialized = Vec::with_capacity(capacity_hint);
         match framing {
@@ -137,8 +130,8 @@ impl EntityTypeSink {
     ///
     /// # Errors
     /// Returns a [`WriterError`] when the entity cannot be serialized or written to the file.
-    pub fn write_entity(&mut self, entity: &NgsiLdEntity, representation: NgsiLdRepresentation, skip_null: NgsiLdSkipNull) -> Result<()> {
-        let serialized = Self::serialize_entity(entity, representation, skip_null, self.framing, DEFAULT_ENTITY_BYTES)?;
+    pub fn write_entity(&mut self, entity: &NgsiLdEntity, representation: NgsiLdRepresentation) -> Result<()> {
+        let serialized = Self::serialize_entity(entity, representation, self.framing, DEFAULT_ENTITY_BYTES)?;
         self.write_serialized(&serialized)
     }
 
@@ -171,7 +164,7 @@ impl EntityTypeSink {
 #[cfg(test)]
 mod tests {
     use crate::file::entity_type_sink::EntityTypeSink;
-    use cassiopeia_common::{file_framing::FileFraming, representation::NgsiLdRepresentation, skip_null::NgsiLdSkipNull};
+    use cassiopeia_common::{file_framing::FileFraming, representation::NgsiLdRepresentation};
     use cassiopeia_ngsi_ld::entity::{NgsiLdEntity, name::NameBuf};
     use pretty_assertions::assert_eq;
     use std::fs;
@@ -197,10 +190,8 @@ mod tests {
         let directory = TempDir::new().unwrap();
         let mut sink = EntityTypeSink::open(directory.path(), &NameBuf::new("Sensor").unwrap(), "json", FileFraming::Array).unwrap();
 
-        sink.write_entity(&entity("urn:ngsi-ld:Sensor:1"), NgsiLdRepresentation::Normalized, NgsiLdSkipNull::Skip)
-            .unwrap();
-        sink.write_entity(&entity("urn:ngsi-ld:Sensor:2"), NgsiLdRepresentation::Normalized, NgsiLdSkipNull::Skip)
-            .unwrap();
+        sink.write_entity(&entity("urn:ngsi-ld:Sensor:1"), NgsiLdRepresentation::Normalized).unwrap();
+        sink.write_entity(&entity("urn:ngsi-ld:Sensor:2"), NgsiLdRepresentation::Normalized).unwrap();
         sink.finalize().unwrap();
 
         let content = fs::read_to_string(directory.path().join("Sensor.json")).unwrap();
@@ -226,10 +217,8 @@ mod tests {
         let directory = TempDir::new().unwrap();
         let mut sink = EntityTypeSink::open(directory.path(), &NameBuf::new("Sensor").unwrap(), "jsonl", FileFraming::LineDelimited).unwrap();
 
-        sink.write_entity(&entity("urn:ngsi-ld:Sensor:1"), NgsiLdRepresentation::Normalized, NgsiLdSkipNull::Skip)
-            .unwrap();
-        sink.write_entity(&entity("urn:ngsi-ld:Sensor:2"), NgsiLdRepresentation::Normalized, NgsiLdSkipNull::Skip)
-            .unwrap();
+        sink.write_entity(&entity("urn:ngsi-ld:Sensor:1"), NgsiLdRepresentation::Normalized).unwrap();
+        sink.write_entity(&entity("urn:ngsi-ld:Sensor:2"), NgsiLdRepresentation::Normalized).unwrap();
         sink.finalize().unwrap();
 
         let content = fs::read_to_string(directory.path().join("Sensor.jsonl")).unwrap();
@@ -247,12 +236,11 @@ mod tests {
 }
 
 /// Confirms the streaming `sonic-rs` write path and the `serde_json` tree path
-/// (`NgsiLdEntity::to_json`) produce the same document, across every representation and
-/// null-handling mode.
+/// (`NgsiLdEntity::to_json`) produce the same document, across every representation and framing.
 #[cfg(test)]
 mod parity_tests {
     use crate::file::entity_type_sink::EntityTypeSink;
-    use cassiopeia_common::{file_framing::FileFraming, representation::NgsiLdRepresentation, skip_null::NgsiLdSkipNull};
+    use cassiopeia_common::{file_framing::FileFraming, representation::NgsiLdRepresentation};
     use cassiopeia_geometry::geometry::NgsiLdGeometry;
     use cassiopeia_ngsi_ld::{
         entity::{
@@ -264,6 +252,7 @@ mod parity_tests {
         value::types::Value,
     };
     use chrono::{TimeZone, Utc};
+    use compact_str::CompactString;
     use indexmap::IndexMap;
     use pretty_assertions::assert_eq;
     use serde_json::{Value as JsonValue, json};
@@ -278,7 +267,7 @@ mod parity_tests {
             Box::new(NgsiLdAttributeWrapper::single(NgsiLdAttribute::Property(NgsiLdProperty::new(0.95)))),
         );
 
-        let mut property = NgsiLdProperty::new(Value::from(json!(21.5)));
+        let mut property = NgsiLdProperty::new(Value::try_from(json!(21.5)).unwrap());
         property.observed_at = Some(Utc.with_ymd_and_hms(2024, 3, 13, 12, 0, 0).unwrap());
         property.dataset_id = Some("urn:ngsi-ld:Dataset:indoor".parse::<Urn>().unwrap());
         property.attributes = nested;
@@ -294,9 +283,9 @@ mod parity_tests {
 
     // Two dataset-distinguished instances, exercising the multi-instance array path.
     fn readings() -> NgsiLdAttributeWrapper {
-        let mut first = NgsiLdProperty::new(Value::from(json!(1)));
+        let mut first = NgsiLdProperty::new(Value::try_from(json!(1)).unwrap());
         first.dataset_id = Some("urn:ngsi-ld:Dataset:a".parse::<Urn>().unwrap());
-        let mut second = NgsiLdProperty::new(Value::from(json!(2)));
+        let mut second = NgsiLdProperty::new(Value::try_from(json!(2)).unwrap());
         second.dataset_id = Some("urn:ngsi-ld:Dataset:b".parse::<Urn>().unwrap());
         NgsiLdAttributeWrapper::Multi(vec![NgsiLdAttribute::Property(first), NgsiLdAttribute::Property(second)])
     }
@@ -306,12 +295,12 @@ mod parity_tests {
         attributes.insert(NameBuf::new("temperature").unwrap(), temperature());
         attributes.insert(
             NameBuf::new("status").unwrap(),
-            NgsiLdAttributeWrapper::single(NgsiLdAttribute::Property(NgsiLdProperty::new(Value::from(json!("active"))))),
+            NgsiLdAttributeWrapper::single(NgsiLdAttribute::Property(NgsiLdProperty::new(Value::try_from(json!("active")).unwrap()))),
         );
-        // A null-valued property, dropped only under skip-null.
+        // An empty-string property, which every representation writes.
         attributes.insert(
             NameBuf::new("spare").unwrap(),
-            NgsiLdAttributeWrapper::single(NgsiLdAttribute::Property(NgsiLdProperty::new(Value::Null))),
+            NgsiLdAttributeWrapper::single(NgsiLdAttribute::Property(NgsiLdProperty::new(Value::String(CompactString::new(""))))),
         );
         attributes.insert(NameBuf::new("refDevice").unwrap(), ref_device());
         attributes.insert(
@@ -342,14 +331,12 @@ mod parity_tests {
         ];
 
         for representation in representations {
-            for skip_null in [NgsiLdSkipNull::Skip, NgsiLdSkipNull::Include] {
-                for framing in [FileFraming::Array, FileFraming::LineDelimited] {
-                    let bytes = EntityTypeSink::serialize_entity(&entity, representation, skip_null, framing, 256).unwrap();
-                    let streamed: JsonValue = serde_json::from_slice(&bytes).unwrap();
-                    let tree = entity.to_json(representation, skip_null).unwrap();
+            for framing in [FileFraming::Array, FileFraming::LineDelimited] {
+                let bytes = EntityTypeSink::serialize_entity(&entity, representation, framing, 256).unwrap();
+                let streamed: JsonValue = serde_json::from_slice(&bytes).unwrap();
+                let tree = entity.to_json(representation).unwrap();
 
-                    assert_eq!(streamed, tree, "representation={representation:?} skip_null={skip_null:?} framing={framing:?}");
-                }
+                assert_eq!(streamed, tree, "representation={representation:?} framing={framing:?}");
             }
         }
     }

@@ -2,7 +2,7 @@ use cassiopeia_mapping::{
     mapping::Mapping,
     template::{error::TemplateError, resolver::TemplateResolver},
 };
-use cassiopeia_ngsi_ld::value::types::Value as NgsiValue;
+use cassiopeia_ngsi_ld::value::{omitted_nulls::OmittedNulls, types::Value as NgsiValue};
 use cassiopeia_unreadable_timestamps::{unreadable_expiries::UnreadableExpiries, unreadable_timestamp::unreadable_text};
 use chrono::{DateTime, Utc};
 use serde_json::Value;
@@ -47,7 +47,11 @@ impl ExpiryResolver {
             return Ok(None);
         };
 
-        let value = NgsiValue::from(resolved);
+        // The value is only read for an instant and never written, so a null nested in it is no loss
+        // to report.
+        let Some(value) = NgsiValue::from_json(resolved, &mut OmittedNulls::default()) else {
+            return Ok(None);
+        };
         let instant = value.try_parse_datetime();
         if instant.is_none()
             && let Some(text) = unreadable_text(&value)

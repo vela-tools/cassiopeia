@@ -83,10 +83,9 @@ The [output guide](output.md#send-to-a-context-broker) documents the operations,
 
 ## Shape the entities
 
-Three flags shape the entities themselves, independently of the destination:
+Two flags shape the entities themselves, independently of the destination:
 
 - `--writer-representation`: the NGSI-LD representation for written entities: `normalized` (the default), `concise`, or `simplified`. Choose it for whatever consumes the output.
-- `--writer-skip-null`: `skip` (the default) omits attributes with a null or empty value, such as empty text; `include` keeps them. An attribute whose source resolves to nothing is absent either way (see [Handle null and empty values](output.md#handle-null-and-empty-values)).
 - `--temporal-representation`: the temporal output shape. `series` folds each base ID's observations into a single temporal entity with time-ordered instance arrays (an EntityTemporal, ETSI GS CIM 009 v1.9.1 clause 5.2.20); absent writes current-state, with one entity per ID and each attribute keeping its latest observation. This applies to file and broker writers. It is **not** the same as `--broker-operation temporal`: this flag shapes the output, while the broker operation only selects the temporal endpoint. A `series` representation against a broker requires `--broker-operation temporal`.
 
 The [representation guide](representation.md) explains how the written representation stays independent of the one validation checks; the [output guide](output.md#temporal-output) explains the temporal shapes.
@@ -110,7 +109,6 @@ Validation checks each entity against its data model's JSON Schema before writin
 
 - `--validation-mode`: how strict a failure is: `warn`, `fail-when-schema` (the default), or `fail`.
 - `--validation-representation`: the representation used to check entities. It defaults to the key-values (simplified) form described by the schemas.
-- `--validation-skip-null`: whether null-valued attributes are present when the entity is checked.
 - `--validation-report` (`-r`): write a JSON validation report to the given path.
 
 The [validation guide](validation.md) covers the modes, the outcome matrix, and where schemas come from.
@@ -164,6 +162,8 @@ Problems that depend on one record's data, or on the rows and header of one CSV 
 | `expander-urn-ungeneratable` | The record's identity resolved to nothing, or a template that names an entity failed to render, so Cassiopeia skipped the record. An identity resolves to nothing when a field it reads is missing, null, or empty, or when its text has no letter or digit, such as `-`. The templates that name an entity are `identity.entityName`, a `scope` template, a relationship's `source`, and a synthetic entity's identity. A scope or relationship target that resolves to nothing, rather than failing, is left out without a warning. |
 | `expander-expires-at-unreadable` | An entity `expiresAt` resolved to text Cassiopeia cannot read as a date and time, so the entity is written without it. One warning per entity type names the first entity that lost it, the text, and how many records did. |
 | `expander-expires-at-unresolvable` | An entity `expiresAt` template failed to render, so Cassiopeia skipped the record. |
+| `extractor-json-payload-misshapen` | A `JsonProperty`'s source is not a JSON object or an array of objects, such as text, a number, or an array of numbers, so Cassiopeia dropped that attribute and kept the entity. The warning names the attribute and what the source was. See [ListProperty and JsonProperty](mapping.md#listproperty-and-jsonproperty). |
+| `extractor-null-dropped` | An attribute's source value held a `null` inside an array or object. NGSI-LD does not allow `null` in an entity, so Cassiopeia wrote the attribute without it. One warning per attribute counts the records that lost a `null`. See [Convert values](mapping.md#convert-values). |
 | `extractor-template-unresolvable` | An attribute's template failed to render for one entity. Cassiopeia dropped that attribute and kept the entity. The warning names the template, the mapping file, an entity that lost the attribute, and a hint. When the failing template is the `observedAt` that ranks the records of one entity, a record it failed on ranks as carrying no observation time; if another record of the entity wins the ranking, the failing record is discarded and the warning says so, naming an entity and counting the records it cost. |
 | `extractor-timestamp-unreadable` | A value read with a `datetime`, `date`, or `time` transformation is text Cassiopeia cannot read as a date and time. The attribute is dropped, or, for an `observedAt`, the attribute is written without it. |
 | `geometry-*` | A source geometry could not become the geometry its `GeoProperty` declares, such as a `GeometryCollection` (`geometry-collection-inadmissible`) or a `MultiPolygon` of several surfaces asked for a `Polygon` (`geometry-ambiguous-multi-geometry`). Cassiopeia dropped that attribute, sub-attribute, or instance and kept the entity. The warning names the attribute and the reason. |

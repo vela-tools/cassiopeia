@@ -92,7 +92,7 @@ impl BrokerWriter {
             http2_prior_knowledge,
             tuning,
         } = transport;
-        let BrokerSerialization { representation, skip_null } = serialization;
+        let BrokerSerialization { representation } = serialization;
         let BrokerContextConfig {
             source: context_source,
             delivery: context_delivery,
@@ -130,7 +130,6 @@ impl BrokerWriter {
             },
             serialization: SerializationParts {
                 representation,
-                skip_null,
                 body_context: context_mode.body_context(),
                 initial_payload_bytes: tuning.initial_payload_bytes,
                 shape: routing.shape,

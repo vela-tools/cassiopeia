@@ -5,7 +5,9 @@ use crate::{
     stages::{
         batch_sink_report::report_sink,
         dropped_geometry_report::dropped_geometry_diagnostic,
+        dropped_null_report::dropped_null_diagnostic,
         pump::{BatchSender, PumpConfig, PumpProcessor, run_pump_stage},
+        refused_json_payload_report::refused_json_payload_diagnostic,
         skipped_records::SkippedRecords,
         stage_env::StageEnv,
         unreadable_timestamp_report::unreadable_timestamp_diagnostic,
@@ -33,9 +35,10 @@ use std::{ops::ControlFlow, sync::Arc};
 /// An entity that fails to extract is counted as a stage warning and skipped, so one extraction
 /// failure does not abort the run. An attribute that cannot be built from its record is dropped
 /// rather than emitted: a geometry the mapping did not authorise converting, text that reads as no
-/// date-time, or a template that fails to render. The entity still goes downstream, the loss is
-/// named once however many records it affected, and every affected attribute is counted as a
-/// warning.
+/// date-time, a `JsonProperty` source that is no JSON object, or a template that fails to render.
+/// An attribute whose source value held nulls is written without them (ETSI GS CIM 009 v1.9.1 clause
+/// 4.5.0). The entity still goes downstream, the loss is named once however many records it
+/// affected, and every affected attribute is counted as a warning.
 struct ExtractorProcessor {
     /// The extractor that resolves attribute values, configured for the run's parallelism.
     extractor: EntityExtractor,
@@ -73,11 +76,15 @@ impl PumpProcessor for ExtractorProcessor {
             geometries,
             timestamps,
             templates,
+            json_payloads,
+            nulls,
         } = dropped;
         let warnings = failed
             + report_sink(self.reporter, geometries, dropped_geometry_diagnostic)
             + report_sink(self.reporter, timestamps, unreadable_timestamp_diagnostic)
-            + report_sink(self.reporter, templates, unresolved_template_diagnostic);
+            + report_sink(self.reporter, templates, unresolved_template_diagnostic)
+            + report_sink(self.reporter, json_payloads, refused_json_payload_diagnostic)
+            + report_sink(self.reporter, nulls, dropped_null_diagnostic);
         if warnings > 0 {
             stage.warn_inc_by(warnings);
             self.telemetry.add_warnings(warnings);
@@ -243,6 +250,23 @@ mod tests {
         (runner.resolver(), Arc::new(mapping))
     }
 
+    /// A mapping whose `tags` is a `ListProperty` read from the record's `tags` array.
+    fn tags_mapping() -> (TemplateResolver, Arc<Mapping>) {
+        let document = r#"{
+                version: "v4",
+                dataModel: "Sensor",
+                identity: { entityName: "Sensor-{{ id }}" },
+                attributes: {
+                    tags: { type: "ListProperty", source: "{{ tags }}" },
+                },
+            }"#;
+        let mut runner = TemplateRunner::new();
+        let mut mapping = Mapping::from_json5(document, Path::new("test.json5"), &mut runner).unwrap();
+        ExpanderCompiler::compile(&mut mapping, Path::new("test.json5"), &mut runner).unwrap();
+
+        (runner.resolver(), Arc::new(mapping))
+    }
+
     /// Runs one batch of two Sensor entities carrying `ts` through the extractor stage.
     fn run_timestamp_batch(ts: &str, reporter: &'static dyn Reporter) -> (usize, u64) {
         let (resolver, mapping) = timestamp_mapping();
@@ -379,6 +403,25 @@ mod tests {
         assert_eq!(reported[0].code, DiagnosticCode::Extractor(ExtractorCode::TemplateUnresolvable));
         assert!(reported[0].headline.contains("dafifCode"), "{}", reported[0].headline);
         assert!(reported[0].headline.contains("urn:ngsi-ld:Country:Bonaire"), "{}", reported[0].headline);
+    }
+
+    #[test]
+    fn a_null_in_a_source_array_is_named_once_with_its_own_code_and_still_forwards_the_entity() {
+        static REPORTER: RecordingReporter = RecordingReporter::new();
+        let (resolver, mapping) = tags_mapping();
+        let records = ["001", "002"]
+            .into_iter()
+            .map(|id| (format!("urn:ngsi-ld:Sensor:{id}"), json!({"id": id, "tags": ["a", null, "b"]})))
+            .collect();
+
+        let (forwarded, warnings) = run_stage(resolver, &mapping, records, &REPORTER);
+
+        let reported = REPORTER.diagnostics();
+        assert_eq!(forwarded, 2);
+        assert_eq!(warnings, 2);
+        assert_eq!(reported.len(), 1);
+        assert_eq!(reported[0].code, DiagnosticCode::Extractor(ExtractorCode::NullDropped));
+        assert!(reported[0].headline.contains("`tags`"), "{}", reported[0].headline);
     }
 
     #[test]

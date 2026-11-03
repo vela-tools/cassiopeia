@@ -9,7 +9,7 @@ use crate::{
     schema_violations::SchemaViolations,
     validator::Validator,
 };
-use cassiopeia_common::{representation::NgsiLdRepresentation, skip_null::NgsiLdSkipNull};
+use cassiopeia_common::representation::NgsiLdRepresentation;
 use cassiopeia_ngsi_ld::{
     data_model::DataModelRepository,
     entity::{NgsiLdEntity, name::NameBuf, representation::NgsiLdSerializable},
@@ -48,8 +48,6 @@ pub struct SchemaValidator {
     custom_schemas: HashMap<NameBuf, PathBuf>,
     /// The NGSI-LD representation entities are serialized in before validation.
     representation: NgsiLdRepresentation,
-    /// Whether null-valued attributes are skipped during serialization.
-    skip_null: NgsiLdSkipNull,
 }
 
 impl SchemaValidator {
@@ -63,7 +61,6 @@ impl SchemaValidator {
             repositories: config.repositories,
             custom_schemas: config.custom_schemas,
             representation: config.representation,
-            skip_null: config.skip_null,
         }
     }
 
@@ -169,12 +166,10 @@ impl SchemaValidator {
             return Ok(ValidationOutcome::absent());
         };
 
-        let entity_value = entity
-            .to_json(self.representation, self.skip_null)
-            .map_err(|source| ValidatorError::SerializeEntity {
-                source,
-                entity_type: entity.entity_type.clone(),
-            })?;
+        let entity_value = entity.to_json(self.representation).map_err(|source| ValidatorError::SerializeEntity {
+            source,
+            entity_type: entity.entity_type.clone(),
+        })?;
 
         if validator.is_valid(&entity_value) {
             return Ok(ValidationOutcome::conformant());
@@ -264,7 +259,7 @@ mod tests {
         schema_verdict::{DiagnosticsLevel, SchemaVerdict, ValidationDiagnostics},
         validator::Validator,
     };
-    use cassiopeia_common::{representation::NgsiLdRepresentation, skip_null::NgsiLdSkipNull};
+    use cassiopeia_common::representation::NgsiLdRepresentation;
     use cassiopeia_ngsi_ld::{
         data_model::DataModelRepository,
         entity::{NgsiLdEntity, name::NameBuf},
@@ -284,7 +279,6 @@ mod tests {
             repositories,
             custom_schemas: HashMap::new(),
             representation: NgsiLdRepresentation::Normalized,
-            skip_null: NgsiLdSkipNull::Skip,
         })
     }
 
@@ -294,7 +288,6 @@ mod tests {
             repositories: HashMap::new(),
             custom_schemas,
             representation: NgsiLdRepresentation::Normalized,
-            skip_null: NgsiLdSkipNull::Skip,
         })
     }
 

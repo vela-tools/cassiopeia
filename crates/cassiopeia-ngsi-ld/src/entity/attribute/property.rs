@@ -5,7 +5,7 @@ use crate::{
     },
     value::types::Value,
 };
-use cassiopeia_common::{representation::NgsiLdRepresentation, skip_null::NgsiLdSkipNull};
+use cassiopeia_common::representation::NgsiLdRepresentation;
 use cefact_units::UnitCode;
 use chrono::{DateTime, Utc};
 use indexmap::IndexMap;
@@ -52,11 +52,11 @@ impl NgsiLdProperty {
 }
 
 impl SerializeRepr for NgsiLdProperty {
-    fn serialize_repr<S: Serializer>(&self, serializer: S, representation: NgsiLdRepresentation, skip_null: NgsiLdSkipNull) -> Result<S::Ok, S::Error> {
+    fn serialize_repr<S: Serializer>(&self, serializer: S, representation: NgsiLdRepresentation) -> Result<S::Ok, S::Error> {
         match representation {
-            NgsiLdRepresentation::Normalized => normalized::serialize_property(self, skip_null, serializer),
-            NgsiLdRepresentation::Concise => concise::serialize_property(self, skip_null, serializer),
-            NgsiLdRepresentation::Simplified => simplified::serialize_property(self, skip_null, serializer),
+            NgsiLdRepresentation::Normalized => normalized::serialize_property(self, serializer),
+            NgsiLdRepresentation::Concise => concise::serialize_property(self, serializer),
+            NgsiLdRepresentation::Simplified => simplified::serialize_property(self, serializer),
         }
     }
 }
@@ -69,7 +69,7 @@ mod tests {
 
     #[test]
     fn a_new_property_holds_its_value_and_no_qualifiers() {
-        let property = NgsiLdProperty::new(Value::from(json!(42)));
+        let property = NgsiLdProperty::new(Value::try_from(json!(42)).unwrap());
         assert_eq!(property.observed_at, None);
         assert_eq!(property.expires_at, None);
         assert_eq!(property.unit_code, None);

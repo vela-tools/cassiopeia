@@ -144,7 +144,7 @@ mod tests {
 
     /// A temporal `maxSustainedWind` observation for `id`, stamped at `observed_at`.
     fn wind_observation(id: &str, value: f64, observed_at: &str) -> NgsiLdEntity {
-        let mut property = NgsiLdProperty::new(Value::from(json!(value)));
+        let mut property = NgsiLdProperty::new(Value::try_from(json!(value)).unwrap());
         property.observed_at = Some(observed_at.parse::<DateTime<Utc>>().unwrap());
         let mut entity = NgsiLdEntity::new(id.parse::<Urn>().unwrap(), NameBuf::new("TropicalCyclone").unwrap());
         entity.attributes.insert(

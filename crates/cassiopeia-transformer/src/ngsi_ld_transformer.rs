@@ -133,11 +133,13 @@ mod tests {
     use cassiopeia_common::parallelism::Parallelism;
     use cassiopeia_geometry::geometry::NgsiLdGeometry;
     use cassiopeia_ir::{
+        attribute_content::AttributeContent,
         entity::{AttributeValues, Entity},
         instance_index::InstanceIndex,
         mapped::Mapped,
         metadata::MetadataStorage,
         relationships::{InstanceObjects, InstanceRelationships},
+        resolved_attribute::ResolvedAttribute,
         sub_attribute::{SubAttribute, SubAttributes},
     };
     use cassiopeia_mapping::{mapping::Mapping, template::runner::TemplateRunner};
@@ -155,7 +157,10 @@ mod tests {
             name::NameBuf,
             scope::{NgsiLdScope, ScopeBuf},
         },
-        value::types::{Number, Value},
+        value::{
+            json_payload::JsonPayload,
+            types::{Number, Value},
+        },
     };
     use cassiopeia_unreadable_timestamps::{attribute_loss::AttributeLoss, timestamp_loss::TimestampLoss, unreadable_timestamps::UnreadableTimestamps};
     use cefact_units::UnitCode;
@@ -206,12 +211,26 @@ mod tests {
         NameBuf::new(value).unwrap()
     }
 
-    fn values(pairs: Vec<(&str, Value)>) -> AttributeValues {
-        pairs.into_iter().map(|(key, value)| (NameBuf::new(key).unwrap(), value)).collect()
+    fn values(pairs: Vec<(&str, ResolvedAttribute)>) -> AttributeValues {
+        pairs.into_iter().map(|(key, resolved)| (NameBuf::new(key).unwrap(), resolved)).collect()
+    }
+
+    /// A single-instance attribute that resolved to `value`.
+    fn single(value: Value) -> ResolvedAttribute {
+        ResolvedAttribute::Single(AttributeContent::Value(value))
+    }
+
+    /// A multi-instance attribute whose instances resolved to `values`, `None` for a missing one.
+    fn instances(values: Vec<Option<Value>>) -> ResolvedAttribute {
+        ResolvedAttribute::Instances(values.into_iter().map(|value| value.map(AttributeContent::Value)).collect())
     }
 
     fn qualifier(value: serde_json::Value) -> SubAttribute {
-        SubAttribute::new(NgsiLdAttributeKind::Property, Value::from(value), IndexMap::default())
+        SubAttribute::new(
+            NgsiLdAttributeKind::Property,
+            AttributeContent::Value(Value::try_from(value).unwrap()),
+            IndexMap::default(),
+        )
     }
 
     #[test]
@@ -239,9 +258,9 @@ mod tests {
         );
         let mut entity = Entity::new(urn("urn:ngsi-ld:Sensor:1"), json!({}), None, None, IndexMap::default(), None);
         entity.set_values(Some(values(vec![
-            ("zone", Value::String("north".into())),
-            ("humidity", Value::Number(Number::Integer(51))),
-            ("airTemperature", Value::Number(Number::Integer(19))),
+            ("zone", single(Value::String("north".into()))),
+            ("humidity", single(Value::Number(Number::Integer(51)))),
+            ("airTemperature", single(Value::Number(Number::Integer(19)))),
         ])));
 
         let result = NgsiLdTransformer::new()
@@ -259,7 +278,7 @@ mod tests {
         let mapping = mapping(
             r#"{ version: "v4", dataModel: "Sensor", identity: { entityName: "S-{{ id }}" }, attributes: { temperature: { source: "{{ t }}", transformation: "float" } } }"#,
         );
-        let value_map = values(vec![("temperature", Value::Number(Number::Float(25.5)))]);
+        let value_map = values(vec![("temperature", single(Value::Number(Number::Float(25.5))))]);
         let entity = Entity::new(urn("urn:ngsi-ld:Sensor:1"), json!({}), None, None, IndexMap::default(), Some(value_map));
 
         let result = NgsiLdTransformer::new()
@@ -278,7 +297,7 @@ mod tests {
     #[test]
     fn a_value_without_a_declaration_is_dropped() {
         let mapping = mapping(r#"{ version: "v4", dataModel: "Sensor", identity: { entityName: "S-{{ id }}" }, attributes: {} }"#);
-        let value_map = values(vec![("stray", Value::String("x".into()))]);
+        let value_map = values(vec![("stray", single(Value::String("x".into())))]);
         let entity = Entity::new(urn("urn:ngsi-ld:Sensor:1"), json!({}), None, None, IndexMap::default(), Some(value_map));
 
         let result = NgsiLdTransformer::new()
@@ -339,7 +358,7 @@ mod tests {
         let mapping = mapping(
             r#"{ version: "v4", dataModel: "Sensor", identity: { entityName: "S-{{ id }}" }, attributes: { temperature: { source: "{{ t }}", transformation: "float", properties: { observedAt: { source: "{{ ts }}" } } } } }"#,
         );
-        let value_map = values(vec![("temperature", Value::Number(Number::Float(20.0)))]);
+        let value_map = values(vec![("temperature", single(Value::Number(Number::Float(20.0))))]);
         let mut metadata = IndexMap::default();
         let mut shared = IndexMap::default();
         shared.insert(name("observedAt"), qualifier(json!("2026-04-03T22:00:20Z")));
@@ -379,7 +398,7 @@ mod tests {
         let mapping = mapping(
             r#"{ version: "v4", dataModel: "Sensor", identity: { entityName: "S-{{ id }}" }, attributes: { temperature: { source: "{{ t }}", transformation: "float", properties: { expiresAt: { source: "{{ until }}" } } } } }"#,
         );
-        let value_map = values(vec![("temperature", Value::Number(Number::Float(20.0)))]);
+        let value_map = values(vec![("temperature", single(Value::Number(Number::Float(20.0))))]);
         let mut metadata = IndexMap::default();
         let mut shared = IndexMap::default();
         shared.insert(name("expiresAt"), qualifier(json!(expires_at)));
@@ -405,7 +424,7 @@ mod tests {
         let mapping = mapping(
             r#"{ version: "v4", dataModel: "Sensor", identity: { entityName: "S-{{ id }}" }, attributes: { temperature: { source: "{{ t }}", transformation: "float", properties: { observedAt: { source: "{{ ts }}" } } } } }"#,
         );
-        let value_map = values(vec![("temperature", Value::Number(Number::Float(20.0)))]);
+        let value_map = values(vec![("temperature", single(Value::Number(Number::Float(20.0))))]);
         let mut metadata = IndexMap::default();
         let mut shared = IndexMap::default();
         shared.insert(name("observedAt"), qualifier(json!(observed_at)));
@@ -520,7 +539,7 @@ mod tests {
     }
 
     #[test]
-    fn instances_become_one_property_per_dataset_id_and_null_instances_are_dropped() {
+    fn instances_become_one_property_per_dataset_id_and_missing_instances_are_dropped() {
         let mapping = mapping(
             r#"{
                 version: "v4",
@@ -539,11 +558,11 @@ mod tests {
                 },
             }"#,
         );
-        // The middle instance is null: a model that reported no value for this record, which must
+        // The middle instance is missing: a model that reported no value for this record, which must
         // leave no instance behind (ETSI GS CIM 009 v1.9.1 clause 4.5.5).
         let value_map = values(vec![(
             "temperature",
-            Value::Array(vec![Value::Number(Number::Float(1.0)), Value::Null, Value::Number(Number::Float(3.0))]),
+            instances(vec![Some(Value::Number(Number::Float(1.0))), None, Some(Value::Number(Number::Float(3.0)))]),
         )]);
         let mut per_item = IndexMap::default();
         let entry = |urn: &str| SubAttributes::from_iter([(name("datasetId"), qualifier(json!(urn)))]);
@@ -822,7 +841,7 @@ mod tests {
                 coordinates: coordinates.into(),
             }))
         };
-        let value_map = values(vec![("location", Value::Array(vec![point([1.0, 2.0]), point([3.0, 4.0])]))]);
+        let value_map = values(vec![("location", instances(vec![Some(point([1.0, 2.0])), Some(point([3.0, 4.0]))]))]);
         let mut metadata = IndexMap::default();
         metadata.insert(
             name("location"),
@@ -860,10 +879,10 @@ mod tests {
         // own datasetIds because metadata is selected by original index (clause 4.5.5).
         let value_map = values(vec![(
             "category",
-            Value::Array(vec![
-                Value::String("https://example.org/a".into()),
-                Value::String("not an iri".into()),
-                Value::String("https://example.org/c".into()),
+            instances(vec![
+                Some(Value::String("https://example.org/a".into())),
+                Some(Value::String("not an iri".into())),
+                Some(Value::String("https://example.org/c".into())),
             ]),
         )]);
         let mut metadata = IndexMap::default();
@@ -904,17 +923,26 @@ mod tests {
             (
                 r#"{ version: "v4", dataModel: "Sensor", identity: { entityName: "S-{{ id }}" }, attributes: { label: { type: "LanguageProperty", instances: [ { source: "{{ a }}" }, { source: "{{ b }}" } ] } } }"#,
                 "label",
-                Value::Array(vec![Value::from(json!({"en": "hello"})), Value::from(json!({"en": "world"}))]),
+                instances(vec![
+                    Some(Value::try_from(json!({"en": "hello"})).unwrap()),
+                    Some(Value::try_from(json!({"en": "world"})).unwrap()),
+                ]),
             ),
             (
                 r#"{ version: "v4", dataModel: "Sensor", identity: { entityName: "S-{{ id }}" }, attributes: { tags: { type: "ListProperty", instances: [ { source: "{{ a }}" }, { source: "{{ b }}" } ] } } }"#,
                 "tags",
-                Value::Array(vec![Value::from(json!(["x", "y"])), Value::from(json!(["z"]))]),
+                instances(vec![
+                    Some(Value::try_from(json!(["x", "y"])).unwrap()),
+                    Some(Value::try_from(json!(["z"])).unwrap()),
+                ]),
             ),
             (
                 r#"{ version: "v4", dataModel: "Sensor", identity: { entityName: "S-{{ id }}" }, attributes: { payload: { type: "JsonProperty", instances: [ { source: "{{ a }}" }, { source: "{{ b }}" } ] } } }"#,
                 "payload",
-                Value::Array(vec![Value::from(json!({"k": 1})), Value::from(json!({"k": 2}))]),
+                ResolvedAttribute::Instances(vec![
+                    Some(AttributeContent::Json(JsonPayload::try_from(json!({"k": 1})).unwrap())),
+                    Some(AttributeContent::Json(JsonPayload::try_from(json!({"k": null})).unwrap())),
+                ]),
             ),
         ];
 
@@ -952,7 +980,7 @@ mod tests {
             name("playsCharacter"),
             SubAttribute::new_relationship(
                 NgsiLdAttributeKind::Relationship,
-                Value::from(json!("urn:ngsi-ld:Character:JackSparrow")),
+                Value::try_from(json!("urn:ngsi-ld:Character:JackSparrow")).unwrap(),
                 Some(name("Character")),
                 IndexMap::default(),
             ),
@@ -1064,7 +1092,7 @@ mod tests {
 
     /// A sensor entity whose temperature carries the given `observedAt` and `unitCode`.
     fn qualified_entity(id: &str, observed_at: &str, unit_code: &str) -> Entity {
-        let value_map = values(vec![("temperature", Value::Number(Number::Float(20.0)))]);
+        let value_map = values(vec![("temperature", single(Value::Number(Number::Float(20.0))))]);
         let mut shared = IndexMap::default();
         shared.insert(name("observedAt"), qualifier(json!(observed_at)));
         shared.insert(name("unitCode"), qualifier(json!(unit_code)));

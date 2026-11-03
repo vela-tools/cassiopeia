@@ -243,14 +243,6 @@ Generate a manifest file from command-line arguments
   - `simplified`:
     Flat key-value representation without metadata
 
-* `--skip-null <SKIPNULL>` — How to handle null values in written entities
-
-  Possible values:
-  - `include`:
-    Include null-valued attributes in output
-  - `skip`:
-    Omit null-valued attributes from output
-
 * `--temporal-representation <REPRESENTATION>` — Temporal output shape. `series` folds each id's observations into one temporal entity with instance arrays (ETSI GS CIM 009 v1.9.1 clause 5.2.20); absent writes current-state (one entity per id, latest per attribute). A general output shape, valid for the file writer and the broker
 * `--validation-representation <REPRESENTATION>` — NGSI-LD representation the validator serializes entities in
 
@@ -261,14 +253,6 @@ Generate a manifest file from command-line arguments
     Compact representation omitting redundant type metadata
   - `simplified`:
     Flat key-value representation without metadata
-
-* `--validation-skip-null <SKIPNULL>` — How the validator handles null values
-
-  Possible values:
-  - `include`:
-    Include null-valued attributes in output
-  - `skip`:
-    Omit null-valued attributes from output
 
 * `--validation-mode <MODE>` — How strictly schema validation is enforced, overriding the manifest: warn, fail-when-schema, or fail
 * `--validation-schema <FILE|URL>` — A custom JSON Schema to validate against (a local file path or an `http(s)` URL), applied to every produced type in place of the Smart Data Models convention. A per-input `schema` in the manifest wins over this
@@ -433,14 +417,6 @@ Map data to a Smart Data Model
   - `simplified`:
     Flat key-value representation without metadata
 
-* `--validation-skip-null <SKIPNULL>` — How the validator handles null values
-
-  Possible values:
-  - `include`:
-    Include null-valued attributes in output
-  - `skip`:
-    Omit null-valued attributes from output
-
 * `--validation-mode <MODE>` — How strictly schema validation is enforced, overriding the manifest: warn, fail-when-schema, or fail
 * `--validation-schema <FILE|URL>` — A custom JSON Schema to validate against (a local file path or an `http(s)` URL), applied to every produced type in place of the Smart Data Models convention. A per-input `schema` in the manifest wins over this
 * `-r`, `--validation-report <FILE>` — Write a JSON validation report to the given file path
@@ -474,14 +450,6 @@ Map data to a Smart Data Model
     Compact representation omitting redundant type metadata
   - `simplified`:
     Flat key-value representation without metadata
-
-* `--writer-skip-null <SKIPNULL>` — How to handle null values in written entities
-
-  Possible values:
-  - `include`:
-    Include null-valued attributes in output
-  - `skip`:
-    Omit null-valued attributes from output
 
 * `--temporal-representation <REPRESENTATION>` — Temporal output shape. `series` folds each id's observations into one temporal entity with instance arrays (ETSI GS CIM 009 v1.9.1 clause 5.2.20); absent writes current-state (one entity per id, latest per attribute). A general output shape, valid for the file writer and the broker
 * `-u`, `--broker-url <URL>` — Context Broker URL (required when --writer is context-broker)

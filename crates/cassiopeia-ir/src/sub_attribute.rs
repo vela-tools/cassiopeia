@@ -1,3 +1,4 @@
+use crate::attribute_content::AttributeContent;
 use cassiopeia_ngsi_ld::{
     entity::{attribute::NgsiLdAttributeKind, name::NameBuf},
     value::types::Value,
@@ -19,8 +20,8 @@ pub type SubAttributes = IndexMap<NameBuf, SubAttribute, RandomState>;
 /// An attribute's sub-attributes are the serialization of a Property or any of its subclasses (ETSI
 /// GS CIM 009 v1.9.1 clause 4.5.2.2), so a sub-attribute keeps its declared [`NgsiLdAttributeKind`]:
 /// a nested `VocabProperty`, `ListProperty`, `LanguageProperty`, `GeoProperty`, or `JsonProperty` is
-/// built as that kind rather than flattened to a plain Property. It carries its kind-shaped [`Value`]
-/// payload and its own sub-attributes, nested to arbitrary depth.
+/// built as that kind rather than flattened to a plain Property. It carries its kind-shaped
+/// [`AttributeContent`] and its own sub-attributes, nested to arbitrary depth.
 ///
 /// The payload is the value the extraction stage resolved, exactly as it resolved it, the same type a
 /// top-level attribute's value travels as: a `GeoProperty` sub-attribute arrives as the geometry its
@@ -41,11 +42,11 @@ pub type SubAttributes = IndexMap<NameBuf, SubAttribute, RandomState>;
 pub struct SubAttribute {
     /// The NGSI-LD attribute kind this sub-attribute was declared as.
     kind: NgsiLdAttributeKind,
-    /// The kind-shaped value payload: a `GeoProperty`'s typed geometry, a `VocabProperty`'s
-    /// vocabulary IRI, a `LanguageProperty`'s `languageMap` object, a `ListProperty`'s array, a plain
-    /// Property's scalar, a Relationship's object URN, a `ListRelationship`'s array of object URNs,
-    /// and so on.
-    value: Value,
+    /// The kind-shaped content: a `GeoProperty`'s typed geometry, a `VocabProperty`'s vocabulary
+    /// IRI, a `LanguageProperty`'s `languageMap` object, a `ListProperty`'s array, a plain Property's
+    /// scalar, a `JsonProperty`'s raw JSON, a Relationship's object URN, a `ListRelationship`'s array
+    /// of object URNs, and so on.
+    value: AttributeContent,
     /// The target entity type of a Relationship/`ListRelationship` sub-attribute (its `objectType`,
     /// ETSI GS CIM 009 v1.9.1 clause 4.5.3); `None` for the Property family.
     object_type: Option<NameBuf>,
@@ -54,10 +55,10 @@ pub struct SubAttribute {
 }
 
 impl SubAttribute {
-    /// Builds a Property-family sub-attribute from its declared kind, resolved value, and nested
+    /// Builds a Property-family sub-attribute from its declared kind, resolved content, and nested
     /// sub-attributes. The target type is `None`, since only a relationship carries one.
     #[must_use]
-    pub const fn new(kind: NgsiLdAttributeKind, value: Value, metadata: SubAttributes) -> SubAttribute {
+    pub const fn new(kind: NgsiLdAttributeKind, value: AttributeContent, metadata: SubAttributes) -> SubAttribute {
         SubAttribute {
             kind,
             value,
@@ -72,7 +73,7 @@ impl SubAttribute {
     pub const fn new_relationship(kind: NgsiLdAttributeKind, value: Value, object_type: Option<NameBuf>, metadata: SubAttributes) -> SubAttribute {
         SubAttribute {
             kind,
-            value,
+            value: AttributeContent::Value(value),
             object_type,
             metadata,
         }
@@ -81,11 +82,11 @@ impl SubAttribute {
 
 #[cfg(test)]
 mod tests {
-    use crate::sub_attribute::SubAttribute;
+    use crate::{attribute_content::AttributeContent, sub_attribute::SubAttribute};
     use cassiopeia_geometry::geometry::NgsiLdGeometry;
     use cassiopeia_ngsi_ld::{
         entity::{attribute::NgsiLdAttributeKind, name::NameBuf},
-        value::types::Value,
+        value::{json_payload::JsonPayload, types::Value},
     };
     use indexmap::IndexMap;
     use pretty_assertions::assert_eq;
@@ -97,13 +98,24 @@ mod tests {
 
     #[test]
     fn a_sub_attribute_exposes_its_kind_value_and_nested_sub_attributes() {
-        let inner = SubAttribute::new(NgsiLdAttributeKind::Property, Value::from(json!("2026-08-26T00:00:00Z")), IndexMap::default());
+        let inner = SubAttribute::new(
+            NgsiLdAttributeKind::Property,
+            AttributeContent::Value(Value::try_from(json!("2026-08-26T00:00:00Z")).unwrap()),
+            IndexMap::default(),
+        );
         let mut nested = IndexMap::default();
         nested.insert(name("observedAt"), inner);
-        let outer = SubAttribute::new(NgsiLdAttributeKind::VocabProperty, Value::from(json!("https://example.org/level/high")), nested);
+        let outer = SubAttribute::new(
+            NgsiLdAttributeKind::VocabProperty,
+            AttributeContent::Value(Value::try_from(json!("https://example.org/level/high")).unwrap()),
+            nested,
+        );
 
         assert_eq!(*outer.kind(), NgsiLdAttributeKind::VocabProperty);
-        assert_eq!(outer.value(), &Value::from(json!("https://example.org/level/high")));
+        assert_eq!(
+            outer.value(),
+            &AttributeContent::Value(Value::try_from(json!("https://example.org/level/high")).unwrap())
+        );
         assert_eq!(
             *outer.metadata().get(&name("observedAt")).expect("nested sub-attribute").kind(),
             NgsiLdAttributeKind::Property
@@ -117,16 +129,16 @@ mod tests {
         };
         let sub = SubAttribute::new(
             NgsiLdAttributeKind::GeoProperty,
-            Value::Geospatial(Box::new(geometry.clone())),
+            AttributeContent::Value(Value::Geospatial(Box::new(geometry.clone()))),
             IndexMap::default(),
         );
 
-        assert_eq!(sub.value(), &Value::Geospatial(Box::new(geometry)));
+        assert_eq!(sub.value(), &AttributeContent::Value(Value::Geospatial(Box::new(geometry))));
     }
 
     #[test]
     fn a_property_sub_attribute_has_no_object_type() {
-        let sub = SubAttribute::new(NgsiLdAttributeKind::Property, Value::from(0.5), IndexMap::default());
+        let sub = SubAttribute::new(NgsiLdAttributeKind::Property, AttributeContent::Value(Value::from(0.5)), IndexMap::default());
 
         assert_eq!(sub.object_type(), &None);
     }
@@ -135,19 +147,36 @@ mod tests {
     fn a_relationship_sub_attribute_carries_its_object_type() {
         let sub = SubAttribute::new_relationship(
             NgsiLdAttributeKind::Relationship,
-            Value::from(json!("urn:ngsi-ld:Character:JackSparrow")),
+            Value::try_from(json!("urn:ngsi-ld:Character:JackSparrow")).unwrap(),
             Some(name("Character")),
             IndexMap::default(),
         );
 
         assert_eq!(*sub.kind(), NgsiLdAttributeKind::Relationship);
         assert_eq!(sub.object_type().as_ref().map(NameBuf::as_str), Some("Character"));
-        assert_eq!(sub.value(), &Value::from(json!("urn:ngsi-ld:Character:JackSparrow")));
+        assert_eq!(
+            sub.value(),
+            &AttributeContent::Value(Value::try_from(json!("urn:ngsi-ld:Character:JackSparrow")).unwrap())
+        );
     }
 
     #[test]
     fn a_sub_attribute_round_trips_through_json() {
-        let sub = SubAttribute::new(NgsiLdAttributeKind::ListProperty, Value::from(json!([1, 2, 3])), IndexMap::default());
+        let sub = SubAttribute::new(
+            NgsiLdAttributeKind::ListProperty,
+            AttributeContent::Value(Value::try_from(json!([1, 2, 3])).unwrap()),
+            IndexMap::default(),
+        );
+        let encoded = serde_json::to_string(&sub).expect("serializes");
+        let decoded: SubAttribute = serde_json::from_str(&encoded).expect("deserializes");
+
+        assert_eq!(sub, decoded);
+    }
+
+    #[test]
+    fn a_json_property_sub_attribute_round_trips_through_json_keeping_its_nested_null() {
+        let payload = JsonPayload::try_from(json!({"maybe": null})).unwrap();
+        let sub = SubAttribute::new(NgsiLdAttributeKind::JsonProperty, AttributeContent::Json(payload), IndexMap::default());
         let encoded = serde_json::to_string(&sub).expect("serializes");
         let decoded: SubAttribute = serde_json::from_str(&encoded).expect("deserializes");
 
@@ -159,7 +188,11 @@ mod tests {
         let polygon = NgsiLdGeometry::Polygon {
             coordinates: vec![vec![[0.0, 0.0].into(), [0.0, 2.0].into(), [2.0, 2.0].into(), [0.0, 0.0].into()]],
         };
-        let sub = SubAttribute::new(NgsiLdAttributeKind::GeoProperty, Value::Geospatial(Box::new(polygon)), IndexMap::default());
+        let sub = SubAttribute::new(
+            NgsiLdAttributeKind::GeoProperty,
+            AttributeContent::Value(Value::Geospatial(Box::new(polygon))),
+            IndexMap::default(),
+        );
         let encoded = serde_json::to_string(&sub).expect("serializes");
         let decoded: SubAttribute = serde_json::from_str(&encoded).expect("deserializes");
 
@@ -170,7 +203,7 @@ mod tests {
     fn a_relationship_sub_attribute_round_trips_through_json() {
         let sub = SubAttribute::new_relationship(
             NgsiLdAttributeKind::ListRelationship,
-            Value::from(json!(["urn:ngsi-ld:Person:1", "urn:ngsi-ld:Person:2"])),
+            Value::try_from(json!(["urn:ngsi-ld:Person:1", "urn:ngsi-ld:Person:2"])).unwrap(),
             Some(name("Person")),
             IndexMap::default(),
         );

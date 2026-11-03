@@ -4,15 +4,24 @@ pub mod temporal;
 pub mod validation;
 pub mod validation_mode;
 
-use crate::output::{destination::Destination, temporal::ManifestTemporal, validation::ManifestValidation};
-use cassiopeia_common::{context::mode::AtContextMode, representation::NgsiLdRepresentation, skip_null::NgsiLdSkipNull};
+use crate::{
+    error::ManifestError,
+    output::{destination::Destination, temporal::ManifestTemporal, validation::ManifestValidation},
+};
+use cassiopeia_common::{context::mode::AtContextMode, representation::NgsiLdRepresentation};
 use getset::Getters;
 use serde::{Deserialize, Serialize};
+use serde_json::{Map, Value as JsonValue};
 use typed_builder::TypedBuilder;
 
 /// Where a run's entities go and in what shape they are written.
+///
+/// It is read through [`ManifestOutputRaw`], because serde's `flatten`, which places the destination's
+/// settings beside the output's own, cannot be combined with `deny_unknown_fields`: the raw struct
+/// hands every key the output does not define to the destination, which refuses any it does not
+/// define either, so a misspelt or retired key is an error rather than silently ignored.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Getters, TypedBuilder)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", try_from = "ManifestOutputRaw")]
 pub struct ManifestOutput {
     /// The destination and the settings only that destination understands.
     #[serde(flatten)]
@@ -25,20 +34,14 @@ pub struct ManifestOutput {
     #[getset(get = "pub")]
     representation: Option<NgsiLdRepresentation>,
 
-    /// Whether null-valued attributes are written or omitted.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    #[builder(default = None)]
-    #[getset(get = "pub")]
-    skip_null: Option<NgsiLdSkipNull>,
-
     /// The `@context` mode applied to every entity that does not override it per input.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[builder(default = None)]
     #[getset(get = "pub")]
     context: Option<AtContextMode>,
 
-    /// How this run validates: mode, custom schema, representation, skip-null, and report path,
-    /// grouped under one `validation` object rather than scattered as flat siblings.
+    /// How this run validates: mode, custom schema, representation, and report path, grouped
+    /// under one `validation` object rather than scattered as flat siblings.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[builder(default = None)]
     #[getset(get = "pub")]
@@ -50,6 +53,39 @@ pub struct ManifestOutput {
     #[builder(default = None)]
     #[getset(get = "pub")]
     temporal: Option<ManifestTemporal>,
+}
+
+/// The on-the-wire shape of a manifest output, before its destination settings are read.
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ManifestOutputRaw {
+    #[serde(default)]
+    representation: Option<NgsiLdRepresentation>,
+    #[serde(default)]
+    context: Option<AtContextMode>,
+    #[serde(default)]
+    validation: Option<ManifestValidation>,
+    #[serde(default)]
+    temporal: Option<ManifestTemporal>,
+    /// The `target` and every other key the output does not define, read as the destination.
+    #[serde(flatten)]
+    destination: Map<String, JsonValue>,
+}
+
+impl TryFrom<ManifestOutputRaw> for ManifestOutput {
+    type Error = ManifestError;
+
+    fn try_from(raw: ManifestOutputRaw) -> Result<ManifestOutput, ManifestError> {
+        let destination = Destination::deserialize(JsonValue::Object(raw.destination)).map_err(|source| ManifestError::Destination { source })?;
+
+        Ok(ManifestOutput {
+            destination,
+            representation: raw.representation,
+            context: raw.context,
+            validation: raw.validation,
+            temporal: raw.temporal,
+        })
+    }
 }
 
 #[cfg(test)]
@@ -67,7 +103,7 @@ mod tests {
     #[test]
     fn reads_a_full_nested_validation_object() {
         let output: ManifestOutput = serde_json::from_str(
-            r#"{"target": "file", "directory": "out", "validation": {"mode": "fail", "schema": "x.schema.json", "representation": "normalized", "skipNull": "skip", "report": "report.json"}}"#,
+            r#"{"target": "file", "directory": "out", "validation": {"mode": "fail", "schema": "x.schema.json", "representation": "normalized", "report": "report.json"}}"#,
         )
         .unwrap();
 
@@ -102,6 +138,37 @@ mod tests {
     #[test]
     fn a_file_output_round_trips_through_json() {
         let output: ManifestOutput = serde_json::from_str(r#"{"target": "file", "directory": "out"}"#).unwrap();
+        let encoded = serde_json::to_string(&output).unwrap();
+
+        assert_eq!(serde_json::from_str::<ManifestOutput>(&encoded).unwrap(), output);
+    }
+
+    #[test]
+    fn an_output_carrying_the_retired_skip_null_key_is_rejected_as_an_unknown_field() {
+        let error = serde_json::from_str::<ManifestOutput>(r#"{"target": "file", "directory": "out", "skipNull": "include"}"#).unwrap_err();
+
+        assert!(error.to_string().contains("unknown field `skipNull`"), "{error}");
+    }
+
+    #[test]
+    fn a_broker_output_carrying_the_retired_skip_null_key_is_rejected_as_an_unknown_field() {
+        let error = serde_json::from_str::<ManifestOutput>(r#"{"target": "context-broker", "url": "http://localhost:9090/", "skipNull": "skip"}"#).unwrap_err();
+
+        assert!(error.to_string().contains("unknown field `skipNull`"), "{error}");
+    }
+
+    #[test]
+    fn a_validation_object_carrying_the_retired_skip_null_key_is_rejected_as_an_unknown_field() {
+        let error = serde_json::from_str::<ManifestOutput>(r#"{"target": "file", "directory": "out", "validation": {"mode": "fail", "skipNull": "include"}}"#)
+            .unwrap_err();
+
+        assert!(error.to_string().contains("unknown field `skipNull`"), "{error}");
+    }
+
+    #[test]
+    fn a_broker_output_round_trips_through_json() {
+        let output: ManifestOutput =
+            serde_json::from_str(r#"{"target": "context-broker", "url": "http://localhost:9090/", "tenant": "city", "representation": "concise"}"#).unwrap();
         let encoded = serde_json::to_string(&output).unwrap();
 
         assert_eq!(serde_json::from_str::<ManifestOutput>(&encoded).unwrap(), output);

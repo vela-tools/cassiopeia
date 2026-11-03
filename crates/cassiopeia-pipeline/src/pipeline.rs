@@ -10,7 +10,6 @@ use cassiopeia_common::{
     file_framing::FileFraming,
     representation::NgsiLdRepresentation,
     schema_source::SchemaSource,
-    skip_null::NgsiLdSkipNull,
 };
 use cassiopeia_manifest::{
     failure_policy::FailurePolicy,
@@ -48,8 +47,6 @@ pub(crate) struct OutputConfig {
     pub(crate) destination: Destination,
     /// The NGSI-LD representation for written entities, when the manifest sets one.
     pub(crate) representation: Option<NgsiLdRepresentation>,
-    /// How null values in written entities are handled, when the manifest sets it.
-    pub(crate) skip_null: Option<NgsiLdSkipNull>,
     /// Whether the run emits the full temporal series (`temporal.representation == "series"`), which
     /// selects the series store and inserts the fold stage. Absent temporal output leaves this false,
     /// the current-state default.
@@ -65,8 +62,6 @@ pub(crate) struct OutputConfig {
     pub(crate) global_validation_schema: Option<SchemaSource>,
     /// The representation the validator serializes entities in, resolved CLI-over-manifest-over-default.
     pub(crate) validation_representation: NgsiLdRepresentation,
-    /// Whether the validator drops null-valued attributes before checking, resolved the same way.
-    pub(crate) validation_skip_null: NgsiLdSkipNull,
 }
 
 /// The validation settings a run supplies from the command line, each overriding the manifest.
@@ -82,8 +77,6 @@ pub struct ValidationOverrides {
     pub schema: Option<SchemaSource>,
     /// The validation representation override, when given.
     pub representation: Option<NgsiLdRepresentation>,
-    /// The validation skip-null override, when given.
-    pub skip_null: Option<NgsiLdSkipNull>,
 }
 
 /// When a run repeats and how it reacts to a failed run.
@@ -131,7 +124,6 @@ impl Pipeline {
             mode,
             schema,
             representation: cli_validation_representation,
-            skip_null: cli_validation_skip_null,
         } = validation;
 
         if let Some(profile) = manifest.memory_profile() {
@@ -156,7 +148,6 @@ impl Pipeline {
         let output = manifest.output().as_ref();
         let destination = output.map_or_else(|| Destination::file(None, FileFraming::default()), |output| output.destination().clone());
         let representation = output.and_then(|output| *output.representation());
-        let skip_null = output.and_then(|output| *output.skip_null());
         let series_representation = output
             .and_then(|output| output.temporal().as_ref())
             .is_some_and(|temporal| *temporal.representation() == TemporalRepresentation::Series);
@@ -184,9 +175,6 @@ impl Pipeline {
         let validation_representation = cli_validation_representation
             .or_else(|| manifest_validation.and_then(|validation| *validation.representation()))
             .unwrap_or(NgsiLdRepresentation::Simplified);
-        let validation_skip_null = cli_validation_skip_null
-            .or_else(|| manifest_validation.and_then(|validation| *validation.skip_null()))
-            .unwrap_or(NgsiLdSkipNull::Skip);
         // Inline runs pass the flag here and the manifest carries none; a `--manifest` run passes
         // `None` and the manifest's `output.validation.schema` wins, the same precedence the mode
         // above follows.
@@ -204,14 +192,12 @@ impl Pipeline {
             output: OutputConfig {
                 destination,
                 representation,
-                skip_null,
                 series_representation,
                 global_context_mode,
                 validation_report_path,
                 validation_mode,
                 global_validation_schema,
                 validation_representation,
-                validation_skip_null,
             },
             config,
             schedule: ScheduleConfig {
@@ -327,7 +313,6 @@ mod tests {
                 mode: cli,
                 schema: None,
                 representation: None,
-                skip_null: None,
             },
             serde_json::Map::new(),
             config(),
@@ -370,7 +355,6 @@ mod tests {
                 mode: None,
                 schema: param,
                 representation: None,
-                skip_null: None,
             },
             serde_json::Map::new(),
             config(),
@@ -445,7 +429,6 @@ mod tests {
                 mode: None,
                 schema: None,
                 representation: cli,
-                skip_null: None,
             },
             serde_json::Map::new(),
             config(),
@@ -505,7 +488,6 @@ mod tests {
                 mode: None,
                 schema: None,
                 representation: None,
-                skip_null: None,
             },
             serde_json::Map::new(),
             config(),
@@ -544,7 +526,6 @@ mod tests {
                 mode: None,
                 schema: None,
                 representation: None,
-                skip_null: None,
             },
             serde_json::Map::new(),
             config(),
@@ -624,7 +605,6 @@ mod tests {
                 mode: None,
                 schema: None,
                 representation: None,
-                skip_null: None,
             },
             cli,
             config(),
@@ -749,7 +729,6 @@ mod tests {
                 mode: None,
                 schema: None,
                 representation: None,
-                skip_null: None,
             },
             serde_json::Map::new(),
             engine,

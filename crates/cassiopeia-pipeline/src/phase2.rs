@@ -84,7 +84,7 @@ impl Pipeline {
 
 #[cfg(test)]
 mod tests {
-    use cassiopeia_common::{representation::NgsiLdRepresentation, skip_null::NgsiLdSkipNull};
+    use cassiopeia_common::representation::NgsiLdRepresentation;
     use cassiopeia_expander::{compiler::ExpanderCompiler, expander::Expander, generic::GenericExpander, router::MappingRouter};
     use cassiopeia_extractor::{dropped_attributes::DroppedAttributes, entity_extractor::EntityExtractor, extractor::Extractor};
     use cassiopeia_ir::{fragment::Fragment, mapped::Mapped, record::Record};
@@ -313,7 +313,7 @@ mod tests {
         let entity = route_through_the_stages(document, json!({"id": 1, "temperature": 21.5, "until": "2026-10-25T13:00:00Z"}));
 
         assert_eq!(entity.expires_at, Some(Utc.with_ymd_and_hms(2026, 10, 25, 13, 0, 0).unwrap()));
-        let serialized = entity.to_json(NgsiLdRepresentation::Normalized, NgsiLdSkipNull::Skip).unwrap();
+        let serialized = entity.to_json(NgsiLdRepresentation::Normalized).unwrap();
         assert_eq!(serialized["expiresAt"], "2026-10-25T13:00:00Z");
     }
 }

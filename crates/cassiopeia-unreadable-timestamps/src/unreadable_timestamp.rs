@@ -41,14 +41,13 @@ impl Recurring for UnreadableTimestamp {
 
 /// The text an unreadable `value` is recorded under, or `None` when the record does not carry one.
 ///
-/// A null or blank value is one the record does not carry and is not recorded; text is quoted as
+/// A blank value is one the record does not carry and is not recorded; text is quoted as
 /// written, and any other value (a number too small to be an epoch, a boolean, an object) as its
 /// rendering, so a mapping mistake is named rather than lost. Text is borrowed from the value: a
 /// sink copies it only when it opens a record, so a repeat of a known failure allocates nothing.
 #[must_use]
 pub fn unreadable_text(value: &Value) -> Option<Cow<'_, str>> {
     match value {
-        Value::Null => None,
         Value::String(text) => {
             let text = text.trim();
             if text.is_empty() { None } else { Some(Cow::Borrowed(text)) }
@@ -78,16 +77,15 @@ mod tests {
     }
 
     #[test]
-    fn a_null_or_blank_value_is_absent_rather_than_unreadable() {
-        assert_eq!(unreadable_text(&Value::from(json!(null))), None);
-        assert_eq!(unreadable_text(&Value::from(json!("   "))), None);
-        assert_eq!(unreadable_text(&Value::from(json!(""))), None);
+    fn a_blank_value_is_absent_rather_than_unreadable() {
+        assert_eq!(unreadable_text(&Value::try_from(json!("   ")).unwrap()), None);
+        assert_eq!(unreadable_text(&Value::try_from(json!("")).unwrap()), None);
     }
 
     #[test]
     fn text_is_recorded_as_written_and_any_other_shape_as_its_rendering() {
-        assert_eq!(unreadable_text(&Value::from(json!("  tomorrow "))), Some("tomorrow".into()));
-        assert_eq!(unreadable_text(&Value::from(json!(2026))), Some("2026".into()));
-        assert_eq!(unreadable_text(&Value::from(json!(true))), Some("true".into()));
+        assert_eq!(unreadable_text(&Value::try_from(json!("  tomorrow ")).unwrap()), Some("tomorrow".into()));
+        assert_eq!(unreadable_text(&Value::try_from(json!(2026)).unwrap()), Some("2026".into()));
+        assert_eq!(unreadable_text(&Value::try_from(json!(true)).unwrap()), Some("true".into()));
     }
 }

@@ -227,7 +227,6 @@ mod tests {
         channel::{ChannelPolicy, channel},
         representation::NgsiLdRepresentation,
         signal::Signal,
-        skip_null::NgsiLdSkipNull,
         stage::Stage,
         telemetry::run::RunTelemetry,
     };
@@ -290,7 +289,6 @@ mod tests {
             repositories: HashMap::new(),
             custom_schemas: HashMap::new(),
             representation: NgsiLdRepresentation::Normalized,
-            skip_null: NgsiLdSkipNull::Skip,
         });
         let output = spawn_validator_thread(
             rx,

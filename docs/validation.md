@@ -53,7 +53,7 @@ output: {
 }
 ~~~
 
-Every validation option lives under one `output.validation` object: the mode above, the custom schema and representation below, plus `skipNull` and a `report` path. Each is optional and falls back to its own default when omitted.
+Every validation option lives under one `output.validation` object: the mode above, the custom schema and representation below, plus a `report` path. Each is optional and falls back to its own default when omitted.
 
 ## Validation representation
 
@@ -64,7 +64,6 @@ The representation used for validation is separate from the representation Cassi
 | Flag | Manifest field | Values | Effect |
 | --- | --- | --- | --- |
 | `--validation-representation` | `output.validation.representation` | `normalized`, `concise`, `simplified` | The representation entities are validated in. |
-| `--validation-skip-null` | `output.validation.skipNull` | `skip`, `include` | Whether null-valued attributes are present when the entity is checked. |
 
 A command-line flag overrides the manifest, which overrides the simplified default. Change the representation only when the target schema describes another form, such as a schema that constrains the full normalized Property wrapper with its `type` and `value` members. [Example 28](https://github.com/vela-tools/cassiopeia-examples/blob/main/examples/28-json-advanced-schema/example.md) validates that form with `representation: "normalized"`. The [representation guide](representation.md) explains how the writing and validation settings stay independent.
 

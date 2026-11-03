@@ -58,7 +58,7 @@ impl Value {
     pub fn into_geometry(self) -> Option<NgsiLdGeometry> {
         match self {
             Value::Geospatial(geometry) => Some(*geometry),
-            Value::Null | Value::Boolean(_) | Value::Number(_) | Value::String(_) | Value::Temporal(_) | Value::Array(_) | Value::Object(_) => None,
+            Value::Boolean(_) | Value::Number(_) | Value::String(_) | Value::Temporal(_) | Value::Array(_) | Value::Object(_) => None,
         }
     }
 
@@ -70,7 +70,7 @@ impl Value {
                 let json = serde_json::to_value(map.as_ref()).ok()?;
                 serde_json::from_value(json).ok()
             }
-            Value::Null | Value::Boolean(_) | Value::Number(_) | Value::Temporal(_) | Value::Geospatial(_) | Value::Array(_) => None,
+            Value::Boolean(_) | Value::Number(_) | Value::Temporal(_) | Value::Geospatial(_) | Value::Array(_) => None,
         }
     }
 
@@ -136,7 +136,7 @@ mod tests {
 
     #[test]
     fn a_coordinate_pair_becomes_the_declared_point() {
-        let value = Value::from(json!([1.0, 2.0]));
+        let value = Value::try_from(json!([1.0, 2.0])).unwrap();
 
         assert_eq!(
             coerce(&value, GeometryKind::Point),
@@ -150,7 +150,7 @@ mod tests {
     fn a_comma_decimal_coordinate_string_still_reads_as_a_number() {
         // CSV sources routinely write a longitude as `14,5`; the value model parses it, which is why
         // coordinate reading lives here rather than in the geometry crate.
-        let value = Value::from(json!(["14,5", "46,05"]));
+        let value = Value::try_from(json!(["14,5", "46,05"])).unwrap();
 
         assert_eq!(
             coerce(&value, GeometryKind::Point),
@@ -162,14 +162,14 @@ mod tests {
 
     #[test]
     fn a_coordinate_array_carrying_an_unreadable_element_is_absent_rather_than_truncated() {
-        let value = Value::from(json!([1.0, 2.0, "junk"]));
+        let value = Value::try_from(json!([1.0, 2.0, "junk"])).unwrap();
 
         assert_eq!(coerce(&value, GeometryKind::Point), Ok(None));
     }
 
     #[test]
     fn an_altitude_survives_a_three_element_coordinate_array() {
-        let value = Value::from(json!([1.0, 2.0, 300.0]));
+        let value = Value::try_from(json!([1.0, 2.0, 300.0])).unwrap();
 
         assert_eq!(
             coerce(&value, GeometryKind::Point),
@@ -181,14 +181,14 @@ mod tests {
 
     #[test]
     fn a_non_geometry_carries_no_geometry() {
-        assert_eq!(coerce(&Value::from(json!("not a point")), GeometryKind::Point), Ok(None));
-        assert_eq!(preserve(&Value::from(json!("not a point"))), Ok(None));
-        assert_eq!(preserve(&Value::Null), Ok(None));
+        assert_eq!(coerce(&Value::try_from(json!("not a point")).unwrap(), GeometryKind::Point), Ok(None));
+        assert_eq!(preserve(&Value::try_from(json!("not a point")).unwrap()), Ok(None));
+        assert_eq!(preserve(&Value::Boolean(true)), Ok(None));
     }
 
     #[test]
     fn a_geojson_object_is_preserved_as_the_geometry_it_declares() {
-        let value = Value::from(json!({"type": "Point", "coordinates": [1.0, 2.0]}));
+        let value = Value::try_from(json!({"type": "Point", "coordinates": [1.0, 2.0]})).unwrap();
 
         assert_eq!(
             preserve(&value),
@@ -212,27 +212,31 @@ mod tests {
         };
 
         assert_eq!(Value::Geospatial(Box::new(point.clone())).into_geometry(), Some(point));
-        assert_eq!(Value::from(json!({"type": "Point", "coordinates": [1.0, 2.0]})).into_geometry(), None);
+        assert_eq!(
+            Value::try_from(json!({"type": "Point", "coordinates": [1.0, 2.0]})).unwrap().into_geometry(),
+            None
+        );
         assert_eq!(Value::String(r#"{"type":"Point","coordinates":[1.0,2.0]}"#.into()).into_geometry(), None);
-        assert_eq!(Value::Null.into_geometry(), None);
+        assert_eq!(Value::Boolean(true).into_geometry(), None);
     }
 
     #[test]
     fn a_source_geometry_collection_is_refused_rather_than_carried() {
-        let value = Value::from(json!({"type": "GeometryCollection", "geometries": []}));
+        let value = Value::try_from(json!({"type": "GeometryCollection", "geometries": []})).unwrap();
 
         assert_eq!(preserve(&value), Err(GeometryError::GeometryCollection));
     }
 
     #[test]
     fn a_source_geometry_collection_folds_when_the_mapping_declares_it() {
-        let value = Value::from(json!({
+        let value = Value::try_from(json!({
             "type": "GeometryCollection",
             "geometries": [
                 {"type": "Point", "coordinates": [1.0, 2.0]},
                 {"type": "Point", "coordinates": [3.0, 4.0]},
             ],
-        }));
+        }))
+        .unwrap();
         let policy = GeometryPolicy::builder().convert(Some(ConversionStrategy::Flatten)).build();
 
         assert_eq!(
@@ -245,7 +249,7 @@ mod tests {
 
     #[test]
     fn a_point_source_promotes_to_a_declared_multipoint() {
-        let value = Value::from(json!({"type": "Point", "coordinates": [1.0, 2.0]}));
+        let value = Value::try_from(json!({"type": "Point", "coordinates": [1.0, 2.0]})).unwrap();
 
         assert_eq!(
             coerce(&value, GeometryKind::MultiPoint),
@@ -257,13 +261,14 @@ mod tests {
 
     #[test]
     fn a_multipolygon_source_is_refused_toward_a_declared_polygon_without_a_conversion() {
-        let value = Value::from(json!({
+        let value = Value::try_from(json!({
             "type": "MultiPolygon",
             "coordinates": [
                 [[[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 0.0]]],
                 [[[5.0, 5.0], [6.0, 5.0], [6.0, 6.0], [5.0, 5.0]]],
             ],
-        }));
+        }))
+        .unwrap();
 
         assert_eq!(
             coerce(&value, GeometryKind::Polygon),

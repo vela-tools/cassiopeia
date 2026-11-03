@@ -15,7 +15,6 @@ use cassiopeia_common::{
     masked_url::MaskedUrl,
     representation::NgsiLdRepresentation,
     request_header::RequestHeaders,
-    skip_null::NgsiLdSkipNull,
     tenant::Tenant,
     user_agent::UserAgent,
 };
@@ -72,13 +71,6 @@ impl BrokerWriterConfig {
     #[must_use]
     pub const fn with_representation(mut self, representation: NgsiLdRepresentation) -> BrokerWriterConfig {
         self.serialization.representation = representation;
-        self
-    }
-
-    /// Overrides whether null-valued attributes are skipped.
-    #[must_use]
-    pub const fn with_skip_null(mut self, skip_null: NgsiLdSkipNull) -> BrokerWriterConfig {
-        self.serialization.skip_null = skip_null;
         self
     }
 

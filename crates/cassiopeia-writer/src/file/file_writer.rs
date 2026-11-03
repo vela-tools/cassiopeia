@@ -10,7 +10,6 @@ use cassiopeia_common::{
     error::io::{IoAction, IoError},
     file_framing::FileFraming,
     representation::NgsiLdRepresentation,
-    skip_null::NgsiLdSkipNull,
 };
 use cassiopeia_ngsi_ld::entity::{NgsiLdEntity, context::ContextSource, name::NameBuf};
 use rayon::prelude::*;
@@ -32,8 +31,6 @@ pub struct FileWriterConfig {
     pub output_dir: PathBuf,
     /// The NGSI-LD representation entities are serialized in.
     pub representation: NgsiLdRepresentation,
-    /// Whether null-valued attributes are skipped during serialization.
-    pub skip_null: NgsiLdSkipNull,
     /// Whether a batch is written in parallel or sequentially.
     pub parallelism: Parallelism,
     /// The `@context` to attach to each entity.
@@ -73,7 +70,6 @@ pub struct FileWriter {
     failed_count: usize,
     bytes_written: u64,
     representation: NgsiLdRepresentation,
-    skip_null: NgsiLdSkipNull,
     parallelism: Parallelism,
     context: ContextSource,
     framing: FileFraming,
@@ -124,7 +120,6 @@ impl FileWriter {
             failed_count: 0,
             bytes_written: 0,
             representation: config.representation,
-            skip_null: config.skip_null,
             parallelism: config.parallelism,
             context,
             framing: config.framing,
@@ -137,7 +132,6 @@ impl FileWriter {
         mut entity: NgsiLdEntity,
         context: &ContextSource,
         representation: NgsiLdRepresentation,
-        skip_null: NgsiLdSkipNull,
         framing: FileFraming,
         capacity_hint: usize,
     ) -> Result<PreparedEntity> {
@@ -147,7 +141,7 @@ impl FileWriter {
 
         let entity_type = entity.entity_type.clone();
         let extension = file_extension(framing, entity.context.is_some());
-        let serialized = EntityTypeSink::serialize_entity(&entity, representation, skip_null, framing, capacity_hint)?;
+        let serialized = EntityTypeSink::serialize_entity(&entity, representation, framing, capacity_hint)?;
 
         Ok(PreparedEntity {
             entity_type,
@@ -160,7 +154,7 @@ impl FileWriter {
     /// from the running size estimate.
     fn prepare_batch(&self, entities: Vec<NgsiLdEntity>) -> Result<Vec<PreparedEntity>> {
         let hint = self.size_estimate;
-        let prepare = |entity| Self::prepare_entity(entity, &self.context, self.representation, self.skip_null, self.framing, hint);
+        let prepare = |entity| Self::prepare_entity(entity, &self.context, self.representation, self.framing, hint);
         match self.parallelism {
             Parallelism::Parallel => entities.into_par_iter().map(prepare).collect(),
             Parallelism::Sequential => entities.into_iter().map(prepare).collect(),
@@ -268,7 +262,7 @@ mod tests {
         run_outcome::RunOutcome,
         writer::Writer,
     };
-    use cassiopeia_common::{error::io::IoError, file_framing::FileFraming, representation::NgsiLdRepresentation, skip_null::NgsiLdSkipNull};
+    use cassiopeia_common::{error::io::IoError, file_framing::FileFraming, representation::NgsiLdRepresentation};
     use cassiopeia_ngsi_ld::entity::{
         NgsiLdEntity,
         context::{ContextSource, NgsiLdContext},
@@ -288,7 +282,6 @@ mod tests {
         FileWriter::new(FileWriterConfig {
             output_dir: directory.path().to_path_buf(),
             representation: NgsiLdRepresentation::Normalized,
-            skip_null: NgsiLdSkipNull::Skip,
             parallelism: Parallelism::Sequential,
             context,
             context_delivery: ContextDelivery::Body,
@@ -302,7 +295,6 @@ mod tests {
         FileWriter::new(FileWriterConfig {
             output_dir: directory.path().to_path_buf(),
             representation: NgsiLdRepresentation::Normalized,
-            skip_null: NgsiLdSkipNull::Skip,
             parallelism: Parallelism::Parallel,
             context: ContextSource::None,
             context_delivery: ContextDelivery::Body,
@@ -378,7 +370,6 @@ mod tests {
         let mut writer = FileWriter::new(FileWriterConfig {
             output_dir: nested.clone(),
             representation: NgsiLdRepresentation::Normalized,
-            skip_null: NgsiLdSkipNull::Skip,
             parallelism: Parallelism::Sequential,
             context: ContextSource::None,
             context_delivery: ContextDelivery::Body,
@@ -402,7 +393,6 @@ mod tests {
         let result = FileWriter::new(FileWriterConfig {
             output_dir: file_path,
             representation: NgsiLdRepresentation::Normalized,
-            skip_null: NgsiLdSkipNull::Skip,
             parallelism: Parallelism::Sequential,
             context: ContextSource::None,
             context_delivery: ContextDelivery::Body,

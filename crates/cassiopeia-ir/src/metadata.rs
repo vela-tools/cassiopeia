@@ -74,6 +74,7 @@ impl MetadataStorage {
 #[cfg(test)]
 mod tests {
     use crate::{
+        attribute_content::AttributeContent,
         metadata::MetadataStorage,
         sub_attribute::{SubAttribute, SubAttributes},
     };
@@ -89,7 +90,11 @@ mod tests {
         let mut map = IndexMap::default();
         map.insert(
             NameBuf::new(key).expect("valid name"),
-            SubAttribute::new(NgsiLdAttributeKind::Property, Value::from(value), IndexMap::default()),
+            SubAttribute::new(
+                NgsiLdAttributeKind::Property,
+                AttributeContent::Value(Value::try_from(value).unwrap()),
+                IndexMap::default(),
+            ),
         );
         map
     }

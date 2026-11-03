@@ -8,7 +8,7 @@ use cassiopeia_pipeline::pipeline_config::{ExtractionParallelism, PipelineConfig
 /// layer and the pipeline engine) rather than domain assembly, so it lives at the binary that
 /// composes them instead of inside either library.
 ///
-/// The writer's representation, skip-null, target, tenant, and `@context` mode are read from the
+/// The writer's representation, target, tenant, and `@context` mode are read from the
 /// manifest, so `context_mode` is only the fallback used when the manifest output does not set one;
 /// [`AtContextMode::None`] keeps a manifest that declares no `@context` from acquiring the default.
 ///

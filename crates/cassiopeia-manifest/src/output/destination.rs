@@ -16,9 +16,9 @@ use std::path::PathBuf;
 /// Where produced entities end up.
 ///
 /// The two destinations take disjoint settings (a directory is meaningless to a broker, and a
-/// tenant is meaningless to a file), so each carries only its own.
+/// tenant is meaningless to a file), so each carries only its own and refuses any other.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(tag = "target", rename_all = "kebab-case")]
+#[serde(tag = "target", rename_all = "kebab-case", deny_unknown_fields)]
 pub enum Destination {
     /// Write entities to the file system.
     File {

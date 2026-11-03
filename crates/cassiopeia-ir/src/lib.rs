@@ -6,6 +6,7 @@
 //! governs it, and [`payload`] models the collector/profiler hand-off.
 
 pub mod assembled_entity;
+pub mod attribute_content;
 pub mod entity;
 pub mod entity_relationships;
 pub mod error;
@@ -21,4 +22,5 @@ pub mod relationship_key;
 pub mod relationship_key_error;
 pub mod relationship_path;
 pub mod relationships;
+pub mod resolved_attribute;
 pub mod sub_attribute;

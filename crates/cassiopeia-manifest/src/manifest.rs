@@ -206,6 +206,40 @@ mod tests {
         assert!(Manifest::from_json5(r#"{ version: "v1", inputs: [], failFast: true }"#, Path::new("manifest.json5")).is_err());
     }
 
+    /// What the JSON5 parser objected to in a manifest that failed to parse.
+    fn parse_failure(document: &str) -> String {
+        match Manifest::from_json5(document, Path::new("manifest.json5")) {
+            Err(ManifestError::Parse { source, .. }) => source.to_string(),
+            other => panic!("expected a parse failure, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn a_manifest_whose_output_carries_the_retired_skip_null_key_fails_to_parse_with_an_unknown_field_error() {
+        let message = parse_failure(
+            r#"{
+                version: "v1",
+                inputs: [{ source: "data/stations.csv", mapping: "mappings/station.json5" }],
+                output: { target: "file", directory: "out", skipNull: "include" },
+            }"#,
+        );
+
+        assert!(message.contains("unknown field `skipNull`"), "{message}");
+    }
+
+    #[test]
+    fn a_manifest_whose_output_validation_carries_the_retired_skip_null_key_fails_to_parse_with_an_unknown_field_error() {
+        let message = parse_failure(
+            r#"{
+                version: "v1",
+                inputs: [{ source: "data/stations.csv", mapping: "mappings/station.json5" }],
+                output: { target: "file", directory: "out", validation: { mode: "fail", skipNull: "skip" } },
+            }"#,
+        );
+
+        assert!(message.contains("unknown field `skipNull`"), "{message}");
+    }
+
     #[test]
     fn a_manifest_round_trips_through_its_json5_rendering() {
         let manifest = Manifest::from_json5(MINIMAL, Path::new("manifest.json5")).unwrap();

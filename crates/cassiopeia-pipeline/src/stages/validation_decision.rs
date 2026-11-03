@@ -83,7 +83,7 @@ pub(crate) const fn diagnostics_level(mode: ValidationMode, reporting: Reporting
 #[cfg(test)]
 mod tests {
     use crate::stages::validation_decision::{Decision, Reporting, WarnReason, decide, diagnostics_level};
-    use cassiopeia_common::{representation::NgsiLdRepresentation, skip_null::NgsiLdSkipNull};
+    use cassiopeia_common::representation::NgsiLdRepresentation;
     use cassiopeia_manifest::output::validation_mode::ValidationMode;
     use cassiopeia_ngsi_ld::entity::{NgsiLdEntity, name::NameBuf};
     use cassiopeia_validator::{
@@ -189,7 +189,6 @@ mod tests {
             repositories: HashMap::new(),
             custom_schemas: HashMap::new(),
             representation: NgsiLdRepresentation::Normalized,
-            skip_null: NgsiLdSkipNull::Skip,
         });
         let entity = NgsiLdEntity::new("urn:ngsi-ld:Sensor:1".parse::<Urn>().unwrap(), NameBuf::new("Sensor").unwrap());
 

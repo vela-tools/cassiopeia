@@ -11,6 +11,12 @@ pub enum ExtractorCode {
     /// An attribute declared a temporal transformation and its source carried text that reads as no
     /// supported spelling of a date-time, so the attribute was dropped.
     TimestampUnreadable,
+    /// An attribute's source value held nulls, which NGSI-LD admits nowhere in an entity, so the
+    /// attribute was written without them.
+    NullDropped,
+    /// A `JsonProperty`'s source was no JSON object or array of objects, so the attribute was
+    /// dropped.
+    JsonPayloadMisshapen,
 }
 
 #[cfg(test)]
@@ -22,5 +28,7 @@ mod tests {
     fn an_extractor_code_renders_a_kebab_case_token() {
         assert_eq!(ExtractorCode::TemplateUnresolvable.to_string(), "template-unresolvable");
         assert_eq!(ExtractorCode::TimestampUnreadable.to_string(), "timestamp-unreadable");
+        assert_eq!(ExtractorCode::NullDropped.to_string(), "null-dropped");
+        assert_eq!(ExtractorCode::JsonPayloadMisshapen.to_string(), "json-payload-misshapen");
     }
 }

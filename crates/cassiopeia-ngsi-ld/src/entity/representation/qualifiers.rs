@@ -11,7 +11,7 @@ use crate::{
     },
     value::{temporal_text, types::Value},
 };
-use cassiopeia_common::{representation::NgsiLdRepresentation, skip_null::NgsiLdSkipNull};
+use cassiopeia_common::representation::NgsiLdRepresentation;
 use cefact_units::UnitCode;
 use chrono::{DateTime, Utc};
 use serde::ser::SerializeMap;
@@ -98,22 +98,13 @@ pub(crate) fn serialize_object_type<M: SerializeMap>(map: &mut M, object_type: O
     Ok(())
 }
 
-/// Writes every nested sub-attribute, serialized in the given representation, skipping instances that
-/// null-handling drops.
+/// Writes every nested sub-attribute, serialized in the given representation.
 ///
 /// # Errors
 /// Returns the serializer's error if a nested attribute cannot be serialized.
-pub(crate) fn serialize_nested<M: SerializeMap>(
-    map: &mut M,
-    attributes: &NestedAttributes,
-    representation: NgsiLdRepresentation,
-    skip_null: NgsiLdSkipNull,
-) -> Result<(), M::Error> {
+pub(crate) fn serialize_nested<M: SerializeMap>(map: &mut M, attributes: &NestedAttributes, representation: NgsiLdRepresentation) -> Result<(), M::Error> {
     for (name, wrapper) in attributes {
-        if wrapper.is_skipped(skip_null) {
-            continue;
-        }
-        map.serialize_entry(name.as_str(), &ReprAdapter::new(wrapper.as_ref(), representation, skip_null))?;
+        map.serialize_entry(name.as_str(), &ReprAdapter::new(wrapper.as_ref(), representation))?;
     }
     Ok(())
 }
@@ -125,7 +116,7 @@ mod tests {
         name::NameBuf,
         representation::{ReprAdapter, qualifiers::serialize_nested},
     };
-    use cassiopeia_common::{representation::NgsiLdRepresentation, skip_null::NgsiLdSkipNull};
+    use cassiopeia_common::representation::NgsiLdRepresentation;
     use indexmap::IndexMap;
     use pretty_assertions::assert_eq;
     use serde::{Serialize, Serializer, ser::SerializeMap};
@@ -137,7 +128,7 @@ mod tests {
     impl Serialize for NestedOnly {
         fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
             let mut map = serializer.serialize_map(None)?;
-            serialize_nested(&mut map, &self.0, NgsiLdRepresentation::Simplified, NgsiLdSkipNull::Include)?;
+            serialize_nested(&mut map, &self.0, NgsiLdRepresentation::Simplified)?;
             map.end()
         }
     }
@@ -157,7 +148,7 @@ mod tests {
     #[test]
     fn a_repr_adapter_streams_the_same_bytes_serde_json_would_build() {
         let property = NgsiLdProperty::new(42);
-        let adapter = ReprAdapter::new(&property, NgsiLdRepresentation::Simplified, NgsiLdSkipNull::Include);
+        let adapter = ReprAdapter::new(&property, NgsiLdRepresentation::Simplified);
         assert_eq!(serde_json::to_string(&adapter).unwrap(), "42");
     }
 }

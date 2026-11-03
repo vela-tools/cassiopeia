@@ -1,5 +1,4 @@
 use crate::value::types::{Number, TemporalValue, Value};
-use compact_str::CompactString;
 use num_traits::ToPrimitive;
 use std::str::from_utf8;
 
@@ -42,8 +41,17 @@ pub fn parse_float(s: &str) -> Option<f64> {
 /// Parses an `f64`, accepting a comma as the decimal separator, without allocating on the common
 /// dot-decimal path. A comma-decimal input is rewritten in a stack buffer rather than a heap
 /// `String`, so per-field parsing on ingest touches the allocator only for pathologically long input.
+///
+/// Only a finite number parses. `NaN` and the infinities read as an `f64`, but JSON has no number for
+/// them (RFC 8259 clause 6) and a serializer writes them as `null`, which cannot be used as a value in
+/// NGSI-LD (ETSI GS CIM 009 v1.9.1 clause 4.5.0), so text spelling one is no number.
 #[must_use]
 pub fn parse_decimal(s: &str) -> Option<f64> {
+    parse_any_decimal(s).filter(|float| float.is_finite())
+}
+
+/// Parses an `f64` the way [`parse_decimal`] does, finite or not.
+fn parse_any_decimal(s: &str) -> Option<f64> {
     if let Ok(float) = s.parse::<f64>() {
         return Some(float);
     }
@@ -79,17 +87,6 @@ fn is_nonzero(f: f64) -> bool {
 }
 
 impl Value {
-    /// Converts a string that might be structured JSON (array or object) into a [`Value`].
-    #[must_use]
-    pub fn from_string(s: String) -> Value {
-        let trimmed = s.trim();
-        let looks_structured = (trimmed.starts_with('[') && trimmed.ends_with(']')) || (trimmed.starts_with('{') && trimmed.ends_with('}'));
-        if looks_structured && let Ok(json) = serde_json::from_str::<serde_json::Value>(trimmed) {
-            return Value::from(json);
-        }
-        Value::String(CompactString::from(s))
-    }
-
     /// Interprets the value as a boolean, returning `None` when it carries no boolean meaning.
     #[must_use]
     pub fn to_boolean(&self) -> Option<bool> {
@@ -98,7 +95,7 @@ impl Value {
             Value::String(s) => parse_boolean(s),
             Value::Number(Number::Integer(i)) => Some(*i != 0),
             Value::Number(Number::Float(f)) => Some(is_nonzero(*f)),
-            Value::Null | Value::Temporal(_) | Value::Geospatial(_) | Value::Array(_) | Value::Object(_) => None,
+            Value::Temporal(_) | Value::Geospatial(_) | Value::Array(_) | Value::Object(_) => None,
         }
     }
 
@@ -111,7 +108,7 @@ impl Value {
             Value::String(s) => parse_integer(s),
             Value::Boolean(b) => Some(i64::from(*b)),
             Value::Temporal(TemporalValue::DateTime(dt) | TemporalValue::Date(dt) | TemporalValue::Time(dt)) => Some(dt.timestamp()),
-            Value::Null | Value::Geospatial(_) | Value::Array(_) | Value::Object(_) => None,
+            Value::Geospatial(_) | Value::Array(_) | Value::Object(_) => None,
         }
     }
 
@@ -127,7 +124,7 @@ impl Value {
                 .timestamp()
                 .to_f64()
                 .map(|secs| secs + f64::from(dt.timestamp_subsec_nanos()) / 1_000_000_000.0),
-            Value::Null | Value::Geospatial(_) | Value::Array(_) | Value::Object(_) => None,
+            Value::Geospatial(_) | Value::Array(_) | Value::Object(_) => None,
         }
     }
 }
@@ -135,7 +132,7 @@ impl Value {
 #[cfg(test)]
 mod tests {
     use crate::value::{
-        parsing::{parse_boolean, parse_float, parse_integer},
+        parsing::{parse_boolean, parse_decimal, parse_float, parse_integer},
         types::{Number, Value},
     };
     use compact_str::CompactString;
@@ -163,9 +160,16 @@ mod tests {
     }
 
     #[test]
+    fn text_spelling_no_finite_number_parses_to_no_float() {
+        for text in ["NaN", "nan", "inf", "-inf", "infinity", "-Infinity"] {
+            assert_eq!(parse_decimal(text), None, "{text}");
+        }
+    }
+
+    #[test]
     fn to_integer_is_none_for_a_non_numeric_value() {
         assert_eq!(Value::String(CompactString::from("hello")).to_integer(), None);
-        assert_eq!(Value::Null.to_integer(), None);
+        assert_eq!(Value::Boolean(true).to_float(), Some(1.0));
     }
 
     #[test]

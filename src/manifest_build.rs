@@ -1,10 +1,10 @@
 //! Turns the `map` and `manifest generate` command-line arguments into a manifest.
 //!
 //! Routing principle: every flag that shapes *this run* (where output goes: the destination and
-//! its representation, skip-null, tenant, user-agent, `@context`; how strictly it validates; and
-//! when and how often it runs) is written into the manifest here. Flags that tune the *engine*
-//! itself (validator representation and skip-null, store backends, the memory profile) never touch
-//! the manifest; they become [`ConfigOverride`](cassiopeia_configuration::overrides::ConfigOverride)s
+//! its representation, tenant, user-agent, `@context`; how strictly it validates; and when and how
+//! often it runs) is written into the manifest here. Flags that tune the *engine* itself (validator
+//! representation, store backends, the memory profile) never touch the manifest; they become
+//! [`ConfigOverride`](cassiopeia_configuration::overrides::ConfigOverride)s
 //! in `config_overrides` instead. The two surfaces stay disjoint so a run's description and the
 //! installation's tuning cannot bleed into each other.
 
@@ -101,7 +101,6 @@ fn build_output(writer: &WriterArgs, context: Option<AtContextMode>) -> Result<M
     Ok(ManifestOutput::builder()
         .destination(destination)
         .representation(writer.writer_representation)
-        .skip_null(writer.writer_skip_null)
         .context(context)
         // Opt-in: the flag's absence leaves `temporal` off the manifest, like the other output flags.
         .temporal(temporal_output(writer.temporal_representation))
@@ -164,7 +163,6 @@ fn build_gen_output(args: &ManifestGenArgs) -> Result<Option<ManifestOutput>> {
         ManifestOutput::builder()
             .destination(destination)
             .representation(args.writer_representation)
-            .skip_null(args.writer_skip_null)
             .context(context)
             .validation(validation_from_args(&args.validator))
             // Opt-in: the flag's absence leaves `temporal` off the manifest, like the other output flags.
@@ -176,18 +174,13 @@ fn build_gen_output(args: &ManifestGenArgs) -> Result<Option<ManifestOutput>> {
 /// Builds the nested `output.validation` object from the validation flags, or `None` when no
 /// validation flag was given, so a generated manifest records an empty `validation: {}` for none.
 fn validation_from_args(validator: &ValidatorArgs) -> Option<ManifestValidation> {
-    let any = validator.validation_mode.is_some()
-        || validator.schema.is_some()
-        || validator.representation.is_some()
-        || validator.skip_null.is_some()
-        || validator.report.is_some();
+    let any = validator.validation_mode.is_some() || validator.schema.is_some() || validator.representation.is_some() || validator.report.is_some();
 
     any.then(|| {
         ManifestValidation::builder()
             .mode(validator.validation_mode)
             .schema(validator.schema.clone())
             .representation(validator.representation)
-            .skip_null(validator.skip_null)
             .report(validator.report.clone())
             .build()
     })

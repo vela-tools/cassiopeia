@@ -21,7 +21,7 @@ mod tests {
         run_outcome::RunOutcome,
         writer::Writer,
     };
-    use cassiopeia_common::{file_framing::FileFraming, representation::NgsiLdRepresentation, skip_null::NgsiLdSkipNull};
+    use cassiopeia_common::{file_framing::FileFraming, representation::NgsiLdRepresentation};
     use cassiopeia_ngsi_ld::entity::{NgsiLdEntity, context::ContextSource, name::NameBuf};
     use pretty_assertions::assert_eq;
     use std::num::NonZeroUsize;
@@ -34,7 +34,6 @@ mod tests {
         let mut writer = FileWriter::new(FileWriterConfig {
             output_dir: directory.path().to_path_buf(),
             representation: NgsiLdRepresentation::Normalized,
-            skip_null: NgsiLdSkipNull::Skip,
             parallelism: Parallelism::Sequential,
             context: ContextSource::None,
             context_delivery: ContextDelivery::Body,

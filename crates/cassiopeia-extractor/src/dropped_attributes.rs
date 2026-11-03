@@ -1,7 +1,13 @@
-use crate::{dropped_geometries::DroppedGeometries, unresolved_templates::UnresolvedTemplates};
+use crate::{
+    dropped_geometries::DroppedGeometries,
+    dropped_nulls::DroppedNulls,
+    refused_json_payloads::RefusedJsonPayloads,
+    unresolved_templates::UnresolvedTemplates,
+};
 use cassiopeia_unreadable_timestamps::unreadable_timestamps::UnreadableTimestamps;
 
-/// The attributes one batch's extraction dropped while keeping their entities, one sink per reason.
+/// What one batch's extraction dropped while keeping its entities, one sink per reason: whole
+/// attributes, and the nulls left out of attribute values.
 ///
 /// Each reason is a different problem with a different fix, so each keeps its own sink and is
 /// reported under its own code; they travel together because every one of them is the same kind of
@@ -14,6 +20,10 @@ pub struct DroppedAttributes {
     pub timestamps: UnreadableTimestamps,
     /// Attributes whose template could not be resolved against the record.
     pub templates: UnresolvedTemplates,
+    /// `JsonProperty` values that are no JSON object or array of objects.
+    pub json_payloads: RefusedJsonPayloads,
+    /// Attribute values written without the nulls their source held.
+    pub nulls: DroppedNulls,
 }
 
 impl DroppedAttributes {
@@ -35,5 +45,7 @@ mod tests {
         assert!(dropped.geometries.is_empty());
         assert!(dropped.timestamps.is_empty());
         assert!(dropped.templates.is_empty());
+        assert!(dropped.json_payloads.is_empty());
+        assert!(dropped.nulls.is_empty());
     }
 }

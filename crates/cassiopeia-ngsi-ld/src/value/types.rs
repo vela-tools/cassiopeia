@@ -15,11 +15,14 @@ pub type ValueObject = IndexMap<CompactString, Value, RandomState>;
 
 /// Represents an NGSI-LD Value, optimized for performance.
 /// Uses `CompactString` for inline small strings to minimize heap allocations.
+///
+/// There is no null: an NGSI-LD Value is a string, a number, a boolean, an object or an array (ETSI
+/// GS CIM 009 v1.9.1 clause 3.1), and `null` cannot be used as a value anywhere in an entity (clause
+/// 4.5.0), so neither the value itself nor any member or item nested in it can be one. A value that
+/// does not exist is not built: it is the `None` of an `Option<Value>`.
 #[derive(Debug, Clone, Deserialize, PartialEq)]
 #[serde(untagged)]
 pub enum Value {
-    /// A JSON null value
-    Null,
     /// A boolean value
     Boolean(bool),
     /// A numeric value (internally either i64 or f64)
@@ -37,15 +40,14 @@ pub enum Value {
     Object(Box<ValueObject>),
 }
 
-// Manual because each variant maps to a distinct JSON shape (null, bare scalar, geometry object)
-// that no single derive expresses.
+// Manual because each variant maps to a distinct JSON shape (bare scalar, time text, geometry
+// object) that no single derive expresses.
 impl Serialize for Value {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
         S: Serializer,
     {
         match self {
-            Value::Null => serializer.serialize_none(),
             Value::Boolean(b) => serializer.serialize_bool(*b),
             Value::Number(n) => n.serialize(serializer),
             Value::String(s) => s.serialize(serializer),
@@ -94,12 +96,6 @@ impl Serialize for TemporalValue {
 }
 
 impl Value {
-    /// Whether the value is JSON null.
-    #[must_use]
-    pub const fn is_null(&self) -> bool {
-        matches!(self, Value::Null)
-    }
-
     /// Whether the value is a string.
     #[must_use]
     pub const fn is_string(&self) -> bool {
@@ -111,7 +107,7 @@ impl Value {
     pub fn is_empty_string(&self) -> bool {
         match self {
             Value::String(s) => s.is_empty(),
-            Value::Null | Value::Boolean(_) | Value::Number(_) | Value::Temporal(_) | Value::Geospatial(_) | Value::Array(_) | Value::Object(_) => false,
+            Value::Boolean(_) | Value::Number(_) | Value::Temporal(_) | Value::Geospatial(_) | Value::Array(_) | Value::Object(_) => false,
         }
     }
 
@@ -120,7 +116,7 @@ impl Value {
     pub fn temporal_type(&self) -> Option<TemporalValueType> {
         match self {
             Value::Temporal(temporal) => Some(TemporalValueType::from(temporal)),
-            Value::Null | Value::Boolean(_) | Value::Number(_) | Value::String(_) | Value::Geospatial(_) | Value::Array(_) | Value::Object(_) => None,
+            Value::Boolean(_) | Value::Number(_) | Value::String(_) | Value::Geospatial(_) | Value::Array(_) | Value::Object(_) => None,
         }
     }
 
@@ -129,7 +125,7 @@ impl Value {
     pub fn as_str(&self) -> Option<&str> {
         match self {
             Value::String(s) => Some(s.as_str()),
-            Value::Null | Value::Boolean(_) | Value::Number(_) | Value::Temporal(_) | Value::Geospatial(_) | Value::Array(_) | Value::Object(_) => None,
+            Value::Boolean(_) | Value::Number(_) | Value::Temporal(_) | Value::Geospatial(_) | Value::Array(_) | Value::Object(_) => None,
         }
     }
 }
@@ -137,7 +133,6 @@ impl Value {
 impl fmt::Display for Value {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Value::Null => write!(f, ""),
             Value::Boolean(b) => write!(f, "{b}"),
             Value::Number(n) => match n {
                 Number::Integer(i) => write!(f, "{i}"),
@@ -167,19 +162,18 @@ mod tests {
         assert_eq!(Value::Boolean(true).to_string(), "true");
         assert_eq!(Value::Number(Number::Integer(100)).to_string(), "100");
         assert_eq!(Value::String(CompactString::from("hello")).to_string(), "hello");
-        assert_eq!(Value::Null.to_string(), "");
     }
 
     #[test]
     fn display_renders_an_array_as_compact_json() {
-        let value = Value::from(json!(["BS", "IN", 7, true, null]));
+        let value = Value::try_from(json!(["BS", "IN", 7, true])).unwrap();
 
-        assert_eq!(value.to_string(), r#"["BS","IN",7,true,null]"#);
+        assert_eq!(value.to_string(), r#"["BS","IN",7,true]"#);
     }
 
     #[test]
     fn display_renders_a_nested_object_as_compact_json() {
-        let value = Value::from(json!({"a": 1, "b": {"c": ["x", {"d": false}]}}));
+        let value = Value::try_from(json!({"a": 1, "b": {"c": ["x", {"d": false}]}})).unwrap();
 
         assert_eq!(value.to_string(), r#"{"a":1,"b":{"c":["x",{"d":false}]}}"#);
     }
@@ -226,7 +220,7 @@ mod tests {
     #[test]
     fn as_str_and_is_empty_string_only_apply_to_strings() {
         assert_eq!(Value::String(CompactString::from("x")).as_str(), Some("x"));
-        assert_eq!(Value::Null.as_str(), None);
+        assert_eq!(Value::Boolean(true).as_str(), None);
         assert!(Value::String(CompactString::new("")).is_empty_string());
         assert!(!Value::Number(Number::Integer(0)).is_empty_string());
     }

@@ -1,4 +1,4 @@
-use cassiopeia_common::{representation::NgsiLdRepresentation, schema_source::SchemaSource, skip_null::NgsiLdSkipNull};
+use cassiopeia_common::{representation::NgsiLdRepresentation, schema_source::SchemaSource};
 use cassiopeia_manifest::output::validation_mode::ValidationMode;
 use clap::Args;
 use std::{path::PathBuf, str::FromStr};
@@ -9,10 +9,6 @@ pub struct ValidatorArgs {
     /// NGSI-LD representation the validator serializes entities in.
     #[arg(long = "validation-representation", value_enum, help_heading = "Validation", value_name = "REPRESENTATION")]
     pub representation: Option<NgsiLdRepresentation>,
-
-    /// How the validator handles null values.
-    #[arg(long = "validation-skip-null", value_enum, help_heading = "Validation", value_name = "SKIPNULL")]
-    pub skip_null: Option<NgsiLdSkipNull>,
 
     /// How strictly schema validation is enforced, overriding the manifest: warn, fail-when-schema,
     /// or fail.

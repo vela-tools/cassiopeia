@@ -1,5 +1,9 @@
 pub mod convert;
 pub mod geo;
+pub mod json_payload;
+pub mod json_payload_error;
+pub mod null_in_json;
+pub mod omitted_nulls;
 pub mod parsing;
 pub mod temporal;
 pub mod temporal_text;

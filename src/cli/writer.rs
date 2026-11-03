@@ -1,5 +1,5 @@
 use crate::cli::broker::BrokerArgs;
-use cassiopeia_common::{destination_kind::DestinationKind, file_framing::FileFraming, representation::NgsiLdRepresentation, skip_null::NgsiLdSkipNull};
+use cassiopeia_common::{destination_kind::DestinationKind, file_framing::FileFraming, representation::NgsiLdRepresentation};
 use cassiopeia_manifest::output::temporal::TemporalRepresentation;
 use clap::Args;
 use std::path::PathBuf;
@@ -36,10 +36,6 @@ pub struct WriterArgs {
     /// NGSI-LD representation for written entities.
     #[arg(long, value_enum, help_heading = "Output", value_name = "REPRESENTATION")]
     pub writer_representation: Option<NgsiLdRepresentation>,
-
-    /// How to handle null values in written entities.
-    #[arg(long, value_enum, help_heading = "Output", value_name = "SKIPNULL")]
-    pub writer_skip_null: Option<NgsiLdSkipNull>,
 
     /// Temporal output shape. `series` folds each id's observations into one temporal entity with
     /// instance arrays (ETSI GS CIM 009 v1.9.1 clause 5.2.20); absent writes current-state (one entity

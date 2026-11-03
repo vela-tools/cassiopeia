@@ -40,7 +40,7 @@ fn parse_channel_capacity(value: &str) -> Result<ChannelPolicy, String> {
 /// instead. The ids are clap argument ids (the field names of the flattened argument structs). Engine
 /// knobs that merely tune *how* the pipeline executes are deliberately absent, so they stay usable
 /// with a manifest.
-const INLINE_RUN_FLAGS: [&str; 36] = [
+const INLINE_RUN_FLAGS: [&str; 34] = [
     "input",
     "input_headers",
     "mapping",
@@ -54,7 +54,6 @@ const INLINE_RUN_FLAGS: [&str; 36] = [
     "attribute_overwrite",
     "atomic",
     "writer_representation",
-    "writer_skip_null",
     "temporal_representation",
     "tenant",
     "user_agent",
@@ -73,7 +72,6 @@ const INLINE_RUN_FLAGS: [&str; 36] = [
     "retry_backoff",
     "on_failure",
     "representation",
-    "skip_null",
     "validation_mode",
     "schema",
     "report",

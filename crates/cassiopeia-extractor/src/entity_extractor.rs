@@ -62,19 +62,12 @@ impl Extractor for EntityExtractor {
         for (data, mapping) in &fragments {
             let mut unresolved = Vec::new();
             {
-                let mut context = ResolutionContext::new(
-                    data,
-                    &self.resolver,
-                    &relationships,
-                    &dropped.geometries,
-                    &dropped.timestamps,
-                    Some(&mut metadata),
-                );
+                let mut context = ResolutionContext::new(data, &self.resolver, &relationships, dropped, Some(&mut metadata));
                 for (name, config) in mapping.attributes() {
                     match resolve(&mut context, name, config) {
-                        Ok(value) if value.is_null() => {}
-                        Ok(value) => {
-                            values.insert(name.clone(), value);
+                        Ok(None) => {}
+                        Ok(Some(resolved)) => {
+                            values.insert(name.clone(), resolved);
                         }
                         // A template failure costs the attribute it belongs to, not the entity.
                         // Resolution records an attribute's metadata only once the attribute has
@@ -123,18 +116,25 @@ impl Extractor for EntityExtractor {
 
 #[cfg(test)]
 mod tests {
-    use crate::{dropped_attributes::DroppedAttributes, entity_extractor::EntityExtractor, extractor::Extractor};
+    use crate::{
+        dropped_attributes::DroppedAttributes,
+        dropped_null::{DroppedNull, NullSite},
+        entity_extractor::EntityExtractor,
+        extractor::Extractor,
+    };
     use cassiopeia_batch_sink::{batch_sink::BatchSink, recurring::Recurring};
     use cassiopeia_common::parallelism::Parallelism;
     use cassiopeia_expander::compiler::ExpanderCompiler;
     use cassiopeia_geometry::geometry::NgsiLdGeometry;
     use cassiopeia_ir::{
         assembled_entity::AssembledEntity,
+        attribute_content::AttributeContent,
         entity::Entity,
         instance_index::InstanceIndex,
         metadata::MetadataStorage,
         relationship_path::RelationshipPath,
         relationships::{InstanceObjects, InstanceRelationships, NestedRelationships, Relationships},
+        resolved_attribute::ResolvedAttribute,
         sub_attribute::SubAttribute,
     };
     use cassiopeia_mapping::{
@@ -144,7 +144,10 @@ mod tests {
     };
     use cassiopeia_ngsi_ld::{
         entity::{attribute::NgsiLdAttributeKind, name::NameBuf},
-        value::types::{Number, TemporalValue, Value},
+        value::{
+            json_payload_error::{JsonPayloadError, JsonShape},
+            types::{Number, TemporalValue, Value},
+        },
     };
     use cassiopeia_unreadable_timestamps::{attribute_loss::AttributeLoss, timestamp_loss::TimestampLoss};
     use chrono::{TimeZone, Utc};
@@ -162,6 +165,21 @@ mod tests {
         let resolver = runner.resolver();
 
         (resolver, Arc::new(mapping))
+    }
+
+    /// A single-instance attribute that resolved to `value`.
+    fn single(value: Value) -> ResolvedAttribute {
+        ResolvedAttribute::Single(AttributeContent::Value(value))
+    }
+
+    /// The NGSI-LD Value a single-instance attribute resolved to, if it resolved at all.
+    fn single_value(resolved: Option<ResolvedAttribute>) -> Option<Value> {
+        match resolved? {
+            ResolvedAttribute::Single(AttributeContent::Value(value)) => Some(value),
+            other @ (ResolvedAttribute::Single(AttributeContent::Json(_)) | ResolvedAttribute::Instances(_)) => {
+                panic!("expected a single value, got {other:?}")
+            }
+        }
     }
 
     fn urn(value: &str) -> Urn {
@@ -209,7 +227,11 @@ mod tests {
             .as_per_item()
             .unwrap()
             .iter()
-            .map(|item| item.get(&name("datasetId")).map(|sub| JsonValue::from(sub.value().clone())))
+            .map(|item| {
+                item.get(&name("datasetId"))
+                    .and_then(|sub| sub.value().as_value())
+                    .map(|value| serde_json::to_value(value).unwrap())
+            })
             .collect()
     }
 
@@ -229,7 +251,7 @@ mod tests {
         let (result, _) = extractor.extract(mapped, &DroppedAttributes::new()).unwrap().into_parts();
         let values = result.values().as_ref().expect("values set");
 
-        assert_eq!(values.get(&name("temperature")), Some(&Value::Number(Number::Float(25.5))));
+        assert_eq!(values.get(&name("temperature")), Some(&single(Value::Number(Number::Float(25.5)))));
     }
 
     #[test]
@@ -301,7 +323,11 @@ mod tests {
             let values = result.values().as_ref().expect("values set").clone();
 
             let expected = TemporalValue::DateTime(Utc.with_ymd_and_hms(2026, 3, 1, 11, 4, 35).unwrap());
-            assert_eq!(values.get(&name("reading")), Some(&Value::Temporal(expected)), "mismatch for {spelling:?}");
+            assert_eq!(
+                values.get(&name("reading")),
+                Some(&single(Value::Temporal(expected))),
+                "mismatch for {spelling:?}"
+            );
         }
 
         assert!(dropped.timestamps.is_empty());
@@ -408,7 +434,7 @@ mod tests {
 
         assert_eq!(
             result.values().as_ref().expect("values set").get(&name("name")),
-            Some(&Value::String("John Doe".into()))
+            Some(&single(Value::String("John Doe".into())))
         );
     }
 
@@ -496,7 +522,10 @@ mod tests {
             .as_shared()
             .expect("shared metadata");
 
-        assert_eq!(shared.get(&name("unitCode")).map(SubAttribute::value), Some(&Value::from(json!("CEL"))));
+        assert_eq!(
+            shared.get(&name("unitCode")).map(SubAttribute::value),
+            Some(&AttributeContent::Value(Value::try_from(json!("CEL")).unwrap()))
+        );
     }
 
     #[test]
@@ -526,7 +555,10 @@ mod tests {
         let level = shared.get(&name("level")).expect("level sub-attribute");
 
         assert_eq!(*level.kind(), NgsiLdAttributeKind::VocabProperty);
-        assert_eq!(level.value(), &Value::from(json!("https://example.org/level/high")));
+        assert_eq!(
+            level.value(),
+            &AttributeContent::Value(Value::try_from(json!("https://example.org/level/high")).unwrap())
+        );
     }
 
     #[test]
@@ -563,7 +595,7 @@ mod tests {
         let inner = level.metadata().get(&name("source")).expect("nested sub-attribute");
 
         assert_eq!(*level.kind(), NgsiLdAttributeKind::VocabProperty);
-        assert_eq!(inner.value(), &Value::from(json!("measured")));
+        assert_eq!(inner.value(), &AttributeContent::Value(Value::try_from(json!("measured")).unwrap()));
     }
 
     #[test]
@@ -593,12 +625,13 @@ mod tests {
         let values = result.values().as_ref().expect("values set");
         let metadata = result.metadata().as_ref().expect("metadata set");
 
-        match values.get(&name("temperatureMax")) {
-            Some(Value::Array(items)) => {
-                assert_eq!(items, &vec![Value::Number(Number::Float(10.0)), Value::Number(Number::Float(12.0))]);
-            }
-            other => panic!("expected an array value, got {other:?}"),
-        }
+        assert_eq!(
+            values.get(&name("temperatureMax")),
+            Some(&ResolvedAttribute::Instances(vec![
+                Some(AttributeContent::Value(Value::Number(Number::Float(10.0)))),
+                Some(AttributeContent::Value(Value::Number(Number::Float(12.0)))),
+            ]))
+        );
 
         let per_item = metadata
             .get(&name("temperatureMax"))
@@ -607,14 +640,17 @@ mod tests {
             .expect("per-item metadata");
         assert_eq!(per_item.len(), 2);
         // Each instance carries the shared unitCode plus its own datasetId.
-        assert_eq!(per_item[0].get(&name("unitCode")).map(SubAttribute::value), Some(&Value::from(json!("CEL"))));
+        assert_eq!(
+            per_item[0].get(&name("unitCode")).map(SubAttribute::value),
+            Some(&AttributeContent::Value(Value::try_from(json!("CEL")).unwrap()))
+        );
         assert_eq!(
             per_item[0].get(&name("datasetId")).map(SubAttribute::value),
-            Some(&Value::from(json!("urn:ngsi-ld:dataset:model:a")))
+            Some(&AttributeContent::Value(Value::try_from(json!("urn:ngsi-ld:dataset:model:a")).unwrap()))
         );
         assert_eq!(
             per_item[1].get(&name("datasetId")).map(SubAttribute::value),
-            Some(&Value::from(json!("urn:ngsi-ld:dataset:model:b")))
+            Some(&AttributeContent::Value(Value::try_from(json!("urn:ngsi-ld:dataset:model:b")).unwrap()))
         );
     }
 
@@ -895,7 +931,7 @@ mod tests {
         let (result, _) = extractor.extract(mapped, &DroppedAttributes::new()).unwrap().into_parts();
         let values = result.values().as_ref().expect("values set");
 
-        match values.get(&name("address")) {
+        match single_value(values.get(&name("address")).cloned()) {
             Some(Value::Object(object)) => {
                 assert_eq!(object.get("city"), Some(&Value::String("Ljubljana".into())));
                 assert_eq!(object.get("street"), Some(&Value::String("Slovenska".into())));
@@ -968,7 +1004,10 @@ mod tests {
         let shared = result.metadata().as_ref().unwrap().get(&name("hasLeadActor")).unwrap().as_shared().unwrap();
         let plays = shared.get(&name("playsCharacter")).expect("nested relationship sub-attribute");
         assert_eq!(*plays.kind(), NgsiLdAttributeKind::Relationship);
-        assert_eq!(plays.value(), &Value::from(json!("urn:ngsi-ld:Character:JackSparrow")));
+        assert_eq!(
+            plays.value(),
+            &AttributeContent::Value(Value::try_from(json!("urn:ngsi-ld:Character:JackSparrow")).unwrap())
+        );
         assert_eq!(plays.object_type().as_ref().map(NameBuf::as_str), Some("Character"));
         // The sibling Property sub-attribute is resolved as before.
         assert!(shared.contains_key(&name("billingOrder")));
@@ -1024,7 +1063,10 @@ mod tests {
         let plays = shared.get(&name("playsCharacter")).expect("nested relationship");
         let located = plays.metadata().get(&name("locatedIn")).expect("doubly nested relationship");
         assert_eq!(*located.kind(), NgsiLdAttributeKind::Relationship);
-        assert_eq!(located.value(), &Value::from(json!("urn:ngsi-ld:Place:Y")));
+        assert_eq!(
+            located.value(),
+            &AttributeContent::Value(Value::try_from(json!("urn:ngsi-ld:Place:Y")).unwrap())
+        );
         assert_eq!(located.object_type().as_ref().map(NameBuf::as_str), Some("Place"));
     }
 
@@ -1072,7 +1114,10 @@ mod tests {
         let shared = result.metadata().as_ref().unwrap().get(&name("directedBy")).unwrap().as_shared().unwrap();
         let known = shared.get(&name("knownFor")).expect("nested list relationship");
         assert_eq!(*known.kind(), NgsiLdAttributeKind::ListRelationship);
-        assert_eq!(known.value(), &Value::from(json!(["urn:ngsi-ld:Movie:10", "urn:ngsi-ld:Movie:20"])));
+        assert_eq!(
+            known.value(),
+            &AttributeContent::Value(Value::try_from(json!(["urn:ngsi-ld:Movie:10", "urn:ngsi-ld:Movie:20"])).unwrap())
+        );
     }
 
     #[test]
@@ -1216,7 +1261,7 @@ mod tests {
 
         let mapped = AssembledEntity::from_single(entity("urn:ngsi-ld:Country:Bonaire", record), mapping);
         let (result, _) = extractor.extract(mapped, &dropped).unwrap().into_parts();
-        let value = result.values().as_ref().expect("values set").get(&name("dafifCode")).cloned();
+        let value = single_value(result.values().as_ref().expect("values set").get(&name("dafifCode")).cloned());
 
         (value, dropped)
     }
@@ -1228,21 +1273,21 @@ mod tests {
     fn a_split_text_column_becomes_an_array_of_its_tokens() {
         let (value, _) = extract_dafif_code(SPLIT, "array", &json!("BS IN"));
 
-        assert_eq!(value, Some(Value::from(json!(["BS", "IN"]))));
+        assert_eq!(value, Some(Value::try_from(json!(["BS", "IN"])).unwrap()));
     }
 
     #[test]
     fn a_split_single_token_becomes_a_one_element_array() {
         let (value, _) = extract_dafif_code(SPLIT, "array", &json!("UK"));
 
-        assert_eq!(value, Some(Value::from(json!(["UK"]))));
+        assert_eq!(value, Some(Value::try_from(json!(["UK"])).unwrap()));
     }
 
     #[test]
     fn a_json_decoded_text_column_becomes_the_array_it_encodes() {
         let (value, _) = extract_dafif_code("{{ this[2] | json_decode }}", "array", &json!(r#"["BS","IN"]"#));
 
-        assert_eq!(value, Some(Value::from(json!(["BS", "IN"]))));
+        assert_eq!(value, Some(Value::try_from(json!(["BS", "IN"])).unwrap()));
     }
 
     #[test]
@@ -1277,7 +1322,7 @@ mod tests {
     fn a_json_decoded_object_column_becomes_the_object_it_encodes() {
         let (value, _) = extract_dafif_code("{{ this[2] | json_decode }}", "object", &json!(r#"{"a":1}"#));
 
-        assert_eq!(value, Some(Value::from(json!({"a": 1}))));
+        assert_eq!(value, Some(Value::try_from(json!({"a": 1})).unwrap()));
     }
 
     /// Extracts the `label` attribute that the JSON5 attribute `declaration` builds over one record.
@@ -1289,6 +1334,12 @@ mod tests {
     /// Extracts the `label` attribute that the JSON5 attribute `declaration` builds over one record,
     /// recording every attribute the extraction drops into `dropped`.
     fn extract_label_recording(declaration: &str, record: JsonValue, dropped: &DroppedAttributes) -> Option<Value> {
+        single_value(resolve_label(declaration, record, dropped))
+    }
+
+    /// Resolves the `label` attribute that the JSON5 attribute `declaration` builds over one record,
+    /// recording every loss into `dropped`.
+    fn resolve_label(declaration: &str, record: JsonValue, dropped: &DroppedAttributes) -> Option<ResolvedAttribute> {
         let (resolver, mapping) = prepare(&format!(
             r#"{{
                 version: "v4",
@@ -1349,14 +1400,14 @@ mod tests {
     fn an_unfiltered_arithmetic_source_under_an_integer_transformation_yields_its_number() {
         let value = extract_label(r#"{ source: "{{ n + 1 }}", transformation: "integer" }"#, json!({"n": 2}));
 
-        assert_eq!(value, Some(Value::from(json!(3))));
+        assert_eq!(value, Some(Value::try_from(json!(3)).unwrap()));
     }
 
     #[test]
     fn a_whole_record_reference_written_without_spaces_binds_the_whole_record() {
         let value = extract_label(r#"{ source: "{{context}}", transformation: "object" }"#, json!({"a": 1, "b": "x"}));
 
-        assert_eq!(value, Some(Value::from(json!({"a": 1, "b": "x"}))));
+        assert_eq!(value, Some(Value::try_from(json!({"a": 1, "b": "x"})).unwrap()));
     }
 
     #[test]
@@ -1408,7 +1459,7 @@ mod tests {
 
         assert_eq!(
             result.values().as_ref().expect("values set").get(&name("labels")),
-            Some(&Value::from(json!(["en:organic", "", "en:vegan"])))
+            Some(&single(Value::try_from(json!(["en:organic", "", "en:vegan"])).unwrap()))
         );
     }
 
@@ -1429,7 +1480,7 @@ mod tests {
 
         assert_eq!(
             result.values().as_ref().expect("values set").get(&name("codes")),
-            Some(&Value::from(json!(["X", 2])))
+            Some(&single(Value::try_from(json!(["X", 2])).unwrap()))
         );
     }
 
@@ -1437,14 +1488,14 @@ mod tests {
     fn a_list_property_without_a_transformation_takes_a_field_array_as_its_list() {
         let value = extract_label(r#"{ type: "ListProperty", source: "{{ codes }}" }"#, json!({"codes": ["BS", "IN"]}));
 
-        assert_eq!(value, Some(Value::from(json!(["BS", "IN"]))));
+        assert_eq!(value, Some(Value::try_from(json!(["BS", "IN"])).unwrap()));
     }
 
     #[test]
     fn a_list_property_without_a_transformation_wraps_a_scalar_field_as_a_one_element_list() {
         let value = extract_label(r#"{ type: "ListProperty", source: "{{ codes }}" }"#, json!({"codes": "BS"}));
 
-        assert_eq!(value, Some(Value::from(json!(["BS"]))));
+        assert_eq!(value, Some(Value::try_from(json!(["BS"])).unwrap()));
     }
 
     #[test]
@@ -1466,18 +1517,117 @@ mod tests {
         assert_eq!(value, Some(Value::String(r#"["BS","IN"]"#.into())));
     }
 
+    /// The raw JSON a `JsonProperty` declaration resolves to over one record, with the losses
+    /// recorded.
+    fn resolve_json_label(declaration: &str, record: JsonValue) -> (Option<JsonValue>, DroppedAttributes) {
+        let dropped = DroppedAttributes::new();
+        let payload = match resolve_label(declaration, record, &dropped) {
+            None => None,
+            Some(ResolvedAttribute::Single(AttributeContent::Json(payload))) => Some(JsonValue::from(payload)),
+            Some(other @ (ResolvedAttribute::Single(AttributeContent::Value(_)) | ResolvedAttribute::Instances(_))) => {
+                panic!("expected raw JSON, got {other:?}")
+            }
+        };
+        (payload, dropped)
+    }
+
     #[test]
     fn a_json_property_without_a_transformation_keeps_a_field_object_as_it_is() {
-        let value = extract_label(r#"{ type: "JsonProperty", source: "{{ payload }}" }"#, json!({"payload": {"a": 1, "b": ["x"]}}));
+        let (payload, _) = resolve_json_label(r#"{ type: "JsonProperty", source: "{{ payload }}" }"#, json!({"payload": {"a": 1, "b": ["x"]}}));
 
-        assert_eq!(value, Some(Value::from(json!({"a": 1, "b": ["x"]}))));
+        assert_eq!(payload, Some(json!({"a": 1, "b": ["x"]})));
     }
 
     #[test]
     fn a_json_property_without_a_transformation_keeps_a_field_array_as_it_is() {
-        let value = extract_label(r#"{ type: "JsonProperty", source: "{{ payload }}" }"#, json!({"payload": [{"a": 1}, {"b": 2}]}));
+        let (payload, _) = resolve_json_label(r#"{ type: "JsonProperty", source: "{{ payload }}" }"#, json!({"payload": [{"a": 1}, {"b": 2}]}));
 
-        assert_eq!(value, Some(Value::from(json!([{"a": 1}, {"b": 2}]))));
+        assert_eq!(payload, Some(json!([{"a": 1}, {"b": 2}])));
+    }
+
+    #[test]
+    fn a_json_property_keeps_a_null_nested_in_its_source_and_records_no_loss() {
+        let (payload, dropped) = resolve_json_label(r#"{ type: "JsonProperty", source: "{{ payload }}" }"#, json!({"payload": {"maybe": null}}));
+
+        assert_eq!(payload, Some(json!({"maybe": null})));
+        assert!(dropped.nulls.is_empty());
+    }
+
+    #[test]
+    fn a_json_property_over_a_scalar_field_is_dropped_and_its_refusal_recorded() {
+        let (payload, dropped) = resolve_json_label(r#"{ type: "JsonProperty", source: "{{ payload }}" }"#, json!({"payload": 3.5}));
+
+        assert_eq!(payload, None);
+        let entries = BatchSink::from(dropped.json_payloads).into_entries().collect::<Vec<_>>();
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].0.attribute, name("label"));
+        assert_eq!(entries[0].0.refusal, JsonPayloadError::NotAnObject { found: JsonShape::Number });
+    }
+
+    #[test]
+    fn a_json_property_under_an_object_transformation_carries_the_object_without_its_nulls() {
+        let (payload, dropped) = resolve_json_label(
+            r#"{ type: "JsonProperty", source: "{{ payload }}", transformation: "object" }"#,
+            json!({"payload": {"a": 1, "b": null}}),
+        );
+
+        assert_eq!(payload, Some(json!({"a": 1})));
+        assert!(!dropped.nulls.is_empty());
+    }
+
+    #[test]
+    fn a_list_property_over_a_source_array_holding_a_null_drops_the_null_and_records_it() {
+        let dropped = DroppedAttributes::new();
+        let value = extract_label_recording(r#"{ type: "ListProperty", source: "{{ tags }}" }"#, json!({"tags": ["a", null, "b"]}), &dropped);
+
+        assert_eq!(value, Some(Value::try_from(json!(["a", "b"])).unwrap()));
+        let entries = BatchSink::from(dropped.nulls)
+            .into_entries()
+            .map(|(dropped, record)| (dropped, record.occurrences().get()))
+            .collect::<Vec<_>>();
+        assert_eq!(
+            entries,
+            [(
+                DroppedNull {
+                    attribute: name("label"),
+                    site: NullSite::ArrayItem,
+                },
+                1
+            )]
+        );
+    }
+
+    #[test]
+    fn an_object_property_over_a_source_object_holding_a_null_member_drops_the_member_and_records_it() {
+        let dropped = DroppedAttributes::new();
+        let value = extract_label_recording(
+            r#"{ source: "{{ reading }}", transformation: "object" }"#,
+            json!({"reading": {"value": 21.5, "unit": null}}),
+            &dropped,
+        );
+
+        assert_eq!(value, Some(Value::try_from(json!({"value": 21.5})).unwrap()));
+        let entries = BatchSink::from(dropped.nulls)
+            .into_entries()
+            .map(|(dropped, record)| (dropped, record.occurrences().get()))
+            .collect::<Vec<_>>();
+        assert_eq!(
+            entries,
+            [(
+                DroppedNull {
+                    attribute: name("label"),
+                    site: NullSite::ObjectMember,
+                },
+                1
+            )]
+        );
+    }
+
+    #[test]
+    fn a_property_over_an_empty_string_field_keeps_the_empty_string() {
+        let value = extract_label(r#"{ source: "{{ label }}" }"#, json!({"label": ""}));
+
+        assert_eq!(value, Some(Value::String("".into())));
     }
 
     #[test]
@@ -1642,7 +1792,7 @@ mod tests {
 
         assert_eq!(*footprint.kind(), NgsiLdAttributeKind::GeoProperty);
         let expected: NgsiLdGeometry = serde_json::from_value(clockwise_square()).unwrap();
-        assert_eq!(footprint.value(), &Value::Geospatial(Box::new(expected)));
+        assert_eq!(footprint.value(), &AttributeContent::Value(Value::Geospatial(Box::new(expected))));
         assert!(dropped.geometries.is_empty());
     }
 
@@ -1712,12 +1862,12 @@ mod tests {
             json!({"street": "Trubarjeva"}),
         );
 
-        assert_eq!(value, Some(Value::from(json!({"street": "Trubarjeva"}))));
+        assert_eq!(value, Some(Value::try_from(json!({"street": "Trubarjeva"})).unwrap()));
     }
 
     #[test]
     fn list_property_instances_without_a_transformation_each_take_their_field_array_as_their_list() {
-        let value = extract_label(
+        let resolved = resolve_label(
             r#"{
                 type: "ListProperty",
                 instances: [
@@ -1726,9 +1876,16 @@ mod tests {
                 ],
             }"#,
             json!({"a": ["x", "y"], "b": "z"}),
+            &DroppedAttributes::new(),
         );
 
-        assert_eq!(value, Some(Value::Array(vec![Value::from(json!(["x", "y"])), Value::from(json!(["z"]))])));
+        assert_eq!(
+            resolved,
+            Some(ResolvedAttribute::Instances(vec![
+                Some(AttributeContent::Value(Value::try_from(json!(["x", "y"])).unwrap())),
+                Some(AttributeContent::Value(Value::try_from(json!(["z"])).unwrap())),
+            ]))
+        );
     }
 
     #[test]
@@ -1757,7 +1914,7 @@ mod tests {
         let codes = shared.get(&name("codes")).expect("codes sub-attribute");
 
         assert_eq!(*codes.kind(), NgsiLdAttributeKind::ListProperty);
-        assert_eq!(codes.value(), &Value::from(json!(["BS", "IN"])));
+        assert_eq!(codes.value(), &AttributeContent::Value(Value::try_from(json!(["BS", "IN"])).unwrap()));
     }
 
     #[test]

@@ -1153,6 +1153,7 @@ dependencies = [
  "cassiopeia-ngsi-ld",
  "cassiopeia-reporter",
  "chrono",
+ "compact_str 0.10.0",
  "crossbeam-channel",
  "execution-time",
  "getset",

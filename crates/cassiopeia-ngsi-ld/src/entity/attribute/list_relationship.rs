@@ -3,7 +3,7 @@ use crate::entity::{
     name::NameBuf,
     representation::{SerializeRepr, concise, normalized, simplified},
 };
-use cassiopeia_common::{representation::NgsiLdRepresentation, skip_null::NgsiLdSkipNull};
+use cassiopeia_common::representation::NgsiLdRepresentation;
 use chrono::{DateTime, Utc};
 use indexmap::IndexMap;
 use serde::{Deserialize, Serialize, Serializer};
@@ -54,11 +54,11 @@ impl NgsiLdListRelationship {
 }
 
 impl SerializeRepr for NgsiLdListRelationship {
-    fn serialize_repr<S: Serializer>(&self, serializer: S, representation: NgsiLdRepresentation, skip_null: NgsiLdSkipNull) -> Result<S::Ok, S::Error> {
+    fn serialize_repr<S: Serializer>(&self, serializer: S, representation: NgsiLdRepresentation) -> Result<S::Ok, S::Error> {
         match representation {
-            NgsiLdRepresentation::Normalized => normalized::serialize_list_relationship(self, skip_null, serializer),
-            NgsiLdRepresentation::Concise => concise::serialize_list_relationship(self, skip_null, serializer),
-            NgsiLdRepresentation::Simplified => simplified::serialize_list_relationship(self, skip_null, serializer),
+            NgsiLdRepresentation::Normalized => normalized::serialize_list_relationship(self, serializer),
+            NgsiLdRepresentation::Concise => concise::serialize_list_relationship(self, serializer),
+            NgsiLdRepresentation::Simplified => simplified::serialize_list_relationship(self, serializer),
         }
     }
 }

@@ -2,8 +2,8 @@
 //! that executes a run rather than describing the run itself. The store backends and the memory
 //! profile configure the pipeline. Each becomes a [`ConfigOverride`] that displaces exactly the
 //! configured value it names. Everything that shapes *what* the run does (its output destination,
-//! output representation/skip-null, `@context`, validation (mode, schema, representation, skip-null,
-//! report), and schedule) is written into the manifest by `manifest_build` instead, never here.
+//! output representation, `@context`, validation (mode, schema, representation, report), and
+//! schedule) is written into the manifest by `manifest_build` instead, never here.
 //! The two surfaces are kept disjoint on purpose.
 
 use crate::cli::{Commands, map::MapArgs};

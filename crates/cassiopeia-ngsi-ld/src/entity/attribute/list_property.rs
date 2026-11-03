@@ -5,7 +5,7 @@ use crate::{
     },
     value::types::Value,
 };
-use cassiopeia_common::{representation::NgsiLdRepresentation, skip_null::NgsiLdSkipNull};
+use cassiopeia_common::representation::NgsiLdRepresentation;
 use chrono::{DateTime, Utc};
 use indexmap::IndexMap;
 use serde::{Deserialize, Serialize, Serializer};
@@ -46,11 +46,11 @@ impl NgsiLdListProperty {
 }
 
 impl SerializeRepr for NgsiLdListProperty {
-    fn serialize_repr<S: Serializer>(&self, serializer: S, representation: NgsiLdRepresentation, skip_null: NgsiLdSkipNull) -> Result<S::Ok, S::Error> {
+    fn serialize_repr<S: Serializer>(&self, serializer: S, representation: NgsiLdRepresentation) -> Result<S::Ok, S::Error> {
         match representation {
-            NgsiLdRepresentation::Normalized => normalized::serialize_list_property(self, skip_null, serializer),
-            NgsiLdRepresentation::Concise => concise::serialize_list_property(self, skip_null, serializer),
-            NgsiLdRepresentation::Simplified => simplified::serialize_list_property(self, skip_null, serializer),
+            NgsiLdRepresentation::Normalized => normalized::serialize_list_property(self, serializer),
+            NgsiLdRepresentation::Concise => concise::serialize_list_property(self, serializer),
+            NgsiLdRepresentation::Simplified => simplified::serialize_list_property(self, serializer),
         }
     }
 }
@@ -63,7 +63,7 @@ mod tests {
 
     #[test]
     fn a_new_list_property_holds_its_values() {
-        let property = NgsiLdListProperty::new(vec![Value::from(json!(1)), Value::from(json!(2))]);
+        let property = NgsiLdListProperty::new(vec![Value::try_from(json!(1)).unwrap(), Value::try_from(json!(2)).unwrap()]);
         assert_eq!(property.has_value_list.len(), 2);
     }
 }

@@ -1,4 +1,4 @@
-use crate::attribute::{resolution_context::ResolutionContext, resolution_error::Result, resolver::resolve};
+use crate::attribute::{resolution_context::ResolutionContext, resolution_error::Result, resolver::resolve_content};
 use cassiopeia_ir::{
     metadata::MetadataStorage,
     relationship_path::RelationshipPath,
@@ -81,7 +81,7 @@ impl MetadataExtractor {
     }
 
     /// Resolves a set of sub-attribute declarations against the record into a metadata map, dropping
-    /// any that resolve to null.
+    /// any that resolve to nothing.
     ///
     /// `path` is the path to the attribute owning these sub-attributes, used only to key nested
     /// relationships; it is empty (and never grown) when the entity has no nested relationships, so
@@ -108,9 +108,8 @@ impl MetadataExtractor {
                 continue;
             }
 
-            let mut child = ctx.child(ctx.data);
-            let value = resolve(&mut child, name, property)?;
-            if !value.is_null() {
+            if let Some(content) = resolve_content(ctx, name, property)? {
+                let child = ctx.child(ctx.data);
                 // Grow the path only when nested relationships exist, so a deeper one under this
                 // Property sub-attribute can still be keyed; otherwise recurse with an empty path.
                 let nested = if ctx.relationships.nested().is_some() {
@@ -120,7 +119,7 @@ impl MetadataExtractor {
                 } else {
                     Self::resolve_property_map(&child, &[], property.properties().as_ref())?
                 };
-                metadata.insert(name.clone(), SubAttribute::new(*property.kind(), value, nested));
+                metadata.insert(name.clone(), SubAttribute::new(*property.kind(), content, nested));
             }
         }
 

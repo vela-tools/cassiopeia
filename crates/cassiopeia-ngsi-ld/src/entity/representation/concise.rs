@@ -24,7 +24,7 @@ use crate::entity::{
         },
     },
 };
-use cassiopeia_common::{representation::NgsiLdRepresentation, skip_null::NgsiLdSkipNull};
+use cassiopeia_common::representation::NgsiLdRepresentation;
 use serde::{Serialize, Serializer, ser::SerializeMap};
 
 /// The representation these serializers emit; every nested attribute is emitted the same way.
@@ -35,7 +35,7 @@ const MODE: NgsiLdRepresentation = NgsiLdRepresentation::Concise;
 ///
 /// # Errors
 /// Returns the serializer's error if serialization fails.
-pub fn serialize_property<S: Serializer>(prop: &NgsiLdProperty, skip_null: NgsiLdSkipNull, serializer: S) -> Result<S::Ok, S::Error> {
+pub fn serialize_property<S: Serializer>(prop: &NgsiLdProperty, serializer: S) -> Result<S::Ok, S::Error> {
     // A `valueType` has no place in a bare value, so a time value keeps the object form to stay
     // lossless (clause 4.5.2.3).
     let has_metadata = prop.value.temporal_type().is_some()
@@ -57,7 +57,7 @@ pub fn serialize_property<S: Serializer>(prop: &NgsiLdProperty, skip_null: NgsiL
     serialize_unit_code(&mut map, prop.unit_code.as_ref())?;
     serialize_dataset_id(&mut map, prop.dataset_id.as_ref())?;
     serialize_instance_id(&mut map, prop.instance_id.as_ref())?;
-    serialize_nested(&mut map, &prop.attributes, MODE, skip_null)?;
+    serialize_nested(&mut map, &prop.attributes, MODE)?;
     map.end()
 }
 
@@ -66,7 +66,7 @@ pub fn serialize_property<S: Serializer>(prop: &NgsiLdProperty, skip_null: NgsiL
 ///
 /// # Errors
 /// Returns the serializer's error if serialization fails.
-pub fn serialize_relationship<S: Serializer>(rel: &NgsiLdRelationship, skip_null: NgsiLdSkipNull, serializer: S) -> Result<S::Ok, S::Error> {
+pub fn serialize_relationship<S: Serializer>(rel: &NgsiLdRelationship, serializer: S) -> Result<S::Ok, S::Error> {
     let has_metadata = rel.object_type.is_some()
         || rel.observed_at.is_some()
         || rel.expires_at.is_some()
@@ -84,7 +84,7 @@ pub fn serialize_relationship<S: Serializer>(rel: &NgsiLdRelationship, skip_null
     serialize_expires_at(&mut map, rel.expires_at.as_ref())?;
     serialize_dataset_id(&mut map, rel.dataset_id.as_ref())?;
     serialize_instance_id(&mut map, rel.instance_id.as_ref())?;
-    serialize_nested(&mut map, &rel.attributes, MODE, skip_null)?;
+    serialize_nested(&mut map, &rel.attributes, MODE)?;
     map.end()
 }
 
@@ -92,7 +92,7 @@ pub fn serialize_relationship<S: Serializer>(rel: &NgsiLdRelationship, skip_null
 ///
 /// # Errors
 /// Returns the serializer's error if serialization fails.
-pub fn serialize_geo_property<S: Serializer>(geo: &NgsiLdGeoProperty, _skip_null: NgsiLdSkipNull, serializer: S) -> Result<S::Ok, S::Error> {
+pub fn serialize_geo_property<S: Serializer>(geo: &NgsiLdGeoProperty, serializer: S) -> Result<S::Ok, S::Error> {
     if geo.observed_at.is_none() && geo.expires_at.is_none() && geo.dataset_id.is_none() && geo.instance_id.is_none() {
         return geo.value.serialize(serializer);
     }
@@ -110,14 +110,14 @@ pub fn serialize_geo_property<S: Serializer>(geo: &NgsiLdGeoProperty, _skip_null
 ///
 /// # Errors
 /// Returns the serializer's error if serialization fails.
-pub fn serialize_list_relationship<S: Serializer>(rel: &NgsiLdListRelationship, skip_null: NgsiLdSkipNull, serializer: S) -> Result<S::Ok, S::Error> {
+pub fn serialize_list_relationship<S: Serializer>(rel: &NgsiLdListRelationship, serializer: S) -> Result<S::Ok, S::Error> {
     let mut map = serializer.serialize_map(None)?;
     map.serialize_entry("objectList", &DisplaySeq(&rel.object_list))?;
     serialize_object_type(&mut map, rel.object_type.as_ref())?;
     serialize_observed_at(&mut map, rel.observed_at.as_ref())?;
     serialize_expires_at(&mut map, rel.expires_at.as_ref())?;
     serialize_dataset_id(&mut map, rel.dataset_id.as_ref())?;
-    serialize_nested(&mut map, &rel.attributes, MODE, skip_null)?;
+    serialize_nested(&mut map, &rel.attributes, MODE)?;
     map.end()
 }
 
@@ -125,7 +125,7 @@ pub fn serialize_list_relationship<S: Serializer>(rel: &NgsiLdListRelationship, 
 ///
 /// # Errors
 /// Returns the serializer's error if serialization fails.
-pub fn serialize_language_property<S: Serializer>(prop: &NgsiLdLanguageProperty, skip_null: NgsiLdSkipNull, serializer: S) -> Result<S::Ok, S::Error> {
+pub fn serialize_language_property<S: Serializer>(prop: &NgsiLdLanguageProperty, serializer: S) -> Result<S::Ok, S::Error> {
     if prop.observed_at.is_none() && prop.expires_at.is_none() && prop.dataset_id.is_none() && prop.attributes.is_empty() {
         return prop.language_map.serialize(serializer);
     }
@@ -135,7 +135,7 @@ pub fn serialize_language_property<S: Serializer>(prop: &NgsiLdLanguageProperty,
     serialize_observed_at(&mut map, prop.observed_at.as_ref())?;
     serialize_expires_at(&mut map, prop.expires_at.as_ref())?;
     serialize_dataset_id(&mut map, prop.dataset_id.as_ref())?;
-    serialize_nested(&mut map, &prop.attributes, MODE, skip_null)?;
+    serialize_nested(&mut map, &prop.attributes, MODE)?;
     map.end()
 }
 
@@ -143,7 +143,7 @@ pub fn serialize_language_property<S: Serializer>(prop: &NgsiLdLanguageProperty,
 ///
 /// # Errors
 /// Returns the serializer's error if serialization fails.
-pub fn serialize_vocab_property<S: Serializer>(prop: &NgsiLdVocabProperty, skip_null: NgsiLdSkipNull, serializer: S) -> Result<S::Ok, S::Error> {
+pub fn serialize_vocab_property<S: Serializer>(prop: &NgsiLdVocabProperty, serializer: S) -> Result<S::Ok, S::Error> {
     if prop.observed_at.is_none() && prop.expires_at.is_none() && prop.dataset_id.is_none() && prop.attributes.is_empty() {
         return serializer.collect_str(&prop.has_vocab);
     }
@@ -153,7 +153,7 @@ pub fn serialize_vocab_property<S: Serializer>(prop: &NgsiLdVocabProperty, skip_
     serialize_observed_at(&mut map, prop.observed_at.as_ref())?;
     serialize_expires_at(&mut map, prop.expires_at.as_ref())?;
     serialize_dataset_id(&mut map, prop.dataset_id.as_ref())?;
-    serialize_nested(&mut map, &prop.attributes, MODE, skip_null)?;
+    serialize_nested(&mut map, &prop.attributes, MODE)?;
     map.end()
 }
 
@@ -161,7 +161,7 @@ pub fn serialize_vocab_property<S: Serializer>(prop: &NgsiLdVocabProperty, skip_
 ///
 /// # Errors
 /// Returns the serializer's error if serialization fails.
-pub fn serialize_list_property<S: Serializer>(prop: &NgsiLdListProperty, skip_null: NgsiLdSkipNull, serializer: S) -> Result<S::Ok, S::Error> {
+pub fn serialize_list_property<S: Serializer>(prop: &NgsiLdListProperty, serializer: S) -> Result<S::Ok, S::Error> {
     if prop.observed_at.is_none() && prop.expires_at.is_none() && prop.dataset_id.is_none() && prop.attributes.is_empty() {
         return prop.has_value_list.serialize(serializer);
     }
@@ -171,24 +171,25 @@ pub fn serialize_list_property<S: Serializer>(prop: &NgsiLdListProperty, skip_nu
     serialize_observed_at(&mut map, prop.observed_at.as_ref())?;
     serialize_expires_at(&mut map, prop.expires_at.as_ref())?;
     serialize_dataset_id(&mut map, prop.dataset_id.as_ref())?;
-    serialize_nested(&mut map, &prop.attributes, MODE, skip_null)?;
+    serialize_nested(&mut map, &prop.attributes, MODE)?;
     map.end()
 }
 
 /// Serializes a `JsonProperty` in the concise representation.
 ///
+/// The `json` member is mandatory in the concise form too (ETSI GS CIM 009 v1.9.1 clause 4.5.24.3),
+/// and only its presence marks the attribute as a `JsonProperty`: a bare object would read as a
+/// Property's value, which JSON-LD expansion does interpret, stripping any null inside it (clause
+/// 4.5.0). So the attribute never collapses to its payload, and the optional `type` is left out.
+///
 /// # Errors
 /// Returns the serializer's error if serialization fails.
-pub fn serialize_json_property<S: Serializer>(prop: &NgsiLdJsonProperty, skip_null: NgsiLdSkipNull, serializer: S) -> Result<S::Ok, S::Error> {
-    if prop.observed_at.is_none() && prop.expires_at.is_none() && prop.dataset_id.is_none() && prop.attributes.is_empty() {
-        return prop.has_json.serialize(serializer);
-    }
-
+pub fn serialize_json_property<S: Serializer>(prop: &NgsiLdJsonProperty, serializer: S) -> Result<S::Ok, S::Error> {
     let mut map = serializer.serialize_map(None)?;
     map.serialize_entry("json", &prop.has_json)?;
     serialize_observed_at(&mut map, prop.observed_at.as_ref())?;
     serialize_expires_at(&mut map, prop.expires_at.as_ref())?;
     serialize_dataset_id(&mut map, prop.dataset_id.as_ref())?;
-    serialize_nested(&mut map, &prop.attributes, MODE, skip_null)?;
+    serialize_nested(&mut map, &prop.attributes, MODE)?;
     map.end()
 }

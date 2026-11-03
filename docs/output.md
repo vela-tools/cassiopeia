@@ -1,6 +1,6 @@
 # Output
 
-Output settings decide where Cassiopeia sends finished entities and how it serializes them. The mapping defines the entity and its attributes; output chooses the destination, representation, null handling, and delivery options.
+Output settings decide where Cassiopeia sends finished entities and how it serializes them. The mapping defines the entity and its attributes; output chooses the destination, representation, and delivery options.
 
 Supply output settings on the command line or in a manifest. The examples on this page use the manifest form because it keeps all output choices together.
 
@@ -95,19 +95,11 @@ The writer default is `normalized`. A manifest `output.representation` or the `-
 
 ## Handle null and empty values
 
-The `skipNull` setting accepts `skip` and `include`:
+Cassiopeia never writes JSON `null` in an entity (ETSI GS CIM 009 v1.9.1 clause 4.5.0), and an attribute with no value is left out. An attribute has no value when its source resolves to nothing: a reference to a field the record does not have or holds as null, a template of text and references with any such field, a transformation that cannot use the value, or a template that fails to render. The [templates reference](templates.md#read-the-record) explains when a source resolves to nothing.
 
-~~~json5
-output: {
-    target: "file",
-    directory: "out",
-    skipNull: "include",
-}
-~~~
+Empty text is a value, not an absence: a JSON field holding `""`, read by a plain reference such as `{{ label }}`, is written as `"value": ""`. A blank CSV field or empty XML element is read as missing when the record is read, so it gives no attribute (see [Source formats](source-formats.md)).
 
-With `skip`, Cassiopeia omits attributes whose value is null or empty. An empty string counts as empty for a `Property` or `JsonProperty`, as do an empty `languageMap` and an empty `valueList`. With `include`, those attributes remain in the serialized entity, so a source field holding empty text is written as `"value": ""`. The writer default is `skip`.
-
-`skipNull` acts only on attributes the mapping produced. An attribute whose source resolves to nothing is never produced, so it is absent under either setting. That covers a reference to a field the record does not have or holds as null, a template of text and references with any such field, a transformation that cannot use the value, and a template that fails to render. The [templates reference](templates.md#read-the-record) explains when a source resolves to nothing.
+A `null` nested inside a source value is left out of it, because NGSI-LD admits none anywhere in a Property's value: a source array `["a", null, "b"]` is written as `["a", "b"]`, and an object `{"value": 21.5, "unit": null}` as `{"value": 21.5}`. The attribute is kept, and the run warns under `extractor-null-dropped`. A `JsonProperty` keeps such a `null`, because its `json` member is raw JSON that NGSI-LD never interprets (clause 4.5.24.2). See [Convert values](mapping.md#convert-values).
 
 ## Temporal output
 
@@ -324,7 +316,6 @@ output: {
     target: "context-broker",
     url: "https://broker.example/",
     representation: "normalized",
-    skipNull: "skip",
     context: "default",
     contextDelivery: "body",
     operation: "upsert",

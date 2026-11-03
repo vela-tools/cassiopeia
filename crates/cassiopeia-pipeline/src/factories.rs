@@ -66,11 +66,10 @@ impl Pipeline {
         Ok(FragmentResolver::new(entity_store, relationship_store, template_resolver))
     }
 
-    /// Builds the writer for the manifest's destination, taking representation and skip-null from the
-    /// manifest output when set, otherwise from the NGSI-LD domain defaults (Normalized, skip nulls).
+    /// Builds the writer for the manifest's destination, taking the representation from the manifest
+    /// output when set, otherwise the NGSI-LD domain default (Normalized).
     pub(crate) fn create_writer(&self, context: ContextSource) -> Result<Box<dyn Writer>> {
         let representation = self.output.representation.unwrap_or_default();
-        let skip_null = self.output.skip_null.unwrap_or_default();
 
         let writer: Box<dyn Writer> = match &self.output.destination {
             Destination::File { directory, framing } => {
@@ -78,7 +77,6 @@ impl Pipeline {
                 Box::new(FileWriter::new(FileWriterConfig {
                     output_dir,
                     representation,
-                    skip_null,
                     parallelism: Parallelism::Parallel,
                     context,
                     // A file keeps its `@context` in the body; there is no header to carry a link.
@@ -106,7 +104,6 @@ impl Pipeline {
                 let operation = BrokerOperation::from_parts(*operation, *upsert_mode, *attribute_overwrite);
                 let config = BrokerWriterConfig::new(url.clone(), user_agent, self.context.shutdown, self.context.reporter)
                     .with_representation(representation)
-                    .with_skip_null(skip_null)
                     .with_context(context)
                     .with_context_delivery(map_context_delivery(*context_delivery))
                     .with_operation(operation)
@@ -143,7 +140,6 @@ impl Pipeline {
             repositories,
             custom_schemas,
             representation: self.output.validation_representation,
-            skip_null: self.output.validation_skip_null,
         })
     }
 }

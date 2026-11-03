@@ -31,7 +31,6 @@ pub fn run_mapping(args: &MapArgs, config: &Config, reporter: &'static dyn Repor
         mode: args.validator.validation_mode,
         schema: args.validator.schema.clone(),
         representation: args.validator.representation,
-        skip_null: args.validator.skip_null,
     };
     let observer: Arc<dyn RunObserver> = Arc::new(NoopObserver);
 

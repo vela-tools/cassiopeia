@@ -52,7 +52,7 @@ pub fn serialize_batch(ctx: &SenderContext, entities: &[NgsiLdEntity], scratch: 
 /// The entity streams straight into `sonic-rs` through a [`ReprAdapter`], with no intermediate
 /// `serde_json::Value` tree.
 fn serialize_entity_into(ctx: &SenderContext, entity: &NgsiLdEntity, batch_len: usize, scratch: &mut Vec<u8>) -> bool {
-    let adapter = ReprAdapter::new(entity, ctx.serialization.representation, ctx.serialization.skip_null);
+    let adapter = ReprAdapter::new(entity, ctx.serialization.representation);
     if let Err(source) = sonic_rs::to_writer(&mut *scratch, &adapter) {
         let error = WriterError::SimdSerialization {
             source,

@@ -1,7 +1,6 @@
-use crate::dropped_geometries::DroppedGeometries;
+use crate::dropped_attributes::DroppedAttributes;
 use cassiopeia_ir::{entity_relationships::EntityRelationships, metadata::EntityMetadata};
 use cassiopeia_mapping::template::resolver::TemplateResolver;
-use cassiopeia_unreadable_timestamps::unreadable_timestamps::UnreadableTimestamps;
 use serde_json::Value as JsonValue;
 
 /// The guard depth for nested attribute resolution. A mapping nested past this is treated as
@@ -15,7 +14,7 @@ const RECURSION_LIMIT: usize = 50;
 /// metadata sink;
 /// child contexts, spawned for nested declarations, never collect metadata of their own.
 ///
-/// The two refusal sinks are borrowed shared rather than mutably, and every child context carries
+/// The batch's loss sinks are borrowed shared rather than mutably, and every child context carries
 /// the same ones: a nested declaration can be refused as readily as a top-level one, and a batch
 /// resolves across a Rayon pool, neither of which a `&mut` sink could cross.
 pub(crate) struct ResolutionContext<'a> {
@@ -27,11 +26,9 @@ pub(crate) struct ResolutionContext<'a> {
     /// entity has none, so the nested-relationship lookup is skipped entirely (ETSI GS CIM 009 v1.9.1
     /// clause 4.5.2.2 with 4.5.3).
     pub(crate) relationships: &'a EntityRelationships,
-    /// Where a refused geometry conversion is recorded, shared by every context of the batch.
-    pub(crate) dropped_geometries: &'a DroppedGeometries,
-    /// Where an attribute value that reads as no date-time is recorded, shared by every context of
-    /// the batch.
-    pub(crate) unreadable_timestamps: &'a UnreadableTimestamps,
+    /// Where a refused conversion, and a null left out of a value, is recorded, shared by every
+    /// context of the batch.
+    pub(crate) dropped: &'a DroppedAttributes,
     /// How deep into nested attribute declarations this context sits.
     pub(crate) depth: usize,
     /// Where attribute-level properties are recorded, present only on the root context.
@@ -44,16 +41,14 @@ impl<'a> ResolutionContext<'a> {
         data: &'a JsonValue,
         resolver: &'a TemplateResolver,
         relationships: &'a EntityRelationships,
-        dropped_geometries: &'a DroppedGeometries,
-        unreadable_timestamps: &'a UnreadableTimestamps,
+        dropped: &'a DroppedAttributes,
         metadata: Option<&'a mut EntityMetadata>,
     ) -> ResolutionContext<'a> {
         ResolutionContext {
             data,
             resolver,
             relationships,
-            dropped_geometries,
-            unreadable_timestamps,
+            dropped,
             depth: 0,
             metadata,
         }
@@ -65,8 +60,7 @@ impl<'a> ResolutionContext<'a> {
             data,
             resolver: self.resolver,
             relationships: self.relationships,
-            dropped_geometries: self.dropped_geometries,
-            unreadable_timestamps: self.unreadable_timestamps,
+            dropped: self.dropped,
             depth: self.depth + 1,
             metadata: None,
         }

@@ -19,7 +19,7 @@ use crate::entity::{
     representation::{DisplayStr, JsonLayout, NgsiLdSerializable, ReprAdapter, SerializeRepr, qualifiers::serialize_expires_at},
     scope::NgsiLdScope,
 };
-use cassiopeia_common::{representation::NgsiLdRepresentation, skip_null::NgsiLdSkipNull};
+use cassiopeia_common::representation::NgsiLdRepresentation;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize, Serializer, ser::SerializeMap};
 use serde_json::Value as JsonValue;
@@ -70,7 +70,7 @@ impl NgsiLdEntity {
 }
 
 impl SerializeRepr for NgsiLdEntity {
-    fn serialize_repr<S: Serializer>(&self, serializer: S, representation: NgsiLdRepresentation, skip_null: NgsiLdSkipNull) -> Result<S::Ok, S::Error> {
+    fn serialize_repr<S: Serializer>(&self, serializer: S, representation: NgsiLdRepresentation) -> Result<S::Ok, S::Error> {
         let mut map = serializer.serialize_map(None)?;
 
         if let Some(context) = &self.context {
@@ -92,10 +92,7 @@ impl SerializeRepr for NgsiLdEntity {
         }
 
         for (name, wrapper) in &self.attributes {
-            if wrapper.is_skipped(skip_null) {
-                continue;
-            }
-            map.serialize_entry(name.as_str(), &ReprAdapter::new(wrapper, representation, skip_null))?;
+            map.serialize_entry(name.as_str(), &ReprAdapter::new(wrapper, representation))?;
         }
 
         map.end()
@@ -103,12 +100,12 @@ impl SerializeRepr for NgsiLdEntity {
 }
 
 impl NgsiLdSerializable for NgsiLdEntity {
-    fn to_json(&self, representation: NgsiLdRepresentation, skip_null: NgsiLdSkipNull) -> NgsiLdResult<JsonValue> {
-        Ok(serde_json::to_value(ReprAdapter::new(self, representation, skip_null))?)
+    fn to_json(&self, representation: NgsiLdRepresentation) -> NgsiLdResult<JsonValue> {
+        Ok(serde_json::to_value(ReprAdapter::new(self, representation))?)
     }
 
-    fn to_string(&self, representation: NgsiLdRepresentation, skip_null: NgsiLdSkipNull, layout: JsonLayout) -> NgsiLdResult<String> {
-        let adapter = ReprAdapter::new(self, representation, skip_null);
+    fn to_string(&self, representation: NgsiLdRepresentation, layout: JsonLayout) -> NgsiLdResult<String> {
+        let adapter = ReprAdapter::new(self, representation);
         let rendered = match layout {
             JsonLayout::Compact => serde_json::to_string(&adapter)?,
             JsonLayout::Pretty => serde_json::to_string_pretty(&adapter)?,
@@ -118,16 +115,13 @@ impl NgsiLdSerializable for NgsiLdEntity {
 }
 
 impl NgsiLdSerializable for [NgsiLdEntity] {
-    fn to_json(&self, representation: NgsiLdRepresentation, skip_null: NgsiLdSkipNull) -> NgsiLdResult<JsonValue> {
-        let vals = self
-            .iter()
-            .map(|entity| entity.to_json(representation, skip_null))
-            .collect::<NgsiLdResult<Vec<_>>>()?;
+    fn to_json(&self, representation: NgsiLdRepresentation) -> NgsiLdResult<JsonValue> {
+        let vals = self.iter().map(|entity| entity.to_json(representation)).collect::<NgsiLdResult<Vec<_>>>()?;
         Ok(JsonValue::Array(vals))
     }
 
-    fn to_string(&self, representation: NgsiLdRepresentation, skip_null: NgsiLdSkipNull, layout: JsonLayout) -> NgsiLdResult<String> {
-        let adapters: Vec<ReprAdapter<'_, NgsiLdEntity>> = self.iter().map(|entity| ReprAdapter::new(entity, representation, skip_null)).collect();
+    fn to_string(&self, representation: NgsiLdRepresentation, layout: JsonLayout) -> NgsiLdResult<String> {
+        let adapters: Vec<ReprAdapter<'_, NgsiLdEntity>> = self.iter().map(|entity| ReprAdapter::new(entity, representation)).collect();
         let rendered = match layout {
             JsonLayout::Compact => serde_json::to_string(&adapters)?,
             JsonLayout::Pretty => serde_json::to_string_pretty(&adapters)?,

@@ -1,5 +1,5 @@
 use crate::entity::representation::{SerializeRepr, concise, normalized, simplified};
-use cassiopeia_common::{representation::NgsiLdRepresentation, skip_null::NgsiLdSkipNull};
+use cassiopeia_common::representation::NgsiLdRepresentation;
 use cassiopeia_geometry::geometry::NgsiLdGeometry;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize, Serializer};
@@ -39,11 +39,11 @@ impl NgsiLdGeoProperty {
 }
 
 impl SerializeRepr for NgsiLdGeoProperty {
-    fn serialize_repr<S: Serializer>(&self, serializer: S, representation: NgsiLdRepresentation, skip_null: NgsiLdSkipNull) -> Result<S::Ok, S::Error> {
+    fn serialize_repr<S: Serializer>(&self, serializer: S, representation: NgsiLdRepresentation) -> Result<S::Ok, S::Error> {
         match representation {
-            NgsiLdRepresentation::Normalized => normalized::serialize_geo_property(self, skip_null, serializer),
-            NgsiLdRepresentation::Concise => concise::serialize_geo_property(self, skip_null, serializer),
-            NgsiLdRepresentation::Simplified => simplified::serialize_geo_property(self, skip_null, serializer),
+            NgsiLdRepresentation::Normalized => normalized::serialize_geo_property(self, serializer),
+            NgsiLdRepresentation::Concise => concise::serialize_geo_property(self, serializer),
+            NgsiLdRepresentation::Simplified => simplified::serialize_geo_property(self, serializer),
         }
     }
 }

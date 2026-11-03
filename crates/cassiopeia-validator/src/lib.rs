@@ -27,7 +27,7 @@ mod tests {
         schema_verdict::{DiagnosticsLevel, SchemaVerdict},
         validator::Validator,
     };
-    use cassiopeia_common::{representation::NgsiLdRepresentation, skip_null::NgsiLdSkipNull};
+    use cassiopeia_common::representation::NgsiLdRepresentation;
     use cassiopeia_ngsi_ld::entity::{NgsiLdEntity, name::NameBuf};
     use pretty_assertions::assert_eq;
     use std::collections::HashMap;
@@ -42,7 +42,6 @@ mod tests {
             repositories: HashMap::new(),
             custom_schemas: HashMap::new(),
             representation: NgsiLdRepresentation::Normalized,
-            skip_null: NgsiLdSkipNull::Skip,
         });
         let entity = NgsiLdEntity::new("urn:ngsi-ld:Unknown:1".parse::<Urn>().unwrap(), NameBuf::new("Unknown").unwrap());
 

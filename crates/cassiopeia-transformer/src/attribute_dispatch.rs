@@ -11,10 +11,14 @@ use crate::{
         build_single_relationship,
     },
 };
+use cassiopeia_ir::{attribute_content::AttributeContent, entity::AttributeValues, resolved_attribute::ResolvedAttribute};
 use cassiopeia_mapping::attribute::Attribute;
-use cassiopeia_ngsi_ld::entity::{
-    attribute::{NgsiLdAttributeKind, NgsiLdAttributeWrapper},
-    name::NameBuf,
+use cassiopeia_ngsi_ld::{
+    entity::{
+        attribute::{NgsiLdAttributeKind, NgsiLdAttributeWrapper},
+        name::NameBuf,
+    },
+    value::{json_payload::JsonPayload, types::Value},
 };
 use cassiopeia_unreadable_timestamps::unreadable_timestamps::UnreadableTimestamps;
 
@@ -55,32 +59,59 @@ pub(crate) fn build_attribute(
     }
     match config.kind() {
         NgsiLdAttributeKind::Property => {
-            let value = values.swap_remove(key)?;
+            let value = take_value(values, key)?;
             Some(build_property(value, transform_metadata(metadata, name, None, cache, unreadable)))
         }
         NgsiLdAttributeKind::GeoProperty => {
             // Extraction leaves a GeoProperty's value as the geometry it typed under the declaration's
             // own `geometry` policy, or no value at all, so there is nothing to parse here.
-            let geometry = values.swap_remove(key)?.into_geometry()?;
+            let geometry = take_value(values, key)?.into_geometry()?;
             Some(build_geo_property(geometry, transform_metadata(metadata, name, None, cache, unreadable)))
         }
         NgsiLdAttributeKind::VocabProperty => {
-            let value = values.swap_remove(key)?;
+            let value = take_value(values, key)?;
             build_vocab_property(&value, transform_metadata(metadata, name, None, cache, unreadable))
         }
         NgsiLdAttributeKind::ListProperty => {
-            let value = values.swap_remove(key)?;
+            let value = take_value(values, key)?;
             Some(build_list_property(value, transform_metadata(metadata, name, None, cache, unreadable)))
         }
         NgsiLdAttributeKind::JsonProperty => {
-            let value = values.swap_remove(key)?;
-            Some(build_json_property(value, transform_metadata(metadata, name, None, cache, unreadable)))
+            let payload = take_json(values, key)?;
+            Some(build_json_property(payload, transform_metadata(metadata, name, None, cache, unreadable)))
         }
         NgsiLdAttributeKind::LanguageProperty => {
-            let value = values.swap_remove(key)?;
+            let value = take_value(values, key)?;
             build_language_property(value, transform_metadata(metadata, name, None, cache, unreadable))
         }
         NgsiLdAttributeKind::Relationship => build_single_relationship(name, config, relationships, metadata, cache, unreadable),
         NgsiLdAttributeKind::ListRelationship => build_list_relationship_attribute(name, config, relationships, metadata, cache, unreadable),
+    }
+}
+
+/// Takes the single content a single-instance declaration resolved to.
+///
+/// The extractor resolves a declaration without `instances` to a single content, so an instance
+/// list has no single value to give and yields no attribute.
+fn take_content(values: &mut AttributeValues, key: &str) -> Option<AttributeContent> {
+    match values.swap_remove(key)? {
+        ResolvedAttribute::Single(content) => Some(content),
+        ResolvedAttribute::Instances(_) => None,
+    }
+}
+
+/// Takes the NGSI-LD Value a single-instance Property-family declaration resolved to.
+fn take_value(values: &mut AttributeValues, key: &str) -> Option<Value> {
+    match take_content(values, key)? {
+        AttributeContent::Value(value) => Some(value),
+        AttributeContent::Json(_) => None,
+    }
+}
+
+/// Takes the raw JSON a single-instance `JsonProperty` declaration resolved to.
+fn take_json(values: &mut AttributeValues, key: &str) -> Option<JsonPayload> {
+    match take_content(values, key)? {
+        AttributeContent::Json(payload) => Some(payload),
+        AttributeContent::Value(_) => None,
     }
 }

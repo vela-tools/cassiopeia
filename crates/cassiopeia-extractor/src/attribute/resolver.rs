@@ -6,13 +6,18 @@ use crate::attribute::{
     transformer::{SourceParts, Transformer},
 };
 use cassiopeia_geometry::policy::GeometryPolicy;
+use cassiopeia_ir::{attribute_content::AttributeContent, resolved_attribute::ResolvedAttribute};
 use cassiopeia_mapping::{
     attribute::{Attribute, instance::AttributeInstance},
     template::CompiledTemplate,
 };
 use cassiopeia_ngsi_ld::{
     entity::{attribute::NgsiLdAttributeKind, name::NameBuf},
-    value::types::{Value, ValueObject},
+    value::{
+        json_payload::JsonPayload,
+        omitted_nulls::OmittedNulls,
+        types::{Value, ValueObject},
+    },
 };
 use cassiopeia_unreadable_timestamps::timestamp_loss::TimestampLoss;
 use compact_str::CompactString;
@@ -20,54 +25,95 @@ use serde_json::Value as JsonValue;
 use smallvec::smallvec;
 use std::result;
 
-/// Resolves one attribute declaration into its NGSI-LD value.
+/// Resolves one attribute declaration into what it carries against the record, or `None` when it
+/// carries nothing.
 ///
 /// The declaration's [`NgsiLdAttributeKind`] and shape select the resolution path: a relationship
 /// reads the entity's pre-resolved targets, a language property builds a `languageMap`, a
 /// declaration carrying nested `mappings` builds a structured object, and everything else reads and
 /// transforms source values.
-pub(crate) fn resolve(ctx: &mut ResolutionContext, attr_name: &NameBuf, config: &Attribute) -> Result<Value> {
+pub(crate) fn resolve(ctx: &mut ResolutionContext, attr_name: &NameBuf, config: &Attribute) -> Result<Option<ResolvedAttribute>> {
     if ctx.recursion_limit_exceeded() {
         return Err(ResolutionError::RecursionLimitExceeded { depth: ctx.depth });
     }
 
     let kind = config.kind();
     if matches!(kind, NgsiLdAttributeKind::Relationship | NgsiLdAttributeKind::ListRelationship) {
-        return resolve_relationship(ctx, attr_name, config);
+        resolve_relationship(ctx, attr_name, config)?;
+        return Ok(None);
     }
     if let Some(instances) = config.instances() {
         return resolve_instances(ctx, attr_name, config, instances);
     }
-    if matches!(kind, NgsiLdAttributeKind::LanguageProperty) && !config.language_map().is_empty() {
-        return resolve_language_property(ctx, attr_name, config);
-    }
-    if !config.mappings().is_empty() {
-        return resolve_object(ctx, attr_name, config);
-    }
 
-    resolve_leaf(ctx, attr_name, config)
+    let content = if matches!(kind, NgsiLdAttributeKind::LanguageProperty) && !config.language_map().is_empty() {
+        resolve_language_property(ctx, attr_name, config)?.map(AttributeContent::Value)
+    } else if !config.mappings().is_empty() {
+        resolve_object(ctx, attr_name, config)?.map(AttributeContent::Value)
+    } else {
+        resolve_leaf(ctx, attr_name, config)?
+    };
+
+    Ok(content.map(ResolvedAttribute::Single))
 }
 
-/// Resolves a multi-instance Property-family attribute into an array of per-instance values.
+/// Resolves a nested declaration into the one content it contributes: what a single-instance
+/// declaration resolved to, or, for one declaring instances, a value listing every instance that
+/// resolved.
+pub(crate) fn resolve_content(ctx: &ResolutionContext, key: &NameBuf, config: &Attribute) -> Result<Option<AttributeContent>> {
+    let mut child = ctx.child(ctx.data);
+    Ok(match resolve(&mut child, key, config)? {
+        None => None,
+        Some(ResolvedAttribute::Single(content)) => Some(content),
+        Some(ResolvedAttribute::Instances(instances)) => Some(AttributeContent::Value(Value::Array(
+            instances.into_iter().flatten().filter_map(|content| into_value(ctx, key, content)).collect(),
+        ))),
+    })
+}
+
+/// Turns resolved content into an NGSI-LD Value, for a place only a Value can stand, such as a member
+/// of a structured value.
 ///
-/// Each instance's `source` is read and converted with the attribute's shared conversion;
-/// the value at index `i` aligns with the per-item metadata recorded for instance `i` (its
-/// `datasetId` and the shared attribute-level properties). A missing instance value stays null so the
-/// alignment holds, and the transformer drops it when it builds the instances (ETSI GS CIM 009
-/// v1.9.1 clause 4.5.5). When every instance is null the whole attribute is omitted.
-fn resolve_instances(ctx: &mut ResolutionContext, attr_name: &NameBuf, config: &Attribute, instances: &[AttributeInstance]) -> Result<Value> {
-    let mut values = Vec::with_capacity(instances.len());
+/// Raw JSON becomes a Value without the nulls it holds, which are recorded: they were admissible in a
+/// `JsonProperty`'s `json` member, but not inside a Property's value (ETSI GS CIM 009 v1.9.1 clause
+/// 4.5.0).
+fn into_value(ctx: &ResolutionContext, key: &NameBuf, content: AttributeContent) -> Option<Value> {
+    match content {
+        AttributeContent::Value(value) => Some(value),
+        AttributeContent::Json(payload) => {
+            let mut omitted = OmittedNulls::default();
+            let value = Value::from_json(JsonValue::from(payload), &mut omitted);
+            ctx.dropped.nulls.record(key, omitted);
+            value
+        }
+    }
+}
+
+/// Resolves a multi-instance Property-family attribute into one entry per declared instance.
+///
+/// Each instance's `source` is read and converted with the attribute's shared conversion; the entry
+/// at index `i` aligns with the per-item metadata recorded for instance `i` (its `datasetId` and the
+/// shared attribute-level properties). A missing instance stays `None` so the alignment holds, and
+/// the transformer drops it when it builds the instances (ETSI GS CIM 009 v1.9.1 clause 4.5.5). When
+/// no instance resolved, the whole attribute is omitted.
+fn resolve_instances(
+    ctx: &mut ResolutionContext,
+    attr_name: &NameBuf,
+    config: &Attribute,
+    instances: &[AttributeInstance],
+) -> Result<Option<ResolvedAttribute>> {
+    let mut contents = Vec::with_capacity(instances.len());
     for instance in instances {
         let parts = collect_source_parts(ctx, instance.source().as_ref(), instance.compiled_source().as_ref())?;
-        values.push(transform(ctx, attr_name, config, parts));
+        contents.push(transform(ctx, attr_name, config, parts));
     }
 
     record_metadata(ctx, attr_name, config)?;
 
-    if values.iter().all(Value::is_null) {
-        Ok(Value::Null)
+    if contents.iter().all(Option::is_none) {
+        Ok(None)
     } else {
-        Ok(Value::Array(values))
+        Ok(Some(ResolvedAttribute::Instances(contents)))
     }
 }
 
@@ -76,26 +122,26 @@ fn resolve_instances(ctx: &mut ResolutionContext, attr_name: &NameBuf, config: &
 /// The relationship's targets were minted by the expander and travel on the entity, directly or
 /// grouped per instance; the value itself is materialised later, so this only records the
 /// attribute's own properties as metadata and contributes no entry to the value map.
-fn resolve_relationship(ctx: &mut ResolutionContext, attr_name: &NameBuf, config: &Attribute) -> Result<Value> {
-    if !ctx.relationships.has_objects(attr_name) {
-        return Ok(Value::Null);
+fn resolve_relationship(ctx: &mut ResolutionContext, attr_name: &NameBuf, config: &Attribute) -> Result<()> {
+    if ctx.relationships.has_objects(attr_name) {
+        record_metadata(ctx, attr_name, config)?;
     }
-
-    record_metadata(ctx, attr_name, config)?;
-    Ok(Value::Null)
+    Ok(())
 }
 
 /// Resolves a `LanguageProperty` into a `languageMap` of per-language values.
 ///
 /// A `languageMap` is keyed by BCP-47 language tag, not attribute name (ETSI GS CIM 009 v1.9.1
 /// clause 4.5.18), and each entry is a single localized string, so every value is resolved as a
-/// leaf against the same record rather than through the name-keyed nested-attribute path.
-fn resolve_language_property(ctx: &mut ResolutionContext, attr_name: &NameBuf, config: &Attribute) -> Result<Value> {
+/// leaf against the same record rather than through the name-keyed nested-attribute path. An entry
+/// that resolved to nothing or to blank text has no text to localize and is left out.
+fn resolve_language_property(ctx: &mut ResolutionContext, attr_name: &NameBuf, config: &Attribute) -> Result<Option<Value>> {
     let mut language_map = ValueObject::default();
     for (language, child_config) in config.language_map() {
         let parts = collect_source_parts(ctx, child_config.source().as_ref(), child_config.compiled_source().as_ref())?;
-        let value = transform(ctx, attr_name, child_config, parts);
-        if !value.is_null() && !value.is_empty_string() {
+        if let Some(value) = transform(ctx, attr_name, child_config, parts).and_then(|content| into_value(ctx, attr_name, content))
+            && !value.is_empty_string()
+        {
             language_map.insert(CompactString::from(language.as_str()), value);
         }
     }
@@ -103,9 +149,9 @@ fn resolve_language_property(ctx: &mut ResolutionContext, attr_name: &NameBuf, c
     record_metadata(ctx, attr_name, config)?;
 
     if language_map.is_empty() {
-        Ok(Value::Null)
+        Ok(None)
     } else {
-        Ok(Value::Object(Box::new(language_map)))
+        Ok(Some(Value::Object(Box::new(language_map))))
     }
 }
 
@@ -115,11 +161,10 @@ fn resolve_language_property(ctx: &mut ResolutionContext, attr_name: &NameBuf, c
 /// `transformation`), the assembled object is a geometry spelled field by field, so it is converted
 /// under the declaration's own `geometry` policy and a refusal is recorded, exactly as for a geometry
 /// read whole from one source. Any other conversion leaves the object as assembled.
-fn resolve_object(ctx: &mut ResolutionContext, attr_name: &NameBuf, config: &Attribute) -> Result<Value> {
+fn resolve_object(ctx: &mut ResolutionContext, attr_name: &NameBuf, config: &Attribute) -> Result<Option<Value>> {
     let mut object = ValueObject::default();
     for (key, child_config) in config.mappings() {
-        let value = resolve_child(ctx, key, child_config)?;
-        if !value.is_null() {
+        if let Some(value) = resolve_content(ctx, key, child_config)?.and_then(|content| into_value(ctx, key, content)) {
             object.insert(CompactString::from(key.as_str()), value);
         }
     }
@@ -127,7 +172,7 @@ fn resolve_object(ctx: &mut ResolutionContext, attr_name: &NameBuf, config: &Att
     record_metadata(ctx, attr_name, config)?;
 
     if object.is_empty() {
-        return Ok(Value::Null);
+        return Ok(None);
     }
     let object = Value::Object(Box::new(object));
 
@@ -137,28 +182,41 @@ fn resolve_object(ctx: &mut ResolutionContext, attr_name: &NameBuf, config: &Att
             attr_name,
             Transformer::coerce_geometry(&object, target, config.geometry().as_ref()).map_err(AttributeRefusal::Geometry),
         ),
-        None => object,
+        None => Some(object),
     })
 }
 
 /// Resolves a leaf declaration: reads its source values and applies its transformation.
-fn resolve_leaf(ctx: &mut ResolutionContext, attr_name: &NameBuf, config: &Attribute) -> Result<Value> {
+fn resolve_leaf(ctx: &mut ResolutionContext, attr_name: &NameBuf, config: &Attribute) -> Result<Option<AttributeContent>> {
     let parts = collect_source_parts(ctx, config.source().as_ref(), config.compiled_source().as_ref())?;
     record_metadata(ctx, attr_name, config)?;
 
     Ok(transform(ctx, attr_name, config, parts))
 }
 
-/// Transforms one declaration's source values, binding a refusal to the sink that gathers it.
+/// Transforms one declaration's source values, binding a refusal, and any nulls left out of the
+/// value, to the sinks that gather them.
 ///
 /// The three paths that read source values (a leaf, one multi-attribute instance, and one
 /// language-map entry) all transform here, so all of them convert through the declaration's
 /// [`Attribute::conversion`], and a declaration naming no transformation gets its kind's default on
 /// every path.
-fn transform(ctx: &ResolutionContext, attr_name: &NameBuf, config: &Attribute, parts: SourceParts) -> Value {
+///
+/// A `JsonProperty` always comes out as raw JSON: read as the source held it under its default
+/// conversion, or, under a declared transformation, as the JSON the transformed value serializes to.
+/// The nulls left out are recorded only when the attribute keeps a value: a refused or absent value
+/// lost the whole attribute, not some of its members.
+fn transform(ctx: &ResolutionContext, attr_name: &NameBuf, config: &Attribute, parts: SourceParts) -> Option<AttributeContent> {
     let geometry: Option<&GeometryPolicy> = config.geometry().as_ref();
+    let mut omitted = OmittedNulls::default();
+    let outcome = Transformer::apply(parts, config.conversion(), geometry, &mut omitted).and_then(|content| match (config.kind(), content) {
+        (NgsiLdAttributeKind::JsonProperty, Some(AttributeContent::Value(value))) => Ok(Some(AttributeContent::Json(JsonPayload::try_from(value)?))),
+        (_, content) => Ok(content),
+    });
 
-    bind_refusal(ctx, attr_name, Transformer::apply(parts, config.conversion(), geometry))
+    let content = bind_refusal(ctx, attr_name, outcome)?;
+    ctx.dropped.nulls.record(attr_name, omitted);
+    Some(content)
 }
 
 /// Binds the outcome of converting one declaration's value to the sink that gathers its refusal.
@@ -166,24 +224,22 @@ fn transform(ctx: &ResolutionContext, attr_name: &NameBuf, config: &Attribute, p
 /// A refusal is not a record failure: the attribute drops, the entity is still emitted, and the run
 /// reports what was lost and why. Every conversion the resolver runs binds its outcome here, so none
 /// of them can forget to.
-fn bind_refusal(ctx: &ResolutionContext, attr_name: &NameBuf, outcome: result::Result<Value, AttributeRefusal>) -> Value {
+fn bind_refusal<T>(ctx: &ResolutionContext, attr_name: &NameBuf, outcome: result::Result<Option<T>, AttributeRefusal>) -> Option<T> {
     match outcome {
         Ok(value) => value,
         Err(AttributeRefusal::Geometry(refusal)) => {
-            ctx.dropped_geometries.record(attr_name, refusal);
-            Value::Null
+            ctx.dropped.geometries.record(attr_name, refusal);
+            None
+        }
+        Err(AttributeRefusal::JsonPayload(refusal)) => {
+            ctx.dropped.json_payloads.record(attr_name, refusal);
+            None
         }
         Err(AttributeRefusal::UnreadableTimestamp { text }) => {
-            ctx.unreadable_timestamps.record(TimestampLoss::AttributeValue, attr_name, &text);
-            Value::Null
+            ctx.dropped.timestamps.record(TimestampLoss::AttributeValue, attr_name, &text);
+            None
         }
     }
-}
-
-/// Resolves a nested declaration in a fresh child context.
-fn resolve_child(ctx: &ResolutionContext, key: &NameBuf, config: &Attribute) -> Result<Value> {
-    let mut child = ctx.child(ctx.data);
-    resolve(&mut child, key, config)
 }
 
 /// Reads the raw source values a declaration is built from, one per template.

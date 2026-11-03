@@ -141,7 +141,14 @@ mod tests {
         telemetry::run::RunTelemetry,
     };
     use cassiopeia_diagnostic::code::{diagnostic_code::DiagnosticCode, transform_code::TransformCode};
-    use cassiopeia_ir::{entity::Entity, mapped::Mapped, metadata::MetadataStorage, sub_attribute::SubAttribute};
+    use cassiopeia_ir::{
+        attribute_content::AttributeContent,
+        entity::Entity,
+        mapped::Mapped,
+        metadata::MetadataStorage,
+        resolved_attribute::ResolvedAttribute,
+        sub_attribute::SubAttribute,
+    };
     use cassiopeia_mapping::{mapping::Mapping, template::runner::TemplateRunner};
     use cassiopeia_ngsi_ld::{
         entity::{attribute::NgsiLdAttributeKind, name::NameBuf},
@@ -185,10 +192,17 @@ mod tests {
     /// One extracted entity whose `temperature` carries `observed_at` as its `observedAt` text.
     fn entity(id: &str, observed_at: &str, mapping: &Arc<Mapping>) -> Mapped<Entity> {
         let urn: Urn = format!("urn:ngsi-ld:Sensor:{id}").parse().unwrap();
-        let values = IndexMap::from_iter([(name("temperature"), Value::Number(Number::Float(20.0)))]);
+        let values = IndexMap::from_iter([(
+            name("temperature"),
+            ResolvedAttribute::Single(AttributeContent::Value(Value::Number(Number::Float(20.0)))),
+        )]);
         let shared = IndexMap::from_iter([(
             name("observedAt"),
-            SubAttribute::new(NgsiLdAttributeKind::Property, Value::from(json!(observed_at)), IndexMap::default()),
+            SubAttribute::new(
+                NgsiLdAttributeKind::Property,
+                AttributeContent::Value(Value::try_from(json!(observed_at)).unwrap()),
+                IndexMap::default(),
+            ),
         )]);
         let metadata = IndexMap::from_iter([(name("temperature"), MetadataStorage::shared(shared))]);
 

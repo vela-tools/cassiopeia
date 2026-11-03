@@ -55,6 +55,14 @@ pub enum ManifestError {
         path: PathBuf,
     },
 
+    /// The output's destination settings could not be read: no known `target`, a missing setting,
+    /// or a key neither the output nor its destination defines.
+    #[error("The manifest's 'output' destination is invalid: {source}")]
+    Destination {
+        /// What serde objected to.
+        source: serde_json::Error,
+    },
+
     /// The manifest could not be serialized to JSON prior to formatting.
     #[error("Failed to serialize the manifest")]
     Serialize(#[from] serde_json::Error),

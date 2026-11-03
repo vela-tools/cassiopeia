@@ -7,7 +7,7 @@ use crate::broker::{
     request_shape::RequestShape,
     serialize::serialize_batch,
 };
-use cassiopeia_common::{masked_url::MaskedUrl, representation::NgsiLdRepresentation, skip_null::NgsiLdSkipNull};
+use cassiopeia_common::{masked_url::MaskedUrl, representation::NgsiLdRepresentation};
 use cassiopeia_ngsi_ld::entity::{NgsiLdEntity, context::ContextSource};
 use cassiopeia_reporter::reporter::Reporter;
 use crossbeam_channel::Receiver;
@@ -49,8 +49,6 @@ pub struct RequestParts {
 pub struct SerializationParts {
     /// The NGSI-LD representation entities serialize in.
     pub representation: NgsiLdRepresentation,
-    /// Whether null-valued attributes are skipped.
-    pub skip_null: NgsiLdSkipNull,
     /// The shared context source for body injection, when in body mode.
     pub body_context: Option<Arc<ContextSource>>,
     /// The initial per-worker serialization scratch capacity, in bytes.
@@ -171,7 +169,7 @@ pub(crate) mod test_support {
         sender::{RequestParts, RuntimeParts, SenderContext, SerializationParts, SharedCounters},
         test_reporter::{static_shutdown, static_test_reporter},
     };
-    use cassiopeia_common::{masked_url::MaskedUrl, representation::NgsiLdRepresentation, skip_null::NgsiLdSkipNull};
+    use cassiopeia_common::{masked_url::MaskedUrl, representation::NgsiLdRepresentation};
     use cassiopeia_ngsi_ld::entity::{NgsiLdEntity, name::NameBuf};
     use reqwest::{blocking::Client, header::HeaderValue};
     use std::sync::{Arc, atomic::AtomicUsize};
@@ -191,7 +189,6 @@ pub(crate) mod test_support {
             },
             serialization: SerializationParts {
                 representation: NgsiLdRepresentation::Normalized,
-                skip_null: NgsiLdSkipNull::Skip,
                 body_context: None,
                 initial_payload_bytes: 1024,
                 shape,

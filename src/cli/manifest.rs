@@ -6,7 +6,6 @@ use cassiopeia_common::{
     input::Input,
     representation::NgsiLdRepresentation,
     request_header::RequestHeader,
-    skip_null::NgsiLdSkipNull,
 };
 use cassiopeia_manifest::{failure_policy::FailurePolicy, output::temporal::TemporalRepresentation};
 use clap::{ArgAction, Args, Parser, Subcommand};
@@ -89,10 +88,6 @@ pub struct ManifestGenArgs {
     /// NGSI-LD representation for written entities.
     #[arg(long = "representation", value_enum, help_heading = "Output", value_name = "REPRESENTATION")]
     pub writer_representation: Option<NgsiLdRepresentation>,
-
-    /// How to handle null values in written entities.
-    #[arg(long = "skip-null", value_enum, help_heading = "Output", value_name = "SKIPNULL")]
-    pub writer_skip_null: Option<NgsiLdSkipNull>,
 
     /// Temporal output shape. `series` folds each id's observations into one temporal entity with
     /// instance arrays (ETSI GS CIM 009 v1.9.1 clause 5.2.20); absent writes current-state (one entity
