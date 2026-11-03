@@ -5,7 +5,7 @@ use crate::broker::{
     sender::SenderContext,
 };
 use bytes::Bytes;
-use cassiopeia_common::captured_body::CapturedBody;
+use cassiopeia_common::{captured_body::CapturedBody, http_retry::retry_after::RetryAfter};
 use cassiopeia_ngsi_ld::entity::NgsiLdEntity;
 use http::StatusCode;
 use reqwest::{
@@ -62,6 +62,8 @@ pub fn post_batch(ctx: &SenderContext, payload: &Bytes, entities: &[NgsiLdEntity
         };
 
         let status = response.status();
+        // The body consumes the response, so the wait the broker asks for is read off it first.
+        let retry_after = RetryAfter::from_headers(response.headers());
         // A full-success response carries no body; every other status is read so the broker's own
         // problem details (clause 6.3.3 requires them) reach the report.
         let body = if status.is_success() && status != StatusCode::MULTI_STATUS {
@@ -85,10 +87,12 @@ pub fn post_batch(ctx: &SenderContext, payload: &Bytes, entities: &[NgsiLdEntity
                 return settle_unreadable(ctx, &delivery, source, &body, status);
             }
             ResponseVerdict::TooLarge { problem } => return settle_too_large(ctx, &delivery, problem.as_ref(), status, payload_len),
-            ResponseVerdict::Retryable { status, problem } => match on_retryable(ctx, &delivery, status, problem.as_ref(), payload_len, &mut attempt) {
-                RetryStep::Again => {}
-                RetryStep::Settled(outcome) => return outcome,
-            },
+            ResponseVerdict::Retryable { status, problem } => {
+                match on_retryable(ctx, &delivery, status, problem.as_ref(), retry_after, payload_len, &mut attempt) {
+                    RetryStep::Again => {}
+                    RetryStep::Settled(outcome) => return outcome,
+                }
+            }
             ResponseVerdict::Rejected { status, problem } => return settle_rejected(ctx, &delivery, status, &problem),
             ResponseVerdict::RejectedOpaque { status } => return settle_opaque(ctx, &delivery, status, &body),
         }
@@ -157,7 +161,12 @@ mod tests {
     use cassiopeia_diagnostic::code::{broker_code::BrokerCode, diagnostic_code::DiagnosticCode};
     use pretty_assertions::assert_eq;
     use secrecy::SecretString;
-    use std::{net::TcpListener, str::FromStr, sync::Arc};
+    use std::{
+        net::TcpListener,
+        str::FromStr,
+        sync::{Arc, atomic::Ordering},
+        time::{Duration, Instant},
+    };
     use url::Url;
 
     /// A URL nothing is listening on, so every request fails at connect without a server to run.
@@ -222,5 +231,34 @@ mod tests {
         assert_eq!(reported.len(), 1);
         assert_eq!(reported[0].code, DiagnosticCode::Broker(BrokerCode::EntityDropped));
         assert!(reported[0].headline.contains("urn:ngsi-ld:AirQualityObserved:LJ-001"));
+    }
+
+    #[test]
+    fn a_congested_broker_is_asked_again_no_sooner_than_its_retry_after() {
+        static REPORTER: TestReporter = TestReporter::new();
+        let mut server = mockito::Server::new();
+        let congested = server
+            .mock("POST", "/ngsi-ld/v1/entityOperations/upsert")
+            .with_status(429)
+            .with_header("Retry-After", "2")
+            .expect(1)
+            .create();
+        let accepted = server.mock("POST", "/ngsi-ld/v1/entityOperations/upsert").with_status(201).expect(1).create();
+        let mut ctx = context(RequestShape::Array);
+        ctx.request.endpoint = Arc::new(MaskedUrl::plain(
+            Url::parse(&format!("{}/ngsi-ld/v1/entityOperations/upsert", server.url())).unwrap(),
+        ));
+        ctx.runtime.reporter = &REPORTER;
+        let started = Instant::now();
+
+        let outcome = post_batch(&ctx, &Bytes::from_static(b"[]"), &[thing("urn:ngsi-ld:Thing:1")]);
+
+        congested.assert();
+        accepted.assert();
+        assert!(matches!(outcome, SendOutcome::Done));
+        assert_eq!(ctx.counters.written.load(Ordering::Relaxed), 1);
+        // The first backoff is 1s, so only the broker's own `Retry-After` makes the wait 2s.
+        assert!(started.elapsed() >= Duration::from_secs(2), "waited {:?}", started.elapsed());
+        assert_eq!(REPORTER.diagnostics().len(), 0);
     }
 }

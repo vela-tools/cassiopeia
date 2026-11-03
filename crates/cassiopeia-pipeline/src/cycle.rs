@@ -73,6 +73,7 @@ impl Pipeline {
             self.output.global_validation_schema.as_ref(),
             self.context.reporter,
             &self.config.default_user_agent,
+            self.context.shutdown,
         )?;
         let validator = self.create_validator(repositories, resolved_schemas.by_type);
 

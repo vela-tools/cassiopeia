@@ -1,5 +1,5 @@
 use crate::{collector::Collector, downloader::Downloader, error::CollectorError, file_extension::FileExtension, source::CollectorSource};
-use cassiopeia_common::{channel::ChannelSender, format::DataFormat, input::Input, request_header::RequestHeaders, signal::Signal, user_agent::UserAgent};
+use cassiopeia_common::{channel::ChannelSender, format::DataFormat, input::Input, signal::Signal};
 use cassiopeia_encoding_detection::encoding_hint::EncodingHint;
 use cassiopeia_ir::payload::{CollectedPayload, FilePayload};
 use std::{env, fs, path::Path};
@@ -10,20 +10,20 @@ use tracing::debug;
 pub struct GenericCollector {
     source: CollectorSource,
     format_hint: Option<DataFormat>,
-    user_agent: UserAgent,
-    headers: RequestHeaders,
+    /// The downloader every remote input of the lane is fetched through, so a multi-source lane
+    /// opens a single connection pool rather than one per source.
+    downloader: Downloader,
 }
 
 impl GenericCollector {
-    /// Creates a collector for the given source, tagging every payload with `format_hint`,
-    /// identifying itself as `user_agent` on every remote fetch, and attaching `headers` to each.
+    /// Creates a collector for the given source, tagging every payload with `format_hint` and
+    /// fetching every remote input through `downloader`.
     #[must_use]
-    pub const fn new(source: CollectorSource, format_hint: Option<DataFormat>, user_agent: UserAgent, headers: RequestHeaders) -> GenericCollector {
+    pub const fn new(source: CollectorSource, format_hint: Option<DataFormat>, downloader: Downloader) -> GenericCollector {
         GenericCollector {
             source,
             format_hint,
-            user_agent,
-            headers,
+            downloader,
         }
     }
 }
@@ -33,16 +33,12 @@ impl Collector for GenericCollector {
         let GenericCollector {
             source,
             format_hint,
-            user_agent,
-            headers,
+            mut downloader,
         } = *self;
         let temp_dir = TempDir::new().map_err(|source| CollectorError::Io { source, path: env::temp_dir() })?;
         // Remote downloads must outlive the collector because downstream stages read them later.
         // The collector does not remove them; cleanup is the caller's responsibility.
         let temp_dir = temp_dir.dont_delete_on_drop();
-        // One downloader serves every input of the lane, so a multi-source lane opens a single
-        // connection pool rather than one per source.
-        let mut downloader = Downloader::new(user_agent, headers);
 
         match &source {
             CollectorSource::Single { input, extension } => {
@@ -99,7 +95,7 @@ fn send_payload(payload: FilePayload, sender: &ChannelSender<Signal<CollectedPay
 
 #[cfg(test)]
 mod tests {
-    use crate::{collector::Collector, file_extension::FileExtension, generic::GenericCollector, source::CollectorSource};
+    use crate::{collector::Collector, downloader::Downloader, file_extension::FileExtension, generic::GenericCollector, source::CollectorSource};
     use cassiopeia_common::{
         channel::{ChannelPolicy, channel},
         format::DataFormat,
@@ -110,7 +106,10 @@ mod tests {
     };
     use cassiopeia_ir::payload::CollectedPayload;
     use pretty_assertions::assert_eq;
-    use std::path::PathBuf;
+    use std::{path::PathBuf, sync::atomic::AtomicBool};
+
+    /// A shutdown flag never set, as in a run nobody stops.
+    static RUNNING: AtomicBool = AtomicBool::new(false);
 
     fn extension(value: &str) -> FileExtension {
         FileExtension::new(value).expect("valid extension")
@@ -120,8 +119,7 @@ mod tests {
         Box::new(GenericCollector::new(
             source,
             format_hint,
-            UserAgent::from("cassiopeia/test".to_owned()),
-            RequestHeaders::default(),
+            Downloader::new(UserAgent::from("cassiopeia/test".to_owned()), RequestHeaders::default(), &RUNNING),
         ))
     }
 

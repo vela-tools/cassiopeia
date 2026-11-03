@@ -6,7 +6,6 @@
 
 use crate::{
     broker::{
-        backoff::{BackoffSleep, backoff_delay, sleep_or_shutdown},
         batch_reconciliation::reconcile,
         batch_result::{BatchEntityError, BatchOperationResult},
         broker_rejection::BrokerRejection,
@@ -16,7 +15,13 @@ use crate::{
     },
     error::WriterError,
 };
-use cassiopeia_common::captured_body::CapturedBody;
+use cassiopeia_common::{
+    captured_body::CapturedBody,
+    http_retry::{
+        backoff::{BackoffSleep, backoff_delay, retry_delay, sleep_or_shutdown},
+        retry_after::RetryAfter,
+    },
+};
 use cassiopeia_diagnostic::{code::broker_code::BrokerCode, context_field::ContextField, severity::Severity};
 use cassiopeia_ngsi_ld::entity::NgsiLdEntity;
 use http::StatusCode;
@@ -154,11 +159,13 @@ pub fn settle_opaque(ctx: &SenderContext, delivery: &DeliveryContext<'_>, status
 ///
 /// Nothing is reported until the retry budget is spent: a broker under sustained load answers 503 for
 /// every attempt, and reporting each one would flood the diagnostics with repeats of the same failure.
+/// The wait before the next attempt is at least the `Retry-After` the broker sent with its answer.
 pub fn on_retryable(
     ctx: &SenderContext,
     delivery: &DeliveryContext<'_>,
     status: StatusCode,
     problem: Option<&BrokerRejection>,
+    retry_after: Option<RetryAfter>,
     payload_len: usize,
     attempt: &mut u32,
 ) -> RetryStep {
@@ -186,7 +193,7 @@ pub fn on_retryable(
         return RetryStep::Settled(SendOutcome::Split);
     }
 
-    let delay = backoff_delay(*attempt);
+    let delay = retry_delay(*attempt, retry_after);
     ctx.counters
         .metrics
         .backoff_ns

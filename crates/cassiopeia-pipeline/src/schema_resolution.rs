@@ -12,6 +12,7 @@ use std::{
     collections::HashMap,
     env,
     path::{Path, PathBuf},
+    sync::atomic::AtomicBool,
 };
 use temp_dir::TempDir;
 use url::Url;
@@ -48,8 +49,9 @@ pub(crate) fn resolve_custom_schemas(
     global: Option<&SchemaSource>,
     reporter: &dyn MessageLog,
     user_agent: &UserAgent,
+    shutdown: &'static AtomicBool,
 ) -> Result<ResolvedSchemas> {
-    let mut downloader = SchemaDownloader::new(reporter, user_agent.clone());
+    let mut downloader = SchemaDownloader::new(reporter, user_agent.clone(), shutdown);
     let mut by_type = HashMap::new();
 
     // A per-input schema binds every type its lane produces and takes precedence over the global one.
@@ -111,13 +113,14 @@ struct SchemaDownloader<'a> {
 }
 
 impl<'a> SchemaDownloader<'a> {
-    /// Builds a downloader that has not yet touched the network, fetching under `user_agent`.
-    fn new(reporter: &'a dyn MessageLog, user_agent: UserAgent) -> SchemaDownloader<'a> {
+    /// Builds a downloader that has not yet touched the network, fetching under `user_agent` and
+    /// waiting to retry only until `shutdown` is set.
+    fn new(reporter: &'a dyn MessageLog, user_agent: UserAgent, shutdown: &'static AtomicBool) -> SchemaDownloader<'a> {
         SchemaDownloader {
             reporter,
             cache: None,
             // An input's headers carry that source's credentials, so a schema server never receives them.
-            downloader: Downloader::new(user_agent, RequestHeaders::default()),
+            downloader: Downloader::new(user_agent, RequestHeaders::default(), shutdown),
             fetched: HashMap::new(),
         }
     }
@@ -200,9 +203,12 @@ mod tests {
         net::TcpListener,
         path::{Path, PathBuf},
         str::FromStr,
-        sync::Arc,
+        sync::{Arc, atomic::AtomicBool},
         thread,
     };
+
+    /// A shutdown flag never set, as in a run nobody stops.
+    static RUNNING: AtomicBool = AtomicBool::new(false);
 
     /// Builds one input lane whose mapping sits at `mapping_path` and that names `schema` (if any),
     /// paired with a single-mapping router producing `data_model`. The mapping path is what a bare
@@ -256,7 +262,7 @@ mod tests {
         let loaded = vec![(&config, router)];
         let reporter = NoopReporter::new();
 
-        let resolved = resolve_custom_schemas(&loaded, None, &reporter, &user_agent()).unwrap();
+        let resolved = resolve_custom_schemas(&loaded, None, &reporter, &user_agent(), &RUNNING).unwrap();
 
         assert_eq!(resolved.by_type.get(&exoplanet()), Some(&PathBuf::from("/maps/e.json")));
     }
@@ -268,7 +274,7 @@ mod tests {
         let reporter = NoopReporter::new();
         let global = SchemaSource::Local(PathBuf::from("/schemas/g.json"));
 
-        let resolved = resolve_custom_schemas(&loaded, Some(&global), &reporter, &user_agent()).unwrap();
+        let resolved = resolve_custom_schemas(&loaded, Some(&global), &reporter, &user_agent(), &RUNNING).unwrap();
 
         assert_eq!(resolved.by_type.get(&exoplanet()), Some(&PathBuf::from("/schemas/g.json")));
     }
@@ -280,7 +286,7 @@ mod tests {
         let reporter = NoopReporter::new();
         let global = SchemaSource::Local(PathBuf::from("/schemas/g.json"));
 
-        let resolved = resolve_custom_schemas(&loaded, Some(&global), &reporter, &user_agent()).unwrap();
+        let resolved = resolve_custom_schemas(&loaded, Some(&global), &reporter, &user_agent(), &RUNNING).unwrap();
 
         // The per-input schema wins; the global one never reaches this type.
         assert_eq!(resolved.by_type.get(&exoplanet()), Some(&PathBuf::from("/schemas/m.json")));
@@ -293,7 +299,7 @@ mod tests {
         let loaded = vec![(&config, router)];
         let reporter = NoopReporter::new();
 
-        let resolved = resolve_custom_schemas(&loaded, None, &reporter, &user_agent()).unwrap();
+        let resolved = resolve_custom_schemas(&loaded, None, &reporter, &user_agent(), &RUNNING).unwrap();
 
         let schema_path = &resolved.by_type[&exoplanet()];
         assert_eq!(fs::read_to_string(schema_path).unwrap(), r#"{"type":"object","required":["mass"]}"#);
@@ -306,7 +312,7 @@ mod tests {
         let loaded = vec![(&config, router)];
         let reporter = NoopReporter::new();
 
-        let result = resolve_custom_schemas(&loaded, None, &reporter, &user_agent());
+        let result = resolve_custom_schemas(&loaded, None, &reporter, &user_agent(), &RUNNING);
 
         assert!(matches!(result, Err(PipelineError::SchemaFetch { .. })));
     }

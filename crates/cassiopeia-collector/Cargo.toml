@@ -22,6 +22,7 @@ tracing = "0.1.44"
 url = "2.5.8"
 
 [dev-dependencies]
+mockito = { version = "1.7.2", default-features = false }
 pretty_assertions = "1.4.1"
 secrecy = "0.10.3"
 tempfile = "3.27.0"

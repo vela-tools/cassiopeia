@@ -21,6 +21,7 @@ pub mod environment;
 pub mod error;
 pub mod file_framing;
 pub mod format;
+pub mod http_retry;
 pub mod input;
 pub mod log;
 pub mod masked_url;

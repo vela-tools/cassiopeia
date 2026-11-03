@@ -13,7 +13,7 @@ use crate::{
         stage_env::StageEnv,
     },
 };
-use cassiopeia_collector::generic::GenericCollector;
+use cassiopeia_collector::{downloader::Downloader, generic::GenericCollector};
 use cassiopeia_common::{
     signal::{MetaSignal, Signal},
     stage::Stage,
@@ -59,13 +59,13 @@ impl Pipeline {
         for (input, router) in loaded {
             let ingestor_bank = spawn_ingestor_bank(batch_size, channel_policy, self.context.reporter, &env.telemetry);
 
-            let collector = Box::new(GenericCollector::new(
-                input.collector_source.clone(),
-                input.format_override,
+            let downloader = Downloader::new(
                 self.config.default_user_agent.clone(),
-                // The lane configuration is borrowed and reused every cycle, so the collector owns a copy.
+                // The lane configuration is borrowed and reused every cycle, so the downloader owns a copy.
                 input.headers.clone(),
-            ));
+                self.context.shutdown,
+            );
+            let collector = Box::new(GenericCollector::new(input.collector_source.clone(), input.format_override, downloader));
             let collector_rx = spawn_collector_thread(collector, channel_policy, Arc::clone(&env.telemetry));
 
             let profiler = create_profiler(

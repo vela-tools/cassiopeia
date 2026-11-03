@@ -1,8 +1,13 @@
+use crate::http_retry::retry_after::RetryAfter;
 use std::{
     sync::atomic::{AtomicBool, Ordering},
     thread::sleep,
     time::Duration,
 };
+
+/// The default number of attempts a request gets before a transient answer is taken as final. Three
+/// attempts wait 1s and then 2s between them, which bounds the time one request can block.
+pub const DEFAULT_MAX_ATTEMPTS: u32 = 3;
 
 /// The ceiling on the backoff delay between retries.
 const MAX_BACKOFF: Duration = Duration::from_secs(30);
@@ -27,6 +32,15 @@ pub fn backoff_delay(attempt: u32) -> Duration {
     Duration::from_secs(seconds).min(MAX_BACKOFF)
 }
 
+/// The wait before the next attempt: the backoff for `attempt`, or the wait the server asked for in
+/// `Retry-After` when that is longer. RFC 9110 section 10.2.3 lets a server name the least time a
+/// client should wait, so a shorter backoff never cuts it short, and the backoff cap does not apply.
+#[must_use]
+pub fn retry_delay(attempt: u32, retry_after: Option<RetryAfter>) -> Duration {
+    let backoff = backoff_delay(attempt);
+    retry_after.map_or(backoff, |asked| backoff.max(asked.delay()))
+}
+
 /// Sleeps in short increments, returning early if shutdown is observed mid-sleep.
 pub fn sleep_or_shutdown(duration: Duration, shutdown: &AtomicBool) -> BackoffSleep {
     let mut remaining = duration;
@@ -43,7 +57,10 @@ pub fn sleep_or_shutdown(duration: Duration, shutdown: &AtomicBool) -> BackoffSl
 
 #[cfg(test)]
 mod tests {
-    use crate::broker::backoff::{BackoffSleep, backoff_delay, sleep_or_shutdown};
+    use crate::http_retry::{
+        backoff::{BackoffSleep, backoff_delay, retry_delay, sleep_or_shutdown},
+        retry_after::RetryAfter,
+    };
     use pretty_assertions::assert_eq;
     use std::{sync::atomic::AtomicBool, time::Duration};
 
@@ -53,6 +70,21 @@ mod tests {
         assert_eq!(backoff_delay(2), Duration::from_secs(2));
         assert_eq!(backoff_delay(6), Duration::from_secs(30));
         assert_eq!(backoff_delay(u32::MAX), Duration::from_secs(30));
+    }
+
+    #[test]
+    fn without_a_retry_after_the_wait_is_the_backoff() {
+        assert_eq!(retry_delay(2, None), Duration::from_secs(2));
+    }
+
+    #[test]
+    fn a_longer_retry_after_outlasts_the_backoff_and_its_cap() {
+        assert_eq!(retry_delay(1, Some(RetryAfter::new(Duration::from_secs(90)))), Duration::from_secs(90));
+    }
+
+    #[test]
+    fn a_shorter_retry_after_never_cuts_the_backoff_short() {
+        assert_eq!(retry_delay(3, Some(RetryAfter::new(Duration::from_secs(1)))), Duration::from_secs(4));
     }
 
     #[test]

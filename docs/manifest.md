@@ -178,6 +178,10 @@ inputs: [
 
 Cassiopeia sends every configured header on every request for that input, in every cycle of a scheduled run. The headers never go to the broker, to another input, or to a server a remote `context` or `schema` is fetched from. They do follow a redirect: when the source redirects to another host, `Authorization` is dropped, but any other header, such as `X-Api-Key`, is sent to that host too. Header values are treated as secrets and are not included in debug output. Keep them out of files that will be committed or shared by reading them from the environment, as [Environment variables](#environment-variables) describes. A local `source`, including a `file:` URL, is read without any request, so an input that pairs one with `headers` is refused. On the command line, `--input-header` sets the same headers for the `-i` input.
 
+### Retried requests
+
+A remote `source` that answers `429 Too Many Requests` or a `5xx` is asked again with backoff, the same way the broker writer retries the broker: up to three attempts in all, 1s and then 2s apart. When the answer carries a `Retry-After` header (RFC 9110 section 10.2.3), in seconds or as a date, the next attempt waits at least that long, even past the backoff. Only when the attempts are spent does the input fail, with the source's last answer, and with it the cycle under [`onFailure`](#top-level-structure). Any other `4xx` fails the input at once, since it points at a wrong URL, a missing key, or a refused request that asking again cannot change. A remote `schema` is fetched under the same rule. Stopping the run with CTRL+C ends a wait at once.
+
 ## Output
 
 The `output` block selects a destination and controls how entities are serialized. `target` is required and picks the destination. The remaining fields are shared across destinations.
