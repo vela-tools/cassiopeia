@@ -1,3 +1,4 @@
+use crate::error::{CliError, Result};
 use cassiopeia_csv_dialect::{dialect::Dialect, statement::DialectStatement};
 use cassiopeia_data_profiler::{
     metadata::{FormatMetadata, GribEdition},
@@ -10,7 +11,7 @@ use cassiopeia_terminal_style::{
     palette::{ACCENT, MUTED, PRIMARY},
     rendering::Rendering,
 };
-use serde_json::Value;
+use serde_json::{Map, Value};
 
 /// Renders a compact, `--version`-style profile report: an identity line (file and size), a format
 /// line (format, media type, confidence), and one format-specific metadata line when the profile
@@ -19,8 +20,12 @@ use serde_json::Value;
 /// Parameterised over [`Rendering`] so both the coloured and plain forms are testable without a
 /// terminal. New formats extend only [`metadata_line`]; the identity and format lines are shared by
 /// every format.
-#[must_use]
-pub fn render_profile(name: &str, size: Option<u64>, profile: &Profile, rendering: Rendering) -> String {
+///
+/// # Errors
+///
+/// Returns [`CliError::SerializeDialect`] when a CSV profile's dialect cannot be written in the
+/// member names of a manifest input's `dialect`.
+pub fn render_profile(name: &str, size: Option<u64>, profile: &Profile, rendering: Rendering) -> Result<String> {
     let mut identity = vec![paint(PRIMARY, name, rendering)];
     if let Some(size) = size {
         identity.push(paint(MUTED, &human_size(size), rendering));
@@ -37,29 +42,33 @@ pub fn render_profile(name: &str, size: Option<u64>, profile: &Profile, renderin
     );
 
     let mut lines = vec![join(&identity, rendering), format];
-    if let Some(metadata) = metadata_line(profile.metadata().as_ref(), rendering) {
+    if let Some(metadata) = metadata_line(profile.metadata().as_ref(), rendering)? {
         lines.push(metadata);
     }
-    lines.join("\n")
+    Ok(lines.join("\n"))
 }
 
 /// Renders the format-specific metadata line, or `None` for a format that carries no metadata.
-fn metadata_line(metadata: Option<&FormatMetadata>, rendering: Rendering) -> Option<String> {
-    match metadata? {
-        FormatMetadata::Csv(csv) => csv_line(csv.dialect(), rendering),
-        FormatMetadata::Grib(grib) => Some(grib_line(grib.edition(), rendering)),
-    }
+fn metadata_line(metadata: Option<&FormatMetadata>, rendering: Rendering) -> Result<Option<String>> {
+    metadata
+        .map(|metadata| match metadata {
+            FormatMetadata::Csv(csv) => csv_line(csv.dialect(), rendering),
+            FormatMetadata::Grib(grib) => Ok(grib_line(grib.edition(), rendering)),
+        })
+        .transpose()
 }
 
 /// Renders the CSV dialect line in the member names and value syntax of a manifest input's
 /// `dialect`, so a member detection got wrong can be copied into a manifest and corrected there.
-/// `None` only if the dialect cannot be written as a statement.
-fn csv_line(dialect: &Dialect, rendering: Rendering) -> Option<String> {
-    let Value::Object(members) = serde_json::to_value(DialectStatement::from(dialect)).ok()? else {
-        return None;
-    };
+///
+/// The statement is read back as a JSON object so its members keep the order and names its `Serialize`
+/// impl gives them; a statement that is not an object is an error rather than an empty line.
+fn csv_line(dialect: &Dialect, rendering: Rendering) -> Result<String> {
+    let members: Map<String, Value> = serde_json::to_value(DialectStatement::from(dialect))
+        .and_then(serde_json::from_value)
+        .map_err(CliError::SerializeDialect)?;
     let fields: Vec<String> = members.iter().map(|(name, value)| field(name, &value.to_string(), rendering)).collect();
-    Some(join(&fields, rendering))
+    Ok(join(&fields, rendering))
 }
 
 /// Renders the GRIB metadata line: the edition read from the Indicator Section.
@@ -187,7 +196,7 @@ mod tests {
 
     #[test]
     fn a_metadata_line_is_absent_for_a_format_without_metadata() {
-        assert_eq!(metadata_line(None, Rendering::Plain), None);
+        assert_eq!(metadata_line(None, Rendering::Plain).unwrap(), None);
     }
 
     #[test]
@@ -195,14 +204,14 @@ mod tests {
         let csv = FormatMetadata::Csv(CsvMetadata::new(comma_dialect()));
         let grib = FormatMetadata::Grib(GribMetadata::new(GribEdition::V2));
 
-        assert!(metadata_line(Some(&csv), Rendering::Plain).unwrap().contains("delimiter"));
-        assert_eq!(metadata_line(Some(&grib), Rendering::Plain).unwrap(), "edition 2");
+        assert!(metadata_line(Some(&csv), Rendering::Plain).unwrap().unwrap().contains("delimiter"));
+        assert_eq!(metadata_line(Some(&grib), Rendering::Plain).unwrap().unwrap(), "edition 2");
     }
 
     #[test]
     fn the_report_leads_with_identity_then_format() {
         let profile = profile_bytes(b"id,name,value\nA-17,Main,21.5\nA-18,North,20.9\n", &EncodingHint::NONE).unwrap();
-        let report = render_profile("energy.csv", Some(133_744_204), &profile, Rendering::Plain);
+        let report = render_profile("energy.csv", Some(133_744_204), &profile, Rendering::Plain).unwrap();
         let mut lines = report.lines();
 
         assert_eq!(lines.next().unwrap(), "energy.csv \u{b7} 127.5 MiB");
@@ -214,7 +223,7 @@ mod tests {
     #[test]
     fn a_report_omits_the_size_when_it_is_unknown() {
         let profile = profile_bytes(b"id,name,value\nA-17,Main,21.5\nA-18,North,20.9\n", &EncodingHint::NONE).unwrap();
-        let report = render_profile("energy.csv", None, &profile, Rendering::Plain);
+        let report = render_profile("energy.csv", None, &profile, Rendering::Plain).unwrap();
 
         assert!(report.starts_with("energy.csv\n"));
     }
@@ -222,7 +231,7 @@ mod tests {
     #[test]
     fn a_plain_report_carries_no_escape_codes() {
         let profile = profile_bytes(b"id,name,value\nA-17,Main,21.5\nA-18,North,20.9\n", &EncodingHint::NONE).unwrap();
-        let report = render_profile("energy.csv", Some(64), &profile, Rendering::Plain);
+        let report = render_profile("energy.csv", Some(64), &profile, Rendering::Plain).unwrap();
 
         assert!(!report.contains(ESCAPE));
     }

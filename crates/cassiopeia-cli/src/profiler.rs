@@ -11,7 +11,8 @@ use std::{fs::metadata, path::Path};
 ///
 /// # Errors
 ///
-/// Returns [`CliError`](crate::error::CliError) when the file's format cannot be detected.
+/// Returns [`CliError`](crate::error::CliError) when the file's format cannot be detected, or when
+/// its profile cannot be rendered.
 pub fn profile_file(file: &Path) -> Result<()> {
     // A local file carries no source context, so its encoding is read from its content alone.
     let profile = profile_path(file, &EncodingHint::NONE)?;
@@ -19,7 +20,7 @@ pub fn profile_file(file: &Path) -> Result<()> {
         .file_name()
         .map_or_else(|| file.display().to_string(), |name| name.to_string_lossy().into_owned());
     let size = metadata(file).map(|meta| meta.len()).ok();
-    println!("{}", render_profile(&name, size, &profile, detect_rendering(Stream::Stdout)));
+    println!("{}", render_profile(&name, size, &profile, detect_rendering(Stream::Stdout))?);
 
     Ok(())
 }

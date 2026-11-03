@@ -64,6 +64,9 @@ pub enum CliError {
     #[error("Failed to serialize schema")]
     SerializeSchema(#[source] serde_json::Error),
 
+    #[error("Failed to write the detected CSV dialect as a manifest dialect")]
+    SerializeDialect(#[source] serde_json::Error),
+
     #[error("Failed to serialize the default configuration")]
     SerializeConfig(#[source] TomlSerError),
 
