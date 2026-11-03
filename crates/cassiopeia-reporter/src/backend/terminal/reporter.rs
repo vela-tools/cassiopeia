@@ -7,7 +7,7 @@ use crate::{
     stage_id::StageId,
 };
 use anstyle::Style;
-use cassiopeia_common::telemetry::run::TelemetrySnapshot;
+use cassiopeia_common::{environment::registry::mask, telemetry::run::TelemetrySnapshot};
 use cassiopeia_diagnostic::{diagnostic::Diagnostic, reason::Reason, verbosity::Verbosity};
 use cassiopeia_terminal_style::{
     paint::paint,
@@ -69,8 +69,9 @@ impl TerminalReporter {
     }
 
     /// Writes one finished line, as a spent bar when the display is live and straight to stderr when
-    /// it is hidden.
+    /// it is hidden, with every secret read from the environment masked.
     fn emit(&self, line: &str) {
+        let line = &*mask(line);
         if self.multi_progress.is_hidden() {
             eprintln!("{line}");
             return;
@@ -153,7 +154,7 @@ impl RunSummary for TerminalReporter {
         // The last bar line is not newline-terminated, so a leading newline breaks off that line
         // before the report's own leading blank separates it from the bars.
         let report = run_summary::render(snapshot, reasons, self.rendering).join("\n");
-        eprintln!("\n{report}");
+        eprintln!("\n{}", mask(&report));
     }
 }
 
@@ -166,14 +167,14 @@ impl ProgressReporter for TerminalReporter {
 
         let bar = self.multi_progress.add(ProgressBar::new(0));
         bar.set_style(style::progress());
-        bar.set_prefix(message.to_owned());
+        bar.set_prefix(mask(message).into_owned());
         bar.enable_steady_tick(TICK_INTERVAL);
         *progress = Some(bar);
     }
 
     fn update_progress(&self, message: &str) {
         if let Some(bar) = self.progress_bar.lock().as_ref() {
-            bar.set_message(message.to_owned());
+            bar.set_message(mask(message).into_owned());
         }
     }
 

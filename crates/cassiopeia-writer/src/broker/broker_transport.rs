@@ -1,7 +1,6 @@
 use crate::broker::{http2_prior_knowledge::Http2PriorKnowledge, tuning::BrokerTuning};
-use cassiopeia_common::user_agent::UserAgent;
+use cassiopeia_common::{masked_url::MaskedUrl, user_agent::UserAgent};
 use std::time::Duration;
-use url::Url;
 
 /// The default number of background sender threads, sized so a handful in retry-backoff cannot
 /// starve the rest of the pool.
@@ -28,8 +27,8 @@ const DEFAULT_CHANNEL_CAPACITY_MULTIPLIER: usize = 4;
 
 /// The HTTP transport settings a broker writer builds its client and worker pool from.
 pub struct BrokerTransport {
-    /// The broker base URL the operation endpoint is joined onto.
-    pub base_url: Url,
+    /// The broker base URL the operation endpoint is joined onto, masked as the manifest read it.
+    pub base_url: MaskedUrl,
     /// The `User-Agent` header sent with every request.
     pub user_agent: UserAgent,
     /// The per-request HTTP timeout.
@@ -54,7 +53,7 @@ impl BrokerTransport {
     /// Builds the transport settings from the broker base URL and user-agent, filling every other
     /// knob from its default.
     #[must_use]
-    pub fn new(base_url: Url, user_agent: UserAgent) -> BrokerTransport {
+    pub fn new(base_url: MaskedUrl, user_agent: UserAgent) -> BrokerTransport {
         let sender_threads = DEFAULT_SENDER_THREADS;
         BrokerTransport {
             base_url,

@@ -1,14 +1,12 @@
+use crate::environment::secret::{MaskStyle, Secrets};
 use derive_more::Debug;
 use http::header::{HeaderName, HeaderValue};
 use serde::{
-    Deserialize,
-    Deserializer,
     Serialize,
     Serializer,
-    de::{Error as DeError, MapAccess, Visitor},
     ser::{Error as SerError, SerializeMap},
 };
-use std::{fmt, str::FromStr};
+use std::str::FromStr;
 use thiserror::Error;
 
 /// A single user-supplied HTTP header attached to every request Cassiopeia sends to one endpoint:
@@ -25,6 +23,10 @@ pub struct RequestHeader {
     /// The header value; skipped in `Debug` so a credential never reaches a log line.
     #[debug(skip)]
     value: HeaderValue,
+    /// The values read from the environment into the header value, which serialization writes back
+    /// as `${NAME}` rather than as the values themselves.
+    #[debug(skip)]
+    secrets: Secrets,
 }
 
 impl RequestHeader {
@@ -36,9 +38,27 @@ impl RequestHeader {
     /// [`RequestHeaderError::Value`] when `value` is not a valid header value. The rejected value is
     /// never echoed, since it may be a secret.
     pub fn new(name: &str, value: &str) -> Result<RequestHeader, RequestHeaderError> {
-        let name = HeaderName::from_str(name.trim()).map_err(|_| RequestHeaderError::Name { name: name.trim().to_owned() })?;
+        let name = RequestHeader::parse_name(name)?;
         let value = HeaderValue::from_str(value.trim()).map_err(|_| RequestHeaderError::Value { name: name.to_string() })?;
-        Ok(RequestHeader { name, value })
+        Ok(RequestHeader {
+            name,
+            value,
+            secrets: Secrets::new(),
+        })
+    }
+
+    /// Validates a header name against the HTTP token grammar, trimming surrounding whitespace.
+    ///
+    /// # Errors
+    /// Returns [`RequestHeaderError::Name`] when `name` is not a valid header name.
+    pub fn parse_name(name: &str) -> Result<HeaderName, RequestHeaderError> {
+        HeaderName::from_str(name.trim()).map_err(|_| RequestHeaderError::Name { name: name.trim().to_owned() })
+    }
+
+    /// Records the values read from the environment into the header value.
+    #[must_use]
+    pub fn with_secrets(self, secrets: Secrets) -> RequestHeader {
+        RequestHeader { secrets, ..self }
     }
 
     /// Returns the header name.
@@ -89,9 +109,10 @@ pub enum RequestHeaderError {
 
 /// The ordered set of user-supplied headers attached to every request sent to one endpoint.
 ///
-/// Serializes to, and deserializes from, a JSON object mapping each header name to its value, so a
-/// manifest spells credentials as `"headers": {"Authorization": "Bearer …"}`, on an input and on a
-/// broker output alike.
+/// Serializes to a JSON object mapping each header name to its value, so a manifest spells
+/// credentials as `"headers": {"Authorization": "Bearer …"}`, on an input and on a broker output
+/// alike. The manifest reads that object back itself, since it fills each value's environment
+/// variables as it goes.
 #[derive(Clone, Default, PartialEq, Eq, Debug)]
 pub struct RequestHeaders(Vec<RequestHeader>);
 
@@ -126,7 +147,8 @@ impl RequestHeaders {
 }
 
 impl Serialize for RequestHeaders {
-    /// Writes the headers as a JSON object of name to value.
+    /// Writes the headers as a JSON object of name to value, each value as the template it reads back
+    /// from: any value read from the environment as `${NAME}`, and any literal `${` escaped.
     ///
     /// # Errors
     /// Fails when a header value holds bytes that are not representable as a string. A value built
@@ -135,42 +157,23 @@ impl Serialize for RequestHeaders {
         let mut map = serializer.serialize_map(Some(self.0.len()))?;
         for header in &self.0 {
             let value = header.value.to_str().map_err(SerError::custom)?;
-            map.serialize_entry(header.name.as_str(), value)?;
+            map.serialize_entry(header.name.as_str(), &header.secrets.mask(value, MaskStyle::Template))?;
         }
         map.end()
     }
 }
 
-impl<'de> Deserialize<'de> for RequestHeaders {
-    /// Reads a JSON object of header name to value, validating each pair.
-    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<RequestHeaders, D::Error> {
-        deserializer.deserialize_map(RequestHeadersVisitor)
-    }
-}
-
-/// The visitor that reads a [`RequestHeaders`] map, validating each entry as it arrives.
-struct RequestHeadersVisitor;
-
-impl<'de> Visitor<'de> for RequestHeadersVisitor {
-    type Value = RequestHeaders;
-
-    fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
-        formatter.write_str("a map of HTTP header names to values")
-    }
-
-    fn visit_map<M: MapAccess<'de>>(self, mut access: M) -> Result<RequestHeaders, M::Error> {
-        let mut headers = Vec::with_capacity(access.size_hint().unwrap_or_default());
-        while let Some((name, value)) = access.next_entry::<String, String>()? {
-            headers.push(RequestHeader::new(&name, &value).map_err(DeError::custom)?);
-        }
-        Ok(RequestHeaders(headers))
-    }
-}
-
 #[cfg(test)]
 mod tests {
-    use crate::request_header::{RequestHeader, RequestHeaderError, RequestHeaders};
+    use crate::{
+        environment::{
+            secret::{Secret, Secrets},
+            variable_name::VariableName,
+        },
+        request_header::{RequestHeader, RequestHeaderError, RequestHeaders},
+    };
     use pretty_assertions::assert_eq;
+    use secrecy::SecretString;
     use std::str::FromStr;
 
     #[test]
@@ -222,17 +225,28 @@ mod tests {
     }
 
     #[test]
-    fn headers_round_trip_through_a_json_object() {
-        let headers: RequestHeaders = serde_json::from_str(r#"{"Authorization": "Bearer t", "X-Api-Key": "k"}"#).unwrap();
+    fn headers_serialize_as_a_json_object_in_order() {
+        let headers = RequestHeaders::new(vec![
+            RequestHeader::new("Authorization", "Bearer t").unwrap(),
+            RequestHeader::new("X-Api-Key", "k").unwrap(),
+        ]);
 
-        assert_eq!(headers.iter().count(), 2);
-        let encoded = serde_json::to_string(&headers).unwrap();
-        assert_eq!(serde_json::from_str::<RequestHeaders>(&encoded).unwrap(), headers);
+        assert_eq!(serde_json::to_string(&headers).unwrap(), r#"{"authorization":"Bearer t","x-api-key":"k"}"#);
     }
 
     #[test]
-    fn a_malformed_header_map_entry_fails_deserialization() {
-        assert!(serde_json::from_str::<RequestHeaders>(r#"{"bad name": "value"}"#).is_err());
+    fn a_header_value_serializes_its_secrets_as_placeholders_and_escapes_a_literal_opening() {
+        let mut secrets = Secrets::new();
+        secrets.insert(Secret::new(VariableName::from_str("BROKER_TOKEN").unwrap(), &SecretString::from("tok-81b")));
+        let headers = RequestHeaders::new(vec![
+            RequestHeader::new("Authorization", "Bearer tok-81b").unwrap().with_secrets(secrets),
+            RequestHeader::new("X-Note", "${not-a-variable}").unwrap(),
+        ]);
+
+        assert_eq!(
+            serde_json::to_string(&headers).unwrap(),
+            r#"{"authorization":"Bearer ${BROKER_TOKEN}","x-note":"$${not-a-variable}"}"#
+        );
     }
 
     #[test]

@@ -1,9 +1,8 @@
-use cassiopeia_common::{format::DataFormat, input::Input};
+use cassiopeia_common::{format::DataFormat, input::Input, masked_url::MaskedUrl};
 use cassiopeia_data_profiler::profile::Profile;
 use cassiopeia_encoding_detection::encoding_hint::EncodingHint;
 use getset::Getters;
 use std::path::PathBuf;
-use url::Url;
 
 /// Data collected by the Collector stage, before format detection.
 #[derive(Debug, Clone)]
@@ -67,9 +66,9 @@ impl FilePayload {
     }
 
     /// Builds the payload of a file downloaded from `url` to `path`, from its optional format hint
-    /// and encoding hint.
+    /// and encoding hint. The payload names its source by `url`, masked as it was given.
     #[must_use]
-    pub const fn downloaded(path: PathBuf, url: Url, format_hint: Option<DataFormat>, encoding_hint: EncodingHint) -> FilePayload {
+    pub const fn downloaded(path: PathBuf, url: MaskedUrl, format_hint: Option<DataFormat>, encoding_hint: EncodingHint) -> FilePayload {
         FilePayload {
             path,
             source: Input::Remote(url),
@@ -146,7 +145,7 @@ impl CollectedPayload {
 #[cfg(test)]
 mod tests {
     use crate::payload::{BytesPayload, CollectedPayload, FilePayload, ProfiledPayload};
-    use cassiopeia_common::{format::DataFormat, input::Input};
+    use cassiopeia_common::{format::DataFormat, input::Input, masked_url::MaskedUrl};
     use cassiopeia_data_profiler::profile::Profile;
     use cassiopeia_encoding_detection::encoding_hint::EncodingHint;
     use mediatype::media_type;
@@ -175,7 +174,7 @@ mod tests {
 
     #[test]
     fn a_downloaded_file_payload_is_named_by_its_url() {
-        let url = Url::parse("https://example.org/feed.csv").unwrap();
+        let url = MaskedUrl::plain(Url::parse("https://example.org/feed.csv").unwrap());
         let payload = FilePayload::downloaded(PathBuf::from("/tmp/input.csv"), url.clone(), None, EncodingHint::NONE);
 
         assert_eq!(payload.source(), &Input::Remote(url));

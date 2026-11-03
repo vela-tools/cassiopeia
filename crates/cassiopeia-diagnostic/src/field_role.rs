@@ -51,7 +51,7 @@ mod tests {
         json_pointer::JsonPointer,
         schema_keyword::SchemaKeyword,
     };
-    use cassiopeia_common::{captured_body::CapturedBody, input::Input};
+    use cassiopeia_common::{captured_body::CapturedBody, input::Input, masked_url::MaskedUrl};
     use cassiopeia_csv_column::{column_key::ColumnKey, column_number::ColumnNumber, renamed_column::RenamedColumn};
     use cassiopeia_ngsi_ld::entity::name::NameBuf;
     use http::StatusCode;
@@ -65,7 +65,7 @@ mod tests {
     fn every_field() -> Vec<ContextField> {
         vec![
             ContextField::HttpStatus(StatusCode::BAD_REQUEST),
-            ContextField::Endpoint(Url::parse("https://broker/ngsi-ld/v1/entityOperations/upsert").unwrap()),
+            ContextField::Endpoint(MaskedUrl::plain(Url::parse("https://broker/ngsi-ld/v1/entityOperations/upsert").unwrap())),
             ContextField::ProblemType("about:blank".parse().unwrap()),
             ContextField::EntityType(NameBuf::new("AirQualityObserved").unwrap()),
             ContextField::Attribute(NameBuf::new("dateObserved").unwrap()),

@@ -74,7 +74,7 @@ pub(crate) fn report_misshapen_rows(sink: &dyn DiagnosticSink, source: &Input, r
 #[cfg(test)]
 mod tests {
     use crate::{stages::misshapen_rows_report::report_misshapen_rows, test_reporter::RecordingReporter};
-    use cassiopeia_common::input::Input;
+    use cassiopeia_common::{input::Input, masked_url::MaskedUrl};
     use cassiopeia_csv_dialect::{misshapen_row::MisshapenRow, row_number::RowNumber};
     use cassiopeia_diagnostic::{
         code::{diagnostic_code::DiagnosticCode, ingest_code::IngestCode},
@@ -128,7 +128,7 @@ mod tests {
     #[test]
     fn a_downloaded_file_is_named_by_its_url() {
         let sink = RecordingReporter::new();
-        let source = Input::Remote(Url::parse("https://example.org/feed.csv").unwrap());
+        let source = Input::Remote(MaskedUrl::plain(Url::parse("https://example.org/feed.csv").unwrap()));
 
         report_misshapen_rows(&sink, &source, &rows(&[(5, 1)]));
 

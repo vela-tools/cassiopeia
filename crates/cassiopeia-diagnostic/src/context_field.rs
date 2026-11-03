@@ -1,11 +1,10 @@
 use crate::{detail::Detail, json_pointer::JsonPointer, schema_keyword::SchemaKeyword};
-use cassiopeia_common::{captured_body::CapturedBody, input::Input};
+use cassiopeia_common::{captured_body::CapturedBody, input::Input, masked_url::MaskedUrl};
 use cassiopeia_csv_column::renamed_column::RenamedColumn;
 use cassiopeia_ngsi_ld::entity::name::NameBuf;
 use http::StatusCode;
 use iri_rs::IriBuf;
 use strum::EnumDiscriminants;
-use url::Url;
 use urn_rs::Urn;
 
 /// One typed fact attached to a diagnostic.
@@ -19,8 +18,8 @@ use urn_rs::Urn;
 pub enum ContextField {
     /// The HTTP status a peer answered with.
     HttpStatus(StatusCode),
-    /// The URL a request was addressed to.
-    Endpoint(Url),
+    /// The URL a request was addressed to, masked.
+    Endpoint(MaskedUrl),
     /// The RFC 7807 problem-type identifier a peer named. It is a URI *reference* because RFC 7807
     /// section 3.1.1 permits a relative form, which a plain IRI would reject.
     ProblemType(iri_rs::IriRefBuf),

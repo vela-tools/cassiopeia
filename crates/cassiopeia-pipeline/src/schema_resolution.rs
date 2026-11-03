@@ -3,7 +3,7 @@ use crate::{
     input_config::InputConfig,
 };
 use cassiopeia_collector::{downloader::Downloader, error::CollectorError};
-use cassiopeia_common::{request_header::RequestHeaders, schema_source::SchemaSource, user_agent::UserAgent};
+use cassiopeia_common::{masked_url::MaskedUrl, request_header::RequestHeaders, schema_source::SchemaSource, user_agent::UserAgent};
 use cassiopeia_expander::router::MappingRouter;
 use cassiopeia_manifest::mapping_binding::MappingBinding;
 use cassiopeia_ngsi_ld::entity::name::NameBuf;
@@ -150,9 +150,11 @@ impl<'a> SchemaDownloader<'a> {
             })?,
         };
         let destination = directory.path().join(format!("{entity_type}.json"));
+        // A schema URL reads nothing from the environment, so its masked form is the URL itself; the
+        // downloader owns the copy it is handed, while the cache keeps keying by this one.
         let outcome = self
             .downloader
-            .download_to_file(url, &destination)
+            .download_to_file(&MaskedUrl::plain(url.clone()), &destination)
             .map_err(|source| PipelineError::SchemaFetch {
                 url: url.clone(),
                 source: Box::new(source),

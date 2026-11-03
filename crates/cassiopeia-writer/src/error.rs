@@ -1,9 +1,8 @@
 use crate::broker::atomic_writer::AtomicSpoolError;
-use cassiopeia_common::error::io::IoError;
+use cassiopeia_common::{error::io::IoError, masked_url::MaskedUrl};
 use cassiopeia_ngsi_ld::entity::name::NameBuf;
 use std::result;
 use thiserror::Error;
-use url::Url;
 use urn_rs::Urn;
 
 /// Failures raised while writing entities to a destination.
@@ -30,11 +29,12 @@ pub enum WriterError {
     /// A request to the broker failed at the transport layer.
     #[error("Broker request failed for {url}")]
     BrokerRequest {
-        /// The transport failure reported by the HTTP layer.
+        /// The transport failure reported by the HTTP layer, stripped of the URL it would quote.
         #[source]
         source: reqwest::Error,
-        /// The endpoint the request targeted.
-        url: Url,
+        /// The endpoint the request targeted, masked. Boxed so a URL does not enlarge every writer
+        /// `Result` and every pipeline error that wraps one.
+        url: Box<MaskedUrl>,
     },
 
     /// The broker rejected a batch with a non-success status and explained why.
@@ -100,8 +100,9 @@ pub enum WriterError {
         /// The parse failure reported by the URL parser.
         #[source]
         source: url::ParseError,
-        /// The URL that could not be joined against.
-        url: Url,
+        /// The URL that could not be joined against, masked. Boxed for the same reason as the
+        /// request failure's endpoint.
+        url: Box<MaskedUrl>,
     },
 
     /// A broker worker thread panicked.

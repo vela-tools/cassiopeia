@@ -18,6 +18,7 @@ use cassiopeia_common::{
     context::mode::AtContextMode,
     destination_kind::DestinationKind,
     file_framing::FileFraming,
+    masked_url::MaskedUrl,
     request_header::RequestHeaders,
     run_var::run_vars_to_map,
 };
@@ -130,7 +131,8 @@ fn destination(kind: DestinationKind, output: Option<PathBuf>, framing: FileFram
 
 /// Builds a Context Broker destination from the shared broker flags.
 fn broker_destination(broker: &BrokerArgs) -> Result<Destination> {
-    let url = broker.broker_url.clone().ok_or(CliValidationError::MissingBrokerUrl)?;
+    // A URL given on the command line reads nothing from the environment, so it is masked as itself.
+    let url = MaskedUrl::plain(broker.broker_url.clone().ok_or(CliValidationError::MissingBrokerUrl)?);
 
     Ok(Destination::ContextBroker {
         url,

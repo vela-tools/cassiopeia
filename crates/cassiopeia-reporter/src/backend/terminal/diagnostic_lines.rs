@@ -165,7 +165,7 @@ fn field_row(field: &ContextField) -> (&'static str, String) {
                 None => status.as_u16().to_string(),
             },
         ),
-        ContextField::Endpoint(url) => ("endpoint", url.as_str().to_owned()),
+        ContextField::Endpoint(url) => ("endpoint", url.to_string()),
         ContextField::ProblemType(problem_type) => ("type", problem_type.as_str().to_owned()),
         ContextField::EntityType(entity_type) => ("entity type", entity_type.to_string()),
         ContextField::Attribute(attribute) => ("attribute", attribute.to_string()),
@@ -206,6 +206,7 @@ fn body_value(body: &CapturedBody) -> String {
 #[cfg(test)]
 mod tests {
     use crate::backend::terminal::diagnostic_lines::diagnostic_lines;
+    use cassiopeia_common::masked_url::MaskedUrl;
     use cassiopeia_csv_column::{column_key::ColumnKey, column_number::ColumnNumber, renamed_column::RenamedColumn};
     use cassiopeia_diagnostic::{
         code::{broker_code::BrokerCode, diagnostic_code::DiagnosticCode, ingest_code::IngestCode, schema_code::SchemaCode},
@@ -232,7 +233,9 @@ mod tests {
             "Broker rejected 100 entities",
         )
         .with_context(ContextField::HttpStatus(StatusCode::UNPROCESSABLE_ENTITY))
-        .with_context(ContextField::Endpoint(Url::parse("https://broker/ngsi-ld/v1/entityOperations/upsert").unwrap()))
+        .with_context(ContextField::Endpoint(MaskedUrl::plain(
+            Url::parse("https://broker/ngsi-ld/v1/entityOperations/upsert").unwrap(),
+        )))
         .with_context(ContextField::ProblemType("https://uri.etsi.org/ngsi-ld/errors/BadRequestData".parse().unwrap()))
         .with_context(ContextField::Entities {
             first: IriBuf::new("urn:ngsi-ld:AirQualityObserved:LJ-001".to_owned()).unwrap(),

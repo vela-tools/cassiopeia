@@ -23,6 +23,7 @@ url = "2.5.8"
 
 [dev-dependencies]
 pretty_assertions = "1.4.1"
+secrecy = "0.10.3"
 tempfile = "3.27.0"
 
 [lints]

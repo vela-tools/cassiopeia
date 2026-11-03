@@ -7,7 +7,7 @@ use crate::broker::{
     request_shape::RequestShape,
     serialize::serialize_batch,
 };
-use cassiopeia_common::{representation::NgsiLdRepresentation, skip_null::NgsiLdSkipNull};
+use cassiopeia_common::{masked_url::MaskedUrl, representation::NgsiLdRepresentation, skip_null::NgsiLdSkipNull};
 use cassiopeia_ngsi_ld::entity::{NgsiLdEntity, context::ContextSource};
 use cassiopeia_reporter::reporter::Reporter;
 use crossbeam_channel::Receiver;
@@ -19,14 +19,13 @@ use std::sync::{
     Arc,
     atomic::{AtomicBool, AtomicUsize, Ordering},
 };
-use url::Url;
 
 /// The request-building inputs a worker uses to construct and address each POST.
 ///
 /// Every field is cheap to clone: the reqwest `Client` shares one connection pool across its clones,
-/// the endpoint is a shared `Arc<Url>`, and the headers are `HeaderValue`s and a shared `Arc` slice.
+/// the endpoint is a shared `Arc<MaskedUrl>`, and the headers are `HeaderValue`s and a shared `Arc` slice.
 ///
-/// The endpoint stays a parsed [`Url`] rather than its text: reqwest re-parses a string on every
+/// The endpoint stays a parsed URL rather than its text: reqwest re-parses a string on every
 /// request, so keeping it parsed removes a full URL parse per POST, and a diagnostic that names the
 /// endpoint gets a typed value rather than another string to interpret.
 #[derive(Clone)]
@@ -34,7 +33,7 @@ pub struct RequestParts {
     /// The HTTP client, sharing one connection pool across workers.
     pub client: Client,
     /// The fully-resolved endpoint URL, with any operation query already baked in.
-    pub endpoint: Arc<Url>,
+    pub endpoint: Arc<MaskedUrl>,
     /// The `Content-Type` header for every request.
     pub content_type: HeaderValue,
     /// The `Link` header, when the context is delivered out of band.
@@ -172,7 +171,7 @@ pub(crate) mod test_support {
         sender::{RequestParts, RuntimeParts, SenderContext, SerializationParts, SharedCounters},
         test_reporter::{static_shutdown, static_test_reporter},
     };
-    use cassiopeia_common::{representation::NgsiLdRepresentation, skip_null::NgsiLdSkipNull};
+    use cassiopeia_common::{masked_url::MaskedUrl, representation::NgsiLdRepresentation, skip_null::NgsiLdSkipNull};
     use cassiopeia_ngsi_ld::entity::{NgsiLdEntity, name::NameBuf};
     use reqwest::{blocking::Client, header::HeaderValue};
     use std::sync::{Arc, atomic::AtomicUsize};
@@ -184,7 +183,7 @@ pub(crate) mod test_support {
         SenderContext {
             request: RequestParts {
                 client: Client::builder().build().unwrap(),
-                endpoint: Arc::new(Url::parse("https://b/ngsi-ld/v1/entityOperations/upsert").unwrap()),
+                endpoint: Arc::new(MaskedUrl::plain(Url::parse("https://b/ngsi-ld/v1/entityOperations/upsert").unwrap())),
                 content_type: HeaderValue::from_static("application/json"),
                 link_header: None,
                 tenant_header: None,

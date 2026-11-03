@@ -1,6 +1,6 @@
-use crate::error::input::InputError;
+use crate::{environment::template::escape, error::input::InputError, masked_url::MaskedUrl};
 use derive_more::Display;
-use serde::{Deserialize, Deserializer, Serialize, Serializer, de::Error as DeError};
+use serde::{Serialize, Serializer};
 use std::{path::PathBuf, str::FromStr};
 use url::Url;
 
@@ -15,9 +15,10 @@ pub enum Input {
     #[display("{}", _0.display())]
     Local(PathBuf),
 
-    /// A source to be downloaded before it can be read.
+    /// A source to be downloaded before it can be read, shown with any value it read from the
+    /// environment masked.
     #[display("{_0}")]
-    Remote(Url),
+    Remote(MaskedUrl),
 }
 
 impl FromStr for Input {
@@ -28,30 +29,23 @@ impl FromStr for Input {
         // rather than "malformed".
         match Url::parse(value) {
             Ok(url) if url.scheme() == "file" => url.to_file_path().map(Input::Local).map_err(|()| InputError::UnusableFileUrl { url }),
-            Ok(url) => Ok(Input::Remote(url)),
+            Ok(url) => Ok(Input::Remote(MaskedUrl::plain(url))),
             Err(_) => Ok(Input::Local(PathBuf::from(value))),
         }
     }
 }
 
-// Manual because the wire form is the single `Display` string, not the enum's variant structure.
+// Manual because the wire form is the single string a manifest spells the source as: the template
+// it reads back from, with any secret as `${NAME}` and any literal `${` escaped.
 impl Serialize for Input {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
         S: Serializer,
     {
-        serializer.collect_str(self)
-    }
-}
-
-// Manual for the same reason as `Serialize`: the wire form is a single string.
-impl<'de> Deserialize<'de> for Input {
-    fn deserialize<D>(deserializer: D) -> Result<Input, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        let value = String::deserialize(deserializer)?;
-        Input::from_str(&value).map_err(DeError::custom)
+        match self {
+            Input::Local(path) => serializer.serialize_str(&escape(&path.display().to_string())),
+            Input::Remote(url) => serializer.serialize_str(&url.template()),
+        }
     }
 }
 
@@ -83,11 +77,16 @@ mod tests {
     }
 
     #[test]
-    fn a_remote_source_round_trips_through_json() {
-        let input = Input::from_str("https://example.org/stations.json").unwrap();
-        let encoded = serde_json::to_string(&input).unwrap();
+    fn a_local_path_with_a_literal_placeholder_opening_serializes_escaped() {
+        let encoded = serde_json::to_string(&Input::Local(PathBuf::from("data/${raw}.csv"))).unwrap();
 
-        assert_eq!(encoded, r#""https://example.org/stations.json""#);
-        assert_eq!(serde_json::from_str::<Input>(&encoded).unwrap(), input);
+        assert_eq!(encoded, r#""data/$${raw}.csv""#);
+    }
+
+    #[test]
+    fn a_remote_source_serializes_as_its_url() {
+        let input = Input::from_str("https://example.org/stations.json").unwrap();
+
+        assert_eq!(serde_json::to_string(&input).unwrap(), r#""https://example.org/stations.json""#);
     }
 }

@@ -1,6 +1,6 @@
 //! Tracing subscriber setup and management.
 
-use crate::error::Result;
+use crate::{error::Result, masking_writer::Masking};
 use cassiopeia_common::log::{config::LoggerConfig, format::LogFormat, level::LogLevel};
 use cassiopeia_directories::locations::log_dir;
 use std::{
@@ -60,7 +60,7 @@ const fn log_level_to_filter(level: LogLevel) -> LevelFilter {
 /// Returns a [`ReporterError`](crate::error::ReporterError) if a layer cannot be constructed.
 pub fn build_root_layer(config: &LoggerConfig) -> Result<(Box<dyn Layer<Registry> + Send + Sync>, Option<WorkerGuard>)> {
     let console_layer = if config.console.enabled {
-        let layer = fmt::layer().with_writer(io::stdout);
+        let layer = fmt::layer().with_writer(Masking::new(io::stdout));
         let formatted = apply_format(layer, config.console.format);
         let filtered = formatted.with_filter(log_level_to_filter(config.console.level));
         Some(Box::new(filtered) as Box<dyn Layer<Registry> + Send + Sync>)
@@ -73,7 +73,7 @@ pub fn build_root_layer(config: &LoggerConfig) -> Result<(Box<dyn Layer<Registry
         let file_appender = rolling::daily(&directory, &config.file.file_name);
         let (non_blocking, guard) = tracing_appender::non_blocking(file_appender);
 
-        let layer = fmt::layer().with_writer(non_blocking).with_ansi(false); // No colors in files
+        let layer = fmt::layer().with_writer(Masking::new(non_blocking)).with_ansi(false); // No colors in files
 
         let formatted = apply_format(layer, config.file.format);
         let filtered = formatted.with_filter(log_level_to_filter(config.file.level));

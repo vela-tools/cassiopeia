@@ -1,6 +1,7 @@
 //! The one place a failure is turned into a report, cause chain and all.
 
 use crate::{backend::terminal::diagnostic_lines::diagnostic_lines, global::try_reporter};
+use cassiopeia_common::environment::registry::mask;
 use cassiopeia_diagnostic::{code::diagnostic_code::DiagnosticCode, diagnostic_builder::from_error, severity::Severity, verbosity::Verbosity};
 use cassiopeia_terminal_style::rendering::{Stream, detect_rendering};
 use std::{
@@ -25,7 +26,7 @@ pub fn report_error(code: DiagnosticCode, error: &dyn Error) {
     let stderr = stderr();
     let mut handle = stderr.lock();
     for line in diagnostic_lines(&diagnostic, Verbosity::Concise, detect_rendering(Stream::Stderr)) {
-        let _ = writeln!(handle, "{line}");
+        let _ = writeln!(handle, "{}", mask(&line));
     }
 }
 

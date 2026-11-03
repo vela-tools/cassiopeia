@@ -1,7 +1,6 @@
-use cassiopeia_common::captured_body::CapturedBody;
+use cassiopeia_common::{captured_body::CapturedBody, masked_url::MaskedUrl};
 use http::StatusCode;
 use std::{io, path::PathBuf};
-use url::Url;
 
 /// The cap on a captured error-response body, which exists to be read by a person.
 pub const ERROR_BODY_CAP: usize = 2 * 1024;
@@ -20,11 +19,12 @@ pub enum CollectorError {
     /// An HTTP request never completed.
     #[error("HTTP request to '{url}' failed")]
     Http {
-        /// The transport failure reported by the HTTP layer.
+        /// The transport failure reported by the HTTP layer, stripped of the URL it would quote.
         #[source]
         source: reqwest::Error,
-        /// The URL the request targeted.
-        url: Url,
+        /// The URL the request targeted, masked. Boxed so a URL does not enlarge every `Result` in the
+        /// collector and every pipeline error that wraps one.
+        url: Box<MaskedUrl>,
     },
 
     /// The server answered with a non-success status.
@@ -33,8 +33,9 @@ pub enum CollectorError {
     /// explanation, and throwing it away leaves a failed download with nothing to act on.
     #[error("'{url}' answered {status}")]
     HttpStatus {
-        /// The URL the request targeted.
-        url: Url,
+        /// The URL the request targeted, masked. Boxed so a URL does not enlarge every `Result` in the
+        /// collector and every pipeline error that wraps one.
+        url: Box<MaskedUrl>,
         /// The status the server answered with.
         status: StatusCode,
         /// The server's explanation, as far as it was captured. Boxed so a captured body does not
@@ -68,14 +69,14 @@ pub enum CollectorError {
 #[cfg(test)]
 mod tests {
     use crate::error::CollectorError;
-    use cassiopeia_common::captured_body::CapturedBody;
+    use cassiopeia_common::{captured_body::CapturedBody, masked_url::MaskedUrl};
     use http::StatusCode;
     use url::Url;
 
     #[test]
     fn a_status_failure_names_the_url_and_the_status() {
         let error = CollectorError::HttpStatus {
-            url: Url::parse("https://schemas.example.org/Sensor.json").unwrap(),
+            url: Box::new(MaskedUrl::plain(Url::parse("https://schemas.example.org/Sensor.json").unwrap())),
             status: StatusCode::NOT_FOUND,
             body: Box::new(CapturedBody::capped(b"no such schema".to_vec(), 2048)),
         };

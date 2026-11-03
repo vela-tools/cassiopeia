@@ -1,4 +1,5 @@
 use crate::{
+    environment::templated,
     error::ManifestError,
     mapping_binding::{CollectionMapping, MappingBinding},
 };
@@ -18,7 +19,8 @@ use typed_builder::TypedBuilder;
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Getters, TypedBuilder)]
 #[serde(try_from = "ManifestInputRaw", into = "ManifestInputRaw")]
 pub struct ManifestInput {
-    /// The file or URL the records are read from.
+    /// The file or URL the records are read from. A URL may read environment variables, and shows
+    /// itself with their values masked.
     #[getset(get = "pub")]
     source: Input,
 
@@ -92,6 +94,7 @@ impl ManifestInput {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct ManifestInputRaw {
+    #[serde(deserialize_with = "templated::source")]
     source: Input,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     mapping: Option<PathBuf>,
@@ -107,7 +110,7 @@ struct ManifestInputRaw {
     schema: Option<SchemaSource>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     vars: Option<serde_json::Map<String, serde_json::Value>>,
-    #[serde(default, skip_serializing_if = "RequestHeaders::is_empty")]
+    #[serde(default, skip_serializing_if = "RequestHeaders::is_empty", deserialize_with = "templated::input_headers")]
     headers: RequestHeaders,
 }
 
@@ -199,6 +202,7 @@ mod tests {
         context::mode::AtContextMode,
         format::DataFormat,
         input::Input,
+        masked_url::MaskedUrl,
         request_header::{RequestHeader, RequestHeaders},
         schema_source::SchemaSource,
     };
@@ -372,7 +376,7 @@ mod tests {
 
     fn remote_input() -> ManifestInput {
         ManifestInput::builder()
-            .source(Input::Remote(Url::parse("https://api.example/records").unwrap()))
+            .source(Input::Remote(MaskedUrl::plain(Url::parse("https://api.example/records").unwrap())))
             .mapping_binding(MappingBinding::Single {
                 mapping: PathBuf::from("record.json5"),
             })
