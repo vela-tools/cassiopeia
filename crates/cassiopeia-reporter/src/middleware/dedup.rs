@@ -122,7 +122,7 @@ mod tests {
     };
     use cassiopeia_common::telemetry::run::{RunTelemetry, TelemetrySnapshot};
     use cassiopeia_diagnostic::{
-        code::{broker_code::BrokerCode, diagnostic_code::DiagnosticCode, schema_code::SchemaCode},
+        code::{broker_code::BrokerCode, diagnostic_code::DiagnosticCode, ingest_code::IngestCode, schema_code::SchemaCode},
         context_field::ContextField,
         detail::Detail,
         diagnostic::Diagnostic,
@@ -135,7 +135,7 @@ mod tests {
     use iri_rs::IriBuf;
     use parking_lot::Mutex;
     use pretty_assertions::assert_eq;
-    use std::sync::Arc;
+    use std::{path::PathBuf, sync::Arc};
 
     /// Records the calls made to it into shared vectors observable after the reporter is boxed.
     struct RecordingReporter {
@@ -257,6 +257,23 @@ mod tests {
 
         harness.dedup.report(&rejection("urn:ngsi-ld:A:1", 422));
         harness.dedup.report(&rejection("urn:ngsi-ld:A:2", 409));
+
+        assert_eq!(harness.headlines.lock().len(), 2);
+    }
+
+    fn skipped_rows(path: &str) -> Diagnostic {
+        DiagnosticBuilder::new(Severity::Warning, DiagnosticCode::Ingest(IngestCode::RowsMisshapen), "rows were skipped")
+            .with_context(ContextField::SourcePath(PathBuf::from(path)))
+            .build()
+    }
+
+    #[test]
+    fn the_same_warning_about_two_source_files_renders_once_per_file() {
+        let harness = harness();
+
+        harness.dedup.report(&skipped_rows("/data/monday.csv"));
+        harness.dedup.report(&skipped_rows("/data/tuesday.csv"));
+        harness.dedup.report(&skipped_rows("/data/monday.csv"));
 
         assert_eq!(harness.headlines.lock().len(), 2);
     }

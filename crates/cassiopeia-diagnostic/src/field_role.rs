@@ -5,7 +5,9 @@ use crate::context_field::{ContextField, ContextFieldKind};
 /// The split is what keeps the terminal quiet. A hundred entities rejected for one reason must
 /// collapse into one line with a count, which they can only do if the entity ids they differ by stay
 /// out of the key. Anything that names *why* something failed is defining; anything that names
-/// *which occurrence* is incidental.
+/// *which occurrence* is incidental. A source file is defining: a diagnostic that names one is about
+/// that file, such as the rows skipped from it, so two files' diagnostics are two findings, and
+/// folding the second into the first would hide what it says about its own file.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub enum FieldRole {
     /// The field distinguishes one failure from another, so it belongs to the identity.
@@ -28,9 +30,9 @@ impl ContextField {
             | ContextFieldKind::SchemaPath
             | ContextFieldKind::Keyword
             | ContextFieldKind::Detail
-            | ContextFieldKind::RenamedColumn => FieldRole::Defining,
+            | ContextFieldKind::RenamedColumn
+            | ContextFieldKind::SourcePath => FieldRole::Defining,
             ContextFieldKind::Entities
-            | ContextFieldKind::SourcePath
             | ContextFieldKind::Attempt
             | ContextFieldKind::PayloadBytes
             | ContextFieldKind::BodyEcho
@@ -109,7 +111,6 @@ mod tests {
             incidental,
             HashSet::from([
                 ContextFieldKind::Entities,
-                ContextFieldKind::SourcePath,
                 ContextFieldKind::Attempt,
                 ContextFieldKind::PayloadBytes,
                 ContextFieldKind::BodyEcho,
@@ -123,6 +124,6 @@ mod tests {
     fn every_other_field_is_defining() {
         let defining = every_field().iter().filter(|field| field.role() == FieldRole::Defining).count();
 
-        assert_eq!(defining, every_field().len() - 7);
+        assert_eq!(defining, every_field().len() - 6);
     }
 }

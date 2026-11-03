@@ -103,8 +103,14 @@ mod tests {
             "The header of `/data/values.csv` gives more than one column the same record key, so 1 column was renamed: column 3 `value` is read as `value@3`, as column 2 keeps `value`"
         );
         assert_eq!(reported[0].occurrences, 1);
-        assert_eq!(reported[0].incidental, [ContextField::SourcePath(PathBuf::from("/data/values.csv"))]);
-        assert_eq!(reported[0].defining, [ContextField::RenamedColumn(renamed("value", 1, 2, "value@3"))]);
+        assert_eq!(reported[0].incidental, []);
+        assert_eq!(
+            reported[0].defining,
+            [
+                ContextField::RenamedColumn(renamed("value", 1, 2, "value@3")),
+                ContextField::SourcePath(PathBuf::from("/data/values.csv")),
+            ]
+        );
     }
 
     #[test]
@@ -129,6 +135,7 @@ mod tests {
             [
                 ContextField::RenamedColumn(renamed("value", 1, 2, "value@3")),
                 ContextField::RenamedColumn(renamed("2", 0, 3, "2@4")),
+                ContextField::SourcePath(PathBuf::from("/data/values.csv")),
             ]
         );
     }
@@ -145,7 +152,12 @@ mod tests {
             reported[0].headline,
             "The header of `/data/units.csv` gives more than one column the same record key, so 5 columns were renamed: column 2 `Unit` is read as `Unit@2`, as column 1 keeps `Unit`; column 3 `Unit` is read as `Unit@3`, as column 1 keeps `Unit`; column 4 `Unit` is read as `Unit@4`, as column 1 keeps `Unit`; and 2 more"
         );
-        assert_eq!(reported[0].defining, columns.into_iter().map(ContextField::RenamedColumn).collect::<Vec<_>>());
+        let defining: Vec<ContextField> = columns
+            .into_iter()
+            .map(ContextField::RenamedColumn)
+            .chain([ContextField::SourcePath(PathBuf::from("/data/units.csv"))])
+            .collect();
+        assert_eq!(reported[0].defining, defining);
     }
 
     #[test]

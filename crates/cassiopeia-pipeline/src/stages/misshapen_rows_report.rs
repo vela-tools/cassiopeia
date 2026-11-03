@@ -118,7 +118,20 @@ mod tests {
             "The table in `/data/values.csv` has 3 fields per row, but 1 row had another number, so it was skipped: row 6 has 1 field"
         );
         assert_eq!(reported[0].occurrences, 1);
-        assert_eq!(reported[0].incidental, [ContextField::SourcePath(PathBuf::from("/data/values.csv"))]);
+        assert_eq!(reported[0].defining, [ContextField::SourcePath(PathBuf::from("/data/values.csv"))]);
+        assert_eq!(reported[0].incidental, []);
+    }
+
+    #[test]
+    fn two_files_skipping_the_same_rows_are_two_findings_each_naming_its_file() {
+        let sink = RecordingReporter::new();
+
+        report_misshapen_rows(&sink, Path::new("/data/monday.csv"), &rows(&[(5, 1)]));
+        report_misshapen_rows(&sink, Path::new("/data/tuesday.csv"), &rows(&[(5, 1)]));
+
+        let reported = sink.diagnostics();
+        assert_eq!(reported[0].defining, [ContextField::SourcePath(PathBuf::from("/data/monday.csv"))]);
+        assert_eq!(reported[1].defining, [ContextField::SourcePath(PathBuf::from("/data/tuesday.csv"))]);
     }
 
     #[test]
