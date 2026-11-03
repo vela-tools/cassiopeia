@@ -156,7 +156,7 @@ Cassiopeia checks every template in a mapping when it loads the mapping. A templ
 
 A geometry declaration that could never run is rejected at load time the same way, naming the attribute: a `GeoProperty` whose `transformation` produces no geometry, such as `string`, a `geometry` block on an attribute whose value is never converted to a geometry, and a `geometry` conversion that cannot produce the declared type. See [GeoProperty](mapping.md#geoproperty).
 
-Problems that depend on one record's data do not stop the run. Each is a warning, and the `Reasons` block counts it under one of these codes:
+Problems that depend on one record's data, or on the rows and header of one CSV file, do not stop the run. Each is a warning, and the `Reasons` block counts it under one of these codes:
 
 | Code | What happened |
 | --- | --- |
@@ -166,11 +166,12 @@ Problems that depend on one record's data do not stop the run. Each is a warning
 | `extractor-template-unresolvable` | An attribute's template failed to render for one entity. Cassiopeia dropped that attribute and kept the entity. The warning names the template, the mapping file, an entity that lost the attribute, and a hint. When the failing template is the `observedAt` that ranks the records of one entity, a record it failed on ranks as carrying no observation time; if another record of the entity wins the ranking, the failing record is discarded and the warning says so, naming an entity and counting the records it cost. |
 | `extractor-timestamp-unreadable` | A value read with a `datetime`, `date`, or `time` transformation is text Cassiopeia cannot read as a date and time. The attribute is dropped, or, for an `observedAt`, the attribute is written without it. |
 | `geometry-*` | A source geometry could not become the geometry its `GeoProperty` declares, such as a `GeometryCollection` (`geometry-collection-inadmissible`) or a `MultiPolygon` of several surfaces asked for a `Polygon` (`geometry-ambiguous-multi-geometry`). Cassiopeia dropped that attribute, sub-attribute, or instance and kept the entity. The warning names the attribute and the reason. |
+| `ingest-columns-renamed` | A CSV file's header gave two columns the same field name, so Cassiopeia kept both and renamed each repeat. One warning per file names up to three renamed columns and the field name to read each by, and counts the rest. With `--verbose`, it lists every renamed column. See [CSV](source-formats.md#dialect-detection). |
 | `ingest-rows-misshapen` | Rows of a CSV file had another number of fields than its table, so Cassiopeia skipped them and kept the rows around them. One warning per file names up to three skipped rows and counts every one. See [CSV](source-formats.md#rows-of-another-width). |
 | `transform-expires-at-unreadable` | An attribute's `expiresAt` could not be read as a date and time, so the attribute is written without it. |
 | `transform-observed-at-unreadable` | An `observedAt` declared without a transformation could not be read as a date and time, so the attribute is written without it. |
 
-A CSV file whose header gives two columns the same field name is still read in full. Each repeat is renamed, and the run reports one `ingest-columns-renamed` warning for the file. The run's warning count adds one for each renamed column, as it adds one for each skipped row of an `ingest-rows-misshapen` warning. The warning names up to three renamed columns and the field name to read each by, and counts the rest. With `--verbose`, it lists every renamed column. See [CSV](source-formats.md#csv).
+The run's warning count adds one for each renamed column of an `ingest-columns-renamed` warning, and one for each skipped row of an `ingest-rows-misshapen` warning.
 
 With `--verbose`, each of these also lists its causes, including Tera's own message when Tera reported one. For a template rejected at load time, that message gives the column where Tera stopped. The [templates reference](templates.md#when-a-template-fails) lists what fails at load time and how to guard a template against a missing field.
 
