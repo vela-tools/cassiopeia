@@ -7,7 +7,7 @@ use cassiopeia_ngsi_ld::{
     entity::{attribute::NestedAttributes, name::NameBuf},
     value::types::Value,
 };
-use cassiopeia_unreadable_timestamps::{timestamp_loss::TimestampLoss, unreadable_timestamp::unreadable_text, unreadable_timestamps::UnreadableTimestamps};
+use cassiopeia_unreadable_timestamps::{timestamp_loss::TimestampLoss, unreadable_timestamps::UnreadableTimestamps};
 use cefact_units::UnitCode;
 use chrono::{DateTime, Utc};
 use urn_rs::Urn;
@@ -65,9 +65,9 @@ pub fn transform_metadata(
 /// fold on (ETSI GS CIM 009 v1.9.1 clause 4.5.2.2), and an `expiresAt` that would have bounded the
 /// value's validity is gone (clause 4.22). Which values are "not carried" rather than unreadable is
 /// the shared rule in
-/// [`unreadable_text`](cassiopeia_unreadable_timestamps::unreadable_timestamp::unreadable_text).
+/// [`Value::reported_text`].
 fn record_unreadable(loss: TimestampLoss, attribute: &NameBuf, value: &Value, unreadable: &UnreadableTimestamps) {
-    if let Some(text) = unreadable_text(value) {
+    if let Some(text) = value.reported_text() {
         unreadable.record(loss, attribute, text.as_ref());
     }
 }
@@ -159,6 +159,8 @@ mod tests {
     use cassiopeia_unreadable_timestamps::{attribute_loss::AttributeLoss, timestamp_loss::TimestampLoss, unreadable_timestamps::UnreadableTimestamps};
     use chrono::{TimeZone, Utc};
     use indexmap::IndexMap;
+    use iri_rs::IriBuf;
+    use langtag::LangTagBuf;
     use pretty_assertions::{assert_eq, assert_ne};
     use serde_json::{Value as JsonValue, json};
 
@@ -168,6 +170,11 @@ mod tests {
 
     fn sub(kind: NgsiLdAttributeKind, value: JsonValue) -> SubAttribute {
         SubAttribute::new(kind, AttributeContent::Value(Value::try_from(value).unwrap()), IndexMap::default())
+    }
+
+    /// The vocabulary IRI content a `VocabProperty` sub-attribute resolves to.
+    fn vocab(iri: &str) -> AttributeContent {
+        AttributeContent::Vocab(IriBuf::new(iri.to_owned()).unwrap())
     }
 
     fn attribute(summary: &MetadataSummary, key: &str) -> NgsiLdAttribute {
@@ -459,7 +466,10 @@ mod tests {
     #[test]
     fn a_vocab_property_sub_attribute_keeps_its_kind() {
         let mut shared = IndexMap::default();
-        shared.insert(name("level"), sub(NgsiLdAttributeKind::VocabProperty, json!("https://example.org/level/high")));
+        shared.insert(
+            name("level"),
+            SubAttribute::new(NgsiLdAttributeKind::VocabProperty, vocab("https://example.org/level/high"), IndexMap::default()),
+        );
         let mut metadata = IndexMap::default();
         metadata.insert(name("sugars"), MetadataStorage::shared(shared));
 
@@ -483,7 +493,16 @@ mod tests {
         shared.insert(name("tags"), sub(NgsiLdAttributeKind::ListProperty, json!(["a", "b"])));
         shared.insert(
             name("label"),
-            sub(NgsiLdAttributeKind::LanguageProperty, json!({ "en": "high", "fr": "eleve" })),
+            SubAttribute::new(
+                NgsiLdAttributeKind::LanguageProperty,
+                AttributeContent::Language(
+                    [("en", "high"), ("fr", "eleve")]
+                        .into_iter()
+                        .map(|(tag, text)| (LangTagBuf::new(tag.to_owned()).unwrap(), text.to_owned()))
+                        .collect(),
+                ),
+                IndexMap::default(),
+            ),
         );
         let mut metadata = IndexMap::default();
         metadata.insert(name("sugars"), MetadataStorage::shared(shared));
@@ -595,11 +614,7 @@ mod tests {
         let mut shared = IndexMap::default();
         shared.insert(
             name("level"),
-            SubAttribute::new(
-                NgsiLdAttributeKind::VocabProperty,
-                AttributeContent::Value(Value::try_from(json!("https://example.org/level/high")).unwrap()),
-                inner,
-            ),
+            SubAttribute::new(NgsiLdAttributeKind::VocabProperty, vocab("https://example.org/level/high"), inner),
         );
         let mut metadata = IndexMap::default();
         metadata.insert(name("sugars"), MetadataStorage::shared(shared));

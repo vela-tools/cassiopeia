@@ -429,7 +429,9 @@ description: {
 }
 ~~~
 
-The keys under `languageMap` are language tags. Each language entry is an attribute declaration, so it can use its own source and transformation.
+The keys under `languageMap` are language tags. Each language entry is an attribute declaration, so it can use its own source and transformation. An entry that resolves to nothing or to blank text is left out, and a LanguageProperty with no entry left produces no attribute.
+
+A LanguageProperty declared with a single `source` instead of a `languageMap` reads that source as text by default, and text is no language map: the attribute is dropped and the run warns under `extractor-language-map-misshapen`, naming the attribute and the value. To take the whole map from one source field that holds an object of text keyed by language tag, set `transformation: "object"`. Only entries keyed by a valid language tag and holding text are kept, and an object with no such entry is dropped with the same warning. Under `object`, a source that is not an object produces no attribute. A missing, null, or blank source produces no attribute and no warning.
 
 ### VocabProperty
 
@@ -442,7 +444,7 @@ vehicleType: {
 }
 ~~~
 
-The resolved source must be a well-formed IRI. A value that is not an IRI produces no attribute. [Example 26](https://github.com/vela-tools/cassiopeia-examples/blob/main/examples/26-csv-vocab-property/example.md) builds the IRI by interpolating an OpenStreetMap amenity term into its canonical tag-page URL.
+The resolved source must be a well-formed IRI; whitespace around it is ignored. A value that is not an IRI is dropped and the run warns under `extractor-vocab-not-an-iri`, naming the attribute and the value. A missing, null, or blank source produces no attribute and no warning. [Example 26](https://github.com/vela-tools/cassiopeia-examples/blob/main/examples/26-csv-vocab-property/example.md) builds the IRI by interpolating an OpenStreetMap amenity term into its canonical tag-page URL.
 
 ### ListProperty and JsonProperty
 
@@ -522,7 +524,7 @@ temperature: {
 }
 ~~~
 
-`observedAt`, `expiresAt`, `unitCode`, and `datasetId` are handled as NGSI-LD attribute qualifiers. Any other entry under `properties` becomes a nested sub-attribute with the declared `type`, or a `Property` when no type is specified. It can also be a `VocabProperty`, a `LanguageProperty`, a `GeoProperty`, or a `Relationship`. A `GeoProperty` sub-attribute is converted under its own `geometry` block exactly like a top-level one, so `winding: "keep"` keeps its rings as the source wound them, and a geometry it refuses drops only that sub-attribute, with a warning naming it. A sub-attribute is the serialization of a Property or any of its subclasses, and of a Relationship (ETSI GS CIM 009 v1.9.1 clause 4.5.2.2 with clause 4.5.3). As a result, `properties` can declare nested relationships as well as nested properties, recursively to any depth. [Example 30](https://github.com/vela-tools/cassiopeia-examples/blob/main/examples/30-csv-nested-relationship/example.md) hangs a `playsCharacter` relationship off a `hasLeadActor` relationship. A mapping can therefore represent both standard qualifiers and model-specific attribute metadata.
+`observedAt`, `expiresAt`, `unitCode`, and `datasetId` are handled as NGSI-LD attribute qualifiers. Any other entry under `properties` becomes a nested sub-attribute with the declared `type`, or a `Property` when no type is specified. It can also be a `VocabProperty`, a `LanguageProperty`, a `GeoProperty`, or a `Relationship`. A `GeoProperty` sub-attribute is converted under its own `geometry` block exactly like a top-level one, so `winding: "keep"` keeps its rings as the source wound them, and a geometry it refuses drops only that sub-attribute, with a warning naming it. The same holds for a `VocabProperty` or `LanguageProperty` sub-attribute whose value its type cannot hold: only the sub-attribute is dropped, the attribute carrying it is still written, and the warning names it by its path, such as `temperature.level`. A sub-attribute is the serialization of a Property or any of its subclasses, and of a Relationship (ETSI GS CIM 009 v1.9.1 clause 4.5.2.2 with clause 4.5.3). As a result, `properties` can declare nested relationships as well as nested properties, recursively to any depth. [Example 30](https://github.com/vela-tools/cassiopeia-examples/blob/main/examples/30-csv-nested-relationship/example.md) hangs a `playsCharacter` relationship off a `hasLeadActor` relationship. A mapping can therefore represent both standard qualifiers and model-specific attribute metadata.
 
 Cassiopeia resolves metadata from the same source record as its parent attribute. For a temporal mapping, put the timestamp on the attributes that represent observations. Cassiopeia can then keep successive observations associated with the same entity identity.
 

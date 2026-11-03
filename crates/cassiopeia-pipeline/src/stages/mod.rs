@@ -30,6 +30,7 @@ pub(crate) mod transformer;
 pub(crate) mod unreadable_expiry_report;
 pub(crate) mod unreadable_timestamp_report;
 pub(crate) mod unresolved_template_report;
+pub(crate) mod unusable_value_report;
 pub(crate) mod validation_abort;
 pub(crate) mod validation_decision;
 pub(crate) mod validation_report;

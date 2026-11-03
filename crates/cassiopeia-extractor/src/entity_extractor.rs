@@ -121,6 +121,7 @@ mod tests {
         dropped_null::{DroppedNull, NullSite},
         entity_extractor::EntityExtractor,
         extractor::Extractor,
+        required_value::RequiredValue,
     };
     use cassiopeia_batch_sink::{batch_sink::BatchSink, recurring::Recurring};
     use cassiopeia_common::parallelism::Parallelism;
@@ -151,6 +152,7 @@ mod tests {
     };
     use cassiopeia_unreadable_timestamps::{attribute_loss::AttributeLoss, timestamp_loss::TimestampLoss};
     use chrono::{TimeZone, Utc};
+    use iri_rs::IriBuf;
     use pretty_assertions::assert_eq;
     use serde_json::{Value as JsonValue, json};
     use std::{path::Path, sync::Arc};
@@ -176,7 +178,8 @@ mod tests {
     fn single_value(resolved: Option<ResolvedAttribute>) -> Option<Value> {
         match resolved? {
             ResolvedAttribute::Single(AttributeContent::Value(value)) => Some(value),
-            other @ (ResolvedAttribute::Single(AttributeContent::Json(_)) | ResolvedAttribute::Instances(_)) => {
+            other @ (ResolvedAttribute::Single(AttributeContent::Json(_) | AttributeContent::Vocab(_) | AttributeContent::Language(_))
+            | ResolvedAttribute::Instances(_)) => {
                 panic!("expected a single value, got {other:?}")
             }
         }
@@ -557,8 +560,185 @@ mod tests {
         assert_eq!(*level.kind(), NgsiLdAttributeKind::VocabProperty);
         assert_eq!(
             level.value(),
-            &AttributeContent::Value(Value::try_from(json!("https://example.org/level/high")).unwrap())
+            &AttributeContent::Vocab(IriBuf::new("https://example.org/level/high".to_owned()).unwrap())
         );
+    }
+
+    #[test]
+    fn unusable_vocab_and_language_values_drop_only_their_own_declarations_and_are_recorded_by_path() {
+        let (resolver, mapping) = prepare(
+            r#"{
+                version: "v4",
+                dataModel: "Thing",
+                identity: { entityName: "{{ id }}" },
+                attributes: {
+                    topVocab: { type: "VocabProperty", source: "{{ v }}" },
+                    topLang: { type: "LanguageProperty", source: "{{ l }}" },
+                    temperature: {
+                        source: "{{ t }}",
+                        properties: {
+                            subVocab: { type: "VocabProperty", source: "{{ v }}" },
+                            subLang: { type: "LanguageProperty", source: "{{ l }}" },
+                        },
+                    },
+                },
+            }"#,
+        );
+        let extractor = EntityExtractor::new(resolver);
+        let mapped = AssembledEntity::from_single(
+            entity("urn:ngsi-ld:Thing:A", json!({"id": "A", "t": 20, "v": "not an iri", "l": "plain text"})),
+            mapping,
+        );
+        let dropped = DroppedAttributes::new();
+
+        let (result, _) = extractor.extract(mapped, &dropped).unwrap().into_parts();
+
+        let values = result.values().as_ref().expect("values set");
+        assert_eq!(values.keys().map(NameBuf::as_str).collect::<Vec<_>>(), ["temperature"]);
+        assert!(result.metadata().as_ref().and_then(|metadata| metadata.get(&name("temperature"))).is_none());
+        let recorded = BatchSink::from(dropped.unusable_values)
+            .into_entries()
+            .map(|(unusable, record)| (unusable.attribute.to_string(), unusable.required, record.example.to_string()))
+            .collect::<Vec<_>>();
+        assert_eq!(
+            recorded,
+            [
+                ("topVocab".to_owned(), RequiredValue::Iri, "not an iri".to_owned()),
+                ("topLang".to_owned(), RequiredValue::LanguageMap, "plain text".to_owned()),
+                ("temperature.subVocab".to_owned(), RequiredValue::Iri, "not an iri".to_owned()),
+                ("temperature.subLang".to_owned(), RequiredValue::LanguageMap, "plain text".to_owned()),
+            ]
+        );
+    }
+
+    #[test]
+    fn a_refused_vocab_instance_leaves_its_index_empty_and_keeps_the_others() {
+        let (resolver, mapping) = prepare(
+            r#"{
+                version: "v4",
+                dataModel: "Sensor",
+                identity: { entityName: "S-{{ id }}" },
+                attributes: {
+                    category: {
+                        type: "VocabProperty",
+                        instances: [ { source: "{{ a }}" }, { source: "{{ b }}" } ],
+                    },
+                },
+            }"#,
+        );
+        let extractor = EntityExtractor::new(resolver);
+        let mapped = AssembledEntity::from_single(
+            entity("urn:ngsi-ld:Sensor:1", json!({"id": "1", "a": "not an iri", "b": "https://example.org/b"})),
+            mapping,
+        );
+        let dropped = DroppedAttributes::new();
+
+        let (result, _) = extractor.extract(mapped, &dropped).unwrap().into_parts();
+
+        let category = result.values().as_ref().and_then(|values| values.get("category")).expect("category resolved");
+        assert_eq!(
+            category,
+            &ResolvedAttribute::Instances(vec![
+                None,
+                Some(AttributeContent::Vocab(IriBuf::new("https://example.org/b".to_owned()).unwrap()))
+            ])
+        );
+        assert_eq!(BatchSink::from(dropped.unusable_values).into_entries().count(), 1);
+    }
+
+    #[test]
+    fn a_language_property_assembled_from_nested_mappings_becomes_its_language_map() {
+        let (resolver, mapping) = prepare(
+            r#"{
+                version: "v4",
+                dataModel: "Museum",
+                identity: { entityName: "M-{{ id }}" },
+                attributes: {
+                    name: {
+                        type: "LanguageProperty",
+                        mappings: { fr: { source: "{{ nom }}" }, nl: { source: "{{ naam }}" } },
+                    },
+                },
+            }"#,
+        );
+        let extractor = EntityExtractor::new(resolver);
+        let mapped = AssembledEntity::from_single(entity("urn:ngsi-ld:Museum:1", json!({"id": "1", "nom": "Musée", "naam": "Museum"})), mapping);
+        let dropped = DroppedAttributes::new();
+
+        let (result, _) = extractor.extract(mapped, &dropped).unwrap().into_parts();
+
+        let ResolvedAttribute::Single(AttributeContent::Language(map)) = result.values().as_ref().and_then(|values| values.get("name")).expect("name resolved")
+        else {
+            panic!("expected a language map");
+        };
+        assert_eq!(
+            map.iter().map(|(tag, text)| (tag.as_str(), text.as_str())).collect::<Vec<_>>(),
+            [("fr", "Musée"), ("nl", "Museum")]
+        );
+        assert!(dropped.unusable_values.is_empty());
+    }
+
+    #[test]
+    fn a_language_property_read_whole_under_an_object_transformation_becomes_its_language_map() {
+        let (resolver, mapping) = prepare(
+            r#"{
+                version: "v4",
+                dataModel: "Museum",
+                identity: { entityName: "M-{{ id }}" },
+                attributes: {
+                    name: { type: "LanguageProperty", transformation: "object", source: "{{ names }}" },
+                },
+            }"#,
+        );
+        let extractor = EntityExtractor::new(resolver);
+        let mapped = AssembledEntity::from_single(
+            entity("urn:ngsi-ld:Museum:1", json!({"id": "1", "names": {"fr": "Musée", "nl": "Museum"}})),
+            mapping,
+        );
+        let dropped = DroppedAttributes::new();
+
+        let (result, _) = extractor.extract(mapped, &dropped).unwrap().into_parts();
+
+        let ResolvedAttribute::Single(AttributeContent::Language(map)) = result.values().as_ref().and_then(|values| values.get("name")).expect("name resolved")
+        else {
+            panic!("expected a language map");
+        };
+        assert_eq!(map.len(), 2);
+        assert!(dropped.unusable_values.is_empty());
+    }
+
+    #[test]
+    fn a_member_of_a_structured_value_is_recorded_by_its_bracketed_path() {
+        let (resolver, mapping) = prepare(
+            r#"{
+                version: "v4",
+                dataModel: "Building",
+                identity: { entityName: "B-{{ id }}" },
+                attributes: {
+                    address: {
+                        mappings: { kind: { type: "VocabProperty", source: "{{ kind }}" }, street: { source: "{{ street }}" } },
+                    },
+                },
+            }"#,
+        );
+        let extractor = EntityExtractor::new(resolver);
+        let mapped = AssembledEntity::from_single(
+            entity("urn:ngsi-ld:Building:1", json!({"id": "1", "kind": "not an iri", "street": "Main"})),
+            mapping,
+        );
+        let dropped = DroppedAttributes::new();
+
+        let (result, _) = extractor.extract(mapped, &dropped).unwrap().into_parts();
+
+        assert_eq!(
+            single_value(result.values().as_ref().and_then(|values| values.get("address")).cloned()),
+            Some(Value::try_from(json!({"street": "Main"})).unwrap())
+        );
+        let paths = BatchSink::from(dropped.unusable_values)
+            .into_entries()
+            .map(|(unusable, _)| unusable.attribute.to_string())
+            .collect::<Vec<_>>();
+        assert_eq!(paths, ["address[kind]"]);
     }
 
     #[test]
@@ -1524,7 +1704,10 @@ mod tests {
         let payload = match resolve_label(declaration, record, &dropped) {
             None => None,
             Some(ResolvedAttribute::Single(AttributeContent::Json(payload))) => Some(JsonValue::from(payload)),
-            Some(other @ (ResolvedAttribute::Single(AttributeContent::Value(_)) | ResolvedAttribute::Instances(_))) => {
+            Some(
+                other @ (ResolvedAttribute::Single(AttributeContent::Value(_) | AttributeContent::Vocab(_) | AttributeContent::Language(_))
+                | ResolvedAttribute::Instances(_)),
+            ) => {
                 panic!("expected raw JSON, got {other:?}")
             }
         };

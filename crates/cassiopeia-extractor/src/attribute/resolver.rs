@@ -1,4 +1,6 @@
 use crate::attribute::{
+    declaration_trail::{DeclarationTrail, Nesting},
+    kind_content::type_for_kind,
     metadata::MetadataExtractor,
     refusal::AttributeRefusal,
     resolution_context::ResolutionContext,
@@ -12,9 +14,11 @@ use cassiopeia_mapping::{
     template::CompiledTemplate,
 };
 use cassiopeia_ngsi_ld::{
-    entity::{attribute::NgsiLdAttributeKind, name::NameBuf},
+    entity::{
+        attribute::{NgsiLdAttributeKind, language_property::LanguageMap},
+        name::NameBuf,
+    },
     value::{
-        json_payload::JsonPayload,
         omitted_nulls::OmittedNulls,
         types::{Value, ValueObject},
     },
@@ -47,9 +51,9 @@ pub(crate) fn resolve(ctx: &mut ResolutionContext, attr_name: &NameBuf, config: 
     }
 
     let content = if matches!(kind, NgsiLdAttributeKind::LanguageProperty) && !config.language_map().is_empty() {
-        resolve_language_property(ctx, attr_name, config)?.map(AttributeContent::Value)
+        resolve_language_property(ctx, attr_name, config)?
     } else if !config.mappings().is_empty() {
-        resolve_object(ctx, attr_name, config)?.map(AttributeContent::Value)
+        resolve_object(ctx, attr_name, config)?
     } else {
         resolve_leaf(ctx, attr_name, config)?
     };
@@ -76,10 +80,16 @@ pub(crate) fn resolve_content(ctx: &ResolutionContext, key: &NameBuf, config: &A
 ///
 /// Raw JSON becomes a Value without the nulls it holds, which are recorded: they were admissible in a
 /// `JsonProperty`'s `json` member, but not inside a Property's value (ETSI GS CIM 009 v1.9.1 clause
-/// 4.5.0).
+/// 4.5.0). A vocabulary IRI becomes its text, and a `languageMap` the object of text it is.
 fn into_value(ctx: &ResolutionContext, key: &NameBuf, content: AttributeContent) -> Option<Value> {
     match content {
         AttributeContent::Value(value) => Some(value),
+        AttributeContent::Vocab(iri) => Some(Value::String(CompactString::from(iri.as_str()))),
+        AttributeContent::Language(map) => Some(Value::Object(Box::new(
+            map.into_iter()
+                .map(|(language, text)| (CompactString::from(language.as_str()), Value::String(CompactString::from(text))))
+                .collect(),
+        ))),
         AttributeContent::Json(payload) => {
             let mut omitted = OmittedNulls::default();
             let value = Value::from_json(JsonValue::from(payload), &mut omitted);
@@ -134,15 +144,17 @@ fn resolve_relationship(ctx: &mut ResolutionContext, attr_name: &NameBuf, config
 /// A `languageMap` is keyed by BCP-47 language tag, not attribute name (ETSI GS CIM 009 v1.9.1
 /// clause 4.5.18), and each entry is a single localized string, so every value is resolved as a
 /// leaf against the same record rather than through the name-keyed nested-attribute path. An entry
-/// that resolved to nothing or to blank text has no text to localize and is left out.
-fn resolve_language_property(ctx: &mut ResolutionContext, attr_name: &NameBuf, config: &Attribute) -> Result<Option<Value>> {
-    let mut language_map = ValueObject::default();
+/// that resolved to nothing, to blank text, or to anything but text has no text to localize and is
+/// left out; when none is left, the attribute carries nothing.
+fn resolve_language_property(ctx: &mut ResolutionContext, attr_name: &NameBuf, config: &Attribute) -> Result<Option<AttributeContent>> {
+    let mut language_map = LanguageMap::default();
     for (language, child_config) in config.language_map() {
         let parts = collect_source_parts(ctx, child_config.source().as_ref(), child_config.compiled_source().as_ref())?;
-        if let Some(value) = transform(ctx, attr_name, child_config, parts).and_then(|content| into_value(ctx, attr_name, content))
-            && !value.is_empty_string()
+        if let Some(Value::String(text)) = transform(ctx, attr_name, child_config, parts).and_then(|content| into_value(ctx, attr_name, content))
+            && !text.is_empty()
         {
-            language_map.insert(CompactString::from(language.as_str()), value);
+            // The map owns its tags, which are only borrowed from the mapping's declaration.
+            language_map.insert(language.clone(), String::from(text));
         }
     }
 
@@ -151,7 +163,7 @@ fn resolve_language_property(ctx: &mut ResolutionContext, attr_name: &NameBuf, c
     if language_map.is_empty() {
         Ok(None)
     } else {
-        Ok(Some(Value::Object(Box::new(language_map))))
+        Ok(Some(AttributeContent::Language(language_map)))
     }
 }
 
@@ -160,11 +172,14 @@ fn resolve_language_property(ctx: &mut ResolutionContext, attr_name: &NameBuf, c
 /// When the declaration's conversion reads a geometry (a `GeoProperty`, or a geometry
 /// `transformation`), the assembled object is a geometry spelled field by field, so it is converted
 /// under the declaration's own `geometry` policy and a refusal is recorded, exactly as for a geometry
-/// read whole from one source. Any other conversion leaves the object as assembled.
-fn resolve_object(ctx: &mut ResolutionContext, attr_name: &NameBuf, config: &Attribute) -> Result<Option<Value>> {
+/// read whole from one source. Any other conversion leaves the object as assembled, typed as the
+/// declared kind exactly as a value read from one source is (see [`type_for_kind`]).
+fn resolve_object(ctx: &mut ResolutionContext, attr_name: &NameBuf, config: &Attribute) -> Result<Option<AttributeContent>> {
     let mut object = ValueObject::default();
+    let owner = DeclarationTrail::below(attr_name, Nesting::Member, ctx.owners);
+    let members = ctx.beneath(&owner);
     for (key, child_config) in config.mappings() {
-        if let Some(value) = resolve_content(ctx, key, child_config)?.and_then(|content| into_value(ctx, key, content)) {
+        if let Some(value) = resolve_content(&members, key, child_config)?.and_then(|content| into_value(&members, key, content)) {
             object.insert(CompactString::from(key.as_str()), value);
         }
     }
@@ -180,9 +195,11 @@ fn resolve_object(ctx: &mut ResolutionContext, attr_name: &NameBuf, config: &Att
         Some(target) => bind_refusal(
             ctx,
             attr_name,
-            Transformer::coerce_geometry(&object, target, config.geometry().as_ref()).map_err(AttributeRefusal::Geometry),
+            Transformer::coerce_geometry(&object, target, config.geometry().as_ref())
+                .map(|geometry| geometry.map(AttributeContent::Value))
+                .map_err(AttributeRefusal::Geometry),
         ),
-        None => Some(object),
+        None => bind_refusal(ctx, attr_name, type_for_kind(*config.kind(), AttributeContent::Value(object))),
     })
 }
 
@@ -202,16 +219,18 @@ fn resolve_leaf(ctx: &mut ResolutionContext, attr_name: &NameBuf, config: &Attri
 /// [`Attribute::conversion`], and a declaration naming no transformation gets its kind's default on
 /// every path.
 ///
-/// A `JsonProperty` always comes out as raw JSON: read as the source held it under its default
-/// conversion, or, under a declared transformation, as the JSON the transformed value serializes to.
-/// The nulls left out are recorded only when the attribute keeps a value: a refused or absent value
-/// lost the whole attribute, not some of its members.
+/// The converted value is then typed as the declared kind (see [`type_for_kind`]): a `JsonProperty`
+/// always comes out as raw JSON, read as the source held it under its default conversion or, under
+/// a declared transformation, as the JSON the transformed value serializes to; a `VocabProperty` as
+/// its IRI; and a `LanguageProperty` as its `languageMap`. The nulls left out are recorded only when
+/// the attribute keeps a value: a refused or absent value lost the whole attribute, not some of its
+/// members.
 fn transform(ctx: &ResolutionContext, attr_name: &NameBuf, config: &Attribute, parts: SourceParts) -> Option<AttributeContent> {
     let geometry: Option<&GeometryPolicy> = config.geometry().as_ref();
     let mut omitted = OmittedNulls::default();
-    let outcome = Transformer::apply(parts, config.conversion(), geometry, &mut omitted).and_then(|content| match (config.kind(), content) {
-        (NgsiLdAttributeKind::JsonProperty, Some(AttributeContent::Value(value))) => Ok(Some(AttributeContent::Json(JsonPayload::try_from(value)?))),
-        (_, content) => Ok(content),
+    let outcome = Transformer::apply(parts, config.conversion(), geometry, &mut omitted).and_then(|content| match content {
+        Some(content) => type_for_kind(*config.kind(), content),
+        None => Ok(None),
     });
 
     let content = bind_refusal(ctx, attr_name, outcome)?;
@@ -237,6 +256,10 @@ fn bind_refusal<T>(ctx: &ResolutionContext, attr_name: &NameBuf, outcome: result
         }
         Err(AttributeRefusal::UnreadableTimestamp { text }) => {
             ctx.dropped.timestamps.record(TimestampLoss::AttributeValue, attr_name, &text);
+            None
+        }
+        Err(AttributeRefusal::UnusableValue { required, text }) => {
+            ctx.dropped.unusable_values.record(ctx.path_of(attr_name), required, &text);
             None
         }
     }

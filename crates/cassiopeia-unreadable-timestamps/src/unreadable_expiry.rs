@@ -1,5 +1,4 @@
-use crate::unreadable_timestamp::UnreadableTimestamp;
-use cassiopeia_batch_sink::recurring::Recurring;
+use cassiopeia_batch_sink::{counted_example::CountedExample, recurring::Recurring};
 use std::num::NonZeroU64;
 use urn_rs::Urn;
 
@@ -15,7 +14,7 @@ pub struct UnreadableExpiry {
     /// does not identify every record that shared it.
     pub exemplar: Urn,
     /// The first text that would not read, and how many records of this type carried one.
-    pub unreadable: UnreadableTimestamp,
+    pub unreadable: CountedExample,
 }
 
 impl UnreadableExpiry {
@@ -26,7 +25,7 @@ impl UnreadableExpiry {
             // The sink outlives the borrowed entity id, so the exemplar must own it; only the first
             // failure of a type pays for this.
             exemplar: exemplar.clone(),
-            unreadable: UnreadableTimestamp::first(example),
+            unreadable: CountedExample::first(example),
         }
     }
 }

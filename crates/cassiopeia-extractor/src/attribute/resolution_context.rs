@@ -1,6 +1,7 @@
-use crate::dropped_attributes::DroppedAttributes;
+use crate::{attribute::declaration_trail::DeclarationTrail, attribute_path::AttributePath, dropped_attributes::DroppedAttributes};
 use cassiopeia_ir::{entity_relationships::EntityRelationships, metadata::EntityMetadata};
 use cassiopeia_mapping::template::resolver::TemplateResolver;
+use cassiopeia_ngsi_ld::entity::name::NameBuf;
 use serde_json::Value as JsonValue;
 
 /// The guard depth for nested attribute resolution. A mapping nested past this is treated as
@@ -31,6 +32,9 @@ pub(crate) struct ResolutionContext<'a> {
     pub(crate) dropped: &'a DroppedAttributes,
     /// How deep into nested attribute declarations this context sits.
     pub(crate) depth: usize,
+    /// The declarations holding the ones this context resolves, or `None` at the top level, so a
+    /// loss met beneath the top level is named by its whole path.
+    pub(crate) owners: Option<&'a DeclarationTrail<'a>>,
     /// Where attribute-level properties are recorded, present only on the root context.
     pub(crate) metadata: Option<&'a mut EntityMetadata>,
 }
@@ -50,6 +54,7 @@ impl<'a> ResolutionContext<'a> {
             relationships,
             dropped,
             depth: 0,
+            owners: None,
             metadata,
         }
     }
@@ -62,8 +67,28 @@ impl<'a> ResolutionContext<'a> {
             relationships: self.relationships,
             dropped: self.dropped,
             depth: self.depth + 1,
+            owners: self.owners,
             metadata: None,
         }
+    }
+
+    /// Derives a context at the same depth for resolving the declarations `owner` holds,
+    /// collecting no metadata.
+    pub(crate) const fn beneath<'b>(&'b self, owner: &'b DeclarationTrail<'b>) -> ResolutionContext<'b> {
+        ResolutionContext {
+            data: self.data,
+            resolver: self.resolver,
+            relationships: self.relationships,
+            dropped: self.dropped,
+            depth: self.depth,
+            owners: Some(owner),
+            metadata: None,
+        }
+    }
+
+    /// The path of the declaration `name`, resolved in this context.
+    pub(crate) fn path_of(&self, name: &NameBuf) -> AttributePath {
+        AttributePath::beneath(self.owners, name)
     }
 
     /// Whether resolution has recursed past the guard depth.

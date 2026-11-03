@@ -20,7 +20,6 @@ use cassiopeia_ngsi_ld::{
     value::{json_payload::JsonPayload, types::Value},
 };
 use iri_rs::IriBuf;
-use langtag::LangTagBuf;
 use urn_rs::Urn;
 
 /// Builds a Property carrying the value and every qualifier its metadata declared.
@@ -89,54 +88,35 @@ pub fn build_geo_property(geometry: NgsiLdGeometry, meta: MetadataSummary) -> Ng
     geo.into_wrapper()
 }
 
-/// Builds a `LanguageProperty` from a value that is an object of language tag to text.
+/// Builds a `LanguageProperty` around the `languageMap` extraction typed (ETSI GS CIM 009 v1.9.1
+/// clause 4.5.18).
 ///
-/// A value that is not an object yields no attribute: a `languageMap` is defined only over a set of
-/// language-tagged strings (ETSI GS CIM 009 v1.9.1 clause 4.5.18). Neither does an object in which no
-/// entry is a well-formed tag with text: an empty `languageMap` carries no value at all.
+/// Extraction refuses, and records, a value that is no map of text keyed by language tag, so the map
+/// is taken exactly as it is.
 #[must_use]
-pub fn build_language_property(value: Value, meta: MetadataSummary) -> Option<NgsiLdAttributeWrapper> {
-    let mut language_map = LanguageMap::default();
-    match value {
-        Value::Object(entries) => {
-            for (language, text) in entries.as_ref() {
-                // Only well-formed BCP-47 tags with textual values enter the map.
-                if let (Ok(tag), Some(text)) = (LangTagBuf::new(language.to_string()), text.as_str()) {
-                    language_map.insert(tag, text.to_string());
-                }
-            }
-        }
-        Value::Boolean(_) | Value::Number(_) | Value::String(_) | Value::Temporal(_) | Value::Geospatial(_) | Value::Array(_) => {
-            return None;
-        }
-    }
-    if language_map.is_empty() {
-        return None;
-    }
-
+pub fn build_language_property(language_map: LanguageMap, meta: MetadataSummary) -> NgsiLdAttributeWrapper {
     let mut property = NgsiLdLanguageProperty::new(language_map);
     property.observed_at = meta.observed_at;
     property.expires_at = meta.expires_at;
     property.dataset_id = meta.dataset_id;
     property.attributes = meta.custom_attributes;
 
-    Some(NgsiLdAttributeWrapper::single(NgsiLdAttribute::LanguageProperty(property)))
+    NgsiLdAttributeWrapper::single(NgsiLdAttribute::LanguageProperty(property))
 }
 
-/// Builds a `VocabProperty` from the value's string form.
+/// Builds a `VocabProperty` around the vocabulary IRI extraction typed (ETSI GS CIM 009 v1.9.1
+/// clause 4.5.20).
 ///
-/// A value that is not a valid IRI yields no attribute: `vocab` is a mapping to a vocabulary IRI
-/// (ETSI GS CIM 009 v1.9.1 clause 4.5.20), so a non-IRI value is dropped rather than emitted.
+/// Extraction refuses, and records, a value that is no IRI, so the IRI is taken exactly as it is.
 #[must_use]
-pub fn build_vocab_property(value: &Value, meta: MetadataSummary) -> Option<NgsiLdAttributeWrapper> {
-    let has_vocab = IriBuf::new(value.to_string()).ok()?;
+pub fn build_vocab_property(has_vocab: IriBuf, meta: MetadataSummary) -> NgsiLdAttributeWrapper {
     let mut property = NgsiLdVocabProperty::new(has_vocab);
     property.observed_at = meta.observed_at;
     property.expires_at = meta.expires_at;
     property.dataset_id = meta.dataset_id;
     property.attributes = meta.custom_attributes;
 
-    Some(NgsiLdAttributeWrapper::single(NgsiLdAttribute::VocabProperty(property)))
+    NgsiLdAttributeWrapper::single(NgsiLdAttribute::VocabProperty(property))
 }
 
 /// Builds a `ListProperty`, splitting an array value into its list and wrapping a scalar as a
@@ -187,10 +167,11 @@ pub fn build_list_relationship(objects: Vec<Urn>, object_type: Option<NameBuf>, 
 ///
 /// A sub-attribute is the serialization of a Property or any of its subclasses, and of a Relationship
 /// (ETSI GS CIM 009 v1.9.1 clause 4.5.2.2 with 4.5.3), so every kind is dispatched to its own builder
-/// and keeps the kind it declared rather than being flattened. A builder that rejects its content (a
-/// non-IRI `VocabProperty`, a non-object `LanguageProperty`, a `Relationship` whose value is not a
-/// valid URN, an empty `ListRelationship`, a `JsonProperty` whose content is no raw JSON, or any other
-/// kind whose content is raw JSON rather than a value) yields `None`, dropping the sub-attribute
+/// and keeps the kind it declared rather than being flattened. Extraction types the content of a
+/// `JsonProperty`, a `VocabProperty`, and a `LanguageProperty` as that kind, refusing and recording
+/// a value the kind cannot hold, and those kinds are built only from that typed content. A builder
+/// that rejects its content (a `Relationship` whose value is not a valid URN, an empty
+/// `ListRelationship`, or content typed for another kind) yields `None`, dropping the sub-attribute
 /// rather than emitting it malformed. A `GeoProperty` is built only around a geometry the extraction
 /// stage already typed under its own `geometry` policy; nothing is parsed here. `object_type` is
 /// consulted only by the two relationship kinds.
@@ -203,27 +184,16 @@ pub fn build_sub_attribute(
 ) -> Option<NgsiLdAttributeWrapper> {
     let value = match content {
         AttributeContent::Value(value) => value,
-        AttributeContent::Json(payload) => {
-            return match kind {
-                NgsiLdAttributeKind::JsonProperty => Some(build_json_property(payload, meta)),
-                NgsiLdAttributeKind::Property
-                | NgsiLdAttributeKind::GeoProperty
-                | NgsiLdAttributeKind::ListProperty
-                | NgsiLdAttributeKind::VocabProperty
-                | NgsiLdAttributeKind::LanguageProperty
-                | NgsiLdAttributeKind::Relationship
-                | NgsiLdAttributeKind::ListRelationship => None,
-            };
-        }
+        AttributeContent::Json(payload) => return matches!(kind, NgsiLdAttributeKind::JsonProperty).then(|| build_json_property(payload, meta)),
+        AttributeContent::Vocab(iri) => return matches!(kind, NgsiLdAttributeKind::VocabProperty).then(|| build_vocab_property(iri, meta)),
+        AttributeContent::Language(map) => return matches!(kind, NgsiLdAttributeKind::LanguageProperty).then(|| build_language_property(map, meta)),
     };
     match kind {
         NgsiLdAttributeKind::Property => Some(build_property(value, meta)),
         NgsiLdAttributeKind::GeoProperty => value.into_geometry().map(|geometry| build_geo_property(geometry, meta)),
         NgsiLdAttributeKind::ListProperty => Some(build_list_property(value, meta)),
-        // A `JsonProperty` carries raw JSON, never a Value.
-        NgsiLdAttributeKind::JsonProperty => None,
-        NgsiLdAttributeKind::VocabProperty => build_vocab_property(&value, meta),
-        NgsiLdAttributeKind::LanguageProperty => build_language_property(value, meta),
+        // Built from their typed content above, never from a Value.
+        NgsiLdAttributeKind::JsonProperty | NgsiLdAttributeKind::VocabProperty | NgsiLdAttributeKind::LanguageProperty => None,
         NgsiLdAttributeKind::Relationship => {
             // A relationship sub-attribute's value is its object URN; a value that is not a valid URN
             // is dropped rather than emitted malformed.
@@ -261,7 +231,7 @@ mod tests {
     use cassiopeia_ir::attribute_content::AttributeContent;
     use cassiopeia_ngsi_ld::{
         entity::{
-            attribute::{NgsiLdAttribute, NgsiLdAttributeKind, NgsiLdAttributeWrapper, property::NgsiLdProperty},
+            attribute::{NgsiLdAttribute, NgsiLdAttributeKind, NgsiLdAttributeWrapper, language_property::LanguageMap, property::NgsiLdProperty},
             name::NameBuf,
         },
         value::{
@@ -271,6 +241,8 @@ mod tests {
     };
     use chrono::{DateTime, TimeZone, Utc};
     use indexmap::IndexMap;
+    use iri_rs::IriBuf;
+    use langtag::LangTagBuf;
     use pretty_assertions::assert_eq;
     use serde_json::json;
     use urn_rs::Urn;
@@ -332,8 +304,17 @@ mod tests {
     }
 
     #[test]
-    fn a_language_property_rejects_a_value_that_is_not_an_object() {
-        assert!(build_language_property(Value::String("hello".into()), empty_meta()).is_none());
+    fn a_language_property_carries_the_language_map_it_was_built_around() {
+        let mut map = LanguageMap::default();
+        map.insert(LangTagBuf::new("en".to_owned()).unwrap(), "hello".to_owned());
+
+        let NgsiLdAttributeWrapper::Single(attr) = build_language_property(map.clone(), empty_meta()) else {
+            panic!("expected a single language property");
+        };
+        let NgsiLdAttribute::LanguageProperty(property) = attr.as_ref() else {
+            panic!("expected a language property");
+        };
+        assert_eq!(property.language_map, map);
     }
 
     /// A polygon whose exterior ring is wound clockwise, against RFC 7946 clause 3.1.6's right-hand
@@ -396,8 +377,16 @@ mod tests {
     }
 
     #[test]
-    fn a_vocab_property_rejects_a_value_that_is_not_a_valid_iri() {
-        assert!(build_vocab_property(&Value::String(" not an iri ".into()), empty_meta()).is_none());
+    fn a_vocab_property_carries_the_iri_it_was_built_around() {
+        let iri = IriBuf::new("https://example.org/level/high".to_owned()).unwrap();
+
+        let NgsiLdAttributeWrapper::Single(attr) = build_vocab_property(iri.clone(), empty_meta()) else {
+            panic!("expected a single vocab property");
+        };
+        let NgsiLdAttribute::VocabProperty(property) = attr.as_ref() else {
+            panic!("expected a vocab property");
+        };
+        assert_eq!(property.has_vocab, iri);
     }
 
     #[test]
@@ -532,9 +521,30 @@ mod tests {
     }
 
     #[test]
-    fn a_language_property_whose_object_holds_no_tagged_text_is_dropped_rather_than_empty() {
-        let value = Value::try_from(json!({"not a tag!": "hello", "en": 7})).unwrap();
+    fn vocab_and_language_sub_attributes_are_built_from_their_typed_content() {
+        let iri = IriBuf::new("https://example.org/level/high".to_owned()).unwrap();
+        let mut map = LanguageMap::default();
+        map.insert(LangTagBuf::new("en".to_owned()).unwrap(), "hello".to_owned());
 
-        assert!(build_language_property(value, empty_meta()).is_none());
+        let vocab = build_sub_attribute(NgsiLdAttributeKind::VocabProperty, AttributeContent::Vocab(iri), None, empty_meta()).expect("vocab built");
+        let language = build_sub_attribute(NgsiLdAttributeKind::LanguageProperty, AttributeContent::Language(map), None, empty_meta()).expect("language built");
+
+        assert!(matches!(vocab, NgsiLdAttributeWrapper::Single(attr) if matches!(*attr, NgsiLdAttribute::VocabProperty(_))));
+        assert!(matches!(language, NgsiLdAttributeWrapper::Single(attr) if matches!(*attr, NgsiLdAttribute::LanguageProperty(_))));
+    }
+
+    #[test]
+    fn a_vocab_or_language_sub_attribute_whose_content_is_a_value_is_dropped() {
+        for kind in [NgsiLdAttributeKind::VocabProperty, NgsiLdAttributeKind::LanguageProperty] {
+            assert!(build_sub_attribute(kind, AttributeContent::Value(Value::String("https://example.org/x".into())), None, empty_meta()).is_none());
+        }
+    }
+
+    #[test]
+    fn typed_content_under_another_kind_is_dropped() {
+        let iri = IriBuf::new("https://example.org/level/high".to_owned()).unwrap();
+
+        assert!(build_sub_attribute(NgsiLdAttributeKind::Property, AttributeContent::Vocab(iri.clone()), None, empty_meta()).is_none());
+        assert!(build_sub_attribute(NgsiLdAttributeKind::LanguageProperty, AttributeContent::Vocab(iri), None, empty_meta()).is_none());
     }
 }

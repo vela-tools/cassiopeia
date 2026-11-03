@@ -166,6 +166,8 @@ mod tests {
     use cefact_units::UnitCode;
     use chrono::{DateTime, TimeZone, Utc};
     use indexmap::IndexMap;
+    use iri_rs::IriBuf;
+    use langtag::LangTagBuf;
     use pretty_assertions::{assert_eq, assert_ne};
     use serde_json::json;
     use std::{path::Path, sync::Arc};
@@ -871,19 +873,16 @@ mod tests {
     }
 
     #[test]
-    fn a_rejected_vocab_property_instance_is_dropped_without_shifting_dataset_ids() {
+    fn a_missing_vocab_property_instance_is_dropped_without_shifting_dataset_ids() {
         let mapping = mapping(
             r#"{ version: "v4", dataModel: "Sensor", identity: { entityName: "S-{{ id }}" }, attributes: { category: { type: "VocabProperty", instances: [ { source: "{{ a }}" }, { source: "{{ b }}" }, { source: "{{ c }}" } ] } } }"#,
         );
-        // The middle element is not a valid IRI, so its instance is dropped; the survivors keep their
-        // own datasetIds because metadata is selected by original index (clause 4.5.5).
+        // Extraction refused the middle instance, so it arrives missing; the survivors keep their own
+        // datasetIds because metadata is selected by original index (clause 4.5.5).
+        let vocab = |iri: &str| Some(AttributeContent::Vocab(IriBuf::new(iri.to_owned()).unwrap()));
         let value_map = values(vec![(
             "category",
-            instances(vec![
-                Some(Value::String("https://example.org/a".into())),
-                Some(Value::String("not an iri".into())),
-                Some(Value::String("https://example.org/c".into())),
-            ]),
+            ResolvedAttribute::Instances(vec![vocab("https://example.org/a"), None, vocab("https://example.org/c")]),
         )]);
         let mut metadata = IndexMap::default();
         metadata.insert(
@@ -923,10 +922,16 @@ mod tests {
             (
                 r#"{ version: "v4", dataModel: "Sensor", identity: { entityName: "S-{{ id }}" }, attributes: { label: { type: "LanguageProperty", instances: [ { source: "{{ a }}" }, { source: "{{ b }}" } ] } } }"#,
                 "label",
-                instances(vec![
-                    Some(Value::try_from(json!({"en": "hello"})).unwrap()),
-                    Some(Value::try_from(json!({"en": "world"})).unwrap()),
-                ]),
+                ResolvedAttribute::Instances(
+                    ["hello", "world"]
+                        .into_iter()
+                        .map(|text| {
+                            Some(AttributeContent::Language(
+                                [(LangTagBuf::new("en".to_owned()).unwrap(), text.to_owned())].into_iter().collect(),
+                            ))
+                        })
+                        .collect(),
+                ),
             ),
             (
                 r#"{ version: "v4", dataModel: "Sensor", identity: { entityName: "S-{{ id }}" }, attributes: { tags: { type: "ListProperty", instances: [ { source: "{{ a }}" }, { source: "{{ b }}" } ] } } }"#,

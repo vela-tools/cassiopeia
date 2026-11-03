@@ -17,5 +17,4 @@ pub mod attribute_loss;
 pub mod timestamp_loss;
 pub mod unreadable_expiries;
 pub mod unreadable_expiry;
-pub mod unreadable_timestamp;
 pub mod unreadable_timestamps;

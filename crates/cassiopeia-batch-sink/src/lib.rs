@@ -10,5 +10,6 @@
 //! that owns the loss decides what to call it.
 
 pub mod batch_sink;
+pub mod counted_example;
 pub mod occurrences;
 pub mod recurring;

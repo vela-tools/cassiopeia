@@ -1,15 +1,14 @@
 use crate::{
     attribute_loss::{AttributeLoss, AttributeLossRef},
     timestamp_loss::TimestampLoss,
-    unreadable_timestamp::UnreadableTimestamp,
 };
-use cassiopeia_batch_sink::batch_sink::BatchSink;
+use cassiopeia_batch_sink::{batch_sink::BatchSink, counted_example::CountedExample};
 use cassiopeia_ngsi_ld::entity::name::NameBuf;
 use derive_more::{Deref, Into};
 
 /// The attribute timestamps one batch could not read, one record per [`AttributeLoss`].
 #[derive(Default, Deref, Into)]
-pub struct UnreadableTimestamps(BatchSink<AttributeLoss, UnreadableTimestamp>);
+pub struct UnreadableTimestamps(BatchSink<AttributeLoss, CountedExample>);
 
 impl UnreadableTimestamps {
     /// Opens an empty sink.
@@ -24,19 +23,14 @@ impl UnreadableTimestamps {
     /// against that same record.
     pub fn record(&self, loss: TimestampLoss, attribute: &NameBuf, text: &str) {
         let key = AttributeLossRef { loss, attribute };
-        self.0.tally(&key, || (key.to_owned_key(), UnreadableTimestamp::first(text)));
+        self.0.tally(&key, || (key.to_owned_key(), CountedExample::first(text)));
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use crate::{
-        attribute_loss::AttributeLoss,
-        timestamp_loss::TimestampLoss,
-        unreadable_timestamp::UnreadableTimestamp,
-        unreadable_timestamps::UnreadableTimestamps,
-    };
-    use cassiopeia_batch_sink::{batch_sink::BatchSink, recurring::Recurring};
+    use crate::{attribute_loss::AttributeLoss, timestamp_loss::TimestampLoss, unreadable_timestamps::UnreadableTimestamps};
+    use cassiopeia_batch_sink::{batch_sink::BatchSink, counted_example::CountedExample, recurring::Recurring};
     use cassiopeia_ngsi_ld::entity::name::NameBuf;
     use pretty_assertions::assert_eq;
 
@@ -51,7 +45,7 @@ mod tests {
         }
     }
 
-    fn entries(sink: UnreadableTimestamps) -> Vec<(AttributeLoss, UnreadableTimestamp)> {
+    fn entries(sink: UnreadableTimestamps) -> Vec<(AttributeLoss, CountedExample)> {
         BatchSink::from(sink).into_entries().collect()
     }
 

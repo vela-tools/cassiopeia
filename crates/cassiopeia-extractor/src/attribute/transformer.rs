@@ -333,7 +333,7 @@ mod tests {
     fn converted(parts: SourceParts, conversion: ValueConversion, policy: Option<&GeometryPolicy>) -> Option<Value> {
         match apply(parts, conversion, policy).unwrap() {
             Some(AttributeContent::Value(value)) => Some(value),
-            Some(AttributeContent::Json(payload)) => panic!("raw JSON {payload:?}, not a value"),
+            Some(other @ (AttributeContent::Json(_) | AttributeContent::Vocab(_) | AttributeContent::Language(_))) => panic!("{other:?}, not a value"),
             None => None,
         }
     }
@@ -342,7 +342,7 @@ mod tests {
     fn payload(parts: SourceParts, conversion: ValueConversion) -> Option<JsonValue> {
         match apply(parts, conversion, None).unwrap() {
             Some(AttributeContent::Json(payload)) => Some(JsonValue::from(payload)),
-            Some(AttributeContent::Value(value)) => panic!("a value {value:?}, not raw JSON"),
+            Some(other @ (AttributeContent::Value(_) | AttributeContent::Vocab(_) | AttributeContent::Language(_))) => panic!("{other:?}, not raw JSON"),
             None => None,
         }
     }
@@ -353,7 +353,7 @@ mod tests {
         let content = Transformer::apply(parts, conversion, None, &mut omitted).unwrap();
         let value = match content {
             Some(AttributeContent::Value(value)) => Some(value),
-            Some(AttributeContent::Json(payload)) => panic!("raw JSON {payload:?}, not a value"),
+            Some(other @ (AttributeContent::Json(_) | AttributeContent::Vocab(_) | AttributeContent::Language(_))) => panic!("{other:?}, not a value"),
             None => None,
         };
         (value, omitted)

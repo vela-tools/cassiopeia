@@ -7,6 +7,7 @@ pub mod non_finite_float;
 pub mod null_in_json;
 pub mod omitted_nulls;
 pub mod parsing;
+pub mod reported_text;
 pub mod temporal;
 pub mod temporal_text;
 pub mod types;

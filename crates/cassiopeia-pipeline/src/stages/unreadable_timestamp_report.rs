@@ -1,4 +1,4 @@
-use cassiopeia_batch_sink::recurring::Recurring;
+use cassiopeia_batch_sink::{counted_example::CountedExample, recurring::Recurring};
 use cassiopeia_diagnostic::{
     code::{diagnostic_code::DiagnosticCode, extractor_code::ExtractorCode, transform_code::TransformCode},
     context_field::ContextField,
@@ -7,7 +7,7 @@ use cassiopeia_diagnostic::{
     severity::Severity,
 };
 use cassiopeia_ngsi_ld::entity::name::NameBuf;
-use cassiopeia_unreadable_timestamps::{attribute_loss::AttributeLoss, timestamp_loss::TimestampLoss, unreadable_timestamp::UnreadableTimestamp};
+use cassiopeia_unreadable_timestamps::{attribute_loss::AttributeLoss, timestamp_loss::TimestampLoss};
 
 /// The code the loss of one attribute timestamp is published under.
 ///
@@ -26,7 +26,7 @@ const fn code(loss: TimestampLoss) -> DiagnosticCode {
 /// The headline carries all three because the concise form shows nothing else: the attribute
 /// travels as a context field, but that field is only rendered under `-v`, and a reader who
 /// cannot see which attribute and which spelling has nothing to go and fix.
-fn headline(loss: TimestampLoss, attribute: &NameBuf, record: &UnreadableTimestamp) -> String {
+fn headline(loss: TimestampLoss, attribute: &NameBuf, record: &CountedExample) -> String {
     let cost = match loss {
         TimestampLoss::AttributeValue => "dropped",
         TimestampLoss::ObservedAt => "emitted without `observedAt`",
@@ -45,7 +45,7 @@ fn headline(loss: TimestampLoss, attribute: &NameBuf, record: &UnreadableTimesta
 /// distinct spellings they carried: the attribute, the loss, and the code are the failure, and the
 /// example spelling rides on the headline, which stays outside the diagnostic's identity so it
 /// cannot split one group into a line per batch.
-pub(crate) fn unreadable_timestamp_diagnostic(AttributeLoss { loss, attribute }: AttributeLoss, record: &UnreadableTimestamp) -> Diagnostic {
+pub(crate) fn unreadable_timestamp_diagnostic(AttributeLoss { loss, attribute }: AttributeLoss, record: &CountedExample) -> Diagnostic {
     DiagnosticBuilder::new(Severity::Warning, code(loss), headline(loss, &attribute, record))
         .with_context(ContextField::Attribute(attribute))
         .with_occurrences(record.occurrences())

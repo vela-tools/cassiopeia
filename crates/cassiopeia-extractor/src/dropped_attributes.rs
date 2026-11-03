@@ -3,6 +3,7 @@ use crate::{
     dropped_nulls::DroppedNulls,
     refused_json_payloads::RefusedJsonPayloads,
     unresolved_templates::UnresolvedTemplates,
+    unusable_values::UnusableValues,
 };
 use cassiopeia_unreadable_timestamps::unreadable_timestamps::UnreadableTimestamps;
 
@@ -22,6 +23,8 @@ pub struct DroppedAttributes {
     pub templates: UnresolvedTemplates,
     /// `JsonProperty` values that are no JSON object or array of objects.
     pub json_payloads: RefusedJsonPayloads,
+    /// `VocabProperty` and `LanguageProperty` values their kind cannot hold.
+    pub unusable_values: UnusableValues,
     /// Attribute values written without the nulls their source held.
     pub nulls: DroppedNulls,
 }
@@ -46,6 +49,7 @@ mod tests {
         assert!(dropped.timestamps.is_empty());
         assert!(dropped.templates.is_empty());
         assert!(dropped.json_payloads.is_empty());
+        assert!(dropped.unusable_values.is_empty());
         assert!(dropped.nulls.is_empty());
     }
 }

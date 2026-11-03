@@ -15,12 +15,13 @@ use cassiopeia_ir::{attribute_content::AttributeContent, entity::AttributeValues
 use cassiopeia_mapping::attribute::Attribute;
 use cassiopeia_ngsi_ld::{
     entity::{
-        attribute::{NgsiLdAttributeKind, NgsiLdAttributeWrapper},
+        attribute::{NgsiLdAttributeKind, NgsiLdAttributeWrapper, language_property::LanguageMap},
         name::NameBuf,
     },
     value::{json_payload::JsonPayload, types::Value},
 };
 use cassiopeia_unreadable_timestamps::unreadable_timestamps::UnreadableTimestamps;
+use iri_rs::IriBuf;
 
 /// Builds one NGSI-LD attribute from its mapping declaration and the entity's resolved data.
 ///
@@ -69,8 +70,8 @@ pub(crate) fn build_attribute(
             Some(build_geo_property(geometry, transform_metadata(metadata, name, None, cache, unreadable)))
         }
         NgsiLdAttributeKind::VocabProperty => {
-            let value = take_value(values, key)?;
-            build_vocab_property(&value, transform_metadata(metadata, name, None, cache, unreadable))
+            let iri = take_vocab(values, key)?;
+            Some(build_vocab_property(iri, transform_metadata(metadata, name, None, cache, unreadable)))
         }
         NgsiLdAttributeKind::ListProperty => {
             let value = take_value(values, key)?;
@@ -81,8 +82,11 @@ pub(crate) fn build_attribute(
             Some(build_json_property(payload, transform_metadata(metadata, name, None, cache, unreadable)))
         }
         NgsiLdAttributeKind::LanguageProperty => {
-            let value = take_value(values, key)?;
-            build_language_property(value, transform_metadata(metadata, name, None, cache, unreadable))
+            let language_map = take_language_map(values, key)?;
+            Some(build_language_property(
+                language_map,
+                transform_metadata(metadata, name, None, cache, unreadable),
+            ))
         }
         NgsiLdAttributeKind::Relationship => build_single_relationship(name, config, relationships, metadata, cache, unreadable),
         NgsiLdAttributeKind::ListRelationship => build_list_relationship_attribute(name, config, relationships, metadata, cache, unreadable),
@@ -104,7 +108,7 @@ fn take_content(values: &mut AttributeValues, key: &str) -> Option<AttributeCont
 fn take_value(values: &mut AttributeValues, key: &str) -> Option<Value> {
     match take_content(values, key)? {
         AttributeContent::Value(value) => Some(value),
-        AttributeContent::Json(_) => None,
+        AttributeContent::Json(_) | AttributeContent::Vocab(_) | AttributeContent::Language(_) => None,
     }
 }
 
@@ -112,6 +116,22 @@ fn take_value(values: &mut AttributeValues, key: &str) -> Option<Value> {
 fn take_json(values: &mut AttributeValues, key: &str) -> Option<JsonPayload> {
     match take_content(values, key)? {
         AttributeContent::Json(payload) => Some(payload),
-        AttributeContent::Value(_) => None,
+        AttributeContent::Value(_) | AttributeContent::Vocab(_) | AttributeContent::Language(_) => None,
+    }
+}
+
+/// Takes the vocabulary IRI a single-instance `VocabProperty` declaration resolved to.
+fn take_vocab(values: &mut AttributeValues, key: &str) -> Option<IriBuf> {
+    match take_content(values, key)? {
+        AttributeContent::Vocab(iri) => Some(iri),
+        AttributeContent::Value(_) | AttributeContent::Json(_) | AttributeContent::Language(_) => None,
+    }
+}
+
+/// Takes the `languageMap` a single-instance `LanguageProperty` declaration resolved to.
+fn take_language_map(values: &mut AttributeValues, key: &str) -> Option<LanguageMap> {
+    match take_content(values, key)? {
+        AttributeContent::Language(language_map) => Some(language_map),
+        AttributeContent::Value(_) | AttributeContent::Json(_) | AttributeContent::Vocab(_) => None,
     }
 }

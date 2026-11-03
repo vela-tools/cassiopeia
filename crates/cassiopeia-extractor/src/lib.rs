@@ -12,7 +12,10 @@
 //! date-time in
 //! [`UnreadableTimestamps`](cassiopeia_unreadable_timestamps::unreadable_timestamps::UnreadableTimestamps),
 //! and a `JsonProperty` source that is no JSON object in
-//! [`RefusedJsonPayloads`](crate::refused_json_payloads::RefusedJsonPayloads). An attribute whose
+//! [`RefusedJsonPayloads`](crate::refused_json_payloads::RefusedJsonPayloads). A `VocabProperty`
+//! source that is no IRI, and a `LanguageProperty` source that is no map of text keyed by language
+//! tag, are recorded in [`UnusableValues`](crate::unusable_values::UnusableValues), named by their
+//! [`AttributePath`](crate::attribute_path::AttributePath). An attribute whose
 //! template fails to render against the record is dropped the same way, and recorded in
 //! [`UnresolvedTemplates`](crate::unresolved_templates::UnresolvedTemplates).
 //!
@@ -27,6 +30,7 @@
 //! reaches the writer and the run can report what it lost.
 
 pub mod attribute;
+pub mod attribute_path;
 pub mod dropped_attributes;
 pub mod dropped_geometries;
 pub mod dropped_geometry;
@@ -37,5 +41,8 @@ pub mod error;
 pub mod extractor;
 pub mod refused_json_payload;
 pub mod refused_json_payloads;
+pub mod required_value;
 pub mod unresolved_template;
 pub mod unresolved_templates;
+pub mod unusable_value;
+pub mod unusable_values;

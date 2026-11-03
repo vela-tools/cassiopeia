@@ -728,10 +728,13 @@ dependencies = [
  "chrono",
  "compact_str 0.10.0",
  "derive_more",
+ "iri-rs",
+ "langtag",
  "pretty_assertions",
  "rayon",
  "serde_json",
  "smallvec",
+ "strum",
  "thiserror 2.0.21",
  "urn-rs",
 ]
@@ -808,6 +811,8 @@ dependencies = [
  "foldhash",
  "getset",
  "indexmap 2.14.2",
+ "iri-rs",
+ "langtag",
  "mediatype",
  "pretty_assertions",
  "serde",
@@ -1114,7 +1119,6 @@ dependencies = [
  "derive_more",
  "indexmap 2.14.2",
  "pretty_assertions",
- "serde_json",
  "urn-rs",
 ]
 

@@ -1,4 +1,9 @@
-use crate::attribute::{resolution_context::ResolutionContext, resolution_error::Result, resolver::resolve_content};
+use crate::attribute::{
+    declaration_trail::{DeclarationTrail, Nesting},
+    resolution_context::ResolutionContext,
+    resolution_error::Result,
+    resolver::resolve_content,
+};
 use cassiopeia_ir::{
     metadata::MetadataStorage,
     relationship_path::RelationshipPath,
@@ -20,8 +25,11 @@ impl MetadataExtractor {
     /// A multi-instance attribute carries one metadata entry per `datasetId`-tagged instance (ETSI GS
     /// CIM 009 v1.9.1 clause 4.5.5); every other kind, a `ListRelationship` included, shares one
     /// metadata entry across the attribute: its sub-attributes qualify the attribute as a whole
-    /// (clause 4.5.2.2).
+    /// (clause 4.5.2.2). Its sub-attributes resolve beneath it, so a loss among them is named by its
+    /// path.
     pub(crate) fn extract(ctx: &ResolutionContext, attr_name: &NameBuf, config: &Attribute) -> Result<Option<MetadataStorage>> {
+        let owner = DeclarationTrail::below(attr_name, Nesting::SubAttribute, ctx.owners);
+        let ctx = &ctx.beneath(&owner);
         if let Some(instances) = config.instances() {
             Self::extract_instances(ctx, attr_name, config, instances)
         } else {
@@ -109,7 +117,8 @@ impl MetadataExtractor {
             }
 
             if let Some(content) = resolve_content(ctx, name, property)? {
-                let child = ctx.child(ctx.data);
+                let owner = DeclarationTrail::below(name, Nesting::SubAttribute, ctx.owners);
+                let child = ctx.beneath(&owner).child(ctx.data);
                 // Grow the path only when nested relationships exist, so a deeper one under this
                 // Property sub-attribute can still be keyed; otherwise recurse with an empty path.
                 let nested = if ctx.relationships.nested().is_some() {
@@ -164,7 +173,8 @@ impl MetadataExtractor {
             .target()
             .as_ref()
             .and_then(|target| NameBuf::new(target.entity().entity_type().as_str()).ok());
-        let nested = Self::resolve_property_map(&ctx.child(ctx.data), rel_path.segments(), property.properties().as_ref())?;
+        let owner = DeclarationTrail::below(name, Nesting::SubAttribute, ctx.owners);
+        let nested = Self::resolve_property_map(&ctx.beneath(&owner).child(ctx.data), rel_path.segments(), property.properties().as_ref())?;
 
         Ok(Some(SubAttribute::new_relationship(kind, value, object_type, nested)))
     }

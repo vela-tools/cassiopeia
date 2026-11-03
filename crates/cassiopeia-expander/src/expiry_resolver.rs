@@ -3,7 +3,7 @@ use cassiopeia_mapping::{
     template::{error::TemplateError, resolver::TemplateResolver},
 };
 use cassiopeia_ngsi_ld::value::{omitted_nulls::OmittedNulls, types::Value as NgsiValue};
-use cassiopeia_unreadable_timestamps::{unreadable_expiries::UnreadableExpiries, unreadable_timestamp::unreadable_text};
+use cassiopeia_unreadable_timestamps::unreadable_expiries::UnreadableExpiries;
 use chrono::{DateTime, Utc};
 use serde_json::Value;
 use urn_rs::Urn;
@@ -54,7 +54,7 @@ impl ExpiryResolver {
         };
         let instant = value.try_parse_datetime();
         if instant.is_none()
-            && let Some(text) = unreadable_text(&value)
+            && let Some(text) = value.reported_text()
         {
             unreadable.record(mapping.data_model().entity_type(), entity, text.as_ref());
         }

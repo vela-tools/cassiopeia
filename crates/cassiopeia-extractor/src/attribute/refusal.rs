@@ -1,3 +1,4 @@
+use crate::required_value::RequiredValue;
 use cassiopeia_geometry::error::GeometryError;
 use cassiopeia_ngsi_ld::value::json_payload_error::JsonPayloadError;
 use derive_more::From;
@@ -20,6 +21,15 @@ pub(crate) enum AttributeRefusal {
     #[from(ignore)]
     UnreadableTimestamp {
         /// The text that would not read, quoted back so a mapping author can see its shape.
+        text: Box<str>,
+    },
+    /// The source carried a value the declared kind cannot hold: text that is no IRI for a
+    /// `VocabProperty`, or anything but tagged text for a `LanguageProperty`.
+    #[from(ignore)]
+    UnusableValue {
+        /// What the kind needed the value to be.
+        required: RequiredValue,
+        /// The value that could not be used, quoted back so a mapping author can see its shape.
         text: Box<str>,
     },
 }

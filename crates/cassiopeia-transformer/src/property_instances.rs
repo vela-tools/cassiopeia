@@ -51,8 +51,7 @@ pub(crate) fn build_multi_instance_attribute(
 ///
 /// This is one instance of a multi-instance attribute, so it unwraps the single occurrence
 /// [`build_sub_attribute`] produces for a Property-family kind. A relationship kind (which uses a
-/// `ListRelationship` for multiple objects) or a builder that rejects the value (a non-IRI vocab
-/// value, a non-object language value) yields none.
+/// `ListRelationship` for multiple objects) or content the kind's builder rejects yields none.
 fn build_property_instance(kind: NgsiLdAttributeKind, content: AttributeContent, meta: MetadataSummary) -> Option<NgsiLdAttribute> {
     // A Property-family instance has no relationship target, so no object type is passed.
     match build_sub_attribute(kind, content, None, meta)? {

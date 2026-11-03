@@ -12,6 +12,7 @@ use crate::{
         stage_env::StageEnv,
         unreadable_timestamp_report::unreadable_timestamp_diagnostic,
         unresolved_template_report::unresolved_template_diagnostic,
+        unusable_value_report::unusable_value_diagnostic,
     },
 };
 use cassiopeia_common::{
@@ -35,7 +36,8 @@ use std::{ops::ControlFlow, sync::Arc};
 /// An entity that fails to extract is counted as a stage warning and skipped, so one extraction
 /// failure does not abort the run. An attribute that cannot be built from its record is dropped
 /// rather than emitted: a geometry the mapping did not authorise converting, text that reads as no
-/// date-time, a `JsonProperty` source that is no JSON object, or a template that fails to render.
+/// date-time, a `JsonProperty` source that is no JSON object, a `VocabProperty` source that is no
+/// IRI, a `LanguageProperty` source that is no language map, or a template that fails to render.
 /// An attribute whose source value held nulls is written without them (ETSI GS CIM 009 v1.9.1 clause
 /// 4.5.0). The entity still goes downstream, the loss is named once however many records it
 /// affected, and every affected attribute is counted as a warning.
@@ -77,6 +79,7 @@ impl PumpProcessor for ExtractorProcessor {
             timestamps,
             templates,
             json_payloads,
+            unusable_values,
             nulls,
         } = dropped;
         let warnings = failed
@@ -84,6 +87,7 @@ impl PumpProcessor for ExtractorProcessor {
             + report_sink(self.reporter, timestamps, unreadable_timestamp_diagnostic)
             + report_sink(self.reporter, templates, unresolved_template_diagnostic)
             + report_sink(self.reporter, json_payloads, refused_json_payload_diagnostic)
+            + report_sink(self.reporter, unusable_values, unusable_value_diagnostic)
             + report_sink(self.reporter, nulls, dropped_null_diagnostic);
         if warnings > 0 {
             stage.warn_inc_by(warnings);
@@ -267,6 +271,32 @@ mod tests {
         (runner.resolver(), Arc::new(mapping))
     }
 
+    /// The mapping from issue 65: a `VocabProperty` and a `LanguageProperty` at the top level, and
+    /// the same two as sub-attributes of `temperature`.
+    fn vocab_and_language_mapping() -> (TemplateResolver, Arc<Mapping>) {
+        let document = r#"{
+                version: "v4",
+                dataModel: "Thing",
+                identity: { entityName: "{{ id }}" },
+                attributes: {
+                    topVocab: { type: "VocabProperty", source: "{{ v }}" },
+                    topLang: { type: "LanguageProperty", source: "{{ l }}" },
+                    temperature: {
+                        source: "{{ t }}",
+                        properties: {
+                            subVocab: { type: "VocabProperty", source: "{{ v }}" },
+                            subLang: { type: "LanguageProperty", source: "{{ l }}" },
+                        },
+                    },
+                },
+            }"#;
+        let mut runner = TemplateRunner::new();
+        let mut mapping = Mapping::from_json5(document, Path::new("test.json5"), &mut runner).unwrap();
+        ExpanderCompiler::compile(&mut mapping, Path::new("test.json5"), &mut runner).unwrap();
+
+        (runner.resolver(), Arc::new(mapping))
+    }
+
     /// Runs one batch of two Sensor entities carrying `ts` through the extractor stage.
     fn run_timestamp_batch(ts: &str, reporter: &'static dyn Reporter) -> (usize, u64) {
         let (resolver, mapping) = timestamp_mapping();
@@ -422,6 +452,64 @@ mod tests {
         assert_eq!(reported.len(), 1);
         assert_eq!(reported[0].code, DiagnosticCode::Extractor(ExtractorCode::NullDropped));
         assert!(reported[0].headline.contains("`tags`"), "{}", reported[0].headline);
+    }
+
+    #[test]
+    fn unusable_vocab_and_language_values_are_each_named_by_their_path_and_still_forward_the_entity() {
+        static REPORTER: RecordingReporter = RecordingReporter::new();
+        let (resolver, mapping) = vocab_and_language_mapping();
+        let records = vec![(
+            "urn:ngsi-ld:Thing:A".to_string(),
+            json!({"id": "A", "t": 20, "v": "not an iri", "l": "plain text"}),
+        )];
+
+        let (forwarded, warnings) = run_stage(resolver, &mapping, records, &REPORTER);
+
+        let reported = REPORTER.diagnostics();
+        let named = reported
+            .iter()
+            .map(|diagnostic| (diagnostic.code, diagnostic.headline.as_str()))
+            .collect::<Vec<_>>();
+        assert_eq!(forwarded, 1);
+        assert_eq!(warnings, 4);
+        assert_eq!(
+            named,
+            [
+                (
+                    DiagnosticCode::Extractor(ExtractorCode::VocabNotAnIri),
+                    "Attribute `topVocab` dropped: `not an iri` is not an IRI"
+                ),
+                (
+                    DiagnosticCode::Extractor(ExtractorCode::LanguageMapMisshapen),
+                    "Attribute `topLang` dropped: `plain text` is not a language map of text keyed by language tag"
+                ),
+                (
+                    DiagnosticCode::Extractor(ExtractorCode::VocabNotAnIri),
+                    "Attribute `temperature.subVocab` dropped: `not an iri` is not an IRI"
+                ),
+                (
+                    DiagnosticCode::Extractor(ExtractorCode::LanguageMapMisshapen),
+                    "Attribute `temperature.subLang` dropped: `plain text` is not a language map of text keyed by language tag"
+                ),
+            ]
+        );
+    }
+
+    #[test]
+    fn missing_null_or_blank_vocab_and_language_sources_leave_the_run_without_warnings() {
+        static REPORTER: RecordingReporter = RecordingReporter::new();
+        let (resolver, mapping) = vocab_and_language_mapping();
+        let records = vec![
+            ("urn:ngsi-ld:Thing:A".to_string(), json!({"id": "A", "t": 20})),
+            ("urn:ngsi-ld:Thing:B".to_string(), json!({"id": "B", "t": 20, "v": null, "l": null})),
+            ("urn:ngsi-ld:Thing:C".to_string(), json!({"id": "C", "t": 20, "v": "  ", "l": ""})),
+        ];
+
+        let (forwarded, warnings) = run_stage(resolver, &mapping, records, &REPORTER);
+
+        assert_eq!(forwarded, 3);
+        assert_eq!(warnings, 0);
+        assert!(REPORTER.diagnostics().is_empty(), "{:?}", REPORTER.diagnostics());
     }
 
     #[test]
