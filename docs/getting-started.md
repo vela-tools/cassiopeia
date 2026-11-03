@@ -26,12 +26,12 @@ You do not install ecCodes yourself. A default build downloads the ecCodes, ecki
 
 ### Build tools for GRIB1
 
-A GRIB1 build needs CMake, a C and C++ compiler, `git` to fetch the sources, and `libclang` for the bindings that `eccodes-sys` generates at build time. The build needs network access, and compiling ecCodes the first time takes several minutes.
+A GRIB1 build needs CMake, a C and C++ compiler, `git` to fetch the sources, `libclang` for the bindings that `eccodes-sys` generates at build time, and the OpenJPEG library, which ecCodes uses to decode JPEG 2000 packed GRIB2 fields. OpenJPEG is linked from the system, so it must also be present wherever the binary runs. The build needs network access, and compiling ecCodes the first time takes several minutes.
 
 macOS, with Homebrew:
 
 ```bash
-brew install cmake
+brew install cmake openjpeg
 ```
 
 Clang, the C and C++ compilers, and `git` are already present on macOS through the Xcode command line tools, so no separate package is needed for them.
@@ -39,7 +39,7 @@ Clang, the C and C++ compilers, and `git` are already present on macOS through t
 Debian or Ubuntu:
 
 ```bash
-sudo apt install cmake g++ git libclang-dev
+sudo apt install cmake g++ git libclang-dev libopenjp2-7-dev
 ```
 
 ecCodes, eckit, and libaec are built as shared libraries. `cargo install` copies them to `lib/cassiopeia` beside its `bin` directory, which is usually `~/.cargo/lib/cassiopeia`, and the binary finds them there. Keep that directory next to the binary. If you install to a custom root, set `CARGO_INSTALL_ROOT` rather than passing `--root`, because the build script cannot see `--root`. A binary built in place with `cargo build` loads the libraries from the target directory instead.

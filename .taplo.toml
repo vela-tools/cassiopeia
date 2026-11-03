@@ -1,3 +1,5 @@
+exclude = ["target/**"]
+
 [formatting]
 inline_table_expand = false
 array_auto_collapse = true

@@ -1,7 +1,7 @@
 FROM rust:1.99.1-trixie AS chef
 
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends cmake g++ git libclang-dev \
+    && apt-get install -y --no-install-recommends cmake g++ git libclang-dev libopenjp2-7-dev \
     && rm -rf /var/lib/apt/lists/*
 RUN cargo install cargo-chef --locked --version 0.1.78
 WORKDIR /cassiopeia
@@ -22,7 +22,7 @@ RUN cargo build --release --locked --bin cassiopeia
 FROM debian:trixie-20261027-slim AS runtime
 
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends ca-certificates \
+    && apt-get install -y --no-install-recommends ca-certificates libopenjp2-7 \
     && rm -rf /var/lib/apt/lists/*
 
 RUN mkdir -p /etc/cassiopeia/mappings /var/lib/cassiopeia/schemas /var/log/cassiopeia/logs
