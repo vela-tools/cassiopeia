@@ -28,12 +28,13 @@ impl EncodingHint {
     /// The hint a source fetched from `url` carries, given the `Content-Type` its server answered with.
     ///
     /// A `charset` parameter `encoding_rs` does not recognise declares nothing, and the encoding is
-    /// detected as for an undeclared source.
+    /// detected as for an undeclared source. So does a label of the Encoding Standard's `replacement`
+    /// encoding, such as `iso-2022-kr`, which would decode the whole file to one replacement character.
     #[must_use]
     pub fn for_remote_source(url: &Url, content_type: Option<&MediaTypeBuf>) -> EncodingHint {
         let declared = content_type
             .and_then(|content_type| content_type.get_param(CHARSET))
-            .and_then(|charset| Encoding::for_label(charset.unquoted_str().as_bytes()));
+            .and_then(|charset| Encoding::for_label_no_replacement(charset.unquoted_str().as_bytes()));
         EncodingHint {
             declared,
             top_level_domain: TopLevelDomain::of(url),

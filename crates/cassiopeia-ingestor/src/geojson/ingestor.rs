@@ -118,7 +118,7 @@ mod tests {
         let path = dir.path().join("data.geojson");
         File::create(&path).unwrap().write_all(contents.as_bytes()).unwrap();
         let payload = ProfiledPayload::new(
-            CollectedPayload::File(FilePayload::new(path, Some(DataFormat::GeoJson), EncodingHint::NONE)),
+            CollectedPayload::File(FilePayload::local(path, Some(DataFormat::GeoJson), EncodingHint::NONE)),
             Profile::new(DataFormat::GeoJson, media_type!(APPLICATION / GEO + JSON), 1.0),
         );
         (dir, payload)

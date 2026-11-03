@@ -1,10 +1,9 @@
 use crate::{detail::Detail, json_pointer::JsonPointer, schema_keyword::SchemaKeyword};
-use cassiopeia_common::captured_body::CapturedBody;
+use cassiopeia_common::{captured_body::CapturedBody, input::Input};
 use cassiopeia_csv_column::renamed_column::RenamedColumn;
 use cassiopeia_ngsi_ld::entity::name::NameBuf;
 use http::StatusCode;
 use iri_rs::IriBuf;
-use std::path::PathBuf;
 use strum::EnumDiscriminants;
 use url::Url;
 use urn_rs::Urn;
@@ -47,8 +46,9 @@ pub enum ContextField {
         /// How many further entities the diagnostic covers.
         additional: u64,
     },
-    /// The source file involved.
-    SourcePath(PathBuf),
+    /// The source involved: a local file, or the URL a downloaded one was fetched from, which stays
+    /// the same across runs where the downloaded copy's path does not.
+    Source(Input),
     /// Which retry attempt this was, out of how many.
     Attempt {
         /// The 1-based attempt number.

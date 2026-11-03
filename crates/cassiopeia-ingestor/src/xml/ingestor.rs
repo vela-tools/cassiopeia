@@ -141,7 +141,7 @@ mod tests {
         let path = dir.path().join("data.xml");
         File::create(&path).unwrap().write_all(contents).unwrap();
         let payload = ProfiledPayload::new(
-            CollectedPayload::File(FilePayload::new(path, Some(DataFormat::Xml), EncodingHint::NONE)),
+            CollectedPayload::File(FilePayload::local(path, Some(DataFormat::Xml), EncodingHint::NONE)),
             Profile::new(DataFormat::Xml, media_type!(APPLICATION / XML), 0.6),
         );
         (dir, payload)

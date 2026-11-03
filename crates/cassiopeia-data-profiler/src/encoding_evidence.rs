@@ -7,6 +7,13 @@ const MAX_EVIDENCE_BYTES: usize = 8 * 1024 * 1024;
 /// file comes from all of it rather than from its start alone.
 const SEGMENTS: usize = 16;
 
+/// Whether `byte` ends a line: a line feed, or a carriage return, which alone ends every line of a
+/// file written with classic Mac OS line endings. A CRLF line end splits into a line and the lone
+/// `\n` after it, which is ASCII and never evidence.
+const fn is_line_end(byte: u8) -> bool {
+    byte == b'\n' || byte == b'\r'
+}
+
 /// The lines of `bytes` that carry evidence of its character encoding, for a detector to weigh.
 ///
 /// A line of ASCII alone reads the same in every encoding a detector can guess, so only lines
@@ -17,7 +24,7 @@ pub fn evidence_lines(bytes: &[u8]) -> impl Iterator<Item = &[u8]> {
     line_aligned_segments(bytes, SEGMENTS).flat_map(|segment| {
         let mut taken = 0usize;
         segment
-            .split_inclusive(|&byte| byte == b'\n')
+            .split_inclusive(|&byte| is_line_end(byte))
             .filter(|line| !line.is_ascii())
             .take_while(move |line| {
                 let within_share = taken < MAX_EVIDENCE_BYTES / SEGMENTS;
@@ -27,7 +34,7 @@ pub fn evidence_lines(bytes: &[u8]) -> impl Iterator<Item = &[u8]> {
     })
 }
 
-/// Splits `bytes` into `count` consecutive parts of about equal length, each ending after a newline
+/// Splits `bytes` into `count` consecutive parts of about equal length, each ending after a line end
 /// or at the end of `bytes`, so no line is split between two parts. A part may be empty.
 fn line_aligned_segments(bytes: &[u8], count: usize) -> impl Iterator<Item = &[u8]> {
     let mut start = 0usize;
@@ -38,7 +45,7 @@ fn line_aligned_segments(bytes: &[u8], count: usize) -> impl Iterator<Item = &[u
         } else {
             bytes
                 .get(target..)
-                .and_then(|rest| rest.iter().position(|&byte| byte == b'\n'))
+                .and_then(|rest| rest.iter().position(|&byte| is_line_end(byte)))
                 .map_or(bytes.len(), |newline| target + newline + 1)
         };
         let segment = bytes.get(start..end).unwrap_or_default();
@@ -57,6 +64,30 @@ mod tests {
         let lines: Vec<&[u8]> = evidence_lines(b"id;name\n1;M\xfcller\n2;Station\n3;Stra\xdfe").collect();
 
         assert_eq!(lines, vec![&b"1;M\xfcller\n"[..], &b"3;Stra\xdfe"[..]]);
+    }
+
+    #[test]
+    fn a_file_of_lone_carriage_returns_gives_its_accented_lines_alone() {
+        let lines: Vec<&[u8]> = evidence_lines(b"id;name\r1;M\xfcller\r2;Station\r3;Stra\xdfe\r").collect();
+
+        assert_eq!(lines, vec![&b"1;M\xfcller\r"[..], &b"3;Stra\xdfe\r"[..]]);
+    }
+
+    #[test]
+    fn evidence_of_a_large_file_of_lone_carriage_returns_is_capped() {
+        let bytes = b"M\xfcller;Stra\xdfe\r".repeat(2 * MAX_EVIDENCE_BYTES / 14);
+        let taken: usize = evidence_lines(&bytes).map(<[u8]>::len).sum();
+
+        assert!(taken <= MAX_EVIDENCE_BYTES + SEGMENTS * 14);
+    }
+
+    #[test]
+    fn segments_of_a_file_of_lone_carriage_returns_split_no_line() {
+        let bytes = b"id;name\r1;alpha\r2;beta\r3;gamma\r4;delta\r";
+        let segments: Vec<&[u8]> = line_aligned_segments(bytes, 4).collect();
+
+        assert_eq!(segments.concat(), bytes.to_vec());
+        assert!(segments.iter().all(|segment| segment.is_empty() || segment.ends_with(b"\r")));
     }
 
     #[test]

@@ -1,3 +1,4 @@
+use cassiopeia_common::input::Input;
 use cassiopeia_csv_column::renamed_column::RenamedColumn;
 use cassiopeia_diagnostic::{
     code::{diagnostic_code::DiagnosticCode, ingest_code::IngestCode},
@@ -6,19 +7,18 @@ use cassiopeia_diagnostic::{
     severity::Severity,
 };
 use cassiopeia_reporter::reporter::DiagnosticSink;
-use std::path::Path;
 
 /// How many renames the headline names before it counts the rest, so a header that repeats a name
 /// dozens of times still fits on one line.
 const HEADLINE_RENAMES: usize = 3;
 
-/// The one-line summary: the file, and the first [`HEADLINE_RENAMES`] renamed columns with the key
+/// The one-line summary: the source, and the first [`HEADLINE_RENAMES`] renamed columns with the key
 /// each is read by, the rest counted.
 ///
 /// The renames ride on the headline because the concise form shows nothing else, and a mapping
 /// author needs the generated key to read the column at all. Every rename is also attached as its
 /// own field, which the verbose form lists in full.
-fn headline(path: &Path, renamed: &[RenamedColumn]) -> String {
+fn headline(source: &Input, renamed: &[RenamedColumn]) -> String {
     let columns = match renamed.len() {
         1 => "1 column was".to_owned(),
         count => format!("{count} columns were"),
@@ -33,25 +33,24 @@ fn headline(path: &Path, renamed: &[RenamedColumn]) -> String {
         0 => named,
         rest => format!("{named}; and {rest} more"),
     };
-    format!(
-        "The header of `{}` gives more than one column the same record key, so {columns} renamed: {details}",
-        path.display()
-    )
+    format!("The header of `{source}` gives more than one column the same record key, so {columns} renamed: {details}")
 }
 
 /// Names a CSV file's renamed columns in one warning and returns how many warnings that was: one
 /// when any column was renamed, none otherwise.
 ///
 /// One diagnostic per file however many columns were renamed, since the renames share one cause: the
-/// file's header.
-pub(crate) fn report_renamed_columns(sink: &dyn DiagnosticSink, path: &Path, renamed: &[RenamedColumn]) -> u64 {
+/// file's header. The file is named by its `source`, so a downloaded one is named by its URL, the
+/// same in every run, rather than by the temporary copy it was read from.
+pub(crate) fn report_renamed_columns(sink: &dyn DiagnosticSink, source: &Input, renamed: &[RenamedColumn]) -> u64 {
     if renamed.is_empty() {
         return 0;
     }
 
     let builder = renamed.iter().fold(
-        DiagnosticBuilder::new(Severity::Warning, DiagnosticCode::Ingest(IngestCode::ColumnsRenamed), headline(path, renamed))
-            .with_context(ContextField::SourcePath(path.to_path_buf())),
+        DiagnosticBuilder::new(Severity::Warning, DiagnosticCode::Ingest(IngestCode::ColumnsRenamed), headline(source, renamed))
+            // The diagnostic outlives the ingestor that names the source.
+            .with_context(ContextField::Source(source.clone())),
         // The diagnostic outlives the ingestor's column keys, so each rename is copied into it.
         |builder, column| builder.with_context(ContextField::RenamedColumn(column.clone())),
     );
@@ -62,13 +61,14 @@ pub(crate) fn report_renamed_columns(sink: &dyn DiagnosticSink, path: &Path, ren
 #[cfg(test)]
 mod tests {
     use crate::{stages::renamed_columns_report::report_renamed_columns, test_reporter::RecordingReporter};
+    use cassiopeia_common::input::Input;
     use cassiopeia_csv_column::{column_key::ColumnKey, column_number::ColumnNumber, renamed_column::RenamedColumn};
     use cassiopeia_diagnostic::{
         code::{diagnostic_code::DiagnosticCode, ingest_code::IngestCode},
         context_field::ContextField,
     };
     use pretty_assertions::assert_eq;
-    use std::path::{Path, PathBuf};
+    use std::path::PathBuf;
 
     fn renamed(wanted: &str, holder: usize, column: usize, key: &str) -> RenamedColumn {
         RenamedColumn {
@@ -83,7 +83,7 @@ mod tests {
     fn a_file_without_renamed_columns_says_nothing_and_counts_nothing() {
         let sink = RecordingReporter::new();
 
-        assert_eq!(report_renamed_columns(&sink, Path::new("/data/plain.csv"), &[]), 0);
+        assert_eq!(report_renamed_columns(&sink, &Input::Local(PathBuf::from("/data/plain.csv")), &[]), 0);
         assert!(sink.diagnostics().is_empty());
     }
 
@@ -91,7 +91,7 @@ mod tests {
     fn one_renamed_column_is_one_warning_naming_the_file_both_columns_and_both_keys() {
         let sink = RecordingReporter::new();
 
-        let total = report_renamed_columns(&sink, Path::new("/data/values.csv"), &[renamed("value", 1, 2, "value@3")]);
+        let total = report_renamed_columns(&sink, &Input::Local(PathBuf::from("/data/values.csv")), &[renamed("value", 1, 2, "value@3")]);
 
         let reported = sink.diagnostics();
         assert_eq!(total, 1);
@@ -108,7 +108,7 @@ mod tests {
             reported[0].defining,
             [
                 ContextField::RenamedColumn(renamed("value", 1, 2, "value@3")),
-                ContextField::SourcePath(PathBuf::from("/data/values.csv")),
+                ContextField::Source(Input::Local(PathBuf::from("/data/values.csv"))),
             ]
         );
     }
@@ -119,7 +119,7 @@ mod tests {
 
         let total = report_renamed_columns(
             &sink,
-            Path::new("/data/values.csv"),
+            &Input::Local(PathBuf::from("/data/values.csv")),
             &[renamed("value", 1, 2, "value@3"), renamed("2", 0, 3, "2@4")],
         );
 
@@ -135,7 +135,7 @@ mod tests {
             [
                 ContextField::RenamedColumn(renamed("value", 1, 2, "value@3")),
                 ContextField::RenamedColumn(renamed("2", 0, 3, "2@4")),
-                ContextField::SourcePath(PathBuf::from("/data/values.csv")),
+                ContextField::Source(Input::Local(PathBuf::from("/data/values.csv"))),
             ]
         );
     }
@@ -145,7 +145,7 @@ mod tests {
         let sink = RecordingReporter::new();
         let columns: Vec<RenamedColumn> = (1..=5).map(|index| renamed("Unit", 0, index, &format!("Unit@{}", index + 1))).collect();
 
-        report_renamed_columns(&sink, Path::new("/data/units.csv"), &columns);
+        report_renamed_columns(&sink, &Input::Local(PathBuf::from("/data/units.csv")), &columns);
 
         let reported = sink.diagnostics();
         assert_eq!(
@@ -155,7 +155,7 @@ mod tests {
         let defining: Vec<ContextField> = columns
             .into_iter()
             .map(ContextField::RenamedColumn)
-            .chain([ContextField::SourcePath(PathBuf::from("/data/units.csv"))])
+            .chain([ContextField::Source(Input::Local(PathBuf::from("/data/units.csv")))])
             .collect();
         assert_eq!(reported[0].defining, defining);
     }
@@ -165,7 +165,7 @@ mod tests {
         let sink = RecordingReporter::new();
         let columns: Vec<RenamedColumn> = (1..=3).map(|index| renamed("Unit", 0, index, &format!("Unit@{}", index + 1))).collect();
 
-        report_renamed_columns(&sink, Path::new("/data/units.csv"), &columns);
+        report_renamed_columns(&sink, &Input::Local(PathBuf::from("/data/units.csv")), &columns);
 
         assert_eq!(
             sink.diagnostics()[0].headline,

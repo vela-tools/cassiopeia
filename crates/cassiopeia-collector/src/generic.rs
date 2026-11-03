@@ -2,11 +2,7 @@ use crate::{collector::Collector, downloader::Downloader, error::CollectorError,
 use cassiopeia_common::{channel::ChannelSender, format::DataFormat, input::Input, signal::Signal, user_agent::UserAgent};
 use cassiopeia_data_profiler::encoding_hint::EncodingHint;
 use cassiopeia_ir::payload::{CollectedPayload, FilePayload};
-use std::{
-    env,
-    fs,
-    path::{Path, PathBuf},
-};
+use std::{env, fs, path::Path};
 use temp_dir::TempDir;
 use tracing::debug;
 
@@ -47,15 +43,13 @@ impl Collector for GenericCollector {
 
         match &source {
             CollectorSource::Single { input, extension } => {
-                let (path, encoding_hint) = resolve_input(input, extension, temp_dir.path(), &mut downloader)?;
-                send_payload(path, format_hint, encoding_hint, &sender)?;
+                send_payload(resolve_input(input, extension, format_hint, temp_dir.path(), &mut downloader)?, &sender)?;
             }
             CollectorSource::Multiple { inputs, extension } => {
                 for (index, input) in inputs.iter().enumerate() {
                     let sub_dir = temp_dir.path().join(format!("input_{index}"));
                     fs::create_dir_all(&sub_dir).map_err(|source| CollectorError::Io { source, path: sub_dir.clone() })?;
-                    let (path, encoding_hint) = resolve_input(input, extension, &sub_dir, &mut downloader)?;
-                    send_payload(path, format_hint, encoding_hint, &sender)?;
+                    send_payload(resolve_input(input, extension, format_hint, &sub_dir, &mut downloader)?, &sender)?;
                 }
             }
         }
@@ -64,35 +58,40 @@ impl Collector for GenericCollector {
     }
 }
 
-/// Resolves a single input to a local file, with what its source says about its encoding.
+/// Resolves a single input to the payload of a local file, with what its source says about its
+/// encoding.
 ///
 /// A `Local` input is used in place and carries no hint. A `Remote` input is downloaded into
-/// `temp_dir` under a name `extension` gives it, and carries its server's declared `charset` and
-/// its domain, which the local copy no longer holds.
-fn resolve_input(input: &Input, extension: &FileExtension, temp_dir: &Path, downloader: &mut Downloader) -> Result<(PathBuf, EncodingHint), CollectorError> {
+/// `temp_dir` under a name `extension` gives it, keeps the URL it was requested by as its source,
+/// and carries what the server it was finally served from says: its declared `charset` and its
+/// domain, which the local copy no longer holds. A redirect can hand the request to another server,
+/// and the body is that server's, so its domain is the one that hints at the body's encoding.
+fn resolve_input(
+    input: &Input,
+    extension: &FileExtension,
+    format_hint: Option<DataFormat>,
+    temp_dir: &Path,
+    downloader: &mut Downloader,
+) -> Result<FilePayload, CollectorError> {
     match input {
         // The payload owns its path, while the input stays with the collector's source.
-        Input::Local(path) => Ok((path.clone(), EncodingHint::NONE)),
+        Input::Local(path) => Ok(FilePayload::local(path.clone(), format_hint, EncodingHint::NONE)),
         Input::Remote(url) => {
             let destination = temp_dir.join(format!("input.{extension}"));
             let file = downloader.download_to_file(url, &destination)?;
-            debug!("Downloaded {} to {}", url, file.path().display());
-            let encoding_hint = EncodingHint::for_remote_source(url, file.content_type().as_ref());
-            Ok((file.into_path(), encoding_hint))
+            debug!("Downloaded {} from {} to {}", url, file.url(), file.path().display());
+            let encoding_hint = EncodingHint::for_remote_source(file.url(), file.content_type().as_ref());
+            // The payload owns the URL it is named by, while the input stays with the collector's source.
+            Ok(FilePayload::downloaded(file.into_path(), url.clone(), format_hint, encoding_hint))
         }
     }
 }
 
 /// Sends one resolved file downstream as a `CollectedPayload`.
-fn send_payload(
-    path: PathBuf,
-    format_hint: Option<DataFormat>,
-    encoding_hint: EncodingHint,
-    sender: &ChannelSender<Signal<CollectedPayload, CollectorError>>,
-) -> Result<(), CollectorError> {
-    let payload = CollectedPayload::File(FilePayload::new(path, format_hint, encoding_hint));
-
-    sender.send(Signal::Data(payload)).map_err(|_| CollectorError::ChannelClosed)
+fn send_payload(payload: FilePayload, sender: &ChannelSender<Signal<CollectedPayload, CollectorError>>) -> Result<(), CollectorError> {
+    sender
+        .send(Signal::Data(CollectedPayload::File(payload)))
+        .map_err(|_| CollectorError::ChannelClosed)
 }
 
 #[cfg(test)]

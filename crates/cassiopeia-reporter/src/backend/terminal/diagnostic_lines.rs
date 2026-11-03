@@ -91,7 +91,7 @@ fn qualifier(field: &ContextField) -> Option<String> {
         | ContextField::Detail(_)
         | ContextField::RenamedColumn(_)
         | ContextField::Entities { .. }
-        | ContextField::SourcePath(_)
+        | ContextField::Source(_)
         | ContextField::Attempt { .. }
         | ContextField::PayloadBytes(_)
         | ContextField::BodyEcho(_)
@@ -114,7 +114,7 @@ const fn explanation(field: &ContextField) -> Option<&str> {
         | ContextField::Keyword(_)
         | ContextField::RenamedColumn(_)
         | ContextField::Entities { .. }
-        | ContextField::SourcePath(_)
+        | ContextField::Source(_)
         | ContextField::Attempt { .. }
         | ContextField::PayloadBytes(_)
         | ContextField::BodyEcho(_)
@@ -182,7 +182,7 @@ fn field_row(field: &ContextField) -> (&'static str, String) {
                 format!("{} (+{additional})", first.as_str())
             },
         ),
-        ContextField::SourcePath(path) => ("source", path.display().to_string()),
+        ContextField::Source(source) => ("source", source.to_string()),
         ContextField::Attempt { attempt, limit } => ("attempt", format!("{attempt}/{limit}")),
         ContextField::PayloadBytes(bytes) => ("payload", human_size(*bytes)),
         ContextField::BodyEcho(body) => ("body", body_value(body)),

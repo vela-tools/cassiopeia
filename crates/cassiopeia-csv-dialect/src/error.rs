@@ -12,6 +12,11 @@ pub enum DialectError {
     #[error("'{0}' is not a known character encoding label")]
     UnknownEncoding(String),
 
+    /// An encoding label the WHATWG Encoding Standard maps to its `replacement` encoding, which
+    /// decodes any input to a single replacement character, so no file can be read in it.
+    #[error("'{0}' names an encoding no file can be read in: the Encoding Standard decodes it to a single replacement character")]
+    UndecodableEncoding(String),
+
     /// A null value token that is blank, which every blank field already reads as.
     #[error("A null value token must not be blank, since a blank field is already read as missing")]
     BlankNullToken,
@@ -19,6 +24,11 @@ pub enum DialectError {
     /// A stated delimiter and quote that are the same character, so no field could be quoted.
     #[error("The delimiter and the quote are both '{0}'")]
     DelimiterIsQuote(char),
+
+    /// A stated delimiter and escape byte that are the same character, so the escape could never
+    /// stand in front of a quote without also splitting the field.
+    #[error("The delimiter and the escape are both '{0}'")]
+    DelimiterIsEscape(char),
 
     /// An escape stated together with `quote: "none"`, so there is no quoted field for it to act in.
     #[error("An escape is stated, but 'quote' is \"none\", so no field is quoted")]

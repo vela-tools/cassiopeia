@@ -86,14 +86,16 @@ pub(crate) fn spawn_ingestor_bank(
     let factories: [(DataFormat, IngestorFactory); 8] = [
         (DataFormat::Csv, |payload, batch, sink| {
             let ingestor = CsvIngestor::from_payload(payload, batch)?;
-            let warnings = report_renamed_columns(sink, ingestor.path(), ingestor.renamed_columns());
+            let warnings = report_renamed_columns(sink, ingestor.source(), ingestor.renamed_columns());
             let misshapen = ingestor.misshapen_rows();
-            // The ingestor gives up its path when it runs, while the report names the file after.
-            let path = ingestor.path().to_path_buf();
+            // The ingestor is given up when it runs, while the report names its source after.
+            let source = ingestor.source().clone();
             Ok(PreparedIngestor {
                 ingestor: Box::new(ingestor),
                 warnings,
-                after_ingest: Some(Box::new(move |sink: &dyn DiagnosticSink| report_misshapen_rows(sink, &path, &misshapen.lock()))),
+                after_ingest: Some(Box::new(move |sink: &dyn DiagnosticSink| {
+                    report_misshapen_rows(sink, &source, &misshapen.lock())
+                })),
             })
         }),
         (DataFormat::Json, |payload, batch, _| {

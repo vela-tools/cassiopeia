@@ -28,8 +28,8 @@ impl Downloader {
         Downloader { user_agent, client: None }
     }
 
-    /// Downloads a single file from `url` to `dest`, returning that path with the media type the
-    /// server declared for it.
+    /// Downloads a single file from `url` to `dest`, returning that path with the URL it was served
+    /// from after any redirects and the media type the server declared for it.
     ///
     /// # Errors
     ///
@@ -49,6 +49,8 @@ impl Downloader {
         // status is checked here rather than through `error_for_status`, which consumes the response and
         // throws the body away, and that body is the server's only explanation of the refusal.
         let status = response.status();
+        // The body consumes the response, while the download keeps naming where it was served from.
+        let served_from = response.url().clone();
         // An unparseable `Content-Type` declares nothing a reader could rely on, so it is dropped.
         let content_type = response
             .headers()
@@ -84,7 +86,7 @@ impl Downloader {
             source,
             path: dest.to_path_buf(),
         })?;
-        Ok(DownloadedFile::new(dest.to_path_buf(), content_type))
+        Ok(DownloadedFile::new(dest.to_path_buf(), served_from, content_type))
     }
 
     /// The HTTP client, built with this downloader's `User-Agent` on first use and reused after.
@@ -123,7 +125,8 @@ mod tests {
     }
 
     /// Serves one response like [`serve_once`], with `headers` (each line ending in `\r\n`) added.
-    fn serve_once_with_headers(status_line: &'static str, headers: &'static str, body: &'static str) -> (Url, Receiver<String>) {
+    fn serve_once_with_headers(status_line: &'static str, headers: impl Into<String>, body: &'static str) -> (Url, Receiver<String>) {
+        let headers = headers.into();
         let listener = TcpListener::bind("127.0.0.1:0").expect("a bindable port");
         let port = listener.local_addr().expect("a local address").port();
         let (request_tx, request_rx) = channel();
@@ -209,6 +212,30 @@ mod tests {
             downloaded.content_type().as_ref().map(ToString::to_string).as_deref(),
             Some("text/csv; charset=windows-1252")
         );
+    }
+
+    #[test]
+    fn a_redirected_download_is_served_from_the_url_redirected_to() {
+        let (target, _target_requests) = serve_once("200 OK", "id;name\n");
+        let (requested, _requests) = serve_once_with_headers("302 Found", format!("Location: {target}\r\n"), "");
+        let directory = TempDir::new().expect("a temporary directory");
+
+        let downloaded = downloader()
+            .download_to_file(&requested, &directory.path().join("feed.csv"))
+            .expect("a download");
+
+        assert_eq!(downloaded.url(), &target);
+        assert_ne!(downloaded.url(), &requested);
+    }
+
+    #[test]
+    fn an_unredirected_download_is_served_from_the_url_requested() {
+        let (url, _requests) = serve_once("200 OK", "id;name\n");
+        let directory = TempDir::new().expect("a temporary directory");
+
+        let downloaded = downloader().download_to_file(&url, &directory.path().join("feed.csv")).expect("a download");
+
+        assert_eq!(downloaded.url(), &url);
     }
 
     #[test]

@@ -234,7 +234,7 @@ mod tests {
         let path = dir.path().join("data.grib");
         File::create(&path).unwrap().write_all(&bytes).unwrap();
         ProfiledPayload::new(
-            CollectedPayload::File(FilePayload::new(path, Some(DataFormat::Grib), EncodingHint::NONE)),
+            CollectedPayload::File(FilePayload::local(path, Some(DataFormat::Grib), EncodingHint::NONE)),
             Profile::new(DataFormat::Grib, media_type!(APPLICATION / OCTET_STREAM), 1.0)
                 .with_metadata(FormatMetadata::Grib(GribMetadata::new(GribEdition::V1))),
         )
@@ -441,7 +441,7 @@ mod tests {
         let path = dir.path().join("data.grib");
         File::create(&path).unwrap().write_all(&bytes).unwrap();
         let payload = ProfiledPayload::new(
-            CollectedPayload::File(FilePayload::new(path, Some(DataFormat::Grib), EncodingHint::NONE)),
+            CollectedPayload::File(FilePayload::local(path, Some(DataFormat::Grib), EncodingHint::NONE)),
             Profile::new(DataFormat::Grib, media_type!(APPLICATION / OCTET_STREAM), 1.0),
         );
 

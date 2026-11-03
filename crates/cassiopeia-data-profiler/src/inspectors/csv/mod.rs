@@ -175,17 +175,7 @@ impl<'s> CsvInspector<'s> {
             .filter_map(|(delimiter, quote)| {
                 // The first escape whose candidate reads a table is the one scored, so an escape the
                 // sample backs is tried alone and doubling only when that escape reads no table.
-                self.escapes(sample, delimiter, quote).into_iter().find_map(|escape| {
-                    let candidate = Dialect {
-                        delimiter,
-                        quote_char: quote,
-                        preamble: Preamble::NONE,
-                        header_rows: HeaderRows::NONE,
-                        escape,
-                        terminator,
-                        encoding,
-                        notation: ValueNotation::PLAIN,
-                    };
+                self.candidates(sample, delimiter, quote, terminator, encoding).find_map(|candidate| {
                     // A quote and its escape decide which line breaks end a record, so a cut sample
                     // is trimmed to its complete records under each candidate, never at a line.
                     let records = match extent {
@@ -196,6 +186,36 @@ impl<'s> CsvInspector<'s> {
                 })
             })
             .reduce(|best, reading| best.or_better(Some(reading)))
+    }
+
+    /// The candidate dialects under `delimiter` and `quote`, one per escape to try, in the order
+    /// [`Self::escapes`] gives them, for a `sample` whose lines end with `terminator` and which was
+    /// decoded from `encoding`.
+    ///
+    /// A stated member can name a byte a detected one also takes, such as a stated `"` delimiter
+    /// under the candidate `"` quote, or a stated `\\` delimiter under the candidate `\\` escape.
+    /// Such a candidate is no dialect at all, so it is never tried.
+    fn candidates(
+        &self,
+        sample: &[u8],
+        delimiter: DialectByte,
+        quote: Quote,
+        terminator: LineTerminator,
+        encoding: CharacterEncoding,
+    ) -> impl Iterator<Item = Dialect> {
+        self.escapes(sample, delimiter, quote)
+            .into_iter()
+            .map(move |escape| Dialect {
+                delimiter,
+                quote_char: quote,
+                preamble: Preamble::NONE,
+                header_rows: HeaderRows::NONE,
+                escape,
+                terminator,
+                encoding,
+                notation: ValueNotation::PLAIN,
+            })
+            .filter(Dialect::has_distinct_bytes)
     }
 
     /// The delimiters to try: the stated one, or every candidate.
@@ -431,6 +451,7 @@ mod tests {
         inspectors::csv::{CHUNK, CsvInspector},
     };
     use cassiopeia_csv_dialect::{
+        character_encoding::CharacterEncoding,
         decimal_separator::DecimalSeparator,
         dialect_byte::DialectByte,
         escape::Escape,
@@ -937,6 +958,46 @@ mod tests {
 
         assert_eq!(dialect.delimiter, DialectByte::SEMICOLON);
         assert_eq!(reader.headers().unwrap(), vec!["id,name,city", "note"]);
+    }
+
+    #[test]
+    fn a_stated_double_quote_delimiter_has_no_candidate_under_the_double_quote() {
+        let statement = stated(serde_json::json!({"delimiter": "\""}));
+        let inspector = CsvInspector::new(&statement);
+        let under_double_quote = Quote::Char(DialectByte::DOUBLE_QUOTE);
+
+        let mut candidates = inspector.candidates(
+            b"id\"name\n",
+            DialectByte::DOUBLE_QUOTE,
+            under_double_quote,
+            LineTerminator::Lf,
+            CharacterEncoding::new(UTF_8),
+        );
+
+        assert!(candidates.next().is_none());
+    }
+
+    #[test]
+    fn a_stated_backslash_delimiter_has_only_the_doubling_candidate_where_the_sample_backs_a_backslash_escape() {
+        let statement = stated(serde_json::json!({"delimiter": "\\"}));
+        let inspector = CsvInspector::new(&statement);
+        let sample = br#"id\name
+1\"say \"hi\""
+2\"a \"b\""
+"#;
+
+        let escapes: Vec<_> = inspector
+            .candidates(
+                sample,
+                DialectByte::BACKSLASH,
+                Quote::Char(DialectByte::DOUBLE_QUOTE),
+                LineTerminator::Lf,
+                CharacterEncoding::new(UTF_8),
+            )
+            .map(|candidate| candidate.escape)
+            .collect();
+
+        assert_eq!(escapes, vec![Escape::Doubled]);
     }
 
     #[test]

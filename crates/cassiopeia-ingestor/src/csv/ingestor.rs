@@ -1,10 +1,15 @@
 use crate::{
-    csv::{column_keys::ColumnKeys, error::CsvIngestError, line_counting_reader::LineCountingReader, misshapen_rows::MisshapenRows},
+    csv::{
+        column_keys::ColumnKeys,
+        error::{CsvIngestError, CsvRead},
+        line_counting_reader::LineCountingReader,
+        misshapen_rows::MisshapenRows,
+    },
     error::IngestorError,
     ingestor::Ingestor,
 };
 use ::csv::{Reader, StringRecord};
-use cassiopeia_common::{channel::ChannelSender, signal::Signal};
+use cassiopeia_common::{channel::ChannelSender, input::Input, signal::Signal};
 use cassiopeia_csv_column::{column_key::ColumnKey, renamed_column::RenamedColumn};
 use cassiopeia_csv_dialect::{
     decimal_separator::DecimalSeparator,
@@ -23,14 +28,7 @@ use encoding_rs::{Encoding, UTF_8};
 use encoding_rs_rw::DecodingReader;
 use parking_lot::Mutex;
 use serde_json::{Map, Number, Value};
-use std::{
-    borrow::Cow,
-    fs::File,
-    io::BufReader,
-    mem,
-    path::{Path, PathBuf},
-    sync::Arc,
-};
+use std::{borrow::Cow, fs::File, io::BufReader, mem, path::PathBuf, sync::Arc};
 use tracing::{info, warn};
 
 /// A CSV reader over a file decoded to UTF-8 with its profiled encoding.
@@ -44,6 +42,8 @@ pub struct CsvIngestor {
     reader: Option<DecodedFileReader>,
     /// The file the records are read from.
     path: PathBuf,
+    /// The input the file was collected from, which diagnostics name it by.
+    source: Input,
     /// The record key of each column, from the header; `None` for a headerless source, whose
     /// columns are keyed by position.
     column_keys: Option<ColumnKeys>,
@@ -74,8 +74,8 @@ impl CsvIngestor {
             .and_then(FormatMetadata::as_csv)
             .map(|metadata| metadata.dialect().clone());
 
-        let path = match payload.into_payload() {
-            CollectedPayload::File(f) => f.into_path(),
+        let (path, source) = match payload.into_payload() {
+            CollectedPayload::File(file) => file.into_path_and_source(),
             CollectedPayload::Bytes(_) => return Err(CsvIngestError::RequiresFile.into()),
         };
 
@@ -101,13 +101,9 @@ impl CsvIngestor {
         let mut reader = match &dialect {
             Some(dialect) => {
                 info!("Using profiled CSV dialect: {:#?}", dialect);
-                dialect.reader(decoded).map_err(|source| {
-                    CsvIngestError::reading(source, encoding, |source| CsvIngestError::TableStart {
-                        source,
-                        // The error owns the path after this borrow ends.
-                        path: path.clone(),
-                    })
-                })?
+                dialect
+                    .reader(decoded)
+                    .map_err(|source| CsvIngestError::reading(source, encoding, &path, CsvRead::TableStart))?
             }
             None => Reader::from_reader(decoded),
         };
@@ -118,7 +114,7 @@ impl CsvIngestor {
             let keys = ColumnKeys::from_headers(
                 reader
                     .headers()
-                    .map_err(|source| CsvIngestError::reading(source, encoding, CsvIngestError::Reader))?,
+                    .map_err(|source| CsvIngestError::reading(source, encoding, &path, CsvRead::Table))?,
             );
             info!("Column keys: {:#?}", keys);
             Some(keys)
@@ -135,6 +131,7 @@ impl CsvIngestor {
         Ok(CsvIngestor {
             reader: Some(reader),
             path,
+            source,
             column_keys,
             encoding,
             notation,
@@ -144,10 +141,12 @@ impl CsvIngestor {
         })
     }
 
-    /// The file the records are read from.
+    /// The input the file was collected from: the file itself, or the URL a downloaded file was
+    /// fetched from, which stays the same from one run to the next where the downloaded copy's path
+    /// does not.
     #[must_use]
-    pub fn path(&self) -> &Path {
-        &self.path
+    pub const fn source(&self) -> &Input {
+        &self.source
     }
 
     /// The columns whose header asks for a key another column holds, each read by a generated key
@@ -260,7 +259,7 @@ impl Ingestor for CsvIngestor {
                         self.misshapen.lock().record(row);
                         continue;
                     }
-                    None => return Err(CsvIngestError::reading(source, encoding, CsvIngestError::Reader).into()),
+                    None => return Err(CsvIngestError::reading(source, encoding, &self.path, CsvRead::Table).into()),
                 },
             };
             let data = match &self.column_keys {
@@ -339,7 +338,7 @@ mod tests {
             profile = profile.with_metadata(metadata);
         }
         let payload = ProfiledPayload::new(
-            CollectedPayload::File(FilePayload::new(path, Some(DataFormat::Csv), EncodingHint::NONE)),
+            CollectedPayload::File(FilePayload::local(path, Some(DataFormat::Csv), EncodingHint::NONE)),
             profile,
         );
         (dir, payload)
@@ -669,17 +668,26 @@ mod tests {
 
     #[test]
     fn a_utf_8_file_with_a_byte_that_is_not_utf_8_fails_naming_its_line() {
-        let (_dir, payload) = profiled_csv(b"Station;Name\nSTEF;Cafe\nAKA;M\xfcller\n", Some(dialect_in(UTF_8)));
+        let (dir, payload) = profiled_csv(b"Station;Name\nSTEF;Cafe\nAKA;M\xfcller\n", Some(dialect_in(UTF_8)));
 
-        assert_eq!(ingest_error(payload), "line 3 of the CSV file is not valid UTF-8");
+        assert_eq!(
+            ingest_error(payload),
+            format!("line 3 of the CSV file at '{}' is not valid UTF-8", dir.path().join("data.csv").display())
+        );
     }
 
     #[test]
     fn a_byte_with_no_character_in_a_single_byte_encoding_fails_naming_its_line() {
         // 0xD2 has no character in windows-1253.
-        let (_dir, payload) = profiled_csv(b"Station;Name\nSTEF;\xd2\n", Some(dialect_in(WINDOWS_1253)));
+        let (dir, payload) = profiled_csv(b"Station;Name\nSTEF;\xd2\n", Some(dialect_in(WINDOWS_1253)));
 
-        assert_eq!(ingest_error(payload), "line 2 of the CSV file is not valid windows-1253");
+        assert_eq!(
+            ingest_error(payload),
+            format!(
+                "line 2 of the CSV file at '{}' is not valid windows-1253",
+                dir.path().join("data.csv").display()
+            )
+        );
     }
 
     #[test]
@@ -694,12 +702,36 @@ mod tests {
             encoding: CharacterEncoding::new(UTF_8),
             notation: ValueNotation::PLAIN,
         }));
-        let (_dir, payload) = profiled_csv(b"\"Lumes\nreport\";v2\nStation;\xb5g\nSTEF;12\n", Some(metadata));
+        let (dir, payload) = profiled_csv(b"\"Lumes\nreport\";v2\nStation;\xb5g\nSTEF;12\n", Some(metadata));
         let Err(error) = CsvIngestor::from_payload(payload, 8) else {
             panic!("expected the header to fail");
         };
 
-        assert_eq!(error.to_string(), "line 3 of the CSV file is not valid UTF-8");
+        assert_eq!(
+            error.to_string(),
+            format!("line 3 of the CSV file at '{}' is not valid UTF-8", dir.path().join("data.csv").display())
+        );
+    }
+
+    #[test]
+    fn a_stated_stacked_header_with_a_unit_row_one_field_short_ingests_every_data_row() {
+        let metadata = FormatMetadata::Csv(CsvMetadata::new(Dialect {
+            delimiter: DialectByte::SEMICOLON,
+            quote_char: Quote::Char(DialectByte::DOUBLE_QUOTE),
+            preamble: Preamble::NONE,
+            header_rows: HeaderRows::new(3),
+            escape: Escape::Doubled,
+            terminator: LineTerminator::Lf,
+            encoding: CharacterEncoding::new(UTF_8),
+            notation: ValueNotation::PLAIN,
+        }));
+        let (_dir, payload) = profiled_csv("Station;NO2;O3\n;HMW;HMW\n;µg/m³\nSTEF;18;50\nTAB;9;10\n", Some(metadata));
+        let records = ingest_all(payload);
+
+        assert_eq!(records.len(), 2);
+        assert_eq!(records[0].data()["Station"], Value::from("STEF"));
+        assert_eq!(records[0].data()["NO2 HMW µg/m³"], Value::from(18));
+        assert_eq!(records[1].data()["O3 HMW"], Value::from(10));
     }
 
     #[test]

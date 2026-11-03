@@ -101,11 +101,11 @@ impl ColumnKeys {
     ///
     /// The spaces around a header are dropped, as they are around a value: a table padded for
     /// reading, such as `id | name`, is keyed `id` and `name`, not `id ` and ` name`. A quoted
-    /// header field may hold an embedded newline (RFC 4180 clause 2.6); folding it to a space keeps
-    /// the key on one line. The header is otherwise preserved verbatim: its Unicode and punctuation
+    /// header field may hold an embedded line break (RFC 4180 clause 2.6), written as CRLF, LF, or a
+    /// lone CR; folding each to one space keeps the key on one line. The header is otherwise preserved verbatim: its Unicode and punctuation
     /// are addressable directly from a mapping, so no transliteration is applied.
     fn clean_header(header: &str) -> String {
-        header.trim().replace('\n', " ")
+        header.trim().replace("\r\n", " ").replace(['\r', '\n'], " ")
     }
 
     /// The rename of each column that does not keep the key it asks for, in column order.
@@ -174,6 +174,13 @@ mod tests {
 
         assert_eq!(texts(&keys), ["id", "NO2 HMW", "2", "O3"]);
         assert_eq!(keys.renamed(), []);
+    }
+
+    #[test]
+    fn a_crlf_or_lone_carriage_return_in_a_header_folds_to_one_space() {
+        let keys = keys_of(&["NO2\r\nHMW", "O3\rHMW", "PM10\n\rµg/m³"]);
+
+        assert_eq!(texts(&keys), ["NO2 HMW", "O3 HMW", "PM10  µg/m³"]);
     }
 
     #[test]

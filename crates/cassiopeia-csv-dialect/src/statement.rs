@@ -181,6 +181,11 @@ impl TryFrom<DialectStatementRaw> for DialectStatement {
         {
             return Err(DialectError::DelimiterIsQuote(char::from(delimiter.byte())));
         }
+        if let (Some(delimiter), Some(Escape::Char(escape))) = (raw.delimiter, raw.escape)
+            && delimiter == escape
+        {
+            return Err(DialectError::DelimiterIsEscape(char::from(delimiter.byte())));
+        }
         if let (Some(_), Some(Quote::Disabled)) = (raw.escape, raw.quote) {
             return Err(DialectError::EscapeWithoutQuote);
         }
@@ -291,6 +296,13 @@ mod tests {
         let error = parse(json!({"delimiter": "'", "quote": "'"})).unwrap_err();
 
         assert!(error.to_string().contains("both '''"));
+    }
+
+    #[test]
+    fn a_delimiter_equal_to_the_escape_is_rejected() {
+        let error = parse(json!({"delimiter": "\\", "escape": "\\"})).unwrap_err();
+
+        assert_eq!(error.to_string(), DialectError::DelimiterIsEscape('\\').to_string());
     }
 
     #[test]
