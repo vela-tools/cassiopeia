@@ -15,6 +15,7 @@ pub(crate) mod expander;
 pub(crate) mod extractor;
 pub(crate) mod ingestor;
 pub(crate) mod merged_records_report;
+pub(crate) mod misshapen_rows_report;
 pub(crate) mod nonconformant_types;
 pub(crate) mod profiler;
 pub(crate) mod pump;

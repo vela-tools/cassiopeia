@@ -82,8 +82,12 @@ Some feeds put a title line above the table. Cassiopeia skips such leading rows 
 
 A header can also span several rows, such as a name row, an aggregation row, and a unit row. Cassiopeia treats a row directly below the header as part of it when every non-blank cell is a short label with no number or date in it, and the row leaves blank a column that every data row fills, as a stacked header usually leaves its station or key column unlabelled. Each column's non-blank header cells are joined from top to bottom with a space, so `NO2` over `HMW` over `µg/m³` becomes the field `NO2 HMW µg/m³`. Two columns that share a name but differ in a lower row, such as `PM10 MW24 µg/m³` and `PM10 HMW µg/m³`, become distinct fields. The profile report shows the header as `headerRows 3`. A header spans at most four rows.
 
+### Rows of another width
+
+RFC 4180 has every row of a CSV hold the same number of fields. A row that does not, such as a row one field short, a row with an extra field, or a `Source: …` note below the table, is skipped. Which of its fields is missing or extra cannot be told, so it is never padded or cut to fit. The rows around it are read as usual. The run reports one `ingest-rows-misshapen` warning per file. The warning names the table's field count and up to three skipped rows with their field counts, and counts the rest. A row is numbered from the top of the file, title and header rows included, as a spreadsheet numbers rows. A quoted field that spans several lines leaves its row one row, and a blank line is not counted. Detection skips such rows too, as long as most rows of the sample have the table's width.
+
 > [!WARNING]
-> Cassiopeia does not detect footer rows below a table, such as a `Total;;60` sum row or a `Source: …` note. Remove them before ingesting. A footer row narrower or wider than the table stops the run: during profiling if the file is small, or at the footer line after the rows above it were ingested if it is large. A footer row as wide as the table, such as `Total;;60`, is not detected at all and is mapped as data.
+> A footer row as wide as the table, such as a `Total;;60` sum row, cannot be told apart from data, so it is mapped as a record. Remove such rows before ingesting.
 
 ### Value inference
 

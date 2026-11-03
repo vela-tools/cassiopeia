@@ -708,6 +708,7 @@ dependencies = [
  "indexmap 2.14.2",
  "kml",
  "mediatype",
+ "parking_lot 0.13.0",
  "pretty_assertions",
  "quick-xml 0.42.0",
  "serde",

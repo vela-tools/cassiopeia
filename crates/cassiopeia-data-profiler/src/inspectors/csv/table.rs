@@ -1,6 +1,6 @@
 use crate::inspectors::csv::data_type::DataType;
 use ::csv::StringRecord;
-use cassiopeia_csv_dialect::dialect::Dialect;
+use cassiopeia_csv_dialect::{dialect::Dialect, misshapen_row::MisshapenRow};
 use std::collections::HashMap;
 
 /// A sample parsed under one candidate dialect, with every cell typed for uniformity scoring.
@@ -14,17 +14,33 @@ pub struct Table {
     pub num_columns: usize,
     /// The number of parsed records.
     pub num_rows: usize,
+    /// The number of records skipped because their field count differs from the table's.
+    pub misshapen_rows: usize,
 }
 
 impl Table {
     /// Parses `sample` under `dialect` into a table, skipping its preamble and, when the dialect
     /// reads one, its header row.
     ///
-    /// Returns `None` when the sample holds no records or any record fails to parse. The reader is
-    /// not flexible, so a record whose field count differs from the first one fails the parse.
+    /// A record whose field count differs from the first one is skipped as a [`MisshapenRow`], as
+    /// the ingestor skips it, and counted against the table's consistency. Returns `None` when the
+    /// sample holds no records, a record fails to parse for any other reason, or the misshapen
+    /// records are not outnumbered by the rest: then the first record is no row of the table, such
+    /// as a title line above it, and the table starts further down.
     pub fn parse(sample: &[u8], dialect: &Dialect) -> Option<Table> {
-        let records = dialect.reader(sample).ok()?.records().collect::<Result<Vec<_>, _>>().ok()?;
-        if records.is_empty() {
+        let mut records = Vec::new();
+        let mut misshapen_rows = 0usize;
+        for result in dialect.reader(sample).ok()?.records() {
+            match result {
+                Ok(record) => records.push(record),
+                Err(error) => {
+                    MisshapenRow::of(&error, dialect.preamble)?;
+                    misshapen_rows += 1;
+                }
+            }
+        }
+        let records = records;
+        if records.len() <= misshapen_rows {
             return None;
         }
 
@@ -39,6 +55,7 @@ impl Table {
             column_types,
             num_columns,
             num_rows,
+            misshapen_rows,
         })
     }
 
@@ -93,13 +110,10 @@ impl Table {
         if total == 0 { 0.0 } else { to_f64(enclosed) / to_f64(total) }
     }
 
+    /// The fraction of the sample's records that have the table's field count.
     fn column_consistency(&self) -> f64 {
-        if self.records.is_empty() {
-            return 0.0;
-        }
-        let expected = self.num_columns;
-        let consistent = self.records.iter().filter(|r| r.len() == expected).count();
-        to_f64(consistent) / to_f64(self.records.len())
+        let total = self.num_rows + self.misshapen_rows;
+        if total == 0 { 0.0 } else { to_f64(self.num_rows) / to_f64(total) }
     }
 
     fn type_uniformity(&self) -> f64 {
@@ -174,6 +188,38 @@ mod tests {
         let sample = b"Lumes;v2.10;25.10.26\nStation;NO2\nSTEF;12,45\n";
 
         assert!(Table::parse(sample, &semicolon_dialect(Preamble::NONE)).is_none());
+    }
+
+    #[test]
+    fn a_short_and_a_long_row_are_skipped_and_the_rows_around_them_kept() {
+        let sample = b"1;a;10\n2;b\n3;c;30\n4;d;40;x\n5;e;50\n";
+        let table = Table::parse(sample, &semicolon_dialect(Preamble::NONE)).unwrap();
+
+        assert_eq!(table.num_rows, 3);
+        assert_eq!(table.misshapen_rows, 2);
+        assert_eq!(table.records[1], vec!["3", "c", "30"]);
+    }
+
+    #[test]
+    fn a_footer_note_below_the_table_is_skipped() {
+        let sample = b"1;a;10\n2;b;20\nTotal;;30\nSource: City statistics office\n";
+        let table = Table::parse(sample, &semicolon_dialect(Preamble::NONE)).unwrap();
+
+        assert_eq!(table.num_rows, 3);
+        assert_eq!(table.misshapen_rows, 1);
+    }
+
+    #[test]
+    fn misshapen_rows_as_many_as_the_rest_fail_the_parse() {
+        assert!(Table::parse(b"1;a;10\n2;b\n3;c;30\n4\n", &semicolon_dialect(Preamble::NONE)).is_none());
+    }
+
+    #[test]
+    fn misshapen_rows_lower_the_score() {
+        let even = Table::parse(b"1;a;10\n2;b;20\n3;c;30\n", &semicolon_dialect(Preamble::NONE)).unwrap();
+        let ragged = Table::parse(b"1;a;10\n2;b\n2;b;20\n3;c;30\n", &semicolon_dialect(Preamble::NONE)).unwrap();
+
+        assert!(even.score() > ragged.score());
     }
 
     #[test]
