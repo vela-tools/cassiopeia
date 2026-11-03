@@ -58,7 +58,13 @@ mod tests {
         metadata::FormatMetadata,
     };
     use cassiopeia_common::format::DataFormat;
-    use cassiopeia_csv_dialect::{dialect_byte::DialectByte, header_rows::HeaderRows, preamble::Preamble, statement::DialectStatement};
+    use cassiopeia_csv_dialect::{
+        dialect_byte::DialectByte,
+        header_rows::HeaderRows,
+        line_terminator::LineTerminator,
+        preamble::Preamble,
+        statement::DialectStatement,
+    };
     use pretty_assertions::assert_eq;
     use url::Url;
 
@@ -90,6 +96,40 @@ mod tests {
         assert_eq!(profile.mime_type().to_string(), "text/csv");
         let metadata = profile.metadata().as_ref().and_then(FormatMetadata::as_csv).unwrap();
         assert_eq!(metadata.dialect().delimiter, DialectByte::COMMA);
+    }
+
+    #[test]
+    fn a_file_of_lone_carriage_returns_is_detected_as_csv() {
+        let profile = CsvDetector.detect(&Content::new(b"id,name,value\r1,alpha,10\r2,beta,20\r")).unwrap();
+        let metadata = profile.metadata().as_ref().and_then(FormatMetadata::as_csv).unwrap();
+
+        assert_eq!(metadata.dialect().terminator, LineTerminator::Cr);
+        assert_eq!(metadata.dialect().header_rows, HeaderRows::ONE);
+    }
+
+    #[test]
+    fn a_single_column_file_under_a_header_is_detected_as_csv() {
+        let profile = CsvDetector.detect(&Content::new(b"name\nAda\nGrace\nLinus\n")).unwrap();
+
+        assert_eq!(*profile.format(), DataFormat::Csv);
+    }
+
+    #[test]
+    fn plain_prose_is_not_detected_as_a_single_column_csv() {
+        assert!(
+            CsvDetector
+                .detect(&Content::new(b"This is a plain note about the data.\nIt has two sentences and no table.\n"))
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn a_utf_16le_file_without_a_byte_order_mark_is_detected_as_csv_in_utf_16le() {
+        let bytes: Vec<u8> = "id,name\n1,Čapek\n2,Grace\n".encode_utf16().flat_map(u16::to_le_bytes).collect();
+        let profile = CsvDetector.detect(&Content::new(&bytes)).unwrap();
+        let metadata = profile.metadata().as_ref().and_then(FormatMetadata::as_csv).unwrap();
+
+        assert_eq!(metadata.dialect().encoding.to_string(), "UTF-16LE");
     }
 
     #[test]

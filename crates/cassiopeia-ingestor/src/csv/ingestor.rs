@@ -9,6 +9,7 @@ use cassiopeia_csv_column::{column_key::ColumnKey, renamed_column::RenamedColumn
 use cassiopeia_csv_dialect::{
     decimal_separator::DecimalSeparator,
     dialect::Dialect,
+    line_terminator::LineTerminator,
     misshapen_row::MisshapenRow,
     preamble::Preamble,
     value_notation::ValueNotation,
@@ -88,7 +89,11 @@ impl CsvIngestor {
         // The file is decoded strictly: a byte sequence that is not valid in its encoding fails the
         // run on its line, rather than reaching the mapped values as `U+FFFD`. A byte order mark
         // names the encoding over the profiled one, as for any decoder of the web's encodings.
-        let decoded = BufReader::new(LineCountingReader::new(DecodingReader::new(BufReader::new(file), encoding.new_decoder())));
+        let terminator = dialect.as_ref().map_or(LineTerminator::Lf, |dialect| dialect.terminator);
+        let decoded = BufReader::new(LineCountingReader::new(
+            DecodingReader::new(BufReader::new(file), encoding.new_decoder()),
+            terminator,
+        ));
 
         // The profiled dialect opens the file exactly as the inspector parsed its sample, preamble
         // skip and stacked-header join included, so the header read below is the one the inspector
@@ -461,6 +466,36 @@ mod tests {
     }
 
     #[test]
+    fn a_file_whose_lines_end_with_a_lone_carriage_return_ingests_a_record_per_line() {
+        let (_dir, payload) = inspected(b"id,name\r1,Ada\r2,Grace\r");
+        let records = ingest_all(payload);
+
+        assert_eq!(records.len(), 2);
+        assert_eq!(records[0].data().get("name"), Some(&Value::String("Ada".to_string())));
+        assert_eq!(records[1].data().get("id"), Some(&Value::Number(2.into())));
+    }
+
+    #[test]
+    fn a_single_column_file_ingests_a_record_per_row_keyed_by_its_header() {
+        let (_dir, payload) = inspected(b"name\nAda\nGrace\nLinus\n");
+        let records = ingest_all(payload);
+        let names: Vec<&Value> = records.iter().filter_map(|record| record.data().get("name")).collect();
+
+        assert_eq!(names, [&Value::from("Ada"), &Value::from("Grace"), &Value::from("Linus")]);
+    }
+
+    #[test]
+    fn a_utf_16le_file_without_a_byte_order_mark_ingests_its_text_intact() {
+        let bytes: Vec<u8> = "id,name\n1,Čapek\n2,Grace\n".encode_utf16().flat_map(u16::to_le_bytes).collect();
+        let (_dir, payload) = inspected(bytes);
+        let records = ingest_all(payload);
+
+        assert_eq!(records.len(), 2);
+        assert_eq!(records[0].data().get("name"), Some(&Value::String("Čapek".to_string())));
+        assert_eq!(records[1].data().get("id"), Some(&Value::Number(2.into())));
+    }
+
+    #[test]
     fn a_pipe_table_padded_for_reading_is_keyed_and_valued_without_its_padding() {
         let contents = "id | name | count\n1 | Ada | 36\n2 | Grace | 45\n";
         let dialect = CsvInspector::new(&DialectStatement::NOTHING)
@@ -540,10 +575,8 @@ mod tests {
         }))
     }
 
-    fn inspected(contents: &str) -> (TempDir, ProfiledPayload) {
-        let dialect = CsvInspector::new(&DialectStatement::NOTHING)
-            .inspect(&Content::new(contents.as_bytes()))
-            .unwrap();
+    fn inspected(contents: impl AsRef<[u8]>) -> (TempDir, ProfiledPayload) {
+        let dialect = CsvInspector::new(&DialectStatement::NOTHING).inspect(&Content::new(contents.as_ref())).unwrap();
         profiled_csv(contents, Some(FormatMetadata::Csv(CsvMetadata::new(dialect))))
     }
 

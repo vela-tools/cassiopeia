@@ -4,7 +4,9 @@ use crate::{
         error::CsvInspectError,
         escape_evidence::backs_escape,
         header::{continuation_rows, header_quality, looks_like_header_row},
+        reading::Reading,
         table::Table,
+        table_shape::TableShape,
         title::title_rows,
     },
 };
@@ -26,7 +28,9 @@ pub mod data_type;
 pub mod error;
 mod escape_evidence;
 mod header;
+mod reading;
 mod table;
+mod table_shape;
 mod title;
 
 /// Scan granularity for [`CsvInspector::sample_of`].
@@ -95,23 +99,6 @@ enum SampleExtent {
     Cut,
 }
 
-/// One reading of a sample: a candidate dialect, the table it reads, and how coherent that table is.
-struct Reading {
-    dialect: Dialect,
-    table: Table,
-    score: f64,
-}
-
-impl Reading {
-    /// The reading of the two that scores higher; `other` must score strictly higher to win.
-    fn or_better(self, other: Option<Reading>) -> Reading {
-        match other {
-            Some(other) if other.score > self.score => other,
-            Some(_) | None => self,
-        }
-    }
-}
-
 impl<'s> CsvInspector<'s> {
     /// Creates an inspector that takes what `statement` states and detects the rest.
     #[must_use]
@@ -129,6 +116,9 @@ impl<'s> CsvInspector<'s> {
     ///
     /// Returns [`CsvInspectError`] when the content is empty or no candidate dialect produces a
     /// coherent table.
+    ///
+    /// A table of several columns is looked for first; a file that no candidate splits into
+    /// columns, such as a plain list of names, is then read as a table of one column.
     pub fn inspect(&self, content: &Content<'_>) -> Result<Dialect, CsvInspectError> {
         if let Some(dialect) = self.statement.whole_dialect() {
             return Ok(dialect);
@@ -150,9 +140,23 @@ impl<'s> CsvInspector<'s> {
         let decoded = encoding.encoding().decode(raw_sample).0;
         let sample = decoded.as_bytes();
         let terminator = self.statement.terminator().unwrap_or_else(|| Self::terminator_of(sample));
-
         let best = self
-            .delimiters()
+            .best_of(sample, extent, terminator, encoding, TableShape::MultiColumn)
+            .or_else(|| self.best_of(sample, extent, terminator, encoding, TableShape::SingleColumn));
+
+        let Reading { mut dialect, table, .. } = best.ok_or(CsvInspectError::NoDialectDetected)?;
+        if !matches!(self.statement.header(), Some(HeaderStatement::Rows(_))) {
+            dialect = Self::with_stacked_header(dialect, &table);
+        }
+        // The dialect owns its notation, while the statement stays the manifest's.
+        dialect.notation = self.statement.notation().clone();
+        Ok(dialect)
+    }
+
+    /// The best reading of `sample`, whose lines end with `terminator` and which was decoded from
+    /// `encoding`, as a table of `shape`, over every candidate delimiter, quote, and escape.
+    fn best_of(&self, sample: &[u8], extent: SampleExtent, terminator: LineTerminator, encoding: CharacterEncoding, shape: TableShape) -> Option<Reading> {
+        self.delimiters()
             .into_iter()
             .flat_map(|delimiter| self.quotes().into_iter().map(move |quote| (delimiter, quote)))
             .filter_map(|(delimiter, quote)| {
@@ -175,18 +179,10 @@ impl<'s> CsvInspector<'s> {
                         SampleExtent::Whole => sample,
                         SampleExtent::Cut => candidate.complete_records(sample),
                     };
-                    self.best_reading(records, candidate)
+                    self.best_reading(records, candidate, shape)
                 })
             })
-            .reduce(|best, reading| best.or_better(Some(reading)));
-
-        let Reading { mut dialect, table, .. } = best.ok_or(CsvInspectError::NoDialectDetected)?;
-        if !matches!(self.statement.header(), Some(HeaderStatement::Rows(_))) {
-            dialect = Self::with_stacked_header(dialect, &table);
-        }
-        // The dialect owns its notation, while the statement stays the manifest's.
-        dialect.notation = self.statement.notation().clone();
-        Ok(dialect)
+            .reduce(|best, reading| best.or_better(Some(reading)))
     }
 
     /// The delimiters to try: the stated one, or every candidate.
@@ -231,10 +227,13 @@ impl<'s> CsvInspector<'s> {
         }
     }
 
-    /// The line terminator of `sample`: CRLF as soon as one line ends with it.
+    /// The line terminator of `sample`: CRLF as soon as one line ends with it, a lone CR when the
+    /// sample has carriage returns but no line feed at all, and LF otherwise.
     fn terminator_of(sample: &[u8]) -> LineTerminator {
         if sample.windows(2).any(|w| w == b"\r\n") {
             LineTerminator::Crlf
+        } else if sample.contains(&b'\r') && !sample.contains(&b'\n') {
+            LineTerminator::Cr
         } else {
             LineTerminator::Lf
         }
@@ -246,12 +245,12 @@ impl<'s> CsvInspector<'s> {
     /// The full table keeps row 0, so it is both what the no-headers hypothesis scores and what a
     /// header is judged against; the headers hypothesis scores the data-only table. A stated header
     /// leaves one hypothesis, scored on the table alone.
-    fn best_reading(&self, sample: &[u8], candidate: Dialect) -> Option<Reading> {
-        let (headerless, full) = self.table_start(sample, candidate)?;
+    fn best_reading(&self, sample: &[u8], candidate: Dialect, shape: TableShape) -> Option<Reading> {
+        let (headerless, full) = self.table_start(sample, candidate, shape)?;
         match self.statement.header() {
             None => {
                 let header_signal = header_quality(&full);
-                let headed = Self::headed(sample, &headerless, HeaderRows::ONE, &full).map(|(dialect, data)| Reading {
+                let headed = Self::headed(sample, &headerless, HeaderRows::ONE, &full, shape).map(|(dialect, data)| Reading {
                     score: data.score() + header_signal * 15.0,
                     dialect,
                     table: data,
@@ -263,8 +262,8 @@ impl<'s> CsvInspector<'s> {
                 };
                 Some(unheaded.or_better(headed))
             }
-            Some(HeaderStatement::Present) => Self::headed_reading(sample, &headerless, HeaderRows::ONE, &full),
-            Some(HeaderStatement::Rows(rows)) if rows.is_present() => Self::headed_reading(sample, &headerless, rows, &full),
+            Some(HeaderStatement::Present) => Self::headed_reading(sample, &headerless, HeaderRows::ONE, &full, shape),
+            Some(HeaderStatement::Rows(rows)) if rows.is_present() => Self::headed_reading(sample, &headerless, rows, &full, shape),
             Some(HeaderStatement::Rows(_)) => Some(Reading {
                 score: full.score(),
                 dialect: headerless,
@@ -274,8 +273,8 @@ impl<'s> CsvInspector<'s> {
     }
 
     /// The reading of `sample` with a header of `header_rows` records, scored on its data alone.
-    fn headed_reading(sample: &[u8], headerless: &Dialect, header_rows: HeaderRows, full: &Table) -> Option<Reading> {
-        Self::headed(sample, headerless, header_rows, full).map(|(dialect, data)| Reading {
+    fn headed_reading(sample: &[u8], headerless: &Dialect, header_rows: HeaderRows, full: &Table, shape: TableShape) -> Option<Reading> {
+        Self::headed(sample, headerless, header_rows, full, shape).map(|(dialect, data)| Reading {
             score: data.score(),
             dialect,
             table: data,
@@ -283,8 +282,8 @@ impl<'s> CsvInspector<'s> {
     }
 
     /// `headerless` with a header of `header_rows` records, and the data-only table below that
-    /// header, when the full table holds a header and a data row and the data is tabular.
-    fn headed(sample: &[u8], headerless: &Dialect, header_rows: HeaderRows, full: &Table) -> Option<(Dialect, Table)> {
+    /// header, when the full table holds a header and a data row and the data is tabular in `shape`.
+    fn headed(sample: &[u8], headerless: &Dialect, header_rows: HeaderRows, full: &Table, shape: TableShape) -> Option<(Dialect, Table)> {
         let headed = Dialect {
             header_rows,
             notation: ValueNotation::PLAIN,
@@ -293,19 +292,19 @@ impl<'s> CsvInspector<'s> {
         (full.num_rows >= 2)
             .then(|| Table::parse(sample, &headed))
             .flatten()
-            .filter(Table::is_tabular)
+            .filter(|data| data.is_tabular(shape))
             .map(|data| (headed, data))
     }
 
     /// Where the table in `sample` starts under `candidate`: below the stated preamble, or below the
-    /// preamble and titles detected, with the headerless table from there.
-    fn table_start(&self, sample: &[u8], candidate: Dialect) -> Option<(Dialect, Table)> {
+    /// preamble and titles detected, with the headerless table of `shape` from there.
+    fn table_start(&self, sample: &[u8], candidate: Dialect, shape: TableShape) -> Option<(Dialect, Table)> {
         if let Some(preamble) = self.statement.skip_rows() {
             let dialect = Dialect { preamble, ..candidate };
-            let table = Table::parse(sample, &dialect).filter(Table::is_tabular)?;
+            let table = Table::parse(sample, &dialect).filter(|table| table.is_tabular(shape))?;
             return Some((dialect, table));
         }
-        let (dialect, table) = Self::locate_table(sample, candidate)?;
+        let (dialect, table) = Self::locate_table(sample, candidate, shape)?;
         Some(Self::below_titles(sample, dialect, table))
     }
 
@@ -326,8 +325,8 @@ impl<'s> CsvInspector<'s> {
         dialect
     }
 
-    /// Finds where the table in `sample` starts under `dialect`'s delimiter and quote, returning the
-    /// dialect with its preamble set and the headerless table below that preamble.
+    /// Finds where the table of `shape` in `sample` starts under `dialect`'s delimiter and quote,
+    /// returning the dialect with its preamble set and the headerless table below that preamble.
     ///
     /// A preamble is the run of leading records, such as a title line, whose field count differs
     /// from the table's. The reader is not flexible, so while such a record is still in front of the
@@ -335,7 +334,7 @@ impl<'s> CsvInspector<'s> {
     /// candidate preamble is only tried when every record in it is a different width from the record
     /// that would start the table, so a ragged row further down never turns the rows above it, the
     /// header among them, into a preamble.
-    fn locate_table(sample: &[u8], mut dialect: Dialect) -> Option<(Dialect, Table)> {
+    fn locate_table(sample: &[u8], mut dialect: Dialect, shape: TableShape) -> Option<(Dialect, Table)> {
         let widths: Vec<usize> = dialect
             .reader_builder()
             .flexible(true)
@@ -355,7 +354,7 @@ impl<'s> CsvInspector<'s> {
                 // Every record from here on shares one width, so a longer preamble could only drop
                 // rows of the same table, never reveal a different one.
                 let enough_rows = records == 0 || table.num_rows >= MIN_RECORDS_BELOW_PREAMBLE;
-                return (table.is_tabular() && enough_rows).then_some((dialect, table));
+                return (table.is_tabular(shape) && enough_rows).then_some((dialect, table));
             }
         }
         None
@@ -383,21 +382,23 @@ impl<'s> CsvInspector<'s> {
     /// The leading bytes of `bytes` the dialect is scored on, large enough to score a header and
     /// bounded by a hard byte ceiling, and whether they are all of `bytes`.
     ///
-    /// A narrow CSV crosses [`MIN_SAMPLE_LINES`] newlines well inside the soft target `sample_size`,
+    /// A narrow CSV crosses [`MIN_SAMPLE_LINES`] line ends well inside the soft target `sample_size`,
     /// so the sample stops at that target. A file whose rows are wider than the soft target keeps
     /// sampling until it holds enough lines to tell a header from data, and [`MAX_SAMPLE_BYTES`]
-    /// caps a pathologically wide single row. Newlines are counted per chunk, never by rescanning
-    /// the sample, so the scan stays linear in the bytes sampled.
+    /// caps a pathologically wide single row. Line ends are counted per chunk, never by rescanning
+    /// the sample, so the scan stays linear in the bytes sampled. The terminator is not detected
+    /// yet, so a chunk's line ends are its line feeds or its carriage returns, whichever are more:
+    /// a CRLF line holds one of each, and a file whose lines end with a lone CR has no line feed.
     ///
     /// A cut sample ends wherever its last chunk does, even inside a record or a character; each
     /// candidate dialect trims it to its complete records with [`Dialect::complete_records`].
     fn sample_of<'a>(&self, bytes: &'a [u8]) -> (&'a [u8], SampleExtent) {
         let mut end = 0usize;
-        let mut newlines = 0usize;
+        let mut line_ends = 0usize;
         for chunk in bytes.chunks(CHUNK) {
-            newlines += bytecount::count(chunk, b'\n');
+            line_ends += bytecount::count(chunk, b'\n').max(bytecount::count(chunk, b'\r'));
             end += chunk.len();
-            if (end >= self.sample_size && newlines >= MIN_SAMPLE_LINES) || end >= MAX_SAMPLE_BYTES {
+            if (end >= self.sample_size && line_ends >= MIN_SAMPLE_LINES) || end >= MAX_SAMPLE_BYTES {
                 break;
             }
         }
@@ -422,8 +423,65 @@ mod tests {
         quote::Quote,
         statement::DialectStatement,
     };
+    use encoding_rs::UTF_16LE;
     use pretty_assertions::assert_eq;
     use std::fmt::Write;
+
+    #[test]
+    fn a_file_whose_lines_end_with_a_lone_carriage_return_is_detected_with_a_cr_terminator() {
+        let sample = "name,age,city\rAda,36,London\rGrace,45,New York\r";
+        let dialect = CsvInspector::new(&DialectStatement::NOTHING).inspect(&Content::new(sample.as_bytes())).unwrap();
+
+        assert_eq!(dialect.delimiter, DialectByte::COMMA);
+        assert_eq!(dialect.header_rows, HeaderRows::ONE);
+        assert_eq!(dialect.terminator, LineTerminator::Cr);
+    }
+
+    #[test]
+    fn a_carriage_return_inside_a_file_of_line_feeds_leaves_the_terminator_lf() {
+        let sample = "name,note\nAda,\"one\rtwo\"\nGrace,three\n";
+        let dialect = CsvInspector::new(&DialectStatement::NOTHING).inspect(&Content::new(sample.as_bytes())).unwrap();
+
+        assert_eq!(dialect.terminator, LineTerminator::Lf);
+    }
+
+    #[test]
+    fn a_single_column_file_is_read_as_one_column_under_a_header() {
+        let sample = "name\nAda\nGrace\nLinus\n";
+        let dialect = CsvInspector::new(&DialectStatement::NOTHING).inspect(&Content::new(sample.as_bytes())).unwrap();
+
+        assert_eq!(dialect.delimiter, DialectByte::COMMA);
+        assert_eq!(dialect.preamble, Preamble::NONE);
+        assert_eq!(dialect.header_rows, HeaderRows::ONE);
+    }
+
+    #[test]
+    fn a_single_column_of_numbers_takes_its_label_as_the_header() {
+        let sample = "count\n1\n2\n3\n";
+        let dialect = CsvInspector::new(&DialectStatement::NOTHING).inspect(&Content::new(sample.as_bytes())).unwrap();
+
+        assert_eq!(dialect.header_rows, HeaderRows::ONE);
+    }
+
+    #[test]
+    fn a_file_that_splits_into_columns_is_never_read_as_a_single_column() {
+        // Every row is one wide under the comma, and its text is uniform there; only the semicolon
+        // splits it, into columns of mixed types that score lower than the single column would.
+        let sample = "id;value\n1;a\n2;3\nx;4\n";
+        let dialect = CsvInspector::new(&DialectStatement::NOTHING).inspect(&Content::new(sample.as_bytes())).unwrap();
+
+        assert_eq!(dialect.delimiter, DialectByte::SEMICOLON);
+    }
+
+    #[test]
+    fn a_utf_16le_file_without_a_byte_order_mark_is_detected_in_utf_16le() {
+        let bytes: Vec<u8> = "id,name\n1,Čapek\n2,Grace\n".encode_utf16().flat_map(u16::to_le_bytes).collect();
+        let dialect = CsvInspector::new(&DialectStatement::NOTHING).inspect(&Content::new(&bytes)).unwrap();
+
+        assert_eq!(dialect.character_encoding(), UTF_16LE);
+        assert_eq!(dialect.delimiter, DialectByte::COMMA);
+        assert_eq!(dialect.header_rows, HeaderRows::ONE);
+    }
 
     #[test]
     fn a_comma_delimited_file_with_headers_is_detected() {

@@ -137,7 +137,7 @@ Every member is optional. A member you state wins, and Cassiopeia still detects 
 | `skipRows` | The number of rows above the header to skip. Rows are counted as CSV records, so a quoted title that spans two lines is one row. |
 | `header` | `false` for a file without a header, whose columns are then read by position. `true` states that the file has a header and leaves its row count to detection. |
 | `headerRows` | The number of rows the header spans. Each column's non-blank header cells are joined with a space, so `NO2` over `HMW` over `µg/m³` becomes the field `NO2 HMW µg/m³`. |
-| `terminator` | `"lf"` or `"crlf"`. |
+| `terminator` | `"lf"`, `"crlf"`, or `"cr"` (a lone carriage return, as classic Mac OS ends lines). |
 | `encoding` | A label from the WHATWG Encoding Standard, such as `"utf-8"`, `"windows-1252"`, or `"iso-8859-2"`. The standard reads `"latin1"` as `windows-1252`. |
 | `decimalSeparator` | `"."`, the default, or `","`, which reads `12,45` as the number 12.45. Under `","`, a value with a full stop, such as the date `25.10.2026`, stays a string. |
 | `nullValues` | Values read as missing, such as `["NE", "---"]`, besides an empty field and `\N`. |

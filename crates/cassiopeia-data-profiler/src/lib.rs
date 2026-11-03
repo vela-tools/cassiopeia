@@ -16,6 +16,7 @@ use cassiopeia_common::error::io::{IoAction, IoError};
 use memmap2::Mmap;
 use std::{fs::File, path::Path};
 
+mod bomless_utf16;
 pub mod content;
 pub mod detectors;
 mod encoding_evidence;

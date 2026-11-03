@@ -1,4 +1,4 @@
-use crate::inspectors::csv::data_type::DataType;
+use crate::inspectors::csv::{data_type::DataType, table_shape::TableShape};
 use ::csv::StringRecord;
 use cassiopeia_csv_dialect::{dialect::Dialect, misshapen_row::MisshapenRow};
 use std::collections::HashMap;
@@ -59,9 +59,9 @@ impl Table {
         })
     }
 
-    /// Whether the table has the shape of tabular data at all: more than one column and a row.
-    pub const fn is_tabular(&self) -> bool {
-        self.num_columns > 1 && self.num_rows > 0
+    /// Whether the table is tabular data of `shape`: a row, and as many columns as the shape takes.
+    pub const fn is_tabular(&self, shape: TableShape) -> bool {
+        shape.fits(self.num_columns) && self.num_rows > 0
     }
 
     /// Scores how coherent the table is, independent of whether row 0 is a header. The header
@@ -155,7 +155,10 @@ fn is_enclosed_in_quotes(field: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use crate::inspectors::csv::table::{Table, is_enclosed_in_quotes};
+    use crate::inspectors::csv::{
+        table::{Table, is_enclosed_in_quotes},
+        table_shape::TableShape,
+    };
     use cassiopeia_csv_dialect::{
         character_encoding::CharacterEncoding,
         dialect::Dialect,
@@ -238,10 +241,19 @@ mod tests {
     }
 
     #[test]
-    fn a_single_column_table_is_not_tabular() {
+    fn a_single_column_table_is_tabular_only_as_a_single_column() {
         let table = Table::parse(b"a\nb\n", &semicolon_dialect(Preamble::NONE)).unwrap();
 
-        assert!(!table.is_tabular());
+        assert!(!table.is_tabular(TableShape::MultiColumn));
+        assert!(table.is_tabular(TableShape::SingleColumn));
+    }
+
+    #[test]
+    fn a_two_column_table_is_tabular_only_as_a_multi_column_one() {
+        let table = Table::parse(b"a;b\n1;2\n", &semicolon_dialect(Preamble::NONE)).unwrap();
+
+        assert!(table.is_tabular(TableShape::MultiColumn));
+        assert!(!table.is_tabular(TableShape::SingleColumn));
     }
 
     #[test]
