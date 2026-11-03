@@ -11,9 +11,9 @@ use crate::{
     context_delivery::ContextDelivery,
 };
 use cassiopeia_common::{
-    broker_header::BrokerHeaders,
     broker_operation::BrokerOperation,
     representation::NgsiLdRepresentation,
+    request_header::RequestHeaders,
     skip_null::NgsiLdSkipNull,
     tenant::Tenant,
     user_agent::UserAgent,
@@ -112,7 +112,7 @@ impl BrokerWriterConfig {
 
     /// Sets the extra request headers attached to every broker request.
     #[must_use]
-    pub fn with_headers(mut self, headers: BrokerHeaders) -> BrokerWriterConfig {
+    pub fn with_headers(mut self, headers: RequestHeaders) -> BrokerWriterConfig {
         self.identity.headers = headers;
         self
     }

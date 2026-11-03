@@ -11,7 +11,6 @@
 pub mod attribute_overwrite;
 pub mod batch;
 pub mod broker_atomicity;
-pub mod broker_header;
 pub mod broker_operation;
 pub mod captured_body;
 pub mod channel;
@@ -27,6 +26,7 @@ pub mod memory_profile;
 pub mod parallelism;
 pub mod pipeline_mode;
 pub mod representation;
+pub mod request_header;
 pub mod run;
 pub mod run_var;
 pub mod schema_source;

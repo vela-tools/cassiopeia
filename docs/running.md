@@ -25,6 +25,7 @@ Many run settings have two equivalent forms: a command-line flag and a manifest 
 Every run needs an input and a mapping that shapes it:
 
 - `--input` (`-i`): the data source, a local file path or an `http`/`https` URL.
+- `--input-header`: an extra request header sent when fetching a remote input, written `"Name: Value"`. Repeat the flag for several headers. This is where a source's API key goes, for example `--input-header "X-Api-Key: <key>"`. A local input refuses it. The manifest form is the input's `headers` (see the [manifest guide](manifest.md#per-input-headers)).
 - `--mapping` (`-m`): the JSON5 mapping file that defines the transformation rules.
 - `--type` (`-t`): the source format. It defaults to `auto`, which detects the format from the content, so you rarely need to set it. Give it explicitly when detection cannot tell, such as with a headerless CSV, or when you want to force a specific reader. The accepted values are `auto`, `csv`, `json`, `geojson`, `kml`, `kmz`, `grib`, `shapefile`, and `xml`.
 
@@ -67,7 +68,7 @@ A broker run needs the broker URL and can optionally set options for each HTTP r
 - `--atomic`: spool every entity locally and push it to the broker only after a clean finish, so a failed run delivers nothing. Without it, entities stream to the broker as they are produced.
 - `--tenant`: the `NGSILD-Tenant` header for a multi-tenant broker.
 - `--user-agent`: override the default `User-Agent` the writer sends.
-- `--header`: an extra request header, written `"Name: Value"`. Repeat the flag for several headers. This is where broker credentials go, for example `--header "Authorization: Bearer <token>"`.
+- `--output-header`: an extra request header, written `"Name: Value"`. Repeat the flag for several headers. This is where broker credentials go, for example `--output-header "Authorization: Bearer <token>"`.
 - `--link-header` (`-L`): send `@context` in a `Link` header instead of embedding it in each entity body.
 
 ~~~bash
@@ -75,7 +76,7 @@ cassiopeia map -i readings.json -m reading.json5 \
     --writer context-broker \
     --broker-url http://localhost:1026/ \
     --broker-operation upsert \
-    --header "Authorization: Bearer replace-me"
+    --output-header "Authorization: Bearer replace-me"
 ~~~
 
 The [output guide](output.md#send-to-a-context-broker) documents the operations, [atomic delivery](output.md#streaming-and-atomic-delivery), and [context delivery](output.md#context-delivery) in full.

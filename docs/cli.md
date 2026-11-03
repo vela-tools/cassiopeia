@@ -184,6 +184,7 @@ Generate a manifest file from command-line arguments
 ###### **Options:**
 
 * `-i`, `--input <INPUT>` — Data source file path or URL
+* `--input-header <NAME: VALUE>` — Extra HTTP header sent when fetching a remote input, written as `Name: Value`; repeat for several. Typically carries an API key, e.g. `--input-header "X-Api-Key: <key>"`. Refused for a local input. Recorded on the generated manifest as the input's `headers`
 * `-m`, `--mapping <FILE>` — JSON5 mapping file defining the transformation rules
 * `-t`, `--type <FORMAT>` — Data format of the input source
 
@@ -230,7 +231,7 @@ Generate a manifest file from command-line arguments
   - `array`:
     A single pretty-printed JSON array holding every entity of the type
   - `line-delimited`:
-    One compact entity per line, with no surrounding array — append-friendly and re-indent-free
+    One compact entity per line, with no surrounding array: append-friendly and re-indent-free
 
 * `--representation <REPRESENTATION>` — NGSI-LD representation for written entities
 
@@ -270,7 +271,7 @@ Generate a manifest file from command-line arguments
     Omit null-valued attributes from output
 
 * `--validation-mode <MODE>` — How strictly schema validation is enforced, overriding the manifest: warn, fail-when-schema, or fail
-* `--validation-schema <FILE|URL>` — A custom JSON Schema to validate against — a local file path or an `http(s)` URL — applied to every produced type in place of the Smart Data Models convention. A per-input `schema` in the manifest wins over this
+* `--validation-schema <FILE|URL>` — A custom JSON Schema to validate against (a local file path or an `http(s)` URL), applied to every produced type in place of the Smart Data Models convention. A per-input `schema` in the manifest wins over this
 * `-r`, `--validation-report <FILE>` — Write a JSON validation report to the given file path
 * `-u`, `--broker-url <URL>` — Context Broker URL (required when --writer is context-broker)
 * `--broker-operation <OPERATION>` — Which NGSI-LD operation each request performs (context-broker writer only)
@@ -314,7 +315,7 @@ Generate a manifest file from command-line arguments
   Default value: `false`
 * `--tenant <TENANT>` — NGSILD-Tenant header value for multi-tenant Context Brokers
 * `--user-agent <USER_AGENT>` — User-Agent header the broker writer identifies itself with (context-broker writer only). Overrides the build-time default of `cassiopeia/<version>`
-* `--header <NAME: VALUE>` — Extra HTTP header for Context Broker requests, written as `Name: Value`; repeat for several. Typically carries credentials, e.g. `--header "Authorization: Bearer <token>"`
+* `--output-header <NAME: VALUE>` — Extra HTTP header for Context Broker requests, written as `Name: Value`; repeat for several. Typically carries credentials, e.g. `--output-header "Authorization: Bearer <token>"`
 * `-L`, `--link-header` — Send the `@context` via a Link header instead of embedding it in the body
 
   Default value: `false`
@@ -337,7 +338,7 @@ Generate a manifest file from command-line arguments
 * `--every <INTERVAL>` — Run at a fixed interval, timezone-independent (e.g. 30s, 5m, 2h)
 * `--cron <EXPRESSION>` — Run on a cron schedule, evaluated in UTC (e.g. "0 0 */5 * * *").
 
-   Six fields with seconds precision — second, minute, hour, day-of-month, month, day-of-week — plus an optional seventh year field. A five-field crontab line has no seconds field and will not parse.
+   Six fields with seconds precision (second, minute, hour, day-of-month, month, day-of-week) plus an optional seventh year field. A five-field crontab line has no seconds field and will not parse.
 * `--at <TIMES>` — Run at fixed times of day, written HH:MM and evaluated in local time (e.g. 14:00,18:00)
 * `--repeat <COUNT>` — Maximum number of runs
 * `--schedule-duration <DURATION>` — Stop scheduling after this duration (e.g. 2h)
@@ -382,8 +383,9 @@ Map data to a Smart Data Model
 
 * `-M`, `--manifest <MANIFEST>` — Path to a manifest file; it supplies the run's input, mapping, output, validation, and schedule settings, replacing the corresponding command-line options.
 
-   A manifest describes the whole run, so it is mutually exclusive with every inline run-shaping flag — input, mapping, and type, and every output, context, validation, schedule, and failure-policy flag. Engine knobs that are not part of a run's description (the pipeline mode, the store backends, the memory profile) remain valid alongside it.
+   A manifest describes the whole run, so it is mutually exclusive with every inline run-shaping flag: input, mapping, and type, and every output, context, validation, schedule, and failure-policy flag. Engine knobs that are not part of a run's description (the pipeline mode, the store backends, the memory profile) remain valid alongside it.
 * `-i`, `--input <INPUT>` — Data source file path or URL
+* `--input-header <NAME: VALUE>` — Extra HTTP header sent when fetching a remote input, written as `Name: Value`; repeat for several. Typically carries an API key, e.g. `--input-header "X-Api-Key: <key>"`. Refused for a local input
 * `-m`, `--mapping <FILE>` — JSON5 mapping file defining the transformation rules
 * `-t`, `--type <FORMAT>` — Data format of the input source
 
@@ -440,7 +442,7 @@ Map data to a Smart Data Model
     Omit null-valued attributes from output
 
 * `--validation-mode <MODE>` — How strictly schema validation is enforced, overriding the manifest: warn, fail-when-schema, or fail
-* `--validation-schema <FILE|URL>` — A custom JSON Schema to validate against — a local file path or an `http(s)` URL — applied to every produced type in place of the Smart Data Models convention. A per-input `schema` in the manifest wins over this
+* `--validation-schema <FILE|URL>` — A custom JSON Schema to validate against (a local file path or an `http(s)` URL), applied to every produced type in place of the Smart Data Models convention. A per-input `schema` in the manifest wins over this
 * `-r`, `--validation-report <FILE>` — Write a JSON validation report to the given file path
 * `-w`, `--writer <WRITER>` — Where to write results: the file system or a Context Broker
 
@@ -461,7 +463,7 @@ Map data to a Smart Data Model
   - `array`:
     A single pretty-printed JSON array holding every entity of the type
   - `line-delimited`:
-    One compact entity per line, with no surrounding array — append-friendly and re-indent-free
+    One compact entity per line, with no surrounding array: append-friendly and re-indent-free
 
 * `--writer-representation <REPRESENTATION>` — NGSI-LD representation for written entities
 
@@ -524,7 +526,7 @@ Map data to a Smart Data Model
   Default value: `false`
 * `--tenant <TENANT>` — NGSILD-Tenant header value for multi-tenant Context Brokers
 * `--user-agent <USER_AGENT>` — User-Agent header the broker writer identifies itself with (context-broker writer only). Overrides the build-time default of `cassiopeia/<version>`
-* `--header <NAME: VALUE>` — Extra HTTP header for Context Broker requests, written as `Name: Value`; repeat for several. Typically carries credentials, e.g. `--header "Authorization: Bearer <token>"`
+* `--output-header <NAME: VALUE>` — Extra HTTP header for Context Broker requests, written as `Name: Value`; repeat for several. Typically carries credentials, e.g. `--output-header "Authorization: Bearer <token>"`
 * `-L`, `--link-header` — Send the `@context` via a Link header instead of embedding it in the body
 
   Default value: `false`
@@ -567,7 +569,7 @@ Map data to a Smart Data Model
 * `--every <INTERVAL>` — Run at a fixed interval, timezone-independent (e.g. 30s, 5m, 2h)
 * `--cron <EXPRESSION>` — Run on a cron schedule, evaluated in UTC (e.g. "0 0 */5 * * *").
 
-   Six fields with seconds precision — second, minute, hour, day-of-month, month, day-of-week — plus an optional seventh year field. A five-field crontab line has no seconds field and will not parse.
+   Six fields with seconds precision (second, minute, hour, day-of-month, month, day-of-week) plus an optional seventh year field. A five-field crontab line has no seconds field and will not parse.
 * `--at <TIMES>` — Run at fixed times of day, written HH:MM and evaluated in local time (e.g. 14:00,18:00)
 * `--repeat <COUNT>` — Maximum number of runs
 * `--schedule-duration <DURATION>` — Stop scheduling after this duration (e.g. 2h)

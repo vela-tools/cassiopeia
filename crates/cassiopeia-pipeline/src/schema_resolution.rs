@@ -3,7 +3,7 @@ use crate::{
     input_config::InputConfig,
 };
 use cassiopeia_collector::{downloader::Downloader, error::CollectorError};
-use cassiopeia_common::{schema_source::SchemaSource, user_agent::UserAgent};
+use cassiopeia_common::{request_header::RequestHeaders, schema_source::SchemaSource, user_agent::UserAgent};
 use cassiopeia_expander::router::MappingRouter;
 use cassiopeia_manifest::mapping_binding::MappingBinding;
 use cassiopeia_ngsi_ld::entity::name::NameBuf;
@@ -116,7 +116,8 @@ impl<'a> SchemaDownloader<'a> {
         SchemaDownloader {
             reporter,
             cache: None,
-            downloader: Downloader::new(user_agent),
+            // An input's headers carry that source's credentials, so a schema server never receives them.
+            downloader: Downloader::new(user_agent, RequestHeaders::default()),
             fetched: HashMap::new(),
         }
     }

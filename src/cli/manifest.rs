@@ -5,10 +5,11 @@ use cassiopeia_common::{
     format::DataFormat,
     input::Input,
     representation::NgsiLdRepresentation,
+    request_header::RequestHeader,
     skip_null::NgsiLdSkipNull,
 };
 use cassiopeia_manifest::{failure_policy::FailurePolicy, output::temporal::TemporalRepresentation};
-use clap::{Args, Parser, Subcommand};
+use clap::{ArgAction, Args, Parser, Subcommand};
 use std::{path::PathBuf, str::FromStr};
 
 /// The `manifest` command group.
@@ -34,6 +35,12 @@ pub struct ManifestGenArgs {
     /// Data source file path or URL.
     #[arg(short, long, value_parser = Input::from_str, help_heading = "Input")]
     pub input: Input,
+
+    /// Extra HTTP header sent when fetching a remote input, written as `Name: Value`; repeat for
+    /// several. Typically carries an API key, e.g. `--input-header "X-Api-Key: <key>"`. Refused for a
+    /// local input. Recorded on the generated manifest as the input's `headers`.
+    #[arg(long = "input-header", action = ArgAction::Append, help_heading = "Input", value_name = "NAME: VALUE")]
+    pub input_headers: Vec<RequestHeader>,
 
     /// JSON5 mapping file defining the transformation rules.
     #[arg(short, long, help_heading = "Input", value_name = "FILE")]

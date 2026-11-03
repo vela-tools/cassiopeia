@@ -66,6 +66,7 @@ inputs: [
 | `dialect` | No | What a CSV source looks like, for an input whose `format` is `csv`. See [CSV dialect](#csv-dialect). |
 | `context` | No | A per-input `@context` override that wins over the output-level `context` for this input's entities. |
 | `schema` | No | A per-input custom validation schema. Use a local path or an `http(s)` URL. It wins over the output-level `output.validation.schema` for the types this input produces. |
+| `headers` | No | Extra HTTP headers sent on every request that fetches a remote `source`, such as an API key. See [Per-input headers](#per-input-headers). |
 
 ### One mapping or many
 
@@ -157,6 +158,26 @@ Cassiopeia rejects `header: false` together with a `headerRows` above 0, and `he
 
 `schema` names a custom validation schema for the types this input produces, using the same value rules as `context`. Its value can be a local file path or an `http(s)` URL. A per-input `schema` overrides the run-wide `output.validation.schema` for that input's types, and both override the Smart Data Models convention. Like `context`, the schema is never declared in the mapping document. A relative path is resolved next to the input's mapping. The [validation guide](validation.md#custom-schemas) describes the precedence in full.
 
+### Per-input headers
+
+`headers` adds HTTP headers to the request that fetches a remote `source`. Use it for an API key, a client identifier, or any other header an open data API needs before it answers. It has the same shape and handling as a broker output's [`headers`](output.md#send-to-a-context-broker):
+
+~~~json5
+inputs: [
+    {
+        source: "https://api.example/records",
+        format: "json",
+        mapping: "record.json5",
+        headers: {
+            Authorization: "Apikey replace-me",
+            "X-Client-Name": "replace-me",
+        },
+    },
+],
+~~~
+
+Cassiopeia sends every configured header on every request for that input, in every cycle of a scheduled run. The headers never go to the broker, to another input, or to a server a remote `context` or `schema` is fetched from. They do follow a redirect: when the source redirects to another host, `Authorization` is dropped, but any other header, such as `X-Api-Key`, is sent to that host too. Header values are treated as secrets and are not included in debug output, so keep them out of files that will be committed or shared. A local `source`, including a `file:` URL, is read without any request, so an input that pairs one with `headers` is refused. On the command line, `--input-header` sets the same headers for the `-i` input.
+
 ## Output
 
 The `output` block selects a destination and controls how entities are serialized. `target` is required and picks the destination. The remaining fields are shared across destinations.
@@ -237,7 +258,7 @@ retry: {
 
 ## What makes a manifest invalid
 
-Cassiopeia rejects a manifest when `inputs` is empty, an input has both or neither of `mapping` and `mappings`, `mappings` is empty or names the same collection twice, `mappings` is used with a format that does not support collections, `dialect` is used on an input that does not declare `format: "csv"`, or any field has a value outside its accepted set. Because the top level rejects unknown keys, a stray or misspelled field is also an error.
+Cassiopeia rejects a manifest when `inputs` is empty, an input has both or neither of `mapping` and `mappings`, `mappings` is empty or names the same collection twice, `mappings` is used with a format that does not support collections, `dialect` is used on an input that does not declare `format: "csv"`, `headers` is used on an input with a local `source`, or any field has a value outside its accepted set. Because the top level rejects unknown keys, a stray or misspelled field is also an error.
 
 ## Next steps
 
