@@ -22,6 +22,7 @@ use crate::{
     run_outcome::RunOutcome,
     writer::{Writer, WriterProgress, WriterStats},
 };
+use cassiopeia_common::masked_url::MaskedUrl;
 use cassiopeia_diagnostic::{code::broker_code::BrokerCode, context_field::ContextField, severity::Severity};
 use cassiopeia_ngsi_ld::entity::NgsiLdEntity;
 use cassiopeia_reporter::{reporter::Reporter, stage_id::StageId};
@@ -36,7 +37,6 @@ use std::{
     thread,
     time::{Duration, Instant},
 };
-use url::Url;
 
 /// The batch size an array-shaped run starts at, before any payload has been observed. A per-entity
 /// operation is pinned to one entity per request instead.
@@ -318,14 +318,13 @@ impl Drop for BrokerWriter {
 /// # Errors
 /// Returns [`WriterError::InvalidBrokerUrl`] when the operation's path cannot be joined onto the
 /// configured base URL.
-fn resolve_endpoint(base_url: &Url, path: &str, query: Option<&str>) -> Result<Arc<Url>> {
-    let mut endpoint = base_url.join(path).map_err(|source| WriterError::InvalidBrokerUrl {
+fn resolve_endpoint(base_url: &MaskedUrl, path: &str, query: Option<&str>) -> Result<Arc<MaskedUrl>> {
+    let endpoint = base_url.join(path).map_err(|source| WriterError::InvalidBrokerUrl {
         source,
         // The error owns the URL after the borrowed configuration is dropped.
-        url: base_url.clone(),
+        url: Box::new(base_url.clone()),
     })?;
-    endpoint.set_query(query);
-    Ok(Arc::new(endpoint))
+    Ok(Arc::new(endpoint.with_query(query)))
 }
 
 /// Starts the delivery workers, each with its own clone of the shared context.

@@ -159,7 +159,7 @@ docker run --rm \
       --output-header "Authorization: Bearer replace-me"
 ```
 
-Pass broker credentials with `--output-header`, and a source's API key with `--input-header`, just as you would on the host. The [output guide](output.md#send-to-a-context-broker) covers broker operations and delivery options.
+Pass broker credentials with `--output-header`, and a source's API key with `--input-header`, just as you would on the host. A run from a mounted manifest reads its credentials from the environment instead: pass each with `-e`, such as `-e BROKER_TOKEN`, and name it as `${BROKER_TOKEN}` in the manifest, as the [manifest guide](manifest.md#environment-variables) describes. The [output guide](output.md#send-to-a-context-broker) covers broker operations and delivery options.
 
 ## Configuration and environment
 

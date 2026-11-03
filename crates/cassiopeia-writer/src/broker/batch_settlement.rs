@@ -210,8 +210,9 @@ pub fn on_transport_error(ctx: &SenderContext, delivery: &DeliveryContext<'_>, s
 
     if *attempt >= ctx.runtime.max_retries {
         let error = WriterError::BrokerRequest {
-            source,
-            url: ctx.request.endpoint.as_ref().clone(),
+            // reqwest quotes the request URL, secrets and all; the error names the masked endpoint instead.
+            source: source.without_url(),
+            url: Box::new(ctx.request.endpoint.as_ref().clone()),
         };
         fail(
             ctx,

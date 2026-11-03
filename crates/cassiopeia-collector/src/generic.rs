@@ -83,7 +83,7 @@ fn resolve_input(
             let destination = temp_dir.join(format!("input.{extension}"));
             let file = downloader.download_to_file(url, &destination)?;
             debug!("Downloaded {} from {} to {}", url, file.url(), file.path().display());
-            let encoding_hint = EncodingHint::for_remote_source(file.url(), file.content_type().as_ref());
+            let encoding_hint = EncodingHint::for_remote_source(file.url().url(), file.content_type().as_ref());
             // The payload owns the URL it is named by, while the input stays with the collector's source.
             Ok(FilePayload::downloaded(file.into_path(), url.clone(), format_hint, encoding_hint))
         }

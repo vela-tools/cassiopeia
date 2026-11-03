@@ -12,6 +12,7 @@ use crate::{
 };
 use cassiopeia_common::{
     broker_operation::BrokerOperation,
+    masked_url::MaskedUrl,
     representation::NgsiLdRepresentation,
     request_header::RequestHeaders,
     skip_null::NgsiLdSkipNull,
@@ -21,7 +22,6 @@ use cassiopeia_common::{
 use cassiopeia_ngsi_ld::entity::context::ContextSource;
 use cassiopeia_reporter::{reporter::Reporter, stage_id::StageId};
 use std::sync::atomic::AtomicBool;
-use url::Url;
 
 /// Configuration for a [`BrokerWriter`](crate::broker::broker_writer::BrokerWriter).
 ///
@@ -50,7 +50,7 @@ impl BrokerWriterConfig {
     /// back apart to re-parse here would lose that guarantee and turn a settled value into another
     /// failure path.
     #[must_use]
-    pub fn new(base_url: Url, user_agent: UserAgent, shutdown: &'static AtomicBool, reporter: &'static dyn Reporter) -> BrokerWriterConfig {
+    pub fn new(base_url: MaskedUrl, user_agent: UserAgent, shutdown: &'static AtomicBool, reporter: &'static dyn Reporter) -> BrokerWriterConfig {
         BrokerWriterConfig {
             transport: BrokerTransport::new(base_url, user_agent),
             serialization: BrokerSerialization::default(),
@@ -139,19 +139,19 @@ mod tests {
         config::BrokerWriterConfig,
         test_reporter::{static_shutdown, static_test_reporter},
     };
-    use cassiopeia_common::user_agent::UserAgent;
+    use cassiopeia_common::{masked_url::MaskedUrl, user_agent::UserAgent};
     use pretty_assertions::assert_eq;
     use url::Url;
 
     #[test]
     fn the_config_keeps_the_base_url_it_was_given() {
         let config = BrokerWriterConfig::new(
-            Url::parse("https://broker.example.com/").unwrap(),
+            MaskedUrl::plain(Url::parse("https://broker.example.com/").unwrap()),
             UserAgent::from("ua".to_owned()),
             static_shutdown(),
             static_test_reporter(),
         );
 
-        assert_eq!(config.transport.base_url.as_str(), "https://broker.example.com/");
+        assert_eq!(config.transport.base_url.url().as_str(), "https://broker.example.com/");
     }
 }

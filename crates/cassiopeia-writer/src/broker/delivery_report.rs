@@ -1,4 +1,5 @@
 use crate::{broker::broker_rejection::BrokerRejection, error::WriterError};
+use cassiopeia_common::masked_url::MaskedUrl;
 use cassiopeia_diagnostic::{
     cause::causes_of,
     code::{broker_code::BrokerCode, diagnostic_code::DiagnosticCode},
@@ -9,13 +10,12 @@ use cassiopeia_diagnostic::{
     severity::Severity,
 };
 use cassiopeia_ngsi_ld::entity::NgsiLdEntity;
-use url::Url;
 
 /// What every delivery diagnostic says regardless of what went wrong: where the request went and
 /// which entities it carried.
 pub struct DeliveryContext<'a> {
     /// The endpoint the request was addressed to.
-    pub endpoint: &'a Url,
+    pub endpoint: &'a MaskedUrl,
     /// The entities the request carried.
     pub entities: &'a [NgsiLdEntity],
 }
@@ -87,6 +87,7 @@ mod tests {
         },
         error::WriterError,
     };
+    use cassiopeia_common::masked_url::MaskedUrl;
     use cassiopeia_diagnostic::{
         code::broker_code::BrokerCode,
         context_field::{ContextField, ContextFieldKind},
@@ -109,8 +110,8 @@ mod tests {
             .collect()
     }
 
-    fn endpoint() -> Url {
-        Url::parse("https://broker/ngsi-ld/v1/entityOperations/upsert").unwrap()
+    fn endpoint() -> MaskedUrl {
+        MaskedUrl::plain(Url::parse("https://broker/ngsi-ld/v1/entityOperations/upsert").unwrap())
     }
 
     #[test]

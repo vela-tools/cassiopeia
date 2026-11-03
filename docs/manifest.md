@@ -176,7 +176,7 @@ inputs: [
 ],
 ~~~
 
-Cassiopeia sends every configured header on every request for that input, in every cycle of a scheduled run. The headers never go to the broker, to another input, or to a server a remote `context` or `schema` is fetched from. They do follow a redirect: when the source redirects to another host, `Authorization` is dropped, but any other header, such as `X-Api-Key`, is sent to that host too. Header values are treated as secrets and are not included in debug output, so keep them out of files that will be committed or shared. A local `source`, including a `file:` URL, is read without any request, so an input that pairs one with `headers` is refused. On the command line, `--input-header` sets the same headers for the `-i` input.
+Cassiopeia sends every configured header on every request for that input, in every cycle of a scheduled run. The headers never go to the broker, to another input, or to a server a remote `context` or `schema` is fetched from. They do follow a redirect: when the source redirects to another host, `Authorization` is dropped, but any other header, such as `X-Api-Key`, is sent to that host too. Header values are treated as secrets and are not included in debug output. Keep them out of files that will be committed or shared by reading them from the environment, as [Environment variables](#environment-variables) describes. A local `source`, including a `file:` URL, is read without any request, so an input that pairs one with `headers` is refused. On the command line, `--input-header` sets the same headers for the `-i` input.
 
 ## Output
 
@@ -205,6 +205,35 @@ output: {
 | `temporal` | The temporal output shape. Set its `representation` to `"series"` for a folded EntityTemporal, or omit it for current-state output (the default). See [Output](output.md#temporal-output). |
 
 A `file` target adds `directory` and `framing`. A `context-broker` target adds a required `url` and broker delivery settings: `operation`, `atomicity`, `contextDelivery`, `tenant`, `userAgent`, `headers`, and the operation refinements `upsertMode` and `attributeOverwrite`. The [output guide](output.md) documents every destination field, the framing and extension rules, and broker delivery in full.
+
+## Environment variables
+
+A manifest can read a value from the environment as `${NAME}`, so a credential never has to be written into the file. Cassiopeia fills each one when it loads the manifest, from the environment of the process it runs in:
+
+~~~json5
+{
+    version: "v1",
+    inputs: [
+        {
+            source: "https://api.example/records?apikey=${API_KEY}",
+            mapping: "record.json5",
+        },
+    ],
+    output: {
+        target: "context-broker",
+        url: "https://broker.example/",
+        headers: {
+            Authorization: "Bearer ${BROKER_TOKEN}",
+        },
+    },
+}
+~~~
+
+`${NAME}` works only in the fields that carry credentials: an input's `source` and `headers` values, and the output's `url` and `headers` values. Anywhere else, including `vars` and every mapping, `${NAME}` is ordinary text, so a mapping can never read an environment value into an entity. A name is letters, digits, and underscores, and does not start with a digit. Write `$${` for a literal `${`. A `$` that does not open a placeholder is ordinary text.
+
+A variable that is not set stops the run before anything is fetched. The error names the variable and the field it sits in, such as `the output header 'authorization': the environment variable 'BROKER_TOKEN' is not set`, and never shows a value. A `source` that reads the environment must be a URL: a local path that reads a variable is refused, since a path is shown as it is wherever a message names the file.
+
+Every value read from the environment is treated as a secret. A URL that carries one is shown with the value replaced by its placeholder, as `https://api.example/records?apikey=${API_KEY}`, in errors, diagnostics, and logs, including after a redirect and on every broker endpoint built from the output `url`. As a backstop, every log line, diagnostic, and error Cassiopeia writes has each value read replaced the same way, in the form it was read and in each percent-encoded form a URL can hold it in. A very short value can therefore mask unrelated text that happens to contain it, so prefer credentials of a realistic length.
 
 ## Schedule
 
@@ -258,7 +287,7 @@ retry: {
 
 ## What makes a manifest invalid
 
-Cassiopeia rejects a manifest when `inputs` is empty, an input has both or neither of `mapping` and `mappings`, `mappings` is empty or names the same collection twice, `mappings` is used with a format that does not support collections, `dialect` is used on an input that does not declare `format: "csv"`, `headers` is used on an input with a local `source`, or any field has a value outside its accepted set. Because the top level rejects unknown keys, a stray or misspelled field is also an error.
+Cassiopeia rejects a manifest when `inputs` is empty, an input has both or neither of `mapping` and `mappings`, `mappings` is empty or names the same collection twice, `mappings` is used with a format that does not support collections, `dialect` is used on an input that does not declare `format: "csv"`, `headers` is used on an input with a local `source`, a `${NAME}` is malformed or names a variable that is not set, a local `source` reads an environment variable, or any field has a value outside its accepted set. Because the top level rejects unknown keys, a stray or misspelled field is also an error.
 
 ## Next steps
 

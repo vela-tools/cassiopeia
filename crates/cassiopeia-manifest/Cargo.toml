@@ -14,8 +14,10 @@ chrono = "0.4.45"
 cron = { version = "0.17.0", features = ["serde"] }
 derive_more = { version = "2.1.1", features = ["deref", "display"] }
 getset = "0.1.7"
+http = "1.5.0"
 humantime-serde = "1.1.1"
 json5format = "0.2.6"
+secrecy = "0.10.3"
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = { version = "1.0.154", features = ["preserve_order"] }
 serde_json5 = "0.2.1"

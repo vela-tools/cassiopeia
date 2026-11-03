@@ -91,8 +91,13 @@ impl Manifest {
 
     /// Reads a manifest from a JSON5 document, naming `origin` in any parse failure.
     ///
+    /// Every `${NAME}` in an input's `source` or `headers`, or in the output's `url` or `headers`, is
+    /// filled from this process's environment, and each value read is recorded as a secret every
+    /// output sink masks. No other field reads the environment.
+    ///
     /// # Errors
-    /// Returns [`ManifestError::Parse`] if `content` is not a valid manifest document.
+    /// Returns [`ManifestError::Parse`] if `content` is not a valid manifest document, including when
+    /// a field names an environment variable that is not set.
     pub fn from_json5(content: &str, origin: &Path) -> Result<Manifest> {
         serde_json5::from_str(content).map_err(|source| ManifestError::Parse {
             path: origin.to_path_buf(),
@@ -137,12 +142,14 @@ impl Manifest {
 #[cfg(test)]
 mod tests {
     use crate::{
+        error::ManifestError,
         failure_policy::FailurePolicy,
         manifest::Manifest,
         output::{ManifestOutput, destination::Destination},
         schedule::{Schedule, trigger::Trigger},
         version::Version,
     };
+    use cassiopeia_common::{environment::registry::mask, input::Input, masked_url::MaskedUrl, request_header::RequestHeaders};
     use pretty_assertions::assert_eq;
     use std::{path::Path, time::Duration};
 
@@ -205,6 +212,133 @@ mod tests {
         let rendered = manifest.to_json5().unwrap();
 
         assert_eq!(Manifest::from_json5(&rendered, Path::new("manifest.json5")).unwrap(), manifest);
+    }
+
+    /// A manifest whose credential fields read `CARGO_PKG_NAME`, which cargo sets for every test run,
+    /// so the test needs no environment of its own.
+    const READS_ENVIRONMENT: &str = r#"{
+        version: "v1",
+        vars: { kept: "${CARGO_PKG_NAME}" },
+        inputs: [
+            {
+                source: "https://api.example/records?apikey=${CARGO_PKG_NAME}",
+                mapping: "record.json5",
+                headers: { "X-Api-Key": "${CARGO_PKG_NAME}" },
+            },
+        ],
+        output: {
+            target: "context-broker",
+            url: "https://broker.example/${CARGO_PKG_NAME}/",
+            headers: { Authorization: "Bearer ${CARGO_PKG_NAME}" },
+        },
+    }"#;
+
+    /// The value cargo gives `CARGO_PKG_NAME` while this crate's tests run.
+    const PACKAGE: &str = "cassiopeia-manifest";
+
+    fn broker(manifest: &Manifest) -> (&MaskedUrl, &RequestHeaders) {
+        match manifest.output().as_ref().map(ManifestOutput::destination) {
+            Some(Destination::ContextBroker { url, headers, .. }) => (url, headers),
+            Some(Destination::File { .. }) | None => panic!("expected a broker destination"),
+        }
+    }
+
+    #[test]
+    fn a_manifest_reads_environment_variables_into_its_credential_fields() {
+        let manifest = Manifest::from_json5(READS_ENVIRONMENT, Path::new("manifest.json5")).unwrap();
+        let input = manifest.inputs().iter().next().unwrap();
+        let Input::Remote(source) = input.source() else {
+            panic!("expected a remote source");
+        };
+        let (url, headers) = broker(&manifest);
+
+        assert_eq!(source.url().as_str(), format!("https://api.example/records?apikey={PACKAGE}"));
+        assert_eq!(input.headers().iter().next().unwrap().value().to_str().unwrap(), PACKAGE);
+        assert_eq!(url.url().as_str(), format!("https://broker.example/{PACKAGE}/"));
+        assert_eq!(headers.iter().next().unwrap().value().to_str().unwrap(), format!("Bearer {PACKAGE}"));
+    }
+
+    #[test]
+    fn a_value_read_from_the_environment_shows_only_masked() {
+        let manifest = Manifest::from_json5(READS_ENVIRONMENT, Path::new("manifest.json5")).unwrap();
+        let input = manifest.inputs().iter().next().unwrap();
+
+        assert_eq!(input.source().to_string(), "https://api.example/records?apikey=${CARGO_PKG_NAME}");
+        assert_eq!(broker(&manifest).0.to_string(), "https://broker.example/${CARGO_PKG_NAME}/");
+        assert!(!format!("{manifest:?}").contains(PACKAGE));
+        assert_eq!(
+            mask(&format!("GET {}", source_url(&manifest))),
+            "GET https://api.example/records?apikey=${CARGO_PKG_NAME}"
+        );
+    }
+
+    fn source_url(manifest: &Manifest) -> String {
+        match manifest.inputs().iter().next().unwrap().source() {
+            Input::Remote(url) => url.url().to_string(),
+            Input::Local(_) => panic!("expected a remote source"),
+        }
+    }
+
+    #[test]
+    fn a_manifest_that_read_the_environment_renders_its_templates_not_its_values() {
+        let manifest = Manifest::from_json5(READS_ENVIRONMENT, Path::new("manifest.json5")).unwrap();
+        let rendered = manifest.to_json5().unwrap();
+
+        assert!(!rendered.contains(PACKAGE), "{rendered}");
+        assert_eq!(Manifest::from_json5(&rendered, Path::new("manifest.json5")).unwrap(), manifest);
+    }
+
+    #[test]
+    fn vars_and_other_fields_never_read_the_environment() {
+        let manifest = Manifest::from_json5(READS_ENVIRONMENT, Path::new("manifest.json5")).unwrap();
+
+        assert_eq!(manifest.vars().as_ref().unwrap().get("kept"), Some(&serde_json::json!("${CARGO_PKG_NAME}")));
+    }
+
+    #[test]
+    fn an_unset_variable_fails_naming_the_variable_and_the_field() {
+        let error = Manifest::from_json5(
+            r#"{ version: "v1", inputs: [{ source: "https://api.example/?k=${CASSIOPEIA_TEST_UNSET_VARIABLE}", mapping: "m.json5" }] }"#,
+            Path::new("manifest.json5"),
+        )
+        .unwrap_err();
+        let ManifestError::Parse { source, .. } = &error else {
+            panic!("expected a parse error, got {error}");
+        };
+
+        assert!(
+            source
+                .to_string()
+                .contains("an input's 'source': the environment variable 'CASSIOPEIA_TEST_UNSET_VARIABLE' is not set"),
+            "{source}"
+        );
+    }
+
+    #[test]
+    fn an_unset_output_header_variable_fails_naming_the_header() {
+        let error = Manifest::from_json5(
+            r#"{ version: "v1", inputs: [{ source: "a.csv", mapping: "m.json5" }],
+                 output: { target: "context-broker", url: "https://b/", headers: { Authorization: "Bearer ${CASSIOPEIA_TEST_UNSET_TOKEN}" } } }"#,
+            Path::new("manifest.json5"),
+        )
+        .unwrap_err();
+        let ManifestError::Parse { source, .. } = &error else {
+            panic!("expected a parse error, got {error}");
+        };
+
+        assert!(source.to_string().contains("the output header 'authorization'"), "{source}");
+        assert!(source.to_string().contains("CASSIOPEIA_TEST_UNSET_TOKEN"), "{source}");
+    }
+
+    #[test]
+    fn an_escaped_opening_reads_as_a_literal() {
+        let manifest = Manifest::from_json5(
+            r#"{ version: "v1", inputs: [{ source: "https://api.example/?q=$${CARGO_PKG_NAME}", mapping: "m.json5" }] }"#,
+            Path::new("manifest.json5"),
+        )
+        .unwrap();
+
+        assert_eq!(source_url(&manifest), "https://api.example/?q=${CARGO_PKG_NAME}");
     }
 
     #[test]

@@ -100,7 +100,7 @@ fn build_request(ctx: &SenderContext, payload: &Bytes) -> RequestBuilder {
     let mut request = ctx
         .request
         .client
-        .post(ctx.request.endpoint.as_str())
+        .post(ctx.request.endpoint.url().as_str())
         .header(header::CONTENT_TYPE, ctx.request.content_type.clone());
     if let Some(link) = &ctx.request.link_header {
         request = request.header(header::LINK, link.clone());
@@ -147,17 +147,25 @@ mod tests {
         test_reporter::TestReporter,
     };
     use bytes::Bytes;
+    use cassiopeia_common::{
+        environment::{
+            secret::{Secret, Secrets},
+            variable_name::VariableName,
+        },
+        masked_url::MaskedUrl,
+    };
     use cassiopeia_diagnostic::code::{broker_code::BrokerCode, diagnostic_code::DiagnosticCode};
     use pretty_assertions::assert_eq;
-    use std::{net::TcpListener, sync::Arc};
+    use secrecy::SecretString;
+    use std::{net::TcpListener, str::FromStr, sync::Arc};
     use url::Url;
 
     /// A URL nothing is listening on, so every request fails at connect without a server to run.
-    fn closed_endpoint() -> Url {
+    fn closed_endpoint() -> MaskedUrl {
         let listener = TcpListener::bind("127.0.0.1:0").expect("a bindable port");
         let port = listener.local_addr().expect("a local address").port();
         drop(listener);
-        Url::parse(&format!("http://127.0.0.1:{port}/ngsi-ld/v1/entityOperations/upsert")).expect("a valid URL")
+        MaskedUrl::plain(Url::parse(&format!("http://127.0.0.1:{port}/ngsi-ld/v1/entityOperations/upsert")).expect("a valid URL"))
     }
 
     #[test]
@@ -177,6 +185,29 @@ mod tests {
         assert_eq!(reported[0].code, DiagnosticCode::Broker(BrokerCode::TransportFailed));
         assert!(reported[0].headline.contains("2 attempts"));
         assert!(!ctx.counters.failures.is_empty());
+    }
+
+    #[test]
+    fn a_transport_failure_report_never_quotes_the_secret_its_endpoint_carries() {
+        static REPORTER: TestReporter = TestReporter::new();
+        let mut ctx = context(RequestShape::Array);
+        let closed = closed_endpoint();
+        let mut secrets = Secrets::new();
+        secrets.insert(Secret::new(
+            VariableName::from_str("BROKER_PATH_TOKEN").unwrap(),
+            &SecretString::from("path-token-62d"),
+        ));
+        let keyed = closed.url().join("path-token-62d/ngsi-ld/v1/entityOperations/upsert").unwrap();
+        ctx.request.endpoint = Arc::new(MaskedUrl::with_secrets(keyed, secrets));
+        ctx.runtime.max_retries = 1;
+        ctx.runtime.reporter = &REPORTER;
+
+        let outcome = post_batch(&ctx, &Bytes::from_static(b"[]"), &[thing("urn:ngsi-ld:Thing:1")]);
+
+        assert!(matches!(outcome, SendOutcome::Split));
+        let text = format!("{:?}", REPORTER.diagnostics());
+        assert!(text.contains("${BROKER_PATH_TOKEN}"), "{text}");
+        assert!(!text.contains("path-token-62d"), "{text}");
     }
 
     #[test]

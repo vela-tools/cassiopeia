@@ -1,9 +1,10 @@
-use crate::output::context_delivery::ContextDelivery;
+use crate::{environment::templated, output::context_delivery::ContextDelivery};
 use cassiopeia_common::{
     attribute_overwrite::AttributeOverwrite,
     broker_atomicity::BrokerAtomicity,
     broker_operation::BrokerOperationKind,
     file_framing::FileFraming,
+    masked_url::MaskedUrl,
     request_header::RequestHeaders,
     tenant::Tenant,
     upsert_mode::UpsertMode,
@@ -11,7 +12,6 @@ use cassiopeia_common::{
 };
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
-use url::Url;
 
 /// Where produced entities end up.
 ///
@@ -34,8 +34,9 @@ pub enum Destination {
     /// Send entities to an NGSI-LD Context Broker.
     #[serde(rename_all = "camelCase")]
     ContextBroker {
-        /// The broker's base URL.
-        url: Url,
+        /// The broker's base URL, shown with any value it read from the environment masked.
+        #[serde(deserialize_with = "templated::url")]
+        url: MaskedUrl,
 
         /// The value sent in the `NGSILD-Tenant` header.
         #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -46,7 +47,7 @@ pub enum Destination {
         user_agent: Option<UserAgent>,
 
         /// Extra HTTP headers attached to every request, typically carrying broker credentials.
-        #[serde(default, skip_serializing_if = "RequestHeaders::is_empty")]
+        #[serde(default, skip_serializing_if = "RequestHeaders::is_empty", deserialize_with = "templated::output_headers")]
         headers: RequestHeaders,
 
         /// How `@context` is attached to each request.

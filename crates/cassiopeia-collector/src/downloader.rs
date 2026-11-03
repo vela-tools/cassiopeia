@@ -2,11 +2,10 @@ use crate::{
     downloaded_file::DownloadedFile,
     error::{CollectorError, ERROR_BODY_CAP},
 };
-use cassiopeia_common::{captured_body::CapturedBody, request_header::RequestHeaders, user_agent::UserAgent};
+use cassiopeia_common::{captured_body::CapturedBody, masked_url::MaskedUrl, request_header::RequestHeaders, user_agent::UserAgent};
 use mediatype::MediaTypeBuf;
 use reqwest::{blocking::Client, header::CONTENT_TYPE};
 use std::{fs::File, io::Write, path::Path};
-use url::Url;
 
 /// Fetches remote sources over HTTP, announcing every request with one fixed `User-Agent` and
 /// attaching the same user-supplied headers to each.
@@ -38,17 +37,20 @@ impl Downloader {
     /// Downloads a single file from `url` to `dest`, returning that path with the URL it was served
     /// from after any redirects and the media type the server declared for it.
     ///
+    /// Every URL a failure names is masked as `url` is, and a transport failure is stripped of the
+    /// URL reqwest would quote, which is the request URL secrets and all.
+    ///
     /// # Errors
     ///
     /// Returns [`CollectorError::ClientInit`] when the HTTP client cannot be built,
     /// [`CollectorError::Http`] when the request never completes, [`CollectorError::HttpStatus`]
     /// when the server answers with a non-success status, and [`CollectorError::Io`] when the
     /// response body cannot be written to `dest`.
-    pub fn download_to_file(&mut self, url: &Url, dest: &Path) -> Result<DownloadedFile, CollectorError> {
-        let response = self.client()?.get(url.as_str()).send().map_err(|source| CollectorError::Http {
-            source,
+    pub fn download_to_file(&mut self, url: &MaskedUrl, dest: &Path) -> Result<DownloadedFile, CollectorError> {
+        let response = self.client()?.get(url.url().as_str()).send().map_err(|source| CollectorError::Http {
+            source: source.without_url(),
             // The error owns the URL after the borrowed request is dropped.
-            url: url.clone(),
+            url: Box::new(url.clone()),
         })?;
 
         // A 4xx/5xx answers with an error page, not the resource; treating that body as the download
@@ -57,7 +59,7 @@ impl Downloader {
         // throws the body away, and that body is the server's only explanation of the refusal.
         let status = response.status();
         // The body consumes the response, while the download keeps naming where it was served from.
-        let served_from = response.url().clone();
+        let served_from = url.led_to(response.url().clone());
         // An unparseable `Content-Type` declares nothing a reader could rely on, so it is dropped.
         let content_type = response
             .headers()
@@ -68,14 +70,19 @@ impl Downloader {
             Ok(bytes) => CapturedBody::capped(bytes.to_vec(), ERROR_BODY_CAP.max(bytes.len())),
             Err(source) => {
                 if status.is_success() {
-                    return Err(CollectorError::Http { source, url: url.clone() });
+                    return Err(CollectorError::Http {
+                        source: source.without_url(),
+                        // The error owns the URL, while the caller keeps the one it asked for.
+                        url: Box::new(url.clone()),
+                    });
                 }
-                CapturedBody::unreadable(&source)
+                CapturedBody::unreadable(&source.without_url())
             }
         };
         if !status.is_success() {
             return Err(CollectorError::HttpStatus {
-                url: url.clone(),
+                // The error owns the URL, while the caller keeps the one it asked for.
+                url: Box::new(url.clone()),
                 status,
                 body: Box::new(body.echo(ERROR_BODY_CAP)),
             });
@@ -123,14 +130,22 @@ impl Downloader {
 mod tests {
     use crate::{downloader::Downloader, error::CollectorError};
     use cassiopeia_common::{
+        environment::{
+            secret::{Secret, Secrets},
+            variable_name::VariableName,
+        },
+        masked_url::MaskedUrl,
         request_header::{RequestHeader, RequestHeaders},
         user_agent::UserAgent,
     };
     use pretty_assertions::assert_eq;
+    use secrecy::SecretString;
     use std::{
+        error::Error,
         fs::read_to_string,
         io::{Read as _, Write as _},
         net::TcpListener,
+        str::FromStr,
         sync::mpsc::{Receiver, channel},
         thread,
     };
@@ -139,12 +154,12 @@ mod tests {
 
     /// Serves exactly one HTTP response with the given status line and body, then closes. The
     /// receiver hands back the raw request the server read, so a test can assert on its headers.
-    fn serve_once(status_line: &'static str, body: &'static str) -> (Url, Receiver<String>) {
+    fn serve_once(status_line: &'static str, body: &'static str) -> (MaskedUrl, Receiver<String>) {
         serve_once_with_headers(status_line, "", body)
     }
 
     /// Serves one response like [`serve_once`], with `headers` (each line ending in `\r\n`) added.
-    fn serve_once_with_headers(status_line: &'static str, headers: impl Into<String>, body: &'static str) -> (Url, Receiver<String>) {
+    fn serve_once_with_headers(status_line: &'static str, headers: impl Into<String>, body: &'static str) -> (MaskedUrl, Receiver<String>) {
         let headers = headers.into();
         let listener = TcpListener::bind("127.0.0.1:0").expect("a bindable port");
         let port = listener.local_addr().expect("a local address").port();
@@ -162,7 +177,29 @@ mod tests {
                 let _ = stream.flush();
             }
         });
-        (Url::parse(&format!("http://127.0.0.1:{port}/Sensor.json")).expect("a valid URL"), request_rx)
+        (
+            MaskedUrl::plain(Url::parse(&format!("http://127.0.0.1:{port}/Sensor.json")).expect("a valid URL")),
+            request_rx,
+        )
+    }
+
+    /// Wraps `url`, which carries `value`, as a URL that read `value` from the variable `name`.
+    fn reading(url: &str, name: &str, value: &str) -> MaskedUrl {
+        let mut secrets = Secrets::new();
+        secrets.insert(Secret::new(VariableName::from_str(name).expect("a valid name"), &SecretString::from(value)));
+        MaskedUrl::with_secrets(Url::parse(url).expect("a valid URL"), secrets)
+    }
+
+    /// Renders an error and its whole cause chain, the way a diagnostic would show it.
+    fn rendered(error: &dyn Error) -> String {
+        let mut text = error.to_string();
+        let mut cause = error.source();
+        while let Some(link) = cause {
+            text.push_str(" / ");
+            text.push_str(&link.to_string());
+            cause = link.source();
+        }
+        text
     }
 
     fn downloader() -> Downloader {
@@ -185,9 +222,55 @@ mod tests {
         let CollectorError::HttpStatus { url: named, status, body } = error else {
             panic!("expected a status failure");
         };
-        assert_eq!(named, url);
+        assert_eq!(*named, url);
         assert_eq!(status.as_u16(), 404);
         assert_eq!(body.text(), "no schema published under that name");
+    }
+
+    #[test]
+    fn a_refused_download_names_its_url_with_the_secret_masked() {
+        let (url, _requests) = serve_once("401 Unauthorized", "bad key");
+        let url = reading(&format!("{url}?apikey=refused-key-0a1"), "SOURCE_KEY", "refused-key-0a1");
+        let directory = TempDir::new().expect("a temporary directory");
+
+        let error = downloader()
+            .download_to_file(&url, &directory.path().join("Sensor.json"))
+            .expect_err("a refusal");
+
+        let text = rendered(&error);
+        assert!(text.contains("apikey=${SOURCE_KEY}"), "{text}");
+        assert!(!text.contains("refused-key-0a1"), "{text}");
+    }
+
+    #[test]
+    fn a_transport_failure_never_quotes_the_secret_its_url_carries() {
+        let listener = TcpListener::bind("127.0.0.1:0").expect("a bindable port");
+        let port = listener.local_addr().expect("a local address").port();
+        drop(listener);
+        let url = reading(&format!("http://127.0.0.1:{port}/feed?apikey=closed-key-7e2"), "SOURCE_KEY", "closed-key-7e2");
+        let directory = TempDir::new().expect("a temporary directory");
+
+        let error = downloader()
+            .download_to_file(&url, &directory.path().join("feed.json"))
+            .expect_err("a transport failure");
+
+        let text = rendered(&error);
+        assert!(matches!(error, CollectorError::Http { .. }), "{text}");
+        assert!(!text.contains("closed-key-7e2"), "{text}");
+    }
+
+    #[test]
+    fn a_redirected_download_masks_the_secret_on_the_url_it_was_served_from() {
+        let (target, _target_requests) = serve_once("200 OK", "id;name\n");
+        let (requested, _requests) = serve_once_with_headers("302 Found", format!("Location: {}?apikey=moved-key-3b9\r\n", target.url()), "");
+        let requested = reading(&format!("{requested}?apikey=moved-key-3b9"), "SOURCE_KEY", "moved-key-3b9");
+        let directory = TempDir::new().expect("a temporary directory");
+
+        let downloaded = downloader()
+            .download_to_file(&requested, &directory.path().join("feed.csv"))
+            .expect("a download");
+
+        assert_eq!(downloaded.url().to_string(), format!("{target}?apikey=${{SOURCE_KEY}}"));
     }
 
     #[test]

@@ -14,6 +14,7 @@ pub mod error_report;
 pub mod global;
 pub mod guard;
 pub mod logging;
+pub mod masking_writer;
 pub mod middleware;
 pub mod reporter;
 pub mod stage_handle;

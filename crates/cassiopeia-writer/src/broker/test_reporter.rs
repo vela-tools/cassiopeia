@@ -17,6 +17,10 @@ pub(crate) struct RecordedDiagnostic {
     pub(crate) headline: String,
     /// The shortest explanation it offered.
     pub(crate) explanation: String,
+    /// Its rendered cause chain, outermost first.
+    pub(crate) causes: Vec<String>,
+    /// Its identifying fields, as `Debug` renders them.
+    pub(crate) defining: String,
 }
 
 /// A reporter that records the diagnostics and stage messages sent to it, for assertions.
@@ -59,6 +63,8 @@ impl DiagnosticSink for TestReporter {
             code: diagnostic.code(),
             headline: diagnostic.headline().to_string(),
             explanation: diagnostic.explanation().to_string(),
+            causes: diagnostic.causes().iter().map(|cause| cause.as_str().to_owned()).collect(),
+            defining: format!("{:?}", diagnostic.defining()),
         });
     }
 }
