@@ -93,8 +93,15 @@ impl Downloader {
     fn client(&mut self) -> Result<&Client, CollectorError> {
         let client = match self.client.take() {
             Some(client) => client,
+            // Another workspace crate enables reqwest's `gzip` feature, which feature unification turns
+            // on for this client as well. Some servers (the City of Vienna WFS among them) interleave a
+            // gzip-encoded HTTP/2 body with empty DATA frames. h2 accepts at most 100 empty non-final
+            // DATA frames over a connection's lifetime, a fixed limit nothing above h2 can raise, and
+            // closes the connection with `too_many_data_frames` past it (hyperium/h2#961). The same
+            // servers send an uncompressed body in full frames, so the download asks for that instead.
             None => Client::builder()
                 .user_agent(self.user_agent.as_str())
+                .no_gzip()
                 .build()
                 .map_err(|source| CollectorError::ClientInit { source })?,
         };
@@ -199,6 +206,17 @@ mod tests {
 
         let request = requests.recv().expect("the served request");
         assert!(request.contains("user-agent: cassiopeia/test"), "request was: {request}");
+    }
+
+    #[test]
+    fn a_download_does_not_ask_for_a_gzip_encoded_body() {
+        let (url, requests) = serve_once("200 OK", "{}");
+        let directory = TempDir::new().expect("a temporary directory");
+
+        downloader().download_to_file(&url, &directory.path().join("Sensor.json")).expect("a download");
+
+        let request = requests.recv().expect("the served request").to_ascii_lowercase();
+        assert!(!request.contains("gzip"), "request was: {request}");
     }
 
     #[test]
