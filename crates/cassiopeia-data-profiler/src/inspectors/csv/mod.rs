@@ -662,6 +662,47 @@ mod tests {
     }
 
     #[test]
+    fn a_title_above_an_all_text_table_of_one_data_row_is_a_preamble_over_a_header() {
+        let sample = "Lumes;v2.10\nStation;NO2;O3\nSTEF;12,45;54,55\n";
+        let dialect = CsvInspector::new(&DialectStatement::NOTHING).inspect(&Content::new(sample.as_bytes())).unwrap();
+        let mut reader = dialect.reader(sample.as_bytes()).unwrap();
+
+        assert_eq!(dialect.preamble, Preamble::new(1));
+        assert_eq!(dialect.header_rows, HeaderRows::ONE);
+        assert_eq!(reader.headers().unwrap(), vec!["Station", "NO2", "O3"]);
+        assert_eq!(reader.records().next().unwrap().unwrap(), vec!["STEF", "12,45", "54,55"]);
+    }
+
+    #[test]
+    fn a_quoted_two_line_title_above_one_data_row_is_one_preamble_record_over_a_header() {
+        let sample = "\"Lumes report\ngenerated 25.10.26\";v2.10\nStation;NO2;O3\nSTEF;12,45;54,55\n";
+        let dialect = CsvInspector::new(&DialectStatement::NOTHING).inspect(&Content::new(sample.as_bytes())).unwrap();
+        let mut reader = dialect.reader(sample.as_bytes()).unwrap();
+
+        assert_eq!(dialect.preamble, Preamble::new(1));
+        assert_eq!(dialect.header_rows, HeaderRows::ONE);
+        assert_eq!(reader.headers().unwrap(), vec!["Station", "NO2", "O3"]);
+        assert_eq!(reader.records().next().unwrap().unwrap(), vec!["STEF", "12,45", "54,55"]);
+    }
+
+    #[test]
+    fn an_all_text_table_of_one_data_row_is_read_under_its_header() {
+        let dialect = CsvInspector::new(&DialectStatement::NOTHING)
+            .inspect(&Content::new(b"Station;NO2;O3\nSTEF;12,45;54,55\n"))
+            .unwrap();
+
+        assert_eq!(dialect.preamble, Preamble::NONE);
+        assert_eq!(dialect.header_rows, HeaderRows::ONE);
+    }
+
+    #[test]
+    fn a_numeric_table_of_two_rows_stays_headerless() {
+        let dialect = CsvInspector::new(&DialectStatement::NOTHING).inspect(&Content::new(b"1;2;3\n4;5;6\n")).unwrap();
+
+        assert_eq!(dialect.header_rows, HeaderRows::NONE);
+    }
+
+    #[test]
     fn a_multi_line_title_block_is_detected_as_a_multi_record_preamble() {
         let sample = "Air quality;Vienna\nGenerated;25.10.26;08:00;CET;v2\nStation;NO2;O3\nSTEF;12;54\nAKA;9;40\nTAB;7;38\n";
         let dialect = CsvInspector::new(&DialectStatement::NOTHING).inspect(&Content::new(sample.as_bytes())).unwrap();

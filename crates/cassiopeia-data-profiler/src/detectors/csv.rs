@@ -178,4 +178,22 @@ mod tests {
         assert_eq!(metadata.dialect().preamble, Preamble::new(1));
         assert_eq!(metadata.dialect().header_rows, HeaderRows::ONE);
     }
+
+    #[test]
+    fn a_titled_all_text_table_with_one_data_row_is_detected_as_csv_with_its_header() {
+        let profile = CsvDetector.detect(&Content::new(b"Lumes;v2.10\nStation;NO2;O3\nSTEF;12,45;54,55\n")).unwrap();
+        let metadata = profile.metadata().as_ref().and_then(FormatMetadata::as_csv).unwrap();
+
+        assert_eq!(metadata.dialect().preamble, Preamble::new(1));
+        assert_eq!(metadata.dialect().header_rows, HeaderRows::ONE);
+    }
+
+    #[test]
+    fn an_all_text_table_with_one_data_row_is_detected_as_csv_with_its_header() {
+        let profile = CsvDetector.detect(&Content::new(b"Station;NO2;O3\nSTEF;12,45;54,55\n")).unwrap();
+        let metadata = profile.metadata().as_ref().and_then(FormatMetadata::as_csv).unwrap();
+
+        assert_eq!(metadata.dialect().preamble, Preamble::NONE);
+        assert_eq!(metadata.dialect().header_rows, HeaderRows::ONE);
+    }
 }
