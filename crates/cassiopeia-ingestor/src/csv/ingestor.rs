@@ -507,6 +507,19 @@ mod tests {
     }
 
     #[test]
+    fn a_quoted_two_line_title_in_a_utf_16le_file_with_a_byte_order_mark_ingests_every_data_row_intact() {
+        let text = "\"Lumes report\ngenerated 25.10.26\";v2.10\nStation;NO2;O3\nSTEF;12,45;54,55\nAKA;9,80;40,10\n";
+        let bytes: Vec<u8> = [0xFF, 0xFE].into_iter().chain(text.encode_utf16().flat_map(u16::to_le_bytes)).collect();
+        let (_dir, payload) = inspected(bytes);
+        let records = ingest_all(payload);
+
+        assert_eq!(records.len(), 2);
+        assert_eq!(records[0].data().get("Station"), Some(&Value::String("STEF".to_string())));
+        assert_eq!(records[0].data().get("O3"), Some(&Value::String("54,55".to_string())));
+        assert_eq!(records[1].data().get("Station"), Some(&Value::String("AKA".to_string())));
+    }
+
+    #[test]
     fn a_pipe_table_padded_for_reading_is_keyed_and_valued_without_its_padding() {
         let contents = "id | name | count\n1 | Ada | 36\n2 | Grace | 45\n";
         let dialect = CsvInspector::new(&DialectStatement::NOTHING)
