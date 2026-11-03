@@ -20,6 +20,15 @@ impl FormatMetadata {
         }
     }
 
+    /// Consumes the metadata and returns the owned CSV metadata, or `None` for a different format.
+    #[must_use]
+    pub fn into_csv(self) -> Option<CsvMetadata> {
+        match self {
+            Self::Csv(metadata) => Some(metadata),
+            Self::Grib(_) => None,
+        }
+    }
+
     /// Returns the GRIB metadata, or `None` for a different format.
     #[must_use]
     pub const fn as_grib(&self) -> Option<&GribMetadata> {
@@ -81,5 +90,60 @@ impl CsvMetadata {
     #[must_use]
     pub const fn dialect(&self) -> &Dialect {
         &self.dialect
+    }
+
+    /// Consumes the metadata and returns the owned dialect.
+    #[must_use]
+    pub fn into_dialect(self) -> Dialect {
+        self.dialect
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::metadata::{CsvMetadata, FormatMetadata, GribEdition, GribMetadata};
+    use cassiopeia_csv_dialect::{
+        character_encoding::CharacterEncoding,
+        dialect::Dialect,
+        dialect_byte::DialectByte,
+        escape::Escape,
+        header_rows::HeaderRows,
+        line_terminator::LineTerminator,
+        preamble::Preamble,
+        quote::Quote,
+        value_notation::ValueNotation,
+    };
+    use encoding_rs::UTF_8;
+    use pretty_assertions::assert_eq;
+
+    fn dialect() -> Dialect {
+        Dialect {
+            delimiter: DialectByte::SEMICOLON,
+            quote_char: Quote::Char(DialectByte::DOUBLE_QUOTE),
+            preamble: Preamble::NONE,
+            header_rows: HeaderRows::ONE,
+            escape: Escape::Doubled,
+            terminator: LineTerminator::Lf,
+            encoding: CharacterEncoding::new(UTF_8),
+            notation: ValueNotation::PLAIN,
+        }
+    }
+
+    #[test]
+    fn csv_metadata_is_read_as_csv_and_never_as_grib() {
+        let metadata = FormatMetadata::Csv(CsvMetadata::new(dialect()));
+
+        assert_eq!(metadata.as_csv().map(CsvMetadata::dialect), Some(&dialect()));
+        assert!(metadata.as_grib().is_none());
+        assert_eq!(metadata.into_csv().map(CsvMetadata::into_dialect), Some(dialect()));
+    }
+
+    #[test]
+    fn grib_metadata_is_read_as_grib_and_never_as_csv() {
+        let metadata = FormatMetadata::Grib(GribMetadata::new(GribEdition::V2));
+
+        assert_eq!(metadata.as_grib().map(GribMetadata::edition), Some(GribEdition::V2));
+        assert!(metadata.as_csv().is_none());
+        assert!(metadata.into_csv().is_none());
     }
 }

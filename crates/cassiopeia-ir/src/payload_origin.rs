@@ -35,7 +35,7 @@ mod tests {
         payload::{BytesPayload, CollectedPayload, FilePayload},
         payload_origin::PayloadOrigin,
     };
-    use cassiopeia_data_profiler::encoding_hint::EncodingHint;
+    use cassiopeia_encoding_detection::encoding_hint::EncodingHint;
     use pretty_assertions::assert_eq;
     use std::path::PathBuf;
 

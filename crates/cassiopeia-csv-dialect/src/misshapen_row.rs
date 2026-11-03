@@ -34,7 +34,7 @@ impl MisshapenRow {
             return None;
         };
         // The reader starts counting records below the preamble, from 0 and header included.
-        let above = u64::try_from(preamble.records()).unwrap_or(u64::MAX).saturating_add(position.record());
+        let above = preamble.records().saturating_add(position.record());
         Some(MisshapenRow {
             row: RowNumber::after(above),
             fields: *len,

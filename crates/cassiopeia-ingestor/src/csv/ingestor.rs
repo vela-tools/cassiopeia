@@ -19,7 +19,7 @@ use cassiopeia_csv_dialect::{
     preamble::Preamble,
     value_notation::ValueNotation,
 };
-use cassiopeia_data_profiler::metadata::FormatMetadata;
+use cassiopeia_data_profiler::metadata::{CsvMetadata, FormatMetadata};
 use cassiopeia_ir::{
     payload::{CollectedPayload, ProfiledPayload},
     record::Record,
@@ -28,11 +28,21 @@ use encoding_rs::{Encoding, UTF_8};
 use encoding_rs_rw::DecodingReader;
 use parking_lot::Mutex;
 use serde_json::{Map, Number, Value};
-use std::{borrow::Cow, fs::File, io::BufReader, mem, path::PathBuf, sync::Arc};
+use std::{
+    borrow::Cow,
+    fs::File,
+    io::BufReader,
+    mem,
+    path::{Path, PathBuf},
+    sync::Arc,
+};
 use tracing::{info, warn};
 
-/// A CSV reader over a file decoded to UTF-8 with its profiled encoding.
-type DecodedFileReader = Reader<BufReader<LineCountingReader<DecodingReader<BufReader<File>>>>>;
+/// A file decoded to UTF-8 from its profiled encoding, its lines counted.
+type DecodedFile = BufReader<LineCountingReader<DecodingReader<BufReader<File>>>>;
+
+/// A CSV reader over a [`DecodedFile`].
+type DecodedFileReader = Reader<DecodedFile>;
 
 /// Ingestor for CSV data.
 ///
@@ -67,61 +77,19 @@ impl CsvIngestor {
     /// Returns [`IngestorError`] when the payload is not a file, the file cannot be opened, or the
     /// CSV reader cannot be built.
     pub fn from_payload(payload: ProfiledPayload, batch_size: usize) -> Result<CsvIngestor, IngestorError> {
-        let dialect = payload
-            .profile()
-            .metadata()
-            .as_ref()
-            .and_then(FormatMetadata::as_csv)
-            .map(|metadata| metadata.dialect().clone());
+        let (payload, profile) = payload.into_parts();
+        let dialect = profile.into_metadata().and_then(FormatMetadata::into_csv).map(CsvMetadata::into_dialect);
 
-        let (path, source) = match payload.into_payload() {
+        let (path, source) = match payload {
             CollectedPayload::File(file) => file.into_path_and_source(),
             CollectedPayload::Bytes(_) => return Err(CsvIngestError::RequiresFile.into()),
         };
 
         let encoding = dialect.as_ref().map_or(UTF_8, Dialect::character_encoding);
-
-        let file = File::open(&path).map_err(|source| CsvIngestError::Open {
-            source,
-            // The error owns the path after this borrow ends.
-            path: path.clone(),
-        })?;
-        // The file is decoded strictly: a byte sequence that is not valid in its encoding fails the
-        // run on its line, rather than reaching the mapped values as `U+FFFD`. A byte order mark
-        // names the encoding over the profiled one, as for any decoder of the web's encodings.
         let terminator = dialect.as_ref().map_or(LineTerminator::Lf, |dialect| dialect.terminator);
-        let decoded = BufReader::new(LineCountingReader::new(
-            DecodingReader::new(BufReader::new(file), encoding.new_decoder()),
-            terminator,
-        ));
-
-        // The profiled dialect opens the file exactly as the inspector parsed its sample, preamble
-        // skip and stacked-header join included, so the header read below is the one the inspector
-        // detected.
-        let mut reader = match &dialect {
-            Some(dialect) => {
-                info!("Using profiled CSV dialect: {:#?}", dialect);
-                dialect
-                    .reader(decoded)
-                    .map_err(|source| CsvIngestError::reading(source, encoding, &path, CsvRead::TableStart))?
-            }
-            None => Reader::from_reader(decoded),
-        };
-
-        // A headerless source has no names to key its columns by; its records are keyed by position
-        // instead, so the first row is not consumed as a header and nothing is lost.
-        let column_keys = if dialect.as_ref().is_none_or(|dialect| dialect.header_rows.is_present()) {
-            let keys = ColumnKeys::from_headers(
-                reader
-                    .headers()
-                    .map_err(|source| CsvIngestError::reading(source, encoding, &path, CsvRead::Table))?,
-            );
-            info!("Column keys: {:#?}", keys);
-            Some(keys)
-        } else {
-            info!("Headerless CSV: columns keyed by position");
-            None
-        };
+        let decoded = Self::open_decoded(&path, encoding, terminator)?;
+        let mut reader = Self::table_reader(decoded, dialect.as_ref(), encoding, &path)?;
+        let column_keys = Self::column_keys(&mut reader, dialect.as_ref(), encoding, &path)?;
 
         // An unprofiled file has no preamble skipped, and states no notation, so its values are read
         // in the plain one.
@@ -139,6 +107,63 @@ impl CsvIngestor {
             misshapen: Arc::default(),
             batch_size,
         })
+    }
+
+    /// Opens the file at `path` decoded from `encoding` to UTF-8, counting its lines by `terminator`.
+    ///
+    /// The file is decoded strictly: a byte sequence that is not valid in its encoding fails the run
+    /// on its line, rather than reaching the mapped values as `U+FFFD`. A byte order mark names the
+    /// encoding over the profiled one, as for any decoder of the web's encodings.
+    fn open_decoded(path: &Path, encoding: &'static Encoding, terminator: LineTerminator) -> Result<DecodedFile, CsvIngestError> {
+        let file = File::open(path).map_err(|source| CsvIngestError::Open {
+            source,
+            // The error outlives the borrowed path.
+            path: path.to_path_buf(),
+        })?;
+        Ok(BufReader::new(LineCountingReader::new(
+            DecodingReader::new(BufReader::new(file), encoding.new_decoder()),
+            terminator,
+        )))
+    }
+
+    /// The reader of the table in `decoded`, positioned at its header.
+    ///
+    /// The profiled dialect opens the file exactly as the inspector parsed its sample, preamble skip
+    /// and stacked-header join included, so the header read next is the one the inspector detected.
+    /// An unprofiled file is read with the `csv` crate's defaults.
+    fn table_reader(decoded: DecodedFile, dialect: Option<&Dialect>, encoding: &'static Encoding, path: &Path) -> Result<DecodedFileReader, CsvIngestError> {
+        match dialect {
+            Some(dialect) => {
+                info!("Using profiled CSV dialect: {:#?}", dialect);
+                dialect
+                    .reader(decoded)
+                    .map_err(|source| CsvIngestError::reading(source, encoding, path, CsvRead::TableStart))
+            }
+            None => Ok(Reader::from_reader(decoded)),
+        }
+    }
+
+    /// The record key of every column, from the header `reader` is positioned at, or `None` for a
+    /// headerless source.
+    ///
+    /// A headerless source has no names to key its columns by; its records are keyed by position
+    /// instead, so the first row is not consumed as a header and nothing is lost.
+    fn column_keys(
+        reader: &mut DecodedFileReader,
+        dialect: Option<&Dialect>,
+        encoding: &'static Encoding,
+        path: &Path,
+    ) -> Result<Option<ColumnKeys>, CsvIngestError> {
+        if dialect.is_some_and(|dialect| !dialect.header_rows.is_present()) {
+            info!("Headerless CSV: columns keyed by position");
+            return Ok(None);
+        }
+        let headers = reader
+            .headers()
+            .map_err(|source| CsvIngestError::reading(source, encoding, path, CsvRead::Table))?;
+        let keys = ColumnKeys::from_headers(headers);
+        info!("Column keys: {:#?}", keys);
+        Ok(Some(keys))
     }
 
     /// The input the file was collected from: the file itself, or the URL a downloaded file was
@@ -312,11 +337,11 @@ mod tests {
     };
     use cassiopeia_data_profiler::{
         content::Content,
-        encoding_hint::EncodingHint,
         inspectors::csv::CsvInspector,
         metadata::{CsvMetadata, FormatMetadata},
         profile::Profile,
     };
+    use cassiopeia_encoding_detection::encoding_hint::EncodingHint;
     use cassiopeia_ir::{
         payload::{CollectedPayload, FilePayload, ProfiledPayload},
         record::Record,

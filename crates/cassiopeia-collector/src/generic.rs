@@ -1,6 +1,6 @@
 use crate::{collector::Collector, downloader::Downloader, error::CollectorError, file_extension::FileExtension, source::CollectorSource};
 use cassiopeia_common::{channel::ChannelSender, format::DataFormat, input::Input, signal::Signal, user_agent::UserAgent};
-use cassiopeia_data_profiler::encoding_hint::EncodingHint;
+use cassiopeia_encoding_detection::encoding_hint::EncodingHint;
 use cassiopeia_ir::payload::{CollectedPayload, FilePayload};
 use std::{env, fs, path::Path};
 use temp_dir::TempDir;

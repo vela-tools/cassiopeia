@@ -16,6 +16,7 @@ mediatype = "0.23.0"
 thiserror = "2.0.21"
 
 [dev-dependencies]
+cassiopeia-encoding-detection.workspace = true
 pretty_assertions = "1.4.1"
 serde_json = "1.0.154"
 

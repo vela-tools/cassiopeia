@@ -90,7 +90,8 @@ mod tests {
         xml::{error::XmlIngestError, ingestor::XmlIngestor},
     };
     use cassiopeia_common::{channel::ChannelSender, format::DataFormat, signal::Signal};
-    use cassiopeia_data_profiler::{encoding_hint::EncodingHint, profile::Profile};
+    use cassiopeia_data_profiler::profile::Profile;
+    use cassiopeia_encoding_detection::encoding_hint::EncodingHint;
     use cassiopeia_ir::{
         payload::{BytesPayload, CollectedPayload, FilePayload, ProfiledPayload},
         record::Record,

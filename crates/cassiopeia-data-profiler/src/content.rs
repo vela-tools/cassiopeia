@@ -1,4 +1,4 @@
-use crate::encoding_hint::EncodingHint;
+use cassiopeia_encoding_detection::encoding_hint::EncodingHint;
 
 /// The bytes being profiled, together with what their source says about their encoding.
 #[derive(Debug, Clone, Copy)]
@@ -35,5 +35,32 @@ impl<'a> Content<'a> {
     #[must_use]
     pub const fn encoding_hint(&self) -> &'a EncodingHint {
         self.encoding_hint
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::content::Content;
+    use cassiopeia_encoding_detection::encoding_hint::EncodingHint;
+    use mediatype::MediaTypeBuf;
+    use pretty_assertions::assert_eq;
+    use url::Url;
+
+    #[test]
+    fn content_without_a_hint_carries_its_bytes_and_no_encoding_context() {
+        let content = Content::new(b"id;name\n");
+
+        assert_eq!(content.bytes(), b"id;name\n");
+        assert_eq!(content.encoding_hint(), &EncodingHint::NONE);
+    }
+
+    #[test]
+    fn hinted_content_carries_the_hint_its_source_supplied() {
+        let content_type = "text/csv; charset=windows-1252".parse::<MediaTypeBuf>().unwrap();
+        let hint = EncodingHint::for_remote_source(&Url::parse("https://www.wien.gv.at/feed.csv").unwrap(), Some(&content_type));
+        let content = Content::hinted(b"id;name\n", &hint);
+
+        assert_eq!(content.bytes(), b"id;name\n");
+        assert_eq!(content.encoding_hint(), &hint);
     }
 }

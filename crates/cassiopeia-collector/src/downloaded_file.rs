@@ -31,3 +31,37 @@ impl DownloadedFile {
         self.path
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use crate::downloaded_file::DownloadedFile;
+    use mediatype::MediaTypeBuf;
+    use pretty_assertions::assert_eq;
+    use std::path::PathBuf;
+    use url::Url;
+
+    #[test]
+    fn a_download_exposes_its_path_url_and_declared_media_type() {
+        let url = Url::parse("https://example.org/feed.csv").unwrap();
+        let content_type = "text/csv; charset=utf-8".parse::<MediaTypeBuf>().unwrap();
+        let file = DownloadedFile::new(PathBuf::from("/tmp/input.csv"), url.clone(), Some(content_type.clone()));
+
+        assert_eq!(file.path(), &PathBuf::from("/tmp/input.csv"));
+        assert_eq!(file.url(), &url);
+        assert_eq!(file.content_type(), &Some(content_type));
+    }
+
+    #[test]
+    fn a_download_without_a_media_type_declares_none() {
+        let file = DownloadedFile::new(PathBuf::from("/tmp/input.csv"), Url::parse("https://example.org/feed.csv").unwrap(), None);
+
+        assert_eq!(file.content_type(), &None);
+    }
+
+    #[test]
+    fn into_path_yields_the_owned_path() {
+        let file = DownloadedFile::new(PathBuf::from("/tmp/input.csv"), Url::parse("https://example.org/feed.csv").unwrap(), None);
+
+        assert_eq!(file.into_path(), PathBuf::from("/tmp/input.csv"));
+    }
+}

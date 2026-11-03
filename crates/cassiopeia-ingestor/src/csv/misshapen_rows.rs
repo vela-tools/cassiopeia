@@ -5,13 +5,15 @@ use cassiopeia_csv_dialect::misshapen_row::MisshapenRow;
 pub const NAMED_ROWS: usize = 3;
 
 /// The rows of one CSV file skipped because their field count differs from the table's: the first
-/// [`NAMED_ROWS`] of them, and how many there were in all.
+/// [`NAMED_ROWS`] of them, how many there were in all, and how many of those went unnamed.
 #[derive(Debug, Default, Eq, PartialEq)]
 pub struct MisshapenRows {
     /// The first rows skipped, in file order.
     named: Vec<MisshapenRow>,
     /// How many rows were skipped, the named ones included.
     total: u64,
+    /// How many rows were skipped past the named ones.
+    unnamed: u64,
 }
 
 impl MisshapenRows {
@@ -19,6 +21,8 @@ impl MisshapenRows {
     pub fn record(&mut self, row: MisshapenRow) {
         if self.named.len() < NAMED_ROWS {
             self.named.push(row);
+        } else {
+            self.unnamed = self.unnamed.saturating_add(1);
         }
         self.total = self.total.saturating_add(1);
     }
@@ -33,6 +37,12 @@ impl MisshapenRows {
     #[must_use]
     pub const fn total(&self) -> u64 {
         self.total
+    }
+
+    /// How many rows were skipped past the named ones, which a report counts rather than names.
+    #[must_use]
+    pub const fn unnamed(&self) -> u64 {
+        self.unnamed
     }
 }
 
@@ -56,6 +66,7 @@ mod tests {
 
         assert_eq!(rows.named(), []);
         assert_eq!(rows.total(), 0);
+        assert_eq!(rows.unnamed(), 0);
     }
 
     #[test]
@@ -67,5 +78,15 @@ mod tests {
         assert_eq!(rows.named()[0], row(0));
         assert_eq!(rows.named()[2], row(2));
         assert_eq!(rows.total(), 5);
+        assert_eq!(rows.unnamed(), 2);
+    }
+
+    #[test]
+    fn rows_that_all_fit_the_named_ones_leave_none_unnamed() {
+        let mut rows = MisshapenRows::default();
+        (0..3).for_each(|above| rows.record(row(above)));
+
+        assert_eq!(rows.total(), 3);
+        assert_eq!(rows.unnamed(), 0);
     }
 }

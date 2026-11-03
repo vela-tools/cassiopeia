@@ -1,4 +1,5 @@
 use csv::Terminator;
+use csv_core::Terminator as CoreTerminator;
 use serde::{Deserialize, Serialize};
 
 /// The line terminator a CSV file's records end with.
@@ -34,11 +35,11 @@ impl LineTerminator {
     }
 
     /// The terminator as the low-level CSV state machine takes it.
-    pub(crate) const fn as_csv_core(self) -> csv_core::Terminator {
+    pub(crate) const fn as_csv_core(self) -> CoreTerminator {
         match self {
-            LineTerminator::Lf => csv_core::Terminator::Any(b'\n'),
-            LineTerminator::Crlf => csv_core::Terminator::CRLF,
-            LineTerminator::Cr => csv_core::Terminator::Any(b'\r'),
+            LineTerminator::Lf => CoreTerminator::Any(b'\n'),
+            LineTerminator::Crlf => CoreTerminator::CRLF,
+            LineTerminator::Cr => CoreTerminator::Any(b'\r'),
         }
     }
 }

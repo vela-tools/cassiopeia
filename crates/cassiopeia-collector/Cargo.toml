@@ -9,7 +9,7 @@ repository.workspace = true
 
 [dependencies]
 cassiopeia-common.workspace = true
-cassiopeia-data-profiler.workspace = true
+cassiopeia-encoding-detection.workspace = true
 cassiopeia-ir.workspace = true
 derive_more = { version = "2.1.1", features = ["display"] }
 getset = "0.1.7"

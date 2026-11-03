@@ -8,10 +8,11 @@ use std::io::{self, BufRead};
 /// The count is in logical CSV records, never physical lines. A quoted field may hold a line break
 /// (RFC 4180 clause 2.6), so one preamble record can span several lines; counting records lets every
 /// reader of a profiled file, which all parse through the same CSV state machine, skip exactly the
-/// same bytes.
+/// same bytes. It is counted in `u64`, as the `csv` crate counts the records of a file, so it adds
+/// to a record's position without conversion.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(transparent)]
-pub struct Preamble(usize);
+pub struct Preamble(u64);
 
 impl Preamble {
     /// No preamble: the table starts at the first record.
@@ -19,13 +20,13 @@ impl Preamble {
 
     /// A preamble of `records` leading CSV records.
     #[must_use]
-    pub const fn new(records: usize) -> Preamble {
+    pub const fn new(records: u64) -> Preamble {
         Preamble(records)
     }
 
     /// The number of leading CSV records the preamble covers.
     #[must_use]
-    pub const fn records(self) -> usize {
+    pub const fn records(self) -> u64 {
         self.0
     }
 

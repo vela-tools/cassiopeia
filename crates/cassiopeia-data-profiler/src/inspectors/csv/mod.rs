@@ -3,11 +3,12 @@ use crate::{
     inspectors::csv::{
         error::CsvInspectError,
         escape_evidence::backs_escape,
-        header::{continuation_rows, header_quality, looks_like_header_row},
+        header::{header_quality, stacked_header_rows},
         reading::Reading,
+        sample::{SAMPLE_SIZE, SampleExtent, sample_of, terminator_of},
         table::Table,
         table_shape::TableShape,
-        title::title_rows,
+        table_start::detected_table_start,
     },
 };
 use cassiopeia_csv_dialect::{
@@ -33,38 +34,12 @@ mod missing_value;
 #[cfg(test)]
 mod preamble_cases;
 mod reading;
+mod sample;
 mod sentence;
 mod table;
 mod table_shape;
+mod table_start;
 mod title;
-
-/// Scan granularity for [`CsvInspector::sample_of`].
-const CHUNK: usize = 64 * 1024;
-
-/// The fewest lines a sample must hold before header scoring can run: row 0 plus enough data rows
-/// for both the header hypothesis (which needs two full rows) and per-column typing.
-///
-/// Lines stand in for records here because where a record ends depends on the quote, which is not
-/// detected yet. A quoted field with a line break makes a record span several lines, so a sample of
-/// very wide multi-line records can hold fewer records than this; it is then scored on fewer rows,
-/// and is still cut at a record boundary.
-const MIN_SAMPLE_LINES: usize = 5;
-
-/// Hard ceiling on the dialect sample. It bounds the read, and the scoring work of the candidate
-/// dialects, for a file whose rows are pathologically wide: a single row can exceed the soft
-/// target on its own, so a fixed-size sample could hold no complete data row at all.
-const MAX_SAMPLE_BYTES: usize = 4 * 1024 * 1024;
-
-/// The most leading records a preamble may cover. It bounds the candidate preambles tried per
-/// dialect; real title blocks above a table are a line or a few.
-const MAX_PREAMBLE_RECORDS: usize = 10;
-
-/// The fewest records a table below a non-empty preamble must hold: a header and a data row. A
-/// shorter tail is more likely a coincidence of a wrong delimiter than a table.
-const MIN_RECORDS_BELOW_PREAMBLE: usize = 2;
-
-/// The soft target size of the dialect sample; see [`CsvInspector::sample_of`].
-const SAMPLE_SIZE: usize = 32 * 1024;
 
 /// The delimiters tried when none is stated.
 const CANDIDATE_DELIMITERS: [DialectByte; 5] = [
@@ -93,15 +68,6 @@ const CANDIDATE_ESCAPE: DialectByte = DialectByte::BACKSLASH;
 pub struct CsvInspector<'s> {
     statement: &'s DialectStatement,
     sample_size: usize,
-}
-
-/// Whether the dialect sample is the whole content or a leading part cut from it.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum SampleExtent {
-    /// The sample is the whole content, so its last record is the file's last record.
-    Whole,
-    /// The sample was cut from the content, so its last record may be cut short.
-    Cut,
 }
 
 impl<'s> CsvInspector<'s> {
@@ -149,17 +115,17 @@ impl<'s> CsvInspector<'s> {
         let encoding = marked
             .or_else(|| self.statement.encoding())
             .unwrap_or_else(|| CharacterEncoding::new(content.encoding_hint().encoding_of(bytes)));
-        let (raw_sample, extent) = self.sample_of(bytes);
+        let (raw_sample, extent) = sample_of(bytes, self.sample_size);
         let decoded = encoding.encoding().decode(raw_sample).0;
         let sample = decoded.as_bytes();
-        let terminator = self.statement.terminator().unwrap_or_else(|| Self::terminator_of(sample));
+        let terminator = self.statement.terminator().unwrap_or_else(|| terminator_of(sample));
         let best = self
             .best_of(sample, extent, terminator, encoding, TableShape::MultiColumn)
             .or_else(|| self.best_of(sample, extent, terminator, encoding, TableShape::SingleColumn));
 
         let Reading { mut dialect, table, .. } = best.ok_or(CsvInspectError::NoDialectDetected)?;
         if !matches!(self.statement.header(), Some(HeaderStatement::Rows(_))) {
-            dialect = Self::with_stacked_header(dialect, &table);
+            dialect.header_rows = stacked_header_rows(&table, dialect.header_rows);
         }
         // The dialect owns its notation, while the statement stays the manifest's.
         dialect.notation = self.statement.notation().clone();
@@ -260,22 +226,6 @@ impl<'s> CsvInspector<'s> {
         }
     }
 
-    /// The line terminator of `sample`: CRLF as soon as one line ends with it, a lone CR when the
-    /// sample has more carriage returns than line feeds, and LF otherwise.
-    ///
-    /// The quote is not detected yet, so a line break inside a quoted field cannot be told from one
-    /// that ends a record; the more frequent byte is taken as the terminator, and the other as such a
-    /// quoted break. A CR-terminated file with a line feed in a quoted cell is still read by CR.
-    fn terminator_of(sample: &[u8]) -> LineTerminator {
-        if sample.windows(2).any(|w| w == b"\r\n") {
-            LineTerminator::Crlf
-        } else if bytecount::count(sample, b'\r') > bytecount::count(sample, b'\n') {
-            LineTerminator::Cr
-        } else {
-            LineTerminator::Lf
-        }
-    }
-
     /// The best reading of `sample` under `candidate`'s delimiter and quote: where its table starts
     /// and whether it has a header, each as stated or, left out, as scored.
     ///
@@ -341,106 +291,7 @@ impl<'s> CsvInspector<'s> {
             let table = Table::parse(sample, &dialect).filter(|table| table.is_tabular(shape))?;
             return Some((dialect, table));
         }
-        let (dialect, table) = Self::locate_table(sample, candidate, shape)?;
-        Some(Self::below_titles(sample, dialect, table))
-    }
-
-    /// Settles how many records form the winning dialect's header, given the table it was scored on.
-    ///
-    /// A headerless winner whose row 0 still looks like a header gets one header record, so the
-    /// header row is not ingested as data. A header is then extended by the records directly below
-    /// it that continue it, such as aggregation and unit rows.
-    fn with_stacked_header(mut dialect: Dialect, table: &Table) -> Dialect {
-        let below_header = if dialect.header_rows.is_present() {
-            table.records.as_slice()
-        } else if looks_like_header_row(table) {
-            table.records.get(1..).unwrap_or_default()
-        } else {
-            return dialect;
-        };
-        dialect.header_rows = HeaderRows::new(1 + continuation_rows(below_header));
-        dialect
-    }
-
-    /// Finds where the table of `shape` in `sample` starts under `dialect`'s delimiter and quote,
-    /// returning the dialect with its preamble set and the headerless table below that preamble.
-    ///
-    /// A preamble is the run of leading records, such as a title line, whose field count differs
-    /// from the table's. The reader is not flexible, so while such a record is still in front of the
-    /// table the parse fails; the shortest preamble under which it succeeds is the one detected. A
-    /// candidate preamble is only tried when every record in it is a different width from the record
-    /// that would start the table, so a ragged row further down never turns the rows above it, the
-    /// header among them, into a preamble.
-    fn locate_table(sample: &[u8], mut dialect: Dialect, shape: TableShape) -> Option<(Dialect, Table)> {
-        let widths: Vec<usize> = dialect
-            .reader_builder()
-            .flexible(true)
-            .from_reader(sample)
-            .records()
-            .take(MAX_PREAMBLE_RECORDS + 1)
-            .map_while(Result::ok)
-            .map(|record| record.len())
-            .collect();
-
-        for (records, width) in widths.iter().enumerate() {
-            if widths[..records].contains(width) {
-                continue;
-            }
-            dialect.preamble = Preamble::new(records);
-            if let Some(table) = Table::parse(sample, &dialect) {
-                // Every record from here on shares one width, so a longer preamble could only drop
-                // rows of the same table, never reveal a different one.
-                let enough_rows = records == 0 || table.num_rows >= MIN_RECORDS_BELOW_PREAMBLE;
-                return (table.is_tabular(shape) && enough_rows).then_some((dialect, table));
-            }
-        }
-        None
-    }
-
-    /// Extends `dialect`'s preamble over the title records at the top of `table` that are as wide as
-    /// the table, returning the dialect and the headerless table below them. A dialect whose table
-    /// starts with no such title, or whose preamble is already at [`MAX_PREAMBLE_RECORDS`], is
-    /// returned unchanged.
-    fn below_titles(sample: &[u8], mut dialect: Dialect, table: Table) -> (Dialect, Table) {
-        let preamble = dialect.preamble;
-        let titles = title_rows(&table).min(MAX_PREAMBLE_RECORDS.saturating_sub(preamble.records()));
-        if titles == 0 {
-            return (dialect, table);
-        }
-
-        dialect.preamble = Preamble::new(preamble.records() + titles);
-        if let Some(below) = Table::parse(sample, &dialect) {
-            return (dialect, below);
-        }
-        dialect.preamble = preamble;
-        (dialect, table)
-    }
-
-    /// The leading bytes of `bytes` the dialect is scored on, large enough to score a header and
-    /// bounded by a hard byte ceiling, and whether they are all of `bytes`.
-    ///
-    /// A narrow CSV crosses [`MIN_SAMPLE_LINES`] line ends well inside the soft target `sample_size`,
-    /// so the sample stops at that target. A file whose rows are wider than the soft target keeps
-    /// sampling until it holds enough lines to tell a header from data, and [`MAX_SAMPLE_BYTES`]
-    /// caps a pathologically wide single row. Line ends are counted per chunk, never by rescanning
-    /// the sample, so the scan stays linear in the bytes sampled. The terminator is not detected
-    /// yet, so a chunk's line ends are its line feeds or its carriage returns, whichever are more:
-    /// a CRLF line holds one of each, and a file whose lines end with a lone CR has no line feed.
-    ///
-    /// A cut sample ends wherever its last chunk does, even inside a record or a character; each
-    /// candidate dialect trims it to its complete records with [`Dialect::complete_records`].
-    fn sample_of<'a>(&self, bytes: &'a [u8]) -> (&'a [u8], SampleExtent) {
-        let mut end = 0usize;
-        let mut line_ends = 0usize;
-        for chunk in bytes.chunks(CHUNK) {
-            line_ends += bytecount::count(chunk, b'\n').max(bytecount::count(chunk, b'\r'));
-            end += chunk.len();
-            if (end >= self.sample_size && line_ends >= MIN_SAMPLE_LINES) || end >= MAX_SAMPLE_BYTES {
-                break;
-            }
-        }
-        let extent = if end < bytes.len() { SampleExtent::Cut } else { SampleExtent::Whole };
-        (&bytes[..end], extent)
+        detected_table_start(sample, candidate, shape)
     }
 }
 
@@ -448,7 +299,7 @@ impl<'s> CsvInspector<'s> {
 mod tests {
     use crate::{
         content::Content,
-        inspectors::csv::{CHUNK, CsvInspector},
+        inspectors::csv::{CsvInspector, sample::CHUNK},
     };
     use cassiopeia_csv_dialect::{
         character_encoding::CharacterEncoding,

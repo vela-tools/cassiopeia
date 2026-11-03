@@ -103,7 +103,8 @@ impl Ingestor for GeoJsonIngestor {
 mod tests {
     use crate::{geojson::ingestor::GeoJsonIngestor, ingestor::Ingestor};
     use cassiopeia_common::{channel::ChannelSender, format::DataFormat, signal::Signal};
-    use cassiopeia_data_profiler::{encoding_hint::EncodingHint, profile::Profile};
+    use cassiopeia_data_profiler::profile::Profile;
+    use cassiopeia_encoding_detection::encoding_hint::EncodingHint;
     use cassiopeia_ir::{
         payload::{CollectedPayload, FilePayload, ProfiledPayload},
         record::Record,

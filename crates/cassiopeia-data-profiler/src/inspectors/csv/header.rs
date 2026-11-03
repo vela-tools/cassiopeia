@@ -4,6 +4,7 @@ use crate::inspectors::csv::{
     table::{Table, to_f64},
 };
 use ::csv::StringRecord;
+use cassiopeia_csv_dialect::header_rows::HeaderRows;
 use std::collections::{HashMap, HashSet};
 
 /// The longest a cell can be and still read as a field label rather than a value.
@@ -135,6 +136,23 @@ pub fn looks_like_header_row(table: &Table) -> bool {
         .column_types
         .iter()
         .any(|col| col.iter().skip(1).any(|t| !matches!(t, DataType::Text | DataType::Empty)))
+}
+
+/// How many records form the header of `table`, which was read with `header_rows` header records
+/// and is scored as the winning reading.
+///
+/// A headerless reading whose row 0 still looks like a header gets one header record, so the
+/// header row is not ingested as data. A header is then extended by the records directly below it
+/// that continue it, such as aggregation and unit rows.
+pub fn stacked_header_rows(table: &Table, header_rows: HeaderRows) -> HeaderRows {
+    let below_header = if header_rows.is_present() {
+        table.records.as_slice()
+    } else if looks_like_header_row(table) {
+        table.records.get(1..).unwrap_or_default()
+    } else {
+        return header_rows;
+    };
+    HeaderRows::new(1 + continuation_rows(below_header))
 }
 
 /// Counts the records directly below a header that continue it rather than start the data, in

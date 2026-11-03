@@ -152,7 +152,8 @@ mod tests {
     use cassiopeia_common::{channel::ChannelSender, format::DataFormat, signal::Signal};
     #[cfg(not(feature = "grib1"))]
     use cassiopeia_data_profiler::metadata::{FormatMetadata, GribMetadata};
-    use cassiopeia_data_profiler::{encoding_hint::EncodingHint, metadata::GribEdition, profile::Profile};
+    use cassiopeia_data_profiler::{metadata::GribEdition, profile::Profile};
+    use cassiopeia_encoding_detection::encoding_hint::EncodingHint;
     use cassiopeia_ir::{
         payload::{BytesPayload, CollectedPayload, FilePayload, ProfiledPayload},
         record::Record,

@@ -12,7 +12,8 @@
 )]
 
 use cassiopeia_common::{channel::ChannelSender, collection::CollectionName, format::DataFormat, signal::Signal};
-use cassiopeia_data_profiler::{encoding_hint::EncodingHint, profile_path};
+use cassiopeia_data_profiler::profile_path;
+use cassiopeia_encoding_detection::encoding_hint::EncodingHint;
 use cassiopeia_ingestor::{ingestor::Ingestor, shapefile::ingestor::ShapefileIngestor};
 use cassiopeia_ir::{
     payload::{CollectedPayload, FilePayload, ProfiledPayload},

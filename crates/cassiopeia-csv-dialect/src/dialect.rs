@@ -10,6 +10,7 @@ use crate::{
     value_notation::ValueNotation,
 };
 use csv::{ErrorKind, Reader, ReaderBuilder, StringRecord};
+use csv_core::{Reader as CoreReader, ReaderBuilder as CoreReaderBuilder};
 use encoding_rs::Encoding;
 use serde::Serialize;
 use std::io::{BufRead, Read};
@@ -152,8 +153,8 @@ impl Dialect {
 
     /// The state machine the preamble is skipped with, splitting records exactly as
     /// [`Self::reader_builder`]'s reader does.
-    fn core_reader(&self) -> csv_core::Reader {
-        let mut builder = csv_core::ReaderBuilder::new();
+    fn core_reader(&self) -> CoreReader {
+        let mut builder = CoreReaderBuilder::new();
         builder
             .delimiter(self.delimiter.byte())
             .terminator(self.terminator.as_csv_core())

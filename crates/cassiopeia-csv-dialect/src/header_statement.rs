@@ -1,4 +1,4 @@
-use crate::{error::DialectError, header_rows::HeaderRows};
+use crate::{error::DialectError, header_flag::HeaderFlag, header_rows::HeaderRows};
 
 /// What a manifest states about a CSV table's header, from its `header` and `headerRows` members.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -16,32 +16,32 @@ impl HeaderStatement {
     ///
     /// Returns [`DialectError::HeaderAbsentWithRows`] for `header: false` with one or more header
     /// rows, and [`DialectError::HeaderPresentWithoutRows`] for `header: true` with none.
-    pub(crate) const fn from_members(header: Option<bool>, header_rows: Option<HeaderRows>) -> Result<Option<HeaderStatement>, DialectError> {
+    pub(crate) const fn from_members(header: Option<HeaderFlag>, header_rows: Option<HeaderRows>) -> Result<Option<HeaderStatement>, DialectError> {
         match (header, header_rows) {
             (None, None) => Ok(None),
-            (Some(true), None) => Ok(Some(HeaderStatement::Present)),
-            (Some(false), None) => Ok(Some(HeaderStatement::Rows(HeaderRows::NONE))),
-            (Some(true), Some(rows)) if !rows.is_present() => Err(DialectError::HeaderPresentWithoutRows),
-            (Some(false), Some(rows)) if rows.is_present() => Err(DialectError::HeaderAbsentWithRows(rows.records())),
-            (None | Some(true | false), Some(rows)) => Ok(Some(HeaderStatement::Rows(rows))),
+            (Some(HeaderFlag::Present), None) => Ok(Some(HeaderStatement::Present)),
+            (Some(HeaderFlag::Absent), None) => Ok(Some(HeaderStatement::Rows(HeaderRows::NONE))),
+            (Some(HeaderFlag::Present), Some(rows)) if !rows.is_present() => Err(DialectError::HeaderPresentWithoutRows),
+            (Some(HeaderFlag::Absent), Some(rows)) if rows.is_present() => Err(DialectError::HeaderAbsentWithRows(rows.records())),
+            (None | Some(HeaderFlag::Present | HeaderFlag::Absent), Some(rows)) => Ok(Some(HeaderStatement::Rows(rows))),
         }
     }
 
     /// The manifest members that state this header: `header: true`, `header: false`, or
     /// `headerRows` alone for a header of one or more records.
     #[must_use]
-    pub(crate) const fn members(self) -> (Option<bool>, Option<HeaderRows>) {
+    pub(crate) const fn members(self) -> (Option<HeaderFlag>, Option<HeaderRows>) {
         match self {
-            HeaderStatement::Present => (Some(true), None),
+            HeaderStatement::Present => (Some(HeaderFlag::Present), None),
             HeaderStatement::Rows(rows) if rows.is_present() => (None, Some(rows)),
-            HeaderStatement::Rows(_) => (Some(false), None),
+            HeaderStatement::Rows(_) => (Some(HeaderFlag::Absent), None),
         }
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use crate::{error::DialectError, header_rows::HeaderRows, header_statement::HeaderStatement};
+    use crate::{error::DialectError, header_flag::HeaderFlag, header_rows::HeaderRows, header_statement::HeaderStatement};
     use pretty_assertions::assert_eq;
 
     #[test]
@@ -51,9 +51,12 @@ mod tests {
 
     #[test]
     fn a_header_flag_alone_states_presence_or_absence() {
-        assert_eq!(HeaderStatement::from_members(Some(true), None), Ok(Some(HeaderStatement::Present)));
         assert_eq!(
-            HeaderStatement::from_members(Some(false), None),
+            HeaderStatement::from_members(Some(HeaderFlag::Present), None),
+            Ok(Some(HeaderStatement::Present))
+        );
+        assert_eq!(
+            HeaderStatement::from_members(Some(HeaderFlag::Absent), None),
             Ok(Some(HeaderStatement::Rows(HeaderRows::NONE)))
         );
     }
@@ -63,9 +66,9 @@ mod tests {
         let three = Ok(Some(HeaderStatement::Rows(HeaderRows::new(3))));
 
         assert_eq!(HeaderStatement::from_members(None, Some(HeaderRows::new(3))), three);
-        assert_eq!(HeaderStatement::from_members(Some(true), Some(HeaderRows::new(3))), three);
+        assert_eq!(HeaderStatement::from_members(Some(HeaderFlag::Present), Some(HeaderRows::new(3))), three);
         assert_eq!(
-            HeaderStatement::from_members(Some(false), Some(HeaderRows::NONE)),
+            HeaderStatement::from_members(Some(HeaderFlag::Absent), Some(HeaderRows::NONE)),
             Ok(Some(HeaderStatement::Rows(HeaderRows::NONE)))
         );
     }
@@ -73,19 +76,19 @@ mod tests {
     #[test]
     fn a_flag_that_contradicts_the_row_count_is_rejected() {
         assert_eq!(
-            HeaderStatement::from_members(Some(false), Some(HeaderRows::new(2))),
+            HeaderStatement::from_members(Some(HeaderFlag::Absent), Some(HeaderRows::new(2))),
             Err(DialectError::HeaderAbsentWithRows(2))
         );
         assert_eq!(
-            HeaderStatement::from_members(Some(true), Some(HeaderRows::NONE)),
+            HeaderStatement::from_members(Some(HeaderFlag::Present), Some(HeaderRows::NONE)),
             Err(DialectError::HeaderPresentWithoutRows)
         );
     }
 
     #[test]
     fn a_statement_is_written_back_as_the_fewest_members_that_state_it() {
-        assert_eq!(HeaderStatement::Present.members(), (Some(true), None));
-        assert_eq!(HeaderStatement::Rows(HeaderRows::NONE).members(), (Some(false), None));
+        assert_eq!(HeaderStatement::Present.members(), (Some(HeaderFlag::Present), None));
+        assert_eq!(HeaderStatement::Rows(HeaderRows::NONE).members(), (Some(HeaderFlag::Absent), None));
         assert_eq!(HeaderStatement::Rows(HeaderRows::new(3)).members(), (None, Some(HeaderRows::new(3))));
     }
 }
