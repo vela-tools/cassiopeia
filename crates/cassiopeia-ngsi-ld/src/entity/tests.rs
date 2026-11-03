@@ -7,6 +7,7 @@ use crate::{
             NgsiLdAttributeWrapper,
             geo_property::NgsiLdGeoProperty,
             json_property::NgsiLdJsonProperty,
+            language_property::NgsiLdLanguageProperty,
             list_property::NgsiLdListProperty,
             list_relationship::NgsiLdListRelationship,
             property::NgsiLdProperty,
@@ -30,6 +31,7 @@ use chrono::{Duration, TimeZone, Utc};
 use compact_str::CompactString;
 use indexmap::IndexMap;
 use iri_rs::IriBuf;
+use langtag::LangTagBuf;
 use pretty_assertions::assert_eq;
 use serde_json::{Value as JsonValue, json};
 use url::Url;
@@ -1471,11 +1473,13 @@ mod edge_case_tests {
             assert_eq!(normalized["vehicleType"]["type"], "VocabProperty");
             assert_eq!(normalized["vehicleType"]["vocab"], "urn:ngsi-ld:vocab:electricMicrobus");
 
+            // Clauses 4.5.20.3 and 4.5.4 keep the `vocab` member in both forms, so the IRI is never
+            // mistaken for a plain Property's text value.
             let concise = serialize_entity(&entity, NgsiLdRepresentation::Concise);
-            assert_eq!(concise["vehicleType"], "urn:ngsi-ld:vocab:electricMicrobus");
+            assert_eq!(concise["vehicleType"], json!({"vocab": "urn:ngsi-ld:vocab:electricMicrobus"}));
 
             let simplified = serialize_entity(&entity, NgsiLdRepresentation::Simplified);
-            assert_eq!(simplified["vehicleType"], "urn:ngsi-ld:vocab:electricMicrobus");
+            assert_eq!(simplified["vehicleType"], json!({"vocab": "urn:ngsi-ld:vocab:electricMicrobus"}));
         }
 
         #[test]
@@ -1493,6 +1497,51 @@ mod edge_case_tests {
             let concise = serialize_entity(&entity, NgsiLdRepresentation::Concise);
             assert_eq!(concise["vehicleType"]["vocab"], "urn:ngsi-ld:vocab:electricMicrobus");
             assert_eq!(concise["vehicleType"]["observedAt"], "2023-12-25T10:30:00Z");
+        }
+    }
+
+    mod language_property_tests {
+        use super::*;
+        use pretty_assertions::assert_eq;
+
+        fn street() -> NgsiLdLanguageProperty {
+            let mut language_map = IndexMap::default();
+            language_map.insert(LangTagBuf::new("fr".to_string()).unwrap(), "Grand Place".to_string());
+            language_map.insert(LangTagBuf::new("nl".to_string()).unwrap(), "Grote Markt".to_string());
+            NgsiLdLanguageProperty::new(language_map)
+        }
+
+        #[test]
+        fn a_language_property_keeps_its_language_map_member_in_every_representation() {
+            let entity = create_test_entity("A4567", "Vehicle", "street", NgsiLdAttribute::LanguageProperty(street()));
+            let language_map = json!({"fr": "Grand Place", "nl": "Grote Markt"});
+
+            let normalized = serialize_entity(&entity, NgsiLdRepresentation::Normalized);
+            assert_eq!(normalized["street"], json!({"type": "LanguageProperty", "languageMap": language_map}));
+
+            // Clauses 4.5.18.3 and 4.5.4 keep the `languageMap` member, so the map is never mistaken
+            // for a plain Property whose value is an object.
+            let concise = serialize_entity(&entity, NgsiLdRepresentation::Concise);
+            assert_eq!(concise["street"], json!({"languageMap": language_map}));
+
+            let simplified = serialize_entity(&entity, NgsiLdRepresentation::Simplified);
+            assert_eq!(simplified["street"], json!({"languageMap": language_map}));
+        }
+
+        #[test]
+        fn a_language_property_with_metadata_keeps_its_qualifiers_in_the_concise_representation() {
+            let mut property = street();
+            property.observed_at = Some(Utc.with_ymd_and_hms(2017, 7, 29, 12, 0, 4).unwrap());
+            let entity = create_test_entity("A4567", "Vehicle", "street", NgsiLdAttribute::LanguageProperty(property));
+
+            let concise = serialize_entity(&entity, NgsiLdRepresentation::Concise);
+            assert_eq!(
+                concise["street"],
+                json!({"languageMap": {"fr": "Grand Place", "nl": "Grote Markt"}, "observedAt": "2017-07-29T12:00:04Z"})
+            );
+
+            let simplified = serialize_entity(&entity, NgsiLdRepresentation::Simplified);
+            assert_eq!(simplified["street"], json!({"languageMap": {"fr": "Grand Place", "nl": "Grote Markt"}}));
         }
     }
 

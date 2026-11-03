@@ -123,13 +123,13 @@ pub fn serialize_list_relationship<S: Serializer>(rel: &NgsiLdListRelationship, 
 
 /// Serializes a `LanguageProperty` in the concise representation.
 ///
+/// The `languageMap` member is written even when the attribute carries nothing else. Clause
+/// 4.5.18.3 of ETSI GS CIM 009 v1.9.1 makes it mandatory, and a bare map would read as a plain
+/// Property whose value is an object (clause 4.5.2.3).
+///
 /// # Errors
 /// Returns the serializer's error if serialization fails.
 pub fn serialize_language_property<S: Serializer>(prop: &NgsiLdLanguageProperty, serializer: S) -> Result<S::Ok, S::Error> {
-    if prop.observed_at.is_none() && prop.expires_at.is_none() && prop.dataset_id.is_none() && prop.attributes.is_empty() {
-        return prop.language_map.serialize(serializer);
-    }
-
     let mut map = serializer.serialize_map(None)?;
     map.serialize_entry("languageMap", &prop.language_map)?;
     serialize_observed_at(&mut map, prop.observed_at.as_ref())?;
@@ -141,13 +141,13 @@ pub fn serialize_language_property<S: Serializer>(prop: &NgsiLdLanguageProperty,
 
 /// Serializes a `VocabProperty` in the concise representation.
 ///
+/// The `vocab` member is written even when the attribute carries nothing else. Clause 4.5.20.3 of
+/// ETSI GS CIM 009 v1.9.1 makes it mandatory, and a bare string would read as a plain Property
+/// whose value is text (clause 4.5.2.3).
+///
 /// # Errors
 /// Returns the serializer's error if serialization fails.
 pub fn serialize_vocab_property<S: Serializer>(prop: &NgsiLdVocabProperty, serializer: S) -> Result<S::Ok, S::Error> {
-    if prop.observed_at.is_none() && prop.expires_at.is_none() && prop.dataset_id.is_none() && prop.attributes.is_empty() {
-        return serializer.collect_str(&prop.has_vocab);
-    }
-
     let mut map = serializer.serialize_map(None)?;
     map.serialize_entry("vocab", &DisplayStr(&prop.has_vocab))?;
     serialize_observed_at(&mut map, prop.observed_at.as_ref())?;

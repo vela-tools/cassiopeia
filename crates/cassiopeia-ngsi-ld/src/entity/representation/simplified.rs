@@ -9,7 +9,7 @@ use crate::entity::{
         relationship::NgsiLdRelationship,
         vocab_property::NgsiLdVocabProperty,
     },
-    representation::DisplaySeq,
+    representation::{DisplaySeq, DisplayStr},
 };
 use serde::{Serialize, Serializer, ser::SerializeMap};
 
@@ -45,20 +45,31 @@ pub fn serialize_list_relationship<S: Serializer>(rel: &NgsiLdListRelationship, 
     DisplaySeq(&rel.object_list).serialize(serializer)
 }
 
-/// Serializes the attribute in the simplified representation (bare value).
+/// Serializes a `LanguageProperty` in the simplified representation.
+///
+/// Clause 4.5.4 of ETSI GS CIM 009 v1.9.1 writes a `LanguageProperty` as an object holding the
+/// single member `languageMap`, not as its bare map, which would read as a Property whose value is
+/// an object.
 ///
 /// # Errors
 /// Returns the serializer's error if serialization fails.
 pub fn serialize_language_property<S: Serializer>(prop: &NgsiLdLanguageProperty, serializer: S) -> Result<S::Ok, S::Error> {
-    prop.language_map.serialize(serializer)
+    let mut map = serializer.serialize_map(Some(1))?;
+    map.serialize_entry("languageMap", &prop.language_map)?;
+    map.end()
 }
 
-/// Serializes the attribute in the simplified representation (bare value).
+/// Serializes a `VocabProperty` in the simplified representation.
+///
+/// Clause 4.5.4 of ETSI GS CIM 009 v1.9.1 writes a `VocabProperty` as an object holding the single
+/// member `vocab`, not as its bare IRI, which would read as a Property whose value is text.
 ///
 /// # Errors
 /// Returns the serializer's error if serialization fails.
 pub fn serialize_vocab_property<S: Serializer>(prop: &NgsiLdVocabProperty, serializer: S) -> Result<S::Ok, S::Error> {
-    serializer.collect_str(&prop.has_vocab)
+    let mut map = serializer.serialize_map(Some(1))?;
+    map.serialize_entry("vocab", &DisplayStr(&prop.has_vocab))?;
+    map.end()
 }
 
 /// Serializes the attribute in the simplified representation (bare value).
