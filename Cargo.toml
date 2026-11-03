@@ -32,6 +32,7 @@ bugreport = { version = "0.6.0", default-features = false, features = ["collecto
 clap = { version = "4.6.7", features = ["derive", "wrap_help"] }
 cron = "0.17.0"
 ctrlc = "3.5.2"
+eccodes-sys = { version = "2.50.0", default-features = false, features = ["memfs"], optional = true }
 gdt-cpus = { version = "0.2606.1", default-features = false }
 human-panic = "2.0.8"
 humantime = "2.4.0"
@@ -47,12 +48,16 @@ pretty_assertions = "1.4.1"
 urn-rs = "0.9.2"
 
 [build-dependencies]
+bindman-utils = { version = "0.2.3", optional = true }
 shadow-rs = "2.0.0"
 
 [features]
 default = ["grib1", "grib2-full"]
-grib1 = ["cassiopeia-pipeline/grib1"]
-grib2-full = ["cassiopeia-pipeline/grib2-full"]
+grib1 = ["cassiopeia-pipeline/grib1", "dep:bindman-utils", "dep:eccodes-sys"]
+grib2-full = ["cassiopeia-pipeline/grib2-full", "dep:bindman-utils", "dep:eccodes-sys"]
+
+[package.metadata.cargo-machete]
+ignored = ["eccodes-sys"]
 
 [profile.release]
 lto = "fat"

@@ -6,12 +6,8 @@ use crate::grib::{
     parameter::{ParameterName, parameter_key_grib1, parameter_key_grib2},
 };
 use cassiopeia_data_profiler::metadata::GribEdition;
-use eccodes::{
-    FallibleIterator,
-    codes_file::{CodesFile, ProductKind},
-    codes_message::{CodesMessage, KeyRead},
-};
-use std::{fmt::Debug, path::Path};
+use eccodes::{GribFile, GribMessage};
+use std::path::Path;
 
 /// ecCodes' default sentinel for a bitmap-masked value; substituted for `NaN` so the pivot omits it.
 const MISSING_VALUE: f64 = 9999.0;
@@ -33,46 +29,45 @@ const MISSING_VALUE: f64 = 9999.0;
 /// Returns [`GribIngestError::Eccodes`] if the file cannot be opened as GRIB or a message key cannot be
 /// read, or [`GribIngestError::ParameterCode`] if a GRIB2 identity code does not fit its byte range.
 pub fn decode(path: &Path, set: &mut GridSliceSet, edition: GribEdition) -> Result<(), GribIngestError> {
-    let mut file = CodesFile::new_from_file(path, ProductKind::GRIB)?;
-    let mut messages = file.ref_message_iter();
-    while let Some(message) = messages.next()? {
+    let file = GribFile::open(path)?;
+    for message in &file {
+        let message = message?;
         let parameter = read_parameter(&message, edition)?;
 
         // When a bitmap is present ecCodes fills masked cells with `missingValue`; map that sentinel
         // back to `NaN` so the pivot drops those cells, matching the grib-rs path's NaN semantics.
-        let raw: Vec<f64> = message.read_key("values")?;
-        let bitmap_present: i64 = message.read_key("bitmapPresent")?;
-        let values: Vec<f64> = if bitmap_present == 0 {
-            raw
-        } else {
-            let missing: f64 = message.read_key("missingValue").unwrap_or(MISSING_VALUE);
+        let raw = message.values()?;
+        let bitmap_present: bool = message.get("bitmapPresent")?;
+        let values: Vec<f64> = if bitmap_present {
+            let missing: f64 = message.get::<Option<f64>>("missingValue")?.unwrap_or(MISSING_VALUE);
             raw.into_iter()
                 .map(|value| if value.to_bits() == missing.to_bits() { f64::NAN } else { value })
                 .collect()
+        } else {
+            raw
         };
 
         // ecCodes yields latitudes and longitudes in the same scanning order as `values`. It reports
         // longitude in the grid's own convention, so a `[0, 360)` grid such as the GFS global product
         // needs folding to match the `[-180, 180)` range grib-rs produces and `DecodedField` promises.
-        let latitudes: Vec<f64> = message.read_key("latitudes")?;
-        let longitudes: Vec<f64> = message.read_key("longitudes")?;
+        let latitudes: Vec<f64> = message.get("latitudes")?;
+        let longitudes: Vec<f64> = message.get("longitudes")?;
         let latlons: Vec<(f64, f64)> = latitudes.into_iter().zip(longitudes.into_iter().map(normalize_longitude)).collect();
 
         // `typeOfLevel` (ecCodes uses it for both editions) and `level` are optional: a product without
-        // a typed level leaves the facet absent rather than failing the decode. `level` is a native
-        // `long`, so it is read as `i64` (ecCodes rejects reading it straight to a double) and widened
-        // during normalization.
-        let type_of_level: Option<String> = message.read_key("typeOfLevel").ok();
-        let level_value: Option<i64> = message.read_key("level").ok();
+        // a typed level, or one coding it as missing, leaves the facet absent rather than failing the
+        // decode. `level` is a native `long`, so it is read as `i64` and widened during normalization.
+        let type_of_level: Option<String> = message.get("typeOfLevel")?;
+        let level_value: Option<i64> = message.get("level")?;
         let level = type_of_level.map(|kind| GribLevel::from_eccodes(&kind, level_value));
 
-        let reference_time = Some(format_timestamp(message.read_key("dataDate")?, message.read_key("dataTime")?));
+        let reference_time = Some(format_timestamp(message.get("dataDate")?, message.get("dataTime")?));
         // `validityDate`/`validityTime` are the forecast valid time ecCodes derives from the step.
-        let forecast_time = Some(format_timestamp(message.read_key("validityDate")?, message.read_key("validityTime")?));
+        let forecast_time = Some(format_timestamp(message.get("validityDate")?, message.get("validityTime")?));
 
         // `md5GridSection` hashes the grid definition: byte-equal grids share the hash, so co-located
         // parameters group into one slice without comparing raw section bytes.
-        let grid_hash: String = message.read_key("md5GridSection")?;
+        let grid_hash: String = message.get("md5GridSection")?;
 
         set.add(DecodedField {
             grid: grid_hash.into_bytes(),
@@ -94,20 +89,20 @@ pub fn decode(path: &Path, set: &mut GridSliceSet, edition: GribEdition) -> Resu
 /// level-independent identity resolved through the same function grib-rs uses, so both backends agree.
 /// GRIB1 identifies it by `indicatorOfParameter`; `table2Version` and `centre` are read only to build
 /// the synthetic fallback key for a centre-local parameter ecCodes cannot name.
-fn read_parameter<P: Debug>(message: &CodesMessage<P>, edition: GribEdition) -> Result<ParameterName, GribIngestError> {
+fn read_parameter(message: &GribMessage, edition: GribEdition) -> Result<ParameterName, GribIngestError> {
     match edition {
         GribEdition::V2 => {
-            let discipline: i64 = message.read_key("discipline")?;
-            let category: i64 = message.read_key("parameterCategory")?;
-            let number: i64 = message.read_key("parameterNumber")?;
+            let discipline: i64 = message.get("discipline")?;
+            let category: i64 = message.get("parameterCategory")?;
+            let number: i64 = message.get("parameterNumber")?;
             Ok(parameter_key_grib2(u8::try_from(discipline)?, u8::try_from(category)?, u8::try_from(number)?))
         }
         GribEdition::V1 => {
-            let table: i64 = message.read_key("table2Version")?;
+            let table: i64 = message.get("table2Version")?;
             // `centre` is a code-table key whose native type is the string abbreviation (e.g. "kwbc");
-            // the unchecked read takes its numeric code so the synthetic key stays numeric and stable.
-            let centre: i64 = message.read_key_unchecked("centre")?;
-            let indicator: i64 = message.read_key("indicatorOfParameter")?;
+            // reading it as a `long` takes its numeric code so the synthetic key stays numeric and stable.
+            let centre: i64 = message.get("centre")?;
+            let indicator: i64 = message.get("indicatorOfParameter")?;
             Ok(parameter_key_grib1(table, centre, indicator))
         }
     }

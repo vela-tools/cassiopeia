@@ -16,33 +16,35 @@ Then either restart your shell or source the Cargo environment for the current s
 source "$HOME/.cargo/env"
 ```
 
-GRIB is the only source format that needs a system library. Whether you need that library depends on the build you choose, so read the next section before building.
+GRIB is the only source format that links C code. Whether your build compiles that code depends on the features you choose, so read the next section before building.
 
 ## GRIB1 and ecCodes
 
-GRIB comes in two editions. GRIB1 is decoded through [ecCodes](https://confluence.ecmwf.int/display/ECC), the ECMWF C library, using the `eccodes-sys` crate. GRIB1 support is controlled by the `grib1` Cargo feature, which is **on by default**. The `grib2-full` feature, also on by default, routes GRIB2 through ecCodes as well, so it can read projected grids. A default build therefore links ecCodes. A build with neither feature does not, and decodes GRIB2 with a pure-Rust reader that handles only regular latitude/longitude grids. The [source-format guide](source-formats.md#backends-and-features) describes the two backends.
+GRIB comes in two editions. GRIB1 is decoded through [ecCodes](https://confluence.ecmwf.int/display/ECC), the ECMWF C library, using the `eccodes` crate. GRIB1 support is controlled by the `grib1` Cargo feature, which is **on by default**. The `grib2-full` feature, also on by default, routes GRIB2 through ecCodes as well, so it can read projected grids. A default build therefore links ecCodes. A build with neither feature does not, and decodes GRIB2 with a pure-Rust reader that handles only regular latitude/longitude grids. The [source-format guide](source-formats.md#backends-and-features) describes the two backends.
 
-You can build with GRIB1 and install the dependencies below, or leave GRIB1 out. Add one Cargo flag to whichever install command you use, as shown in [Installing](#installing).
+You do not install ecCodes yourself. A default build downloads the ecCodes, eckit, and libaec sources from their release tags and compiles them as part of the build. The definition tables ecCodes reads are compiled into the library, so the binary does not look for them on disk at run time. You can build with GRIB1 and install the build tools below, or leave GRIB1 out. Add one Cargo flag to whichever install command you use, as shown in [Installing](#installing).
 
-### System dependencies for GRIB1
+### Build tools for GRIB1
 
-A GRIB1 build needs the ecCodes library, `pkg-config` so the build can locate it, and `libclang` for the bindings that `eccodes-sys` generates at build time. Install them with your system package manager.
+A GRIB1 build needs CMake, a C and C++ compiler, `git` to fetch the sources, and `libclang` for the bindings that `eccodes-sys` generates at build time. The build needs network access, and compiling ecCodes the first time takes several minutes.
 
 macOS, with Homebrew:
 
 ```bash
-brew install eccodes pkg-config
+brew install cmake
 ```
 
-Clang is already present on macOS through the Xcode command line tools, so no separate libclang package is needed.
+Clang, the C and C++ compilers, and `git` are already present on macOS through the Xcode command line tools, so no separate package is needed for them.
 
 Debian or Ubuntu:
 
 ```bash
-sudo apt install libeccodes-dev libclang-dev pkg-config
+sudo apt install cmake g++ git libclang-dev
 ```
 
-If you do not need GRIB1, skip these dependencies and add `--no-default-features` to the install command you choose below. That build does not link ecCodes or require a C library, and GRIB2 on a regular latitude/longitude grid still works. It reports GRIB1 input as unsupported instead of decoding it.
+ecCodes, eckit, and libaec are built as shared libraries. `cargo install` copies them to `lib/cassiopeia` beside its `bin` directory, which is usually `~/.cargo/lib/cassiopeia`, and the binary finds them there. Keep that directory next to the binary. If you install to a custom root, set `CARGO_INSTALL_ROOT` rather than passing `--root`, because the build script cannot see `--root`. A binary built in place with `cargo build` loads the libraries from the target directory instead.
+
+If you do not need GRIB1, skip these tools and add `--no-default-features` to the install command you choose below. That build does not compile or link any C code, and GRIB2 on a regular latitude/longitude grid still works. It reports GRIB1 input as unsupported instead of decoding it.
 
 ## Installing
 
@@ -74,7 +76,7 @@ gh attestation verify cassiopeia-linux-x86_64-musl.tar.xz --repo vela-tools/cass
 
 Add `--signer-workflow vela-tools/cassiopeia/.github/workflows/release.yaml` to pin the check to the release workflow rather than accepting any workflow in the repository.
 
-The release binaries are built with `--no-default-features`, so they do **not** link ecCodes. They can decode GRIB2 with the pure-Rust reader, but report GRIB1 input as unsupported. If you need GRIB1, install ecCodes and build from source with the default features using one of the options below.
+The release binaries are built with `--no-default-features`, so they do **not** link ecCodes. They can decode GRIB2 with the pure-Rust reader, but report GRIB1 input as unsupported. If you need GRIB1, build from source with the default features using one of the options below.
 
 ### 2. Clone and install onto your PATH
 

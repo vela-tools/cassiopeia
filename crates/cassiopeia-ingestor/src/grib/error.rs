@@ -1,5 +1,3 @@
-#[cfg(any(feature = "grib1", feature = "grib2-full"))]
-use eccodes::errors::CodesError;
 use grib::GribError;
 #[cfg(any(feature = "grib1", feature = "grib2-full"))]
 use std::num::TryFromIntError;
@@ -32,7 +30,7 @@ pub enum GribIngestError {
     /// ecCodes failed to open or decode a GRIB message.
     #[cfg(any(feature = "grib1", feature = "grib2-full"))]
     #[error(transparent)]
-    Eccodes(#[from] CodesError),
+    Eccodes(#[from] eccodes::Error),
 
     /// A GRIB2 parameter identity code read from ecCodes did not fit the byte range the WMO tables
     /// define for it, so the message is malformed.

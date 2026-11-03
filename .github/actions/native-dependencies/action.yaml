@@ -1,11 +1,11 @@
 name: Native dependencies
-description: Installs the system libraries the workspace builds and links against.
+description: Installs the native build tools the workspace needs to compile ecCodes from source.
 
 runs:
   using: composite
   steps:
-    - name: Install native dependencies
+    - name: Install native build tools
       shell: bash
       run: |
         sudo apt-get update
-        sudo apt-get install -y --no-install-recommends libclang-dev libeccodes-dev pkg-config
+        sudo apt-get install -y --no-install-recommends cmake g++ git libclang-dev

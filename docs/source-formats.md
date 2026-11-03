@@ -491,7 +491,7 @@ Parameters measured at different vertical levels go into separate records becaus
 
 ### Backends and features
 
-Two compile-time features select the backend for each edition. Both link the native ecCodes library, can be toggled independently, and are enabled in the default build:
+Two compile-time features select the backend for each edition. Both link the ecCodes C library, which the build compiles from source, can be toggled independently, and are enabled in the default build:
 
 - `grib2-full` routes GRIB2 through ecCodes. ecCodes computes coordinates for projected grids and reads the full parameter tables. With this feature off, GRIB2 falls back to the pure-Rust grib-rs decoder, which has no C dependency but handles only regular latitude/longitude grids.
 - `grib1` routes GRIB1 through ecCodes. With this feature off, the build reports GRIB1 as unsupported because there is no pure-Rust GRIB1 decoder.
