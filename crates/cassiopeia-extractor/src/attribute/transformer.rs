@@ -279,14 +279,14 @@ impl Transformer {
     }
 
     /// Keeps the merged value when it is a non-empty JSON object, reading text as the object it is
-    /// written as, and yields no value for blank text or any other value.
+    /// written as.
     ///
-    /// A null member of an object read from text is left out and counted in `omitted`, as it is in
-    /// an object read structured.
+    /// Blank text and an empty object yield no value. A null member of an object read from text is
+    /// left out and counted in `omitted`, as it is in an object read structured.
     ///
     /// # Errors
-    /// Returns [`AttributeRefusal::UnusableValue`] quoting text that is not JSON or is JSON but no
-    /// object.
+    /// Returns [`AttributeRefusal::UnusableValue`] quoting a value that is no object: text as written
+    /// when it is not JSON or is JSON but no object, any other value as its rendering.
     fn coerce_object(value: Value, omitted: &mut OmittedNulls) -> Result<Option<Value>, AttributeRefusal> {
         let value = match value {
             Value::String(text) => match Self::read_json(&text, RequiredValue::JsonObject)? {
@@ -296,7 +296,10 @@ impl Transformer {
                 }
                 None => None,
             },
-            other @ (Value::Boolean(_) | Value::Number(_) | Value::Temporal(_) | Value::Geospatial(_) | Value::Array(_) | Value::Object(_)) => Some(other),
+            object @ Value::Object(_) => Some(object),
+            other @ (Value::Boolean(_) | Value::Number(_) | Value::Temporal(_) | Value::Geospatial(_) | Value::Array(_)) => {
+                return Err(AttributeRefusal::unusable(RequiredValue::JsonObject, &other.to_string()));
+            }
         };
 
         Ok(value.filter(|value| matches!(value, Value::Object(object) if !object.is_empty())))
@@ -776,10 +779,22 @@ mod tests {
     }
 
     #[test]
-    fn a_structured_value_that_is_no_object_under_an_object_transformation_is_still_no_value() {
-        let value = converted(smallvec![json!([1, 2])], ValueConversion::Transform(Transformation::Object), None);
+    fn a_structured_value_that_is_no_object_under_an_object_transformation_is_refused_quoting_its_rendering() {
+        for (part, rendering) in [(json!([1, 2]), "[1,2]"), (json!(5), "5"), (json!(true), "true")] {
+            assert_eq!(
+                apply(smallvec![part], ValueConversion::Transform(Transformation::Object), None),
+                Err(AttributeRefusal::unusable(RequiredValue::JsonObject, rendering)),
+                "{rendering}"
+            );
+        }
+    }
 
-        assert_eq!(value, None);
+    #[test]
+    fn a_null_part_under_an_object_transformation_is_no_value_rather_than_a_refusal() {
+        assert_eq!(
+            converted(smallvec![json!(null)], ValueConversion::Transform(Transformation::Object), None),
+            None
+        );
     }
 
     #[test]

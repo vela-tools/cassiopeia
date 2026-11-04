@@ -15,7 +15,7 @@ pub enum RequiredValue {
     /// The `json` transformation reads text as the JSON value it is written as (RFC 8259 clause 2).
     #[strum(to_string = "JSON")]
     Json,
-    /// The `object` transformation reads text as a JSON object (RFC 8259 clause 4).
+    /// The `object` transformation keeps a JSON object, or reads text as one (RFC 8259 clause 4).
     #[strum(to_string = "a JSON object")]
     JsonObject,
 }

@@ -35,9 +35,8 @@ pub enum Transformation {
 
     /// Keep a JSON object, reading one from text written as a JSON object.
     ///
-    /// Text that does not read as a JSON object is refused, so the attribute is dropped with a
-    /// warning. Blank text, any other value that is not an object, and an empty object resolve to no
-    /// value.
+    /// A value that is no object, and text that does not read as one, are refused, so the attribute
+    /// is dropped with a warning. Blank text and an empty object resolve to no value.
     Object,
 
     /// Read text as the JSON value it is written as: an object, an array, a number, a boolean, or a

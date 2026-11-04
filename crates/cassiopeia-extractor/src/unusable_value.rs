@@ -1,7 +1,7 @@
 use crate::{attribute_path::AttributePath, required_value::RequiredValue};
 
 /// One attribute, sub-attribute, or instance dropped because its value is not what its NGSI-LD kind
-/// has to hold, or is text its transformation cannot read: the key the unusable-value sink files its
+/// has to hold, or is not what its transformation can read: the key the unusable-value sink files its
 /// records under.
 ///
 /// The path and the requirement together are the failure; the values that broke it differ from
