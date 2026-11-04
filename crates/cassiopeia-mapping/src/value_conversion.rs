@@ -4,10 +4,11 @@ use cassiopeia_ngsi_ld::entity::attribute::NgsiLdAttributeKind;
 
 /// How an attribute declaration's source values become its NGSI-LD value.
 ///
-/// A declaration that names a `transformation` converts through exactly that transformation. One
-/// that names none converts through the default its NGSI-LD attribute kind implies, which
-/// [`ValueConversion::default_for`] decides. Keeping a value as it was read is not a transformation a
-/// mapping can name: it exists only as the default of a kind whose value is raw JSON.
+/// A declaration that names a `transformation` converts through exactly that transformation, except
+/// that `json` on a kind whose value is raw JSON decodes into raw JSON. One that names none converts
+/// through the default its NGSI-LD attribute kind implies, which [`ValueConversion::default_for`]
+/// decides. [`ValueConversion::resolve`] makes that choice. Keeping a value as it was read is not a
+/// transformation a mapping can name: it exists only for a kind whose value is raw JSON.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum ValueConversion {
     /// Convert through the named transformation.
@@ -16,9 +17,28 @@ pub enum ValueConversion {
     /// Keep the value read from the source as it is: no coercion, no stringification, and no
     /// filtering by JSON type.
     Verbatim,
+
+    /// Read text from the source as the JSON it is written as, then keep the result, and any value
+    /// that is not text, as it is.
+    Decoded,
 }
 
 impl ValueConversion {
+    /// The conversion an attribute of `kind` declaring `transformation`, or none, uses.
+    ///
+    /// A `JsonProperty`'s `json` member is a JSON literal whose nulls are kept (ETSI GS CIM 009
+    /// v1.9.1 clause 4.5.24.2), so the `json` transformation on one decodes straight into raw JSON:
+    /// converting through an NGSI-LD Value first would drop every null the text holds, since none can
+    /// sit in a Value (clause 4.5.0).
+    #[must_use]
+    pub const fn resolve(kind: NgsiLdAttributeKind, transformation: Option<Transformation>) -> ValueConversion {
+        match transformation {
+            None => ValueConversion::default_for(kind),
+            Some(Transformation::Json) if matches!(kind, NgsiLdAttributeKind::JsonProperty) => ValueConversion::Decoded,
+            Some(transformation) => ValueConversion::Transform(transformation),
+        }
+    }
+
     /// The conversion an attribute of `kind` uses when its declaration names no transformation.
     ///
     /// A `GeoProperty`'s value shall be a `GeoJSON` geometry (ETSI GS CIM 009 v1.9.1 clause 4.7.1, and
@@ -36,6 +56,7 @@ impl ValueConversion {
     /// names "a raw JSON object (or array of objects)", and Table 5.2.38-1 of clause 5.2.38 types
     /// it as `JSON` with no restriction), so the value is kept as read. [`Transformation::Object`]
     /// would wrongly drop an array, and [`Transformation::String`] would turn the JSON into text.
+    /// Text is not decoded unless the declaration asks for it with [`Transformation::Json`].
     ///
     /// Every other kind keeps its source value as text, which is what a declaration naming a source
     /// and no conversion has always produced.
@@ -55,12 +76,13 @@ impl ValueConversion {
 
     /// What this conversion asks a geometry to become, or `None` when it reads no geometry at all.
     ///
-    /// Only a transformation naming a geometry type reads one; keeping a value as read never does.
+    /// Only a transformation naming a geometry type reads one; keeping a value as read, decoded or
+    /// not, never does.
     #[must_use]
     pub const fn geometry_target(self) -> Option<GeometryTarget> {
         match self {
             ValueConversion::Transform(transformation) => transformation.geometry_target(),
-            ValueConversion::Verbatim => None,
+            ValueConversion::Verbatim | ValueConversion::Decoded => None,
         }
     }
 }
@@ -127,8 +149,50 @@ mod tests {
     }
 
     #[test]
-    fn a_scalar_transformation_and_a_verbatim_value_read_no_geometry() {
+    fn a_scalar_transformation_and_a_verbatim_or_decoded_value_read_no_geometry() {
         assert_eq!(ValueConversion::Transform(Transformation::String).geometry_target(), None);
         assert_eq!(ValueConversion::Verbatim.geometry_target(), None);
+        assert_eq!(ValueConversion::Decoded.geometry_target(), None);
+    }
+
+    #[test]
+    fn no_transformation_resolves_to_the_kind_default() {
+        assert_eq!(
+            ValueConversion::resolve(NgsiLdAttributeKind::ListProperty, None),
+            ValueConversion::Transform(Transformation::Array)
+        );
+        assert_eq!(ValueConversion::resolve(NgsiLdAttributeKind::JsonProperty, None), ValueConversion::Verbatim);
+    }
+
+    #[test]
+    fn the_json_transformation_on_a_json_property_decodes_into_raw_json() {
+        assert_eq!(
+            ValueConversion::resolve(NgsiLdAttributeKind::JsonProperty, Some(Transformation::Json)),
+            ValueConversion::Decoded
+        );
+    }
+
+    #[test]
+    fn the_json_transformation_on_any_other_kind_converts_through_it() {
+        for kind in [
+            NgsiLdAttributeKind::Property,
+            NgsiLdAttributeKind::ListProperty,
+            NgsiLdAttributeKind::LanguageProperty,
+            NgsiLdAttributeKind::VocabProperty,
+        ] {
+            assert_eq!(
+                ValueConversion::resolve(kind, Some(Transformation::Json)),
+                ValueConversion::Transform(Transformation::Json),
+                "{kind:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn any_other_transformation_on_a_json_property_converts_through_it() {
+        assert_eq!(
+            ValueConversion::resolve(NgsiLdAttributeKind::JsonProperty, Some(Transformation::Object)),
+            ValueConversion::Transform(Transformation::Object)
+        );
     }
 }

@@ -8,18 +8,23 @@ use cassiopeia_diagnostic::{
 };
 use cassiopeia_extractor::{required_value::RequiredValue, unusable_value::UnusableValue};
 
-/// The code a value its kind cannot hold is published under.
+/// The code a value its kind cannot hold, or text its transformation cannot read, is published
+/// under.
 ///
-/// A non-IRI vocabulary value and a value that is no language map are different mistakes with
-/// different fixes, so each publishes its own code.
+/// A non-IRI vocabulary value, a value that is no language map, and text that does not read as the
+/// JSON a transformation asked for are different mistakes with different fixes, so each publishes
+/// its own code. Text that is no JSON and text that is no JSON object share one: both are fixed in
+/// the source text or by naming another transformation.
 const fn code(required: RequiredValue) -> DiagnosticCode {
     match required {
         RequiredValue::Iri => DiagnosticCode::Extractor(ExtractorCode::VocabNotAnIri),
         RequiredValue::LanguageMap => DiagnosticCode::Extractor(ExtractorCode::LanguageMapMisshapen),
+        RequiredValue::Json | RequiredValue::JsonObject => DiagnosticCode::Extractor(ExtractorCode::JsonTextUnreadable),
     }
 }
 
-/// The diagnostic naming one declaration whose values its kind could not hold.
+/// The diagnostic naming one declaration whose values its kind could not hold or its transformation
+/// could not read.
 ///
 /// One diagnostic per declaration and requirement, however many records lost their value and
 /// however many distinct values they carried. The headline names the declaration by its path, the
@@ -90,5 +95,35 @@ mod tests {
             "Attribute `temperature.label` dropped: `plain text` is not a language map of text keyed by language tag"
         );
         assert_eq!(reported[0].defining, [ContextField::Attribute(name("temperature"))]);
+    }
+
+    #[test]
+    fn text_that_is_no_json_and_text_that_is_no_json_object_are_each_named_under_the_json_text_code() {
+        let sink = RecordingReporter::new();
+        let unusable = UnusableValues::new();
+        unusable.record(AttributePath::new(name("payload"), Vec::new(), Vec::new()), RequiredValue::Json, "{not json");
+        unusable.record(AttributePath::new(name("settings"), Vec::new(), Vec::new()), RequiredValue::JsonObject, "[1,2]");
+
+        report_sink(&sink, unusable, unusable_value_diagnostic);
+
+        let mut named = sink
+            .diagnostics()
+            .into_iter()
+            .map(|diagnostic| (diagnostic.code, diagnostic.headline))
+            .collect::<Vec<_>>();
+        named.sort_by(|left, right| left.1.cmp(&right.1));
+        assert_eq!(
+            named,
+            [
+                (
+                    DiagnosticCode::Extractor(ExtractorCode::JsonTextUnreadable),
+                    "Attribute `payload` dropped: `{not json` is not JSON".to_owned()
+                ),
+                (
+                    DiagnosticCode::Extractor(ExtractorCode::JsonTextUnreadable),
+                    "Attribute `settings` dropped: `[1,2]` is not a JSON object".to_owned()
+                ),
+            ]
+        );
     }
 }

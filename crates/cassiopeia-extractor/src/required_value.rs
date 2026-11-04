@@ -1,7 +1,7 @@
 use strum::Display;
 
-/// What an NGSI-LD attribute kind needs its value to be, for a kind that refuses a value it cannot
-/// hold rather than holding it as text.
+/// What a declaration needs its value to be, for an NGSI-LD attribute kind that refuses a value it
+/// cannot hold rather than holding it as text, or a transformation that refuses text it cannot read.
 #[derive(Clone, Copy, Debug, Display, Eq, Hash, PartialEq)]
 pub enum RequiredValue {
     /// A `VocabProperty`'s `vocab` member names a vocabulary IRI (ETSI GS CIM 009 v1.9.1 clause
@@ -12,6 +12,12 @@ pub enum RequiredValue {
     /// v1.9.1 clause 4.5.18).
     #[strum(to_string = "a language map of text keyed by language tag")]
     LanguageMap,
+    /// The `json` transformation reads text as the JSON value it is written as (RFC 8259 clause 2).
+    #[strum(to_string = "JSON")]
+    Json,
+    /// The `object` transformation reads text as a JSON object (RFC 8259 clause 4).
+    #[strum(to_string = "a JSON object")]
+    JsonObject,
 }
 
 #[cfg(test)]
@@ -23,5 +29,7 @@ mod tests {
     fn each_requirement_reads_as_the_value_it_asks_for() {
         assert_eq!(RequiredValue::Iri.to_string(), "an IRI");
         assert_eq!(RequiredValue::LanguageMap.to_string(), "a language map of text keyed by language tag");
+        assert_eq!(RequiredValue::Json.to_string(), "JSON");
+        assert_eq!(RequiredValue::JsonObject.to_string(), "a JSON object");
     }
 }

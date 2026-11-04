@@ -22,6 +22,9 @@ pub enum ExtractorCode {
     /// A `LanguageProperty`'s source was no map of text keyed by language tag, so the attribute was
     /// dropped.
     LanguageMapMisshapen,
+    /// An attribute declared the `json` or `object` transformation and its source carried text that
+    /// is not JSON, or for `object` no JSON object, so the attribute was dropped.
+    JsonTextUnreadable,
 }
 
 #[cfg(test)]
@@ -37,5 +40,6 @@ mod tests {
         assert_eq!(ExtractorCode::JsonPayloadMisshapen.to_string(), "json-payload-misshapen");
         assert_eq!(ExtractorCode::VocabNotAnIri.to_string(), "vocab-not-an-iri");
         assert_eq!(ExtractorCode::LanguageMapMisshapen.to_string(), "language-map-misshapen");
+        assert_eq!(ExtractorCode::JsonTextUnreadable.to_string(), "json-text-unreadable");
     }
 }

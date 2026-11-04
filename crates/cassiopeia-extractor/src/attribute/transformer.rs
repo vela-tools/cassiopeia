@@ -1,4 +1,4 @@
-use crate::attribute::refusal::AttributeRefusal;
+use crate::{attribute::refusal::AttributeRefusal, required_value::RequiredValue};
 use cassiopeia_geometry::{error::GeometryError, policy::GeometryPolicy, target::GeometryTarget};
 use cassiopeia_ir::attribute_content::AttributeContent;
 use cassiopeia_mapping::{transformation::Transformation, value_conversion::ValueConversion};
@@ -34,21 +34,24 @@ impl Transformer {
     /// Applies a conversion to the source values collected for one attribute.
     ///
     /// The conversion is already resolved: the declared transformation, or the default the
-    /// attribute's kind implies (see [`ValueConversion::default_for`]). A verbatim conversion keeps
-    /// what the source held as raw JSON. Under a transformation, `Array` aggregates all parts; every
-    /// other transformation first merges the parts into one intermediate value and then coerces it to
-    /// the target NGSI-LD type.
+    /// attribute's kind implies (see [`ValueConversion::resolve`]). A verbatim conversion keeps what
+    /// the source held as raw JSON, and a decoded one does so after reading each text part as the
+    /// JSON it is written as. Under a transformation, `Array` aggregates all parts; every other
+    /// transformation first merges the parts into one intermediate value and then coerces it to the
+    /// target NGSI-LD type.
     ///
     /// Reading a source into an NGSI-LD Value leaves out every null nested in it, since none can sit
     /// in a Value (ETSI GS CIM 009 v1.9.1 clause 4.5.0), and counts each in `omitted`. Raw JSON keeps
     /// its nulls.
     ///
-    /// `Ok(None)` means the source carried no value. Three conversions can refuse instead: a
+    /// `Ok(None)` means the source carried no value. Four conversions can refuse instead: a
     /// transformation naming a geometry type routes through the geometry lattice, where the source
     /// may carry a geometry a `GeoProperty` cannot hold or one this mapping did not authorise
     /// converting; a temporal transformation refuses text that reads as no supported spelling of a
-    /// date-time; and raw JSON that is no object or array of objects is no `JsonProperty` payload.
-    /// Every other conversion drops an unusable value and cannot fail.
+    /// date-time; the `json` and `object` transformations, and a decoded conversion, refuse text
+    /// that does not read as the JSON they ask for; and raw JSON that is no object or array of
+    /// objects is no `JsonProperty` payload. Every other conversion drops an unusable value and
+    /// cannot fail.
     ///
     /// # Errors
     /// Returns the [`AttributeRefusal`] naming what the attribute could not take.
@@ -60,6 +63,7 @@ impl Transformer {
     ) -> Result<Option<AttributeContent>, AttributeRefusal> {
         match conversion {
             ValueConversion::Verbatim => Ok(Self::keep_as_read(parts)?.map(AttributeContent::Json)),
+            ValueConversion::Decoded => Ok(Self::keep_as_read(Self::decode(parts)?)?.map(AttributeContent::Json)),
             ValueConversion::Transform(transformation) => {
                 let value = match transformation.geometry_target() {
                     Some(target) => match Self::merge_structured(parts, omitted) {
@@ -95,6 +99,35 @@ impl Transformer {
         Ok(Some(JsonPayload::try_from(json)?))
     }
 
+    /// Reads every text part as the JSON it is written as, keeping every other part as it is.
+    ///
+    /// Blank text is a field the record does not carry, the way CSV spells an empty cell, so it
+    /// becomes null and is left out with the other absent parts.
+    ///
+    /// # Errors
+    /// Returns [`AttributeRefusal::UnusableValue`] quoting the first text part that is not JSON.
+    fn decode(parts: SourceParts) -> Result<SourceParts, AttributeRefusal> {
+        parts
+            .into_iter()
+            .map(|part| match part {
+                JsonValue::String(text) => Ok(Self::read_json(&text, RequiredValue::Json)?.unwrap_or(JsonValue::Null)),
+                JsonValue::Null | JsonValue::Bool(_) | JsonValue::Number(_) | JsonValue::Array(_) | JsonValue::Object(_) => Ok(part),
+            })
+            .collect()
+    }
+
+    /// Reads text as the JSON it is written as (RFC 8259 clause 2), or as nothing when it is blank.
+    ///
+    /// # Errors
+    /// Returns [`AttributeRefusal::UnusableValue`] quoting the text, as not the `required` value,
+    /// when it is not JSON.
+    fn read_json(text: &str, required: RequiredValue) -> Result<Option<JsonValue>, AttributeRefusal> {
+        if text.trim().is_empty() {
+            return Ok(None);
+        }
+        serde_json::from_str(text).map(Some).map_err(|_| AttributeRefusal::unusable(required, text))
+    }
+
     /// Applies a transformation that names no geometry type.
     ///
     /// The geometry transformations are routed away before this point and name no scalar or container
@@ -106,7 +139,8 @@ impl Transformer {
             Transformation::Integer => Ok(Self::merge_first(parts, omitted).as_ref().and_then(Self::coerce_integer)),
             Transformation::Float => Ok(Self::merge_first(parts, omitted).as_ref().and_then(Self::coerce_float)),
             Transformation::String => Ok(Self::merge_text(parts, omitted).map(Self::coerce_string)),
-            Transformation::Object => Ok(Self::merge_text(parts, omitted).and_then(Self::coerce_object)),
+            Transformation::Object => Self::merge_text(parts, omitted).map_or(Ok(None), |value| Self::coerce_object(value, omitted)),
+            Transformation::Json => Self::merge_text(parts, omitted).map_or(Ok(None), |value| Self::coerce_json(value, omitted)),
             Transformation::DateTime => Self::coerce_temporal(Self::merge_text(parts, omitted), TemporalKind::DateTime),
             Transformation::Date => Self::coerce_temporal(Self::merge_text(parts, omitted), TemporalKind::Date),
             Transformation::Time => Self::coerce_temporal(Self::merge_text(parts, omitted), TemporalKind::Time),
@@ -124,10 +158,12 @@ impl Transformer {
     ///
     /// A part is absent when it is null or blank text: CSV and spreadsheet sources spell an empty
     /// field as an empty string, so a blank is a value the record does not carry, and keeping it would
-    /// emit `[""]` for an empty cell. Only whole parts are judged that way; the elements of an array
-    /// part are the source's own data and are spliced in as they are, except that a null element is
-    /// left out and counted in `omitted`, since a `valueList` is an ordered array of NGSI-LD Values
-    /// (ETSI GS CIM 009 v1.9.1 clause 4.5.21.2) and null is none (clause 3.1).
+    /// emit `[""]` for an empty cell. A text part that reads as a JSON array is spliced in like an
+    /// array part, since a CSV source can carry an array only as its text; any other text, such as
+    /// `BS IN`, is one element. Only whole parts are judged that way; the elements of an array part
+    /// are the source's own data and are spliced in as they are, except that a null element is left
+    /// out and counted in `omitted`, since a `valueList` is an ordered array of NGSI-LD Values (ETSI
+    /// GS CIM 009 v1.9.1 clause 4.5.21.2) and null is none (clause 3.1).
     fn aggregate(parts: SourceParts, omitted: &mut OmittedNulls) -> Option<Value> {
         let mut result = Vec::new();
         for part in parts {
@@ -135,7 +171,13 @@ impl Transformer {
                 JsonValue::Array(array) => result.extend(array),
                 JsonValue::Null => {}
                 JsonValue::String(text) if text.trim().is_empty() => {}
-                JsonValue::Bool(_) | JsonValue::Number(_) | JsonValue::String(_) | JsonValue::Object(_) => result.push(part),
+                JsonValue::String(text) => match serde_json::from_str::<JsonValue>(&text).ok() {
+                    Some(JsonValue::Array(array)) => result.extend(array),
+                    Some(JsonValue::Null | JsonValue::Bool(_) | JsonValue::Number(_) | JsonValue::String(_) | JsonValue::Object(_)) | None => {
+                        result.push(JsonValue::String(text));
+                    }
+                },
+                JsonValue::Bool(_) | JsonValue::Number(_) | JsonValue::Object(_) => result.push(part),
             }
         }
 
@@ -236,12 +278,42 @@ impl Transformer {
         }
     }
 
-    /// Keeps the merged value when it is a non-empty JSON object, and yields no value for anything
-    /// else.
-    fn coerce_object(value: Value) -> Option<Value> {
+    /// Keeps the merged value when it is a non-empty JSON object, reading text as the object it is
+    /// written as, and yields no value for blank text or any other value.
+    ///
+    /// A null member of an object read from text is left out and counted in `omitted`, as it is in
+    /// an object read structured.
+    ///
+    /// # Errors
+    /// Returns [`AttributeRefusal::UnusableValue`] quoting text that is not JSON or is JSON but no
+    /// object.
+    fn coerce_object(value: Value, omitted: &mut OmittedNulls) -> Result<Option<Value>, AttributeRefusal> {
+        let value = match value {
+            Value::String(text) => match Self::read_json(&text, RequiredValue::JsonObject)? {
+                Some(object @ JsonValue::Object(_)) => Value::from_json(object, omitted),
+                Some(JsonValue::Null | JsonValue::Bool(_) | JsonValue::Number(_) | JsonValue::String(_) | JsonValue::Array(_)) => {
+                    return Err(AttributeRefusal::unusable(RequiredValue::JsonObject, &text));
+                }
+                None => None,
+            },
+            other @ (Value::Boolean(_) | Value::Number(_) | Value::Temporal(_) | Value::Geospatial(_) | Value::Array(_) | Value::Object(_)) => Some(other),
+        };
+
+        Ok(value.filter(|value| matches!(value, Value::Object(object) if !object.is_empty())))
+    }
+
+    /// Reads merged text as the JSON value it is written as, and keeps any other value as it is.
+    ///
+    /// Blank text, and text spelling `null`, yield no value. A null nested in what the text holds is
+    /// left out and counted in `omitted`, since none can sit in a Value (ETSI GS CIM 009 v1.9.1
+    /// clause 4.5.0).
+    ///
+    /// # Errors
+    /// Returns [`AttributeRefusal::UnusableValue`] quoting text that is not JSON.
+    fn coerce_json(value: Value, omitted: &mut OmittedNulls) -> Result<Option<Value>, AttributeRefusal> {
         match value {
-            Value::Object(object) if !object.is_empty() => Some(Value::Object(object)),
-            Value::Boolean(_) | Value::Number(_) | Value::String(_) | Value::Temporal(_) | Value::Geospatial(_) | Value::Array(_) | Value::Object(_) => None,
+            Value::String(text) => Ok(Self::read_json(&text, RequiredValue::Json)?.and_then(|json| Value::from_json(json, omitted))),
+            other @ (Value::Boolean(_) | Value::Number(_) | Value::Temporal(_) | Value::Geospatial(_) | Value::Array(_) | Value::Object(_)) => Ok(Some(other)),
         }
     }
 
@@ -300,9 +372,12 @@ impl Transformer {
 
 #[cfg(test)]
 mod tests {
-    use crate::attribute::{
-        refusal::AttributeRefusal,
-        transformer::{SourceParts, Transformer},
+    use crate::{
+        attribute::{
+            refusal::AttributeRefusal,
+            transformer::{SourceParts, Transformer},
+        },
+        required_value::RequiredValue,
     };
     use cassiopeia_geometry::{
         error::GeometryError,
@@ -649,10 +724,230 @@ mod tests {
     }
 
     #[test]
-    fn an_object_transformation_does_not_parse_text() {
-        let value = converted(smallvec![json!(r#"{"a":1}"#)], ValueConversion::Transform(Transformation::Object), None);
+    fn an_object_transformation_reads_text_written_as_an_object() {
+        let value = converted(smallvec![json!(r#"{"k":1}"#)], ValueConversion::Transform(Transformation::Object), None);
+
+        assert_eq!(value, Some(Value::try_from(json!({"k": 1})).unwrap()));
+    }
+
+    #[test]
+    fn a_null_member_of_object_text_is_left_out_of_the_object_and_counted() {
+        let (value, omitted) = omitted(
+            smallvec![json!(r#"{"value":21.5,"unit":null}"#)],
+            ValueConversion::Transform(Transformation::Object),
+        );
+
+        assert_eq!(value, Some(Value::try_from(json!({"value": 21.5})).unwrap()));
+        assert_eq!(
+            omitted,
+            OmittedNulls {
+                array_items: 0,
+                object_members: 1,
+            }
+        );
+    }
+
+    #[test]
+    fn text_that_is_not_json_under_an_object_transformation_is_refused_quoting_it() {
+        assert_eq!(
+            apply(smallvec![json!("{not json")], ValueConversion::Transform(Transformation::Object), None),
+            Err(AttributeRefusal::unusable(RequiredValue::JsonObject, "{not json"))
+        );
+    }
+
+    #[test]
+    fn json_text_that_is_no_object_under_an_object_transformation_is_refused_quoting_it() {
+        for text in ["[1,2]", "5", "\"k\"", "null"] {
+            assert_eq!(
+                apply(smallvec![json!(text)], ValueConversion::Transform(Transformation::Object), None),
+                Err(AttributeRefusal::unusable(RequiredValue::JsonObject, text)),
+                "{text}"
+            );
+        }
+    }
+
+    #[test]
+    fn blank_text_and_empty_object_text_under_an_object_transformation_are_no_value() {
+        for text in ["", "  ", "{}"] {
+            let value = converted(smallvec![json!(text)], ValueConversion::Transform(Transformation::Object), None);
+
+            assert_eq!(value, None, "{text:?}");
+        }
+    }
+
+    #[test]
+    fn a_structured_value_that_is_no_object_under_an_object_transformation_is_still_no_value() {
+        let value = converted(smallvec![json!([1, 2])], ValueConversion::Transform(Transformation::Object), None);
 
         assert_eq!(value, None);
+    }
+
+    #[test]
+    fn an_array_transformation_splices_in_text_written_as_an_array() {
+        let value = converted(smallvec![json!("[1,2]")], ValueConversion::Transform(Transformation::Array), None);
+
+        assert_eq!(value, Some(Value::try_from(json!([1, 2])).unwrap()));
+    }
+
+    #[test]
+    fn array_text_under_the_list_property_default_becomes_the_list_it_encodes() {
+        let value = converted(smallvec![json!("[1,7,15]")], default_of(NgsiLdAttributeKind::ListProperty), None);
+
+        assert_eq!(value, Some(Value::try_from(json!([1, 7, 15])).unwrap()));
+    }
+
+    #[test]
+    fn text_that_is_no_json_array_under_an_array_transformation_is_one_element() {
+        for text in ["BS IN", "[1,2", "5", "true", r#"{"k":1}"#] {
+            let value = converted(smallvec![json!(text)], ValueConversion::Transform(Transformation::Array), None);
+
+            assert_eq!(value, Some(Value::try_from(json!([text])).unwrap()), "{text}");
+        }
+    }
+
+    #[test]
+    fn a_null_item_of_array_text_is_left_out_of_the_list_and_counted() {
+        let (value, omitted) = omitted(smallvec![json!(r#"["a",null,"b"]"#)], default_of(NgsiLdAttributeKind::ListProperty));
+
+        assert_eq!(value, Some(Value::try_from(json!(["a", "b"])).unwrap()));
+        assert_eq!(
+            omitted,
+            OmittedNulls {
+                array_items: 1,
+                object_members: 0,
+            }
+        );
+    }
+
+    #[test]
+    fn array_text_and_other_parts_are_flattened_in_order() {
+        let value = converted(
+            smallvec![json!("[1,2]"), json!("BS"), json!([3])],
+            ValueConversion::Transform(Transformation::Array),
+            None,
+        );
+
+        assert_eq!(value, Some(Value::try_from(json!([1, 2, "BS", 3])).unwrap()));
+    }
+
+    #[test]
+    fn empty_array_text_under_an_array_transformation_is_no_value() {
+        let value = converted(smallvec![json!("[]")], ValueConversion::Transform(Transformation::Array), None);
+
+        assert_eq!(value, None);
+    }
+
+    #[test]
+    fn a_json_transformation_reads_text_as_the_json_value_it_is_written_as() {
+        for (text, expected) in [
+            (r#"{"no2":3,"pm10":2}"#, json!({"no2": 3, "pm10": 2})),
+            ("[1,7,15]", json!([1, 7, 15])),
+            ("3.5", json!(3.5)),
+            ("true", json!(true)),
+            (r#""hello""#, json!("hello")),
+        ] {
+            let value = converted(smallvec![json!(text)], ValueConversion::Transform(Transformation::Json), None);
+
+            assert_eq!(value, Some(Value::try_from(expected).unwrap()), "{text}");
+        }
+    }
+
+    #[test]
+    fn a_value_that_is_not_text_under_a_json_transformation_is_kept_as_it_is() {
+        for part in [json!(7), json!(false), json!([1, "a"]), json!({"k": 1})] {
+            // The part is consumed by the conversion and still needed to build the expected value.
+            let value = converted(smallvec![part.clone()], ValueConversion::Transform(Transformation::Json), None);
+
+            assert_eq!(value, Some(Value::try_from(part).unwrap()));
+        }
+    }
+
+    #[test]
+    fn text_that_is_not_json_under_a_json_transformation_is_refused_quoting_it() {
+        assert_eq!(
+            apply(smallvec![json!("hello")], ValueConversion::Transform(Transformation::Json), None),
+            Err(AttributeRefusal::unusable(RequiredValue::Json, "hello"))
+        );
+    }
+
+    #[test]
+    fn blank_text_and_null_text_under_a_json_transformation_are_no_value() {
+        for part in [json!(""), json!("  "), json!("null"), json!(null)] {
+            let value = converted(smallvec![part], ValueConversion::Transform(Transformation::Json), None);
+
+            assert_eq!(value, None, "{value:?}");
+        }
+    }
+
+    #[test]
+    fn a_null_nested_in_json_text_under_a_json_transformation_is_left_out_and_counted() {
+        let (value, omitted) = omitted(smallvec![json!("[1,null]")], ValueConversion::Transform(Transformation::Json));
+
+        assert_eq!(value, Some(Value::try_from(json!([1])).unwrap()));
+        assert_eq!(
+            omitted,
+            OmittedNulls {
+                array_items: 1,
+                object_members: 0,
+            }
+        );
+    }
+
+    #[test]
+    fn text_under_the_json_property_default_is_not_decoded() {
+        assert_eq!(
+            apply(smallvec![json!(r#"{"k":1}"#)], default_of(NgsiLdAttributeKind::JsonProperty), None),
+            Err(AttributeRefusal::JsonPayload(JsonPayloadError::NotAnObject { found: JsonShape::String }))
+        );
+    }
+
+    #[test]
+    fn a_decoded_conversion_reads_object_text_as_raw_json_keeping_its_nulls() {
+        let payload = payload(smallvec![json!(r#"{"no2":3,"pm10":null}"#)], ValueConversion::Decoded);
+
+        assert_eq!(payload, Some(json!({"no2": 3, "pm10": null})));
+    }
+
+    #[test]
+    fn a_decoded_conversion_reads_text_of_an_array_of_objects() {
+        let payload = payload(smallvec![json!(r#"[{"a":1},{"b":2}]"#)], ValueConversion::Decoded);
+
+        assert_eq!(payload, Some(json!([{"a": 1}, {"b": 2}])));
+    }
+
+    #[test]
+    fn a_decoded_conversion_keeps_a_structured_part_as_it_is() {
+        let payload = payload(smallvec![json!({"maybe": null})], ValueConversion::Decoded);
+
+        assert_eq!(payload, Some(json!({"maybe": null})));
+    }
+
+    #[test]
+    fn text_that_is_not_json_under_a_decoded_conversion_is_refused_quoting_it() {
+        assert_eq!(
+            apply(smallvec![json!("{not json")], ValueConversion::Decoded, None),
+            Err(AttributeRefusal::unusable(RequiredValue::Json, "{not json"))
+        );
+    }
+
+    #[test]
+    fn scalar_text_under_a_decoded_conversion_is_no_json_property_payload() {
+        assert_eq!(
+            apply(smallvec![json!("5")], ValueConversion::Decoded, None),
+            Err(AttributeRefusal::JsonPayload(JsonPayloadError::NotAnObject { found: JsonShape::Number }))
+        );
+    }
+
+    #[test]
+    fn blank_text_under_a_decoded_conversion_is_no_value() {
+        assert_eq!(payload(smallvec![json!("  ")], ValueConversion::Decoded), None);
+    }
+
+    #[test]
+    fn several_parts_under_a_decoded_conversion_become_an_array_of_the_present_decoded_parts() {
+        let payload = payload(smallvec![json!(r#"{"a":1}"#), json!(""), json!({"b": 2})], ValueConversion::Decoded);
+
+        assert_eq!(payload, Some(json!([{"a": 1}, {"b": 2}])));
     }
 
     #[test]

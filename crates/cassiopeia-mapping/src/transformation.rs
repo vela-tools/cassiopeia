@@ -27,19 +27,25 @@ pub enum Transformation {
 
     /// Collect every source part into one JSON array.
     ///
-    /// A part that is already an array contributes its elements and any other part contributes
-    /// itself; a null or blank part contributes nothing, and no parts left means no value. Text is
-    /// never parsed: an array reaches this transformation already structured, from a source field
-    /// that holds one or from a template whose one expression yields one, such as `split` or
-    /// `json_decode`.
+    /// A part that is already an array contributes its elements, and so does text that reads as a
+    /// JSON array, the way every value arrives from a CSV source; any other part contributes itself,
+    /// so text that is no JSON array becomes one element. A null or blank part contributes nothing,
+    /// and no parts left means no value.
     Array,
 
-    /// Keep a JSON object.
+    /// Keep a JSON object, reading one from text written as a JSON object.
     ///
-    /// Text is never parsed: an object reaches this transformation already structured, from a source
-    /// field that holds one or from a template whose one expression yields one, such as
-    /// `json_decode`. Any value that is not an object, and an empty object, resolve to no value.
+    /// Text that does not read as a JSON object is refused, so the attribute is dropped with a
+    /// warning. Blank text, any other value that is not an object, and an empty object resolve to no
+    /// value.
     Object,
+
+    /// Read text as the JSON value it is written as: an object, an array, a number, a boolean, or a
+    /// string.
+    ///
+    /// Text that is not JSON is refused, so the attribute is dropped with a warning, and blank text
+    /// resolves to no value. A value that is not text is already structured and is kept as it is.
+    Json,
 
     /// Accept an already-formed `GeoJSON` geometry, inferring the type from the value.
     ///
@@ -101,6 +107,7 @@ impl Transformation {
             | Transformation::String
             | Transformation::Array
             | Transformation::Object
+            | Transformation::Json
             | Transformation::DateTime
             | Transformation::Date
             | Transformation::Time => None,
@@ -165,6 +172,17 @@ mod tests {
     fn a_scalar_transformation_names_no_geometry() {
         assert_eq!(Transformation::Float.geometry_target(), None);
         assert_eq!(Transformation::DateTime.geometry_target(), None);
+    }
+
+    #[test]
+    fn the_json_transformation_round_trips_through_its_token() {
+        assert_eq!(serde_json::from_str::<Transformation>(r#""json""#).unwrap(), Transformation::Json);
+        assert_eq!(serde_json::to_string(&Transformation::Json).unwrap(), r#""json""#);
+    }
+
+    #[test]
+    fn the_json_transformation_names_no_geometry() {
+        assert_eq!(Transformation::Json.geometry_target(), None);
     }
 
     #[test]

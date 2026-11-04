@@ -71,6 +71,7 @@ impl AttributeEditorState {
         ("String", Transformation::String),
         ("Array", Transformation::Array),
         ("Object", Transformation::Object),
+        ("Json", Transformation::Json),
         ("Point", Transformation::Point),
         ("MultiPoint", Transformation::MultiPoint),
         ("LineString", Transformation::LineString),

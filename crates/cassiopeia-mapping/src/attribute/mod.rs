@@ -179,16 +179,15 @@ impl Attribute {
         AttributeIterator::new(self)
     }
 
-    /// How this attribute's source values become its value: the declared `transformation` exactly
-    /// as written, or, when none is declared, the default of its NGSI-LD kind.
+    /// How this attribute's source values become its value: the declared `transformation`, or, when
+    /// none is declared, the default of its NGSI-LD kind, as [`ValueConversion::resolve`] decides.
     ///
     /// Every path that reads source values resolves its conversion here: the attribute itself, each
     /// of its `instances` (which share its `type` and `transformation`), and each `languageMap`
     /// entry, nested mapping, and sub-attribute through its own declaration.
     #[must_use]
-    pub fn conversion(&self) -> ValueConversion {
-        self.transformation
-            .map_or_else(|| ValueConversion::default_for(self.kind), ValueConversion::Transform)
+    pub const fn conversion(&self) -> ValueConversion {
+        ValueConversion::resolve(self.kind, self.transformation)
     }
 
     /// The raw `observedAt` template declared directly on this attribute, if any.
@@ -291,6 +290,13 @@ mod tests {
         assert_eq!(list.conversion(), ValueConversion::Transform(Transformation::String));
         assert_eq!(json.conversion(), ValueConversion::Transform(Transformation::Object));
         assert_eq!(geo.conversion(), ValueConversion::Transform(Transformation::Point));
+    }
+
+    #[test]
+    fn a_json_property_naming_the_json_transformation_decodes_its_text_into_raw_json() {
+        let attribute = parse(r#"{"type": "JsonProperty", "source": "{{ payload }}", "transformation": "json"}"#);
+
+        assert_eq!(attribute.conversion(), ValueConversion::Decoded);
     }
 
     #[test]

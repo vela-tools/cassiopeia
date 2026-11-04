@@ -49,7 +49,7 @@ fn vocab(value: &Value) -> Result<Option<AttributeContent>, AttributeRefusal> {
 
     IriBuf::new(text.to_string())
         .map(|iri| Some(AttributeContent::Vocab(iri)))
-        .map_err(|_| unusable(RequiredValue::Iri, &text))
+        .map_err(|_| AttributeRefusal::unusable(RequiredValue::Iri, &text))
 }
 
 /// Reads a value as the `languageMap` of a `LanguageProperty`.
@@ -72,17 +72,9 @@ fn language_map(value: &Value) -> Result<Option<AttributeContent>, AttributeRefu
     };
 
     if map.is_empty() {
-        Err(unusable(RequiredValue::LanguageMap, &text))
+        Err(AttributeRefusal::unusable(RequiredValue::LanguageMap, &text))
     } else {
         Ok(Some(AttributeContent::Language(map)))
-    }
-}
-
-/// The refusal of a value that is not the `required` one, quoting the text it was met with.
-fn unusable(required: RequiredValue, text: &str) -> AttributeRefusal {
-    AttributeRefusal::UnusableValue {
-        required,
-        text: Box::from(text),
     }
 }
 
@@ -110,13 +102,6 @@ mod tests {
         AttributeContent::Value(Value::try_from(json).unwrap())
     }
 
-    fn unusable(required: RequiredValue, text: &str) -> AttributeRefusal {
-        AttributeRefusal::UnusableValue {
-            required,
-            text: Box::from(text),
-        }
-    }
-
     fn language_map(entries: &[(&str, &str)]) -> LanguageMap {
         entries
             .iter()
@@ -136,7 +121,7 @@ mod tests {
     fn text_that_is_no_iri_is_refused_quoting_the_text() {
         assert_eq!(
             type_for_kind(NgsiLdAttributeKind::VocabProperty, value(json!("not an iri"))),
-            Err(unusable(RequiredValue::Iri, "not an iri"))
+            Err(AttributeRefusal::unusable(RequiredValue::Iri, "not an iri"))
         );
     }
 
@@ -144,7 +129,7 @@ mod tests {
     fn a_number_is_no_iri_and_is_refused_quoting_its_rendering() {
         assert_eq!(
             type_for_kind(NgsiLdAttributeKind::VocabProperty, value(json!(20))),
-            Err(unusable(RequiredValue::Iri, "20"))
+            Err(AttributeRefusal::unusable(RequiredValue::Iri, "20"))
         );
     }
 
@@ -171,7 +156,7 @@ mod tests {
     fn plain_text_is_no_language_map_and_is_refused_quoting_the_text() {
         assert_eq!(
             type_for_kind(NgsiLdAttributeKind::LanguageProperty, value(json!("plain text"))),
-            Err(unusable(RequiredValue::LanguageMap, "plain text"))
+            Err(AttributeRefusal::unusable(RequiredValue::LanguageMap, "plain text"))
         );
     }
 
@@ -179,7 +164,7 @@ mod tests {
     fn an_object_with_no_tagged_text_is_refused_quoting_its_rendering() {
         assert_eq!(
             type_for_kind(NgsiLdAttributeKind::LanguageProperty, value(json!({"not a tag!": "hello", "en": 7}))),
-            Err(unusable(RequiredValue::LanguageMap, r#"{"not a tag!":"hello","en":7}"#))
+            Err(AttributeRefusal::unusable(RequiredValue::LanguageMap, r#"{"not a tag!":"hello","en":7}"#))
         );
     }
 

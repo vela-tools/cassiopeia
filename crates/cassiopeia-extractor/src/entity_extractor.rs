@@ -1505,6 +1505,76 @@ mod tests {
         assert_eq!(value, Some(Value::try_from(json!({"a": 1})).unwrap()));
     }
 
+    #[test]
+    fn an_array_text_column_becomes_the_array_it_encodes_without_decoding_in_the_template() {
+        let (value, _) = extract_dafif_code("{{ this[2] }}", "array", &json!(r#"["BS","IN"]"#));
+
+        assert_eq!(value, Some(Value::try_from(json!(["BS", "IN"])).unwrap()));
+    }
+
+    #[test]
+    fn an_object_text_column_becomes_the_object_it_encodes_without_decoding_in_the_template() {
+        let (value, _) = extract_dafif_code("{{ this[2] }}", "object", &json!(r#"{"a":1}"#));
+
+        assert_eq!(value, Some(Value::try_from(json!({"a": 1})).unwrap()));
+    }
+
+    #[test]
+    fn a_json_text_column_becomes_the_number_it_encodes() {
+        let (value, _) = extract_dafif_code("{{ this[2] }}", "json", &json!("12.5"));
+
+        assert_eq!(value, Some(Value::try_from(12.5).unwrap()));
+    }
+
+    #[test]
+    fn a_column_that_is_not_json_under_the_json_transformation_drops_the_attribute_and_is_recorded() {
+        let (value, dropped) = extract_dafif_code("{{ this[2] }}", "json", &json!("BS IN"));
+
+        assert_eq!(value, None);
+        let recorded = BatchSink::from(dropped.unusable_values)
+            .into_entries()
+            .map(|(unusable, record)| (unusable.attribute.to_string(), unusable.required, record.example.to_string()))
+            .collect::<Vec<_>>();
+        assert_eq!(recorded, [("dafifCode".to_owned(), RequiredValue::Json, "BS IN".to_owned())]);
+    }
+
+    #[test]
+    fn json_and_list_properties_read_csv_text_as_the_json_it_encodes() {
+        let (resolver, mapping) = prepare(
+            r#"{
+                version: "v4",
+                dataModel: "Stop",
+                identity: { entityName: "{{ id }}" },
+                attributes: {
+                    pollutantIndex: { type: "JsonProperty", source: "{{ indices }}", transformation: "json" },
+                    nextCountdowns: { type: "ListProperty", source: "{{ countdowns }}" },
+                },
+            }"#,
+        );
+        let extractor = EntityExtractor::new(resolver);
+        let mapped = AssembledEntity::from_single(
+            entity(
+                "urn:ngsi-ld:Stop:A",
+                json!({"id": "A", "indices": r#"{"no2":3,"pm10":null}"#, "countdowns": "[1,7,15]"}),
+            ),
+            mapping,
+        );
+        let dropped = DroppedAttributes::new();
+
+        let (result, _) = extractor.extract(mapped, &dropped).unwrap().into_parts();
+
+        let values = result.values().as_ref().expect("values set");
+        let Some(ResolvedAttribute::Single(AttributeContent::Json(payload))) = values.get(&name("pollutantIndex")).cloned() else {
+            panic!("raw JSON");
+        };
+        assert_eq!(JsonValue::from(payload), json!({"no2": 3, "pm10": null}));
+        assert_eq!(
+            single_value(values.get(&name("nextCountdowns")).cloned()),
+            Some(Value::try_from(json!([1, 7, 15])).unwrap())
+        );
+        assert!(dropped.nulls.is_empty());
+    }
+
     /// Extracts the `label` attribute that the JSON5 attribute `declaration` builds over one record.
     /// Extraction itself must succeed: the entity is produced.
     fn extract_label(declaration: &str, record: JsonValue) -> Option<Value> {

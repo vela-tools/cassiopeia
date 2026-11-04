@@ -23,20 +23,31 @@ pub(crate) enum AttributeRefusal {
         /// The text that would not read, quoted back so a mapping author can see its shape.
         text: Box<str>,
     },
-    /// The source carried a value the declared kind cannot hold: text that is no IRI for a
-    /// `VocabProperty`, or anything but tagged text for a `LanguageProperty`.
+    /// The source carried a value the declaration cannot use: text that is no IRI for a
+    /// `VocabProperty`, anything but tagged text for a `LanguageProperty`, or text the `json` or
+    /// `object` transformation cannot read.
     #[from(ignore)]
     UnusableValue {
-        /// What the kind needed the value to be.
+        /// What the kind or transformation needed the value to be.
         required: RequiredValue,
         /// The value that could not be used, quoted back so a mapping author can see its shape.
         text: Box<str>,
     },
 }
 
+impl AttributeRefusal {
+    /// The refusal of a value that is not the `required` one, quoting the text it was met with.
+    pub(crate) fn unusable(required: RequiredValue, text: &str) -> AttributeRefusal {
+        AttributeRefusal::UnusableValue {
+            required,
+            text: Box::from(text),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use crate::attribute::refusal::AttributeRefusal;
+    use crate::{attribute::refusal::AttributeRefusal, required_value::RequiredValue};
     use cassiopeia_geometry::error::GeometryError;
     use cassiopeia_ngsi_ld::value::json_payload_error::{JsonPayloadError, JsonShape};
     use pretty_assertions::assert_eq;
@@ -46,6 +57,17 @@ mod tests {
         assert_eq!(
             AttributeRefusal::from(GeometryError::GeometryCollection),
             AttributeRefusal::Geometry(GeometryError::GeometryCollection)
+        );
+    }
+
+    #[test]
+    fn an_unusable_refusal_quotes_the_text_it_was_met_with() {
+        assert_eq!(
+            AttributeRefusal::unusable(RequiredValue::Json, "{not json"),
+            AttributeRefusal::UnusableValue {
+                required: RequiredValue::Json,
+                text: Box::from("{not json"),
+            }
         );
     }
 
