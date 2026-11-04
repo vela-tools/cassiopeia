@@ -117,7 +117,8 @@ impl FragmentResolver {
     ///
     /// A temporal mapping re-declares its static relationships on every observation, so an identical
     /// `(parent, property, child)` edge from a temporal mapping is emitted once and later duplicates
-    /// are dropped; a non-temporal mapping keeps every edge, preserving the retain-duplicates contract.
+    /// are dropped before they reach the store. A non-temporal mapping writes every edge, and the store
+    /// reads each target back once.
     pub(crate) fn build_edges(&self, base_urn: &Urn, parent_contexts: Option<&Vec<ParentContext>>, temporal: bool) -> Vec<(Urn, String, Urn)> {
         let Some(parent_contexts) = parent_contexts else {
             return Vec::new();

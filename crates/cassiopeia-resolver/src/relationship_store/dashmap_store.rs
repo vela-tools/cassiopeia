@@ -22,7 +22,8 @@ type ParentEntries = SmallVec<[(Arc<str>, Urn); 4]>;
 /// One outer map keyed directly by the base parent [`Urn`] maps to a `SmallVec` of
 /// `(property, child_urn)` pairs. Every observation of one id shares the base id, so a temporal
 /// mapping's repeated static relationship accumulates under the one key; the resolver deduplicates
-/// those repeats before they reach the store.
+/// those repeats before they reach the store. Every other repeated edge is kept as written and
+/// collapses onto its first position when the parent's relationships are read.
 ///
 /// Property names are interned through a separate `DashMap<String, Arc<str>>`:
 /// typical datasets have a handful of distinct relationship property names, so
@@ -68,7 +69,7 @@ impl RelationshipStore for DashMapRelationshipStore {
 
         let mut grouped = StoredRelationships::default();
         for (property, child) in entries {
-            grouped.entry(property.as_ref().to_string()).or_default().push(child);
+            grouped.entry(property.as_ref().to_string()).or_default().insert(child);
         }
         Ok(grouped)
     }
@@ -77,7 +78,7 @@ impl RelationshipStore for DashMapRelationshipStore {
         let mut grouped = StoredRelationships::default();
         if let Some(entries) = self.relationships.get(parent_urn) {
             for (property, child) in entries.iter() {
-                grouped.entry(property.as_ref().to_string()).or_default().push(child.clone());
+                grouped.entry(property.as_ref().to_string()).or_default().insert(child.clone());
             }
         }
         Ok(grouped)
@@ -104,15 +105,18 @@ impl Default for DashMapRelationshipStore {
 mod tests {
     use crate::relationship_store::{
         dashmap_store::DashMapRelationshipStore,
-        store::{RelationshipStore, tests::assert_preserves_insertion_order_and_duplicates},
+        store::{
+            RelationshipStore,
+            tests::{assert_keeps_first_insertion_order_without_repeats, in_order},
+        },
     };
     use pretty_assertions::assert_eq;
     use urn_rs::Urn;
 
     #[test]
-    fn honours_cross_backend_order_and_duplicate_contract() {
+    fn honours_cross_backend_order_and_repeat_contract() {
         let store = DashMapRelationshipStore::new();
-        assert_preserves_insertion_order_and_duplicates(&store);
+        assert_keeps_first_insertion_order_without_repeats(&store);
     }
 
     #[test]
@@ -141,10 +145,10 @@ mod tests {
         store.add_child(&parent, "hasPart", &child).unwrap();
 
         let read = store.get_all_relationships(&parent).unwrap();
-        assert_eq!(read.get("hasPart").map(Vec::as_slice), Some(&[child.clone()][..]));
+        assert_eq!(in_order(&read, "hasPart"), [&child]);
 
         let taken = store.take_all_relationships(&parent).unwrap();
-        assert_eq!(taken.get("hasPart").map(Vec::as_slice), Some(&[child][..]));
+        assert_eq!(in_order(&taken, "hasPart"), [&child]);
 
         let after = store.take_all_relationships(&parent).unwrap();
         assert!(after.is_empty());

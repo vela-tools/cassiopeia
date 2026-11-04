@@ -67,6 +67,7 @@ impl FragmentResolver {
         let mut nested_relationships = NestedRelationships::default();
         let mut instance_relationships = InstanceRelationships::default();
         for (key, targets) in stored_relationships {
+            let targets = targets.into_iter().collect::<Vec<Urn>>();
             match key.parse::<RelationshipKey>()? {
                 RelationshipKey::Path(RelationshipPath::Flat(name)) => {
                     relationships.insert(name, targets);
@@ -576,6 +577,46 @@ mod tests {
         assert_eq!(unit.relationships().top_level().get(&name("refRoad")).map(Vec::as_slice), Some(&[road][..]));
         assert_eq!(unit.relationships().nested(), &None);
         assert_eq!(unit.relationships().instances(), &None);
+    }
+
+    #[test]
+    fn records_merged_into_one_entity_link_each_target_once_in_first_seen_order() {
+        let (resolver, mappings) = resolver_with(Box::new(DashMapLatestEntityStore::new()), &[SIMPLE]);
+        let ref_line = || RelationshipKey::Path(RelationshipPath::flat(name("refLine")));
+        let lines = |targets: &[&str]| {
+            targets
+                .iter()
+                .map(|target| ParentContext::new(ParentContextType::Child(urn(target)), ref_line()))
+                .collect::<Vec<ParentContext>>()
+        };
+        let victoria = urn("urn:ngsi-ld:TransportStation:VIC");
+        let bank = urn("urn:ngsi-ld:TransportStation:BAN");
+        let shared = [
+            "urn:ngsi-ld:GtfsRoute:circle",
+            "urn:ngsi-ld:GtfsRoute:district",
+            "urn:ngsi-ld:GtfsRoute:victoria",
+        ];
+        let records = [
+            (&victoria, lines(&shared)),
+            (&victoria, lines(&shared)),
+            (&victoria, lines(&shared)),
+            (&bank, lines(&["urn:ngsi-ld:GtfsRoute:central"])),
+            (&bank, lines(&["urn:ngsi-ld:GtfsRoute:northern"])),
+        ];
+
+        for (station, contexts) in records {
+            let fragment = Fragment::new(json!({"t": 1}), station.clone(), None, None, Some(contexts));
+            resolver.resolve(Mapped::new(fragment, Arc::clone(&mappings[0]))).unwrap();
+        }
+
+        assert_eq!(
+            only_unit(&resolver, &victoria).relationships().top_level().get(&name("refLine")),
+            Some(&shared.map(urn).to_vec())
+        );
+        assert_eq!(
+            only_unit(&resolver, &bank).relationships().top_level().get(&name("refLine")),
+            Some(&vec![urn("urn:ngsi-ld:GtfsRoute:central"), urn("urn:ngsi-ld:GtfsRoute:northern")])
+        );
     }
 
     #[test]

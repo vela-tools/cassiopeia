@@ -32,8 +32,9 @@ const RELATIONSHIPS_TABLE: TableDefinition<&[u8], &[u8]> = TableDefinition::new(
 /// Keys are `{parent}\x1F{property}\x1F{seq_be}` (an 8-byte big-endian
 /// insertion sequence number) mapping to the child URN bytes as the value.
 /// Sequencing edges rather than keying on the child makes a prefix range scan
-/// return each `(parent, property)` list in exact insertion order and retains
-/// duplicate edges, matching [`DashMapRelationshipStore`](crate::relationship_store::dashmap_store::DashMapRelationshipStore).
+/// return each `(parent, property)` list in exact insertion order; a repeated
+/// edge is stored again and collapses onto its first position when read,
+/// matching [`DashMapRelationshipStore`](crate::relationship_store::dashmap_store::DashMapRelationshipStore).
 /// [`add_child`](RelationshipStore::add_child) and
 /// [`add_child_batch`](RelationshipStore::add_child_batch) commit a single
 /// `WriteTransaction`; [`take_all_relationships`](RelationshipStore::take_all_relationships)
@@ -44,8 +45,8 @@ pub struct RedbRelationshipStore {
     db: Arc<Database>,
     temp_dir_path: PathBuf,
     db_path: PathBuf,
-    /// Monotonic edge counter shared across clones. A duplicate `(parent,
-    /// property, child)` edge gets a distinct key, so duplicates survive and
+    /// Monotonic edge counter shared across clones. Every edge, a repeated
+    /// `(parent, property, child)` one included, gets a distinct key, so
     /// insertion order is recoverable by byte-sorting the big-endian sequence.
     next_seq: Arc<AtomicU64>,
 }
@@ -254,7 +255,7 @@ impl RelationshipStore for RedbRelationshipStore {
                     let remainder = &key_bytes[prefix.len()..];
                     let property = Self::parse_property(remainder)?;
                     let child_urn = Self::parse_child(value.value())?;
-                    result.entry(property).or_default().push(child_urn);
+                    result.entry(property).or_default().insert(child_urn);
                     keys_to_remove.push(key_bytes.to_vec());
                 }
             }
@@ -290,7 +291,7 @@ impl RelationshipStore for RedbRelationshipStore {
             let remainder = &key_bytes[prefix.len()..];
             let property = Self::parse_property(remainder)?;
             let child_urn = Self::parse_child(value.value())?;
-            result.entry(property).or_default().push(child_urn);
+            result.entry(property).or_default().insert(child_urn);
         }
         Ok(result)
     }
@@ -327,15 +328,18 @@ impl Drop for RedbRelationshipStore {
 mod tests {
     use crate::relationship_store::{
         redb_store::RedbRelationshipStore,
-        store::{RelationshipStore, tests::assert_preserves_insertion_order_and_duplicates},
+        store::{
+            RelationshipStore,
+            tests::{assert_keeps_first_insertion_order_without_repeats, in_order},
+        },
     };
     use pretty_assertions::assert_eq;
     use urn_rs::Urn;
 
     #[test]
-    fn honours_cross_backend_order_and_duplicate_contract() {
+    fn honours_cross_backend_order_and_repeat_contract() {
         let store = RedbRelationshipStore::new().unwrap();
-        assert_preserves_insertion_order_and_duplicates(&store);
+        assert_keeps_first_insertion_order_without_repeats(&store);
     }
 
     #[test]
@@ -355,11 +359,11 @@ mod tests {
             .unwrap();
 
         let rels = store.take_all_relationships(&parent).unwrap();
-        assert_eq!(rels.get("hasPart").map(Vec::as_slice), Some(&[child_c, child_a, child_b][..]));
+        assert_eq!(in_order(&rels, "hasPart"), [&child_c, &child_a, &child_b]);
     }
 
     #[test]
-    fn duplicate_edges_are_retained() {
+    fn a_repeated_edge_is_read_back_once() {
         let store = RedbRelationshipStore::new().unwrap();
         let parent: Urn = "urn:ngsi-ld:Parent:1".parse().unwrap();
         let child: Urn = "urn:ngsi-ld:Child:X".parse().unwrap();
@@ -368,7 +372,7 @@ mod tests {
         store.add_child(&parent, "hasPart", &child).unwrap();
 
         let rels = store.take_all_relationships(&parent).unwrap();
-        assert_eq!(rels.get("hasPart").map(Vec::as_slice), Some(&[child.clone(), child][..]));
+        assert_eq!(in_order(&rels, "hasPart"), [&child]);
     }
 
     #[test]
@@ -390,8 +394,8 @@ mod tests {
             .unwrap();
 
         let rels = store.take_all_relationships(&parent).unwrap();
-        assert_eq!(rels.get("first").map(Vec::as_slice), Some(&[first_b, first_a][..]));
-        assert_eq!(rels.get("second").map(Vec::as_slice), Some(&[second_b, second_a][..]));
+        assert_eq!(in_order(&rels, "first"), [&first_b, &first_a]);
+        assert_eq!(in_order(&rels, "second"), [&second_b, &second_a]);
     }
 
     #[test]
@@ -406,7 +410,7 @@ mod tests {
             .unwrap();
 
         let rels = store.take_all_relationships(&parent).unwrap();
-        assert_eq!(rels.get("hasPart").map(Vec::as_slice), Some(&[child_a, child_b][..]));
+        assert_eq!(in_order(&rels, "hasPart"), [&child_a, &child_b]);
 
         let rels_again = store.take_all_relationships(&parent).unwrap();
         assert!(rels_again.is_empty());
@@ -421,10 +425,10 @@ mod tests {
         store.add_child(&parent, "hasPart", &child).unwrap();
 
         let first = store.get_all_relationships(&parent).unwrap();
-        assert_eq!(first.get("hasPart").map(Vec::as_slice), Some(&[child.clone()][..]));
+        assert_eq!(in_order(&first, "hasPart"), [&child]);
 
         let second = store.get_all_relationships(&parent).unwrap();
-        assert_eq!(second.get("hasPart").map(Vec::as_slice), Some(&[child][..]));
+        assert_eq!(in_order(&second, "hasPart"), [&child]);
     }
 
     #[test]
@@ -438,9 +442,9 @@ mod tests {
         store.add_child(&parent_b, "has", &child).unwrap();
 
         let rels_a = store.take_all_relationships(&parent_a).unwrap();
-        assert_eq!(rels_a.get("has").map(Vec::as_slice), Some(&[child.clone()][..]));
+        assert_eq!(in_order(&rels_a, "has"), [&child]);
 
         let rels_b = store.take_all_relationships(&parent_b).unwrap();
-        assert_eq!(rels_b.get("has").map(Vec::as_slice), Some(&[child][..]));
+        assert_eq!(in_order(&rels_b, "has"), [&child]);
     }
 }
