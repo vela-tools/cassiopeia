@@ -7,7 +7,6 @@ use crate::attribute::{
     resolution_error::{ResolutionError, Result},
     transformer::{SourceParts, Transformer},
 };
-use cassiopeia_geometry::policy::GeometryPolicy;
 use cassiopeia_ir::{attribute_content::AttributeContent, resolved_attribute::ResolvedAttribute};
 use cassiopeia_mapping::{
     attribute::{Attribute, instance::AttributeInstance},
@@ -169,11 +168,11 @@ fn resolve_language_property(ctx: &mut ResolutionContext, attr_name: &NameBuf, c
 
 /// Resolves a declaration carrying nested `mappings` into a structured object value.
 ///
-/// When the declaration's conversion reads a geometry (a `GeoProperty`, or a geometry
-/// `transformation`), the assembled object is a geometry spelled field by field, so it is converted
-/// under the declaration's own `geometry` policy and a refusal is recorded, exactly as for a geometry
-/// read whole from one source. Any other conversion leaves the object as assembled, typed as the
-/// declared kind exactly as a value read from one source is (see [`type_for_kind`]).
+/// The assembled object converts through the declaration's [`Attribute::conversion`], as a value
+/// read from one source does: a declared `transformation` is applied as written, and naming none
+/// keeps the object as assembled, or, on a `GeoProperty`, reads it as the geometry it spells field
+/// by field, under the declaration's own `geometry` policy. The result is typed as the declared kind
+/// and a refusal is recorded, exactly as for a value read from one source (see [`convert`]).
 fn resolve_object(ctx: &mut ResolutionContext, attr_name: &NameBuf, config: &Attribute) -> Result<Option<AttributeContent>> {
     let mut object = ValueObject::default();
     let owner = DeclarationTrail::below(attr_name, Nesting::Member, ctx.owners);
@@ -189,18 +188,10 @@ fn resolve_object(ctx: &mut ResolutionContext, attr_name: &NameBuf, config: &Att
     if object.is_empty() {
         return Ok(None);
     }
-    let object = Value::Object(Box::new(object));
 
-    Ok(match config.conversion().geometry_target() {
-        Some(target) => bind_refusal(
-            ctx,
-            attr_name,
-            Transformer::coerce_geometry(&object, target, config.geometry().as_ref())
-                .map(|geometry| geometry.map(AttributeContent::Value))
-                .map_err(AttributeRefusal::Geometry),
-        ),
-        None => bind_refusal(ctx, attr_name, type_for_kind(*config.kind(), AttributeContent::Value(object))),
-    })
+    Ok(convert(ctx, attr_name, *config.kind(), |omitted| {
+        Transformer::apply_to_object(object, config.conversion(), config.geometry().as_ref(), omitted)
+    }))
 }
 
 /// Resolves a leaf declaration: reads its source values and applies its transformation.
@@ -218,18 +209,34 @@ fn resolve_leaf(ctx: &mut ResolutionContext, attr_name: &NameBuf, config: &Attri
 /// language-map entry) all transform here, so all of them convert through the declaration's
 /// [`Attribute::conversion`], and a declaration naming no transformation gets its kind's default on
 /// every path.
+fn transform(ctx: &ResolutionContext, attr_name: &NameBuf, config: &Attribute, parts: SourceParts) -> Option<AttributeContent> {
+    convert(ctx, attr_name, *config.kind(), |omitted| {
+        Transformer::apply(parts, config.conversion(), config.geometry().as_ref(), omitted)
+    })
+}
+
+/// Runs one conversion of a declaration's value, types the result as the declared `kind`, and binds a
+/// refusal, and any nulls left out of the value, to the sinks that gather them.
 ///
-/// The converted value is then typed as the declared kind (see [`type_for_kind`]): a `JsonProperty`
+/// Both what a declaration reads from its sources ([`transform`]) and the object its nested
+/// `mappings` assemble ([`resolve_object`]) convert here, so neither can type or report its value
+/// differently from the other.
+///
+/// The converted value is typed as the declared kind (see [`type_for_kind`]): a `JsonProperty`
 /// always comes out as raw JSON, read as the source held it under its default conversion or, under
 /// a declared transformation, as the JSON the transformed value serializes to; a `VocabProperty` as
 /// its IRI; and a `LanguageProperty` as its `languageMap`. The nulls left out are recorded only when
 /// the attribute keeps a value: a refused or absent value lost the whole attribute, not some of its
 /// members.
-fn transform(ctx: &ResolutionContext, attr_name: &NameBuf, config: &Attribute, parts: SourceParts) -> Option<AttributeContent> {
-    let geometry: Option<&GeometryPolicy> = config.geometry().as_ref();
+fn convert(
+    ctx: &ResolutionContext,
+    attr_name: &NameBuf,
+    kind: NgsiLdAttributeKind,
+    conversion: impl FnOnce(&mut OmittedNulls) -> result::Result<Option<AttributeContent>, AttributeRefusal>,
+) -> Option<AttributeContent> {
     let mut omitted = OmittedNulls::default();
-    let outcome = Transformer::apply(parts, config.conversion(), geometry, &mut omitted).and_then(|content| match content {
-        Some(content) => type_for_kind(*config.kind(), content),
+    let outcome = conversion(&mut omitted).and_then(|content| match content {
+        Some(content) => type_for_kind(kind, content),
         None => Ok(None),
     });
 

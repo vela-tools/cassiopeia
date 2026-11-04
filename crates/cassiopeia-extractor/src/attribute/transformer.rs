@@ -6,7 +6,7 @@ use cassiopeia_ngsi_ld::value::{
     json_payload::JsonPayload,
     omitted_nulls::OmittedNulls,
     parsing::parse_decimal,
-    types::{TemporalValue, Value},
+    types::{TemporalValue, Value, ValueObject},
 };
 use compact_str::CompactString;
 use serde_json::Value as JsonValue;
@@ -77,6 +77,40 @@ impl Transformer {
         }
     }
 
+    /// Applies a conversion to the object an attribute's nested `mappings` assembled.
+    ///
+    /// The object converts exactly as it would read from one source: kept as assembled when the
+    /// declaration names no transformation (see [`ValueConversion::resolve_assembled`]), and
+    /// otherwise through the same coercion a value read from a source goes through, so `string`
+    /// writes its compact JSON text and `array` a list of the one object. A decoded conversion keeps
+    /// it as well, since an assembled object holds no text to decode.
+    ///
+    /// # Errors
+    /// Returns the [`AttributeRefusal`] naming what the attribute could not take: under a geometry
+    /// transformation, a geometry the declared type cannot hold, or, since the object is there and
+    /// is not simply absent, [`RequiredValue::Geometry`] quoting an object that spells no geometry
+    /// at all; under any other transformation, what that transformation refuses.
+    pub(crate) fn apply_to_object(
+        object: ValueObject,
+        conversion: ValueConversion,
+        geometry: Option<&GeometryPolicy>,
+        omitted: &mut OmittedNulls,
+    ) -> Result<Option<AttributeContent>, AttributeRefusal> {
+        let object = Value::Object(Box::new(object));
+        let value = match conversion {
+            ValueConversion::Verbatim | ValueConversion::Decoded => Some(object),
+            ValueConversion::Transform(transformation) => match transformation.geometry_target() {
+                Some(target) => match Self::coerce_geometry(&object, target, geometry)? {
+                    Some(geometry) => Some(geometry),
+                    None => return Err(AttributeRefusal::unusable(RequiredValue::Geometry, &object.to_string())),
+                },
+                None => Self::coerce_merged(object, transformation, omitted)?,
+            },
+        };
+
+        Ok(value.map(AttributeContent::Value))
+    }
+
     /// Keeps the parts as the source held them, as raw JSON: a lone part is its own payload, several
     /// are an array of the parts in order.
     ///
@@ -128,22 +162,55 @@ impl Transformer {
         serde_json::from_str(text).map(Some).map_err(|_| AttributeRefusal::unusable(required, text))
     }
 
-    /// Applies a transformation that names no geometry type.
+    /// Applies a transformation that names no geometry type to the source parts.
     ///
-    /// The geometry transformations are routed away before this point and name no scalar or container
-    /// value of their own, so they resolve to no value here.
+    /// `array` aggregates every part; a scalar transformation takes the first part present and every
+    /// other one merges the parts into text, and the merged value is then coerced like any other
+    /// (see [`Transformer::coerce_merged`]). The geometry transformations are routed away before this
+    /// point and name no scalar or container value of their own, so they resolve to no value here.
     fn coerce_value(parts: SourceParts, transformation: Transformation, omitted: &mut OmittedNulls) -> Result<Option<Value>, AttributeRefusal> {
+        let merged = match transformation {
+            Transformation::Array => return Ok(Self::aggregate(parts, omitted)),
+            Transformation::Boolean | Transformation::Integer | Transformation::Float => Self::merge_first(parts, omitted),
+            Transformation::String | Transformation::Object | Transformation::Json | Transformation::DateTime | Transformation::Date | Transformation::Time => {
+                Self::merge_text(parts, omitted)
+            }
+            Transformation::Geometry
+            | Transformation::Point
+            | Transformation::MultiPoint
+            | Transformation::LineString
+            | Transformation::MultiLineString
+            | Transformation::Polygon
+            | Transformation::MultiPolygon => return Ok(None),
+        };
+
+        merged.map_or(Ok(None), |value| Self::coerce_merged(value, transformation, omitted))
+    }
+
+    /// Coerces one value, already merged from the source parts or assembled from nested `mappings`,
+    /// through a transformation that names no geometry type.
+    ///
+    /// Under `array` a value that is already an array is the list and any other value is its one
+    /// element, as a lone part of either kind is aggregated. The geometry transformations name no
+    /// scalar or container value of their own and are routed away before this point, so they
+    /// resolve to no value here.
+    fn coerce_merged(value: Value, transformation: Transformation, omitted: &mut OmittedNulls) -> Result<Option<Value>, AttributeRefusal> {
         match transformation {
-            Transformation::Array => Ok(Self::aggregate(parts, omitted)),
-            Transformation::Boolean => Ok(Self::merge_first(parts, omitted).as_ref().and_then(Value::to_boolean).map(Value::from)),
-            Transformation::Integer => Ok(Self::merge_first(parts, omitted).as_ref().and_then(Self::coerce_integer)),
-            Transformation::Float => Ok(Self::merge_first(parts, omitted).as_ref().and_then(Self::coerce_float)),
-            Transformation::String => Ok(Self::merge_text(parts, omitted).map(Self::coerce_string)),
-            Transformation::Object => Self::merge_text(parts, omitted).map_or(Ok(None), |value| Self::coerce_object(value, omitted)),
-            Transformation::Json => Self::merge_text(parts, omitted).map_or(Ok(None), |value| Self::coerce_json(value, omitted)),
-            Transformation::DateTime => Self::coerce_temporal(Self::merge_text(parts, omitted), TemporalKind::DateTime),
-            Transformation::Date => Self::coerce_temporal(Self::merge_text(parts, omitted), TemporalKind::Date),
-            Transformation::Time => Self::coerce_temporal(Self::merge_text(parts, omitted), TemporalKind::Time),
+            Transformation::Array => Ok(Some(match value {
+                list @ Value::Array(_) => list,
+                other @ (Value::Boolean(_) | Value::Number(_) | Value::String(_) | Value::Temporal(_) | Value::Geospatial(_) | Value::Object(_)) => {
+                    Value::Array(vec![other])
+                }
+            })),
+            Transformation::Boolean => Ok(value.to_boolean().map(Value::from)),
+            Transformation::Integer => Ok(Self::coerce_integer(&value)),
+            Transformation::Float => Ok(Self::coerce_float(&value)),
+            Transformation::String => Ok(Some(Self::coerce_string(value))),
+            Transformation::Object => Self::coerce_object(value, omitted),
+            Transformation::Json => Self::coerce_json(value, omitted),
+            Transformation::DateTime => Self::coerce_temporal(&value, TemporalKind::DateTime),
+            Transformation::Date => Self::coerce_temporal(&value, TemporalKind::Date),
+            Transformation::Time => Self::coerce_temporal(&value, TemporalKind::Time),
             Transformation::Geometry
             | Transformation::Point
             | Transformation::MultiPoint
@@ -325,8 +392,8 @@ impl Transformer {
     /// A value that carries no geometry at all yields no value, so the attribute is simply omitted,
     /// the way an absent source field always has been. A value that carries a geometry which cannot
     /// legally become the declared type is refused instead, so the run can say what it dropped and
-    /// why. The resolver also calls this directly for a geometry it assembled from nested `mappings`,
-    /// which has no source parts left to merge.
+    /// why. A geometry assembled from nested `mappings` is read here too, with no source parts left
+    /// to merge (see [`Transformer::apply_to_object`]).
     ///
     /// # Errors
     /// Returns the [`GeometryError`] naming why the geometry cannot become the declared type.
@@ -339,7 +406,7 @@ impl Transformer {
 
     /// Coerces the merged value to a temporal value of the given kind.
     ///
-    /// An absent source resolves to no value, and so does a blank one: CSV and spreadsheet sources
+    /// A blank value resolves to no value, as an absent source does: CSV and spreadsheet sources
     /// spell an empty field as an empty string, so a blank is a value the record does not carry
     /// rather than one it carries wrongly, and naming every empty cell of a column would drown the
     /// run. Any other value that is there and will not read is refused instead, text and non-text
@@ -349,11 +416,7 @@ impl Transformer {
     /// # Errors
     /// Returns [`AttributeRefusal::UnreadableTimestamp`] quoting the value that would not read: text
     /// as written, any other value as its rendering.
-    fn coerce_temporal(value: Option<Value>, kind: TemporalKind) -> Result<Option<Value>, AttributeRefusal> {
-        let Some(value) = value else {
-            return Ok(None);
-        };
-
+    fn coerce_temporal(value: &Value, kind: TemporalKind) -> Result<Option<Value>, AttributeRefusal> {
         if let Some(datetime) = value.try_parse_datetime() {
             let temporal = match kind {
                 TemporalKind::DateTime => TemporalValue::DateTime(datetime),
@@ -395,7 +458,7 @@ mod tests {
         value::{
             json_payload_error::{JsonPayloadError, JsonShape},
             omitted_nulls::OmittedNulls,
-            types::{Number, Value},
+            types::{Number, Value, ValueObject},
         },
     };
     use pretty_assertions::assert_eq;
@@ -435,6 +498,90 @@ mod tests {
             None => None,
         };
         (value, omitted)
+    }
+
+    /// The object `{"street": "Ring"}`, as nested `mappings` would assemble it.
+    fn street_object() -> ValueObject {
+        match Value::try_from(json!({"street": "Ring"})).unwrap() {
+            Value::Object(object) => *object,
+            other @ (Value::Boolean(_) | Value::Number(_) | Value::String(_) | Value::Temporal(_) | Value::Geospatial(_) | Value::Array(_)) => {
+                panic!("{other:?}, not an object")
+            }
+        }
+    }
+
+    /// Applies a conversion to the assembled street object with a fresh null count.
+    fn apply_to_street(conversion: ValueConversion) -> Result<Option<AttributeContent>, AttributeRefusal> {
+        Transformer::apply_to_object(street_object(), conversion, None, &mut OmittedNulls::default())
+    }
+
+    #[test]
+    fn an_assembled_object_kept_as_assembled_or_decoded_stays_the_object() {
+        for conversion in [ValueConversion::Verbatim, ValueConversion::Decoded] {
+            assert_eq!(
+                apply_to_street(conversion),
+                Ok(Some(AttributeContent::Value(Value::try_from(json!({"street": "Ring"})).unwrap()))),
+                "{conversion:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn an_assembled_object_under_the_string_transformation_becomes_its_compact_json_text() {
+        assert_eq!(
+            apply_to_street(ValueConversion::Transform(Transformation::String)),
+            Ok(Some(AttributeContent::Value(Value::String(r#"{"street":"Ring"}"#.into()))))
+        );
+    }
+
+    #[test]
+    fn an_assembled_object_under_the_array_transformation_becomes_a_list_of_the_object() {
+        assert_eq!(
+            apply_to_street(ValueConversion::Transform(Transformation::Array)),
+            Ok(Some(AttributeContent::Value(Value::try_from(json!([{"street": "Ring"}])).unwrap())))
+        );
+    }
+
+    #[test]
+    fn an_assembled_object_under_the_object_and_json_transformations_stays_the_object() {
+        for transformation in [Transformation::Object, Transformation::Json] {
+            assert_eq!(
+                apply_to_street(ValueConversion::Transform(transformation)),
+                Ok(Some(AttributeContent::Value(Value::try_from(json!({"street": "Ring"})).unwrap()))),
+                "{transformation}"
+            );
+        }
+    }
+
+    #[test]
+    fn an_assembled_object_spelling_no_geometry_under_a_geometry_transformation_is_refused_quoting_it() {
+        for transformation in [Transformation::Geometry, Transformation::Point, Transformation::MultiPolygon] {
+            assert_eq!(
+                apply_to_street(ValueConversion::Transform(transformation)),
+                Err(AttributeRefusal::unusable(RequiredValue::Geometry, r#"{"street":"Ring"}"#)),
+                "{transformation}"
+            );
+        }
+    }
+
+    #[test]
+    fn an_assembled_point_under_the_multipoint_transformation_becomes_a_multipoint() {
+        let point = match Value::try_from(json!({"type": "Point", "coordinates": [16.37, 48.2]})).unwrap() {
+            Value::Object(object) => *object,
+            other @ (Value::Boolean(_) | Value::Number(_) | Value::String(_) | Value::Temporal(_) | Value::Geospatial(_) | Value::Array(_)) => {
+                panic!("{other:?}, not an object")
+            }
+        };
+
+        let content = Transformer::apply_to_object(
+            point,
+            ValueConversion::Transform(Transformation::MultiPoint),
+            None,
+            &mut OmittedNulls::default(),
+        );
+
+        let expected: NgsiLdGeometry = serde_json::from_value(json!({"type": "MultiPoint", "coordinates": [[16.37, 48.2]]})).unwrap();
+        assert_eq!(content, Ok(Some(AttributeContent::Value(Value::Geospatial(Box::new(expected))))));
     }
 
     #[test]

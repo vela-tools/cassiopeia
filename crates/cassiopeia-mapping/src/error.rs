@@ -74,6 +74,21 @@ pub enum MappingError {
         /// The transformation it declared.
         transformation: Transformation,
     },
+
+    /// An attribute assembles its value from nested `mappings`, but declares a `transformation`
+    /// that can never apply to the object they assemble.
+    ///
+    /// The value nested `mappings` assemble is always an object, and no object is a boolean, a
+    /// number, or a date-time, so the declaration could never produce a value for a single record.
+    #[error(
+        "Attribute `{attribute}` builds its value from nested `mappings`, but `transformation: \"{transformation}\"` cannot apply to the object they build; remove the transformation or name one that reads an object: `object`, `json`, `string`, `array`, or a geometry type"
+    )]
+    TransformationOnAssembledObject {
+        /// The attribute whose transformation cannot apply to its assembled object.
+        attribute: NameBuf,
+        /// The transformation it declared.
+        transformation: Transformation,
+    },
 }
 
 /// The result type used throughout mapping loading.

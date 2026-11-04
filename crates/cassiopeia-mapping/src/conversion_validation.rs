@@ -6,13 +6,13 @@ use crate::{
 use cassiopeia_geometry::lattice::check;
 use cassiopeia_ngsi_ld::entity::{attribute::NgsiLdAttributeKind, name::NameBuf};
 
-/// Checks every attribute a mapping declares, at load time, for a geometry declaration that can
-/// never run.
+/// Checks every attribute a mapping declares, at load time, for a conversion that can never run.
 ///
-/// Both checks read the attribute's conversion exactly as the extraction stage resolves it
+/// Every check reads the attribute's conversion exactly as the extraction stage resolves it
 /// ([`Attribute::conversion`]): the declared `transformation`, or the default of the attribute's
 /// type when none is declared. A `GeoProperty` whose conversion reads no geometry could never carry
-/// the geometry its value has to be. A `geometry` block on a conversion that reads no geometry would
+/// the geometry its value has to be. A transformation that never applies to an object could never
+/// convert the object an attribute's nested `mappings` assemble. A `geometry` block on a conversion that reads no geometry would
 /// be ignored on every record, and a conversion and a target that disagree (asking for the largest
 /// member of something with no extent to rank by, say) would refuse every record in turn once the
 /// run started. Refusing the document instead means the mistake is reported once, by name, before a
@@ -20,6 +20,7 @@ use cassiopeia_ngsi_ld::entity::{attribute::NgsiLdAttributeKind, name::NameBuf};
 ///
 /// # Errors
 /// Returns [`MappingError::GeoPropertyWithoutGeometry`],
+/// [`MappingError::TransformationOnAssembledObject`],
 /// [`MappingError::GeometryPolicyWithoutGeometry`], or [`MappingError::InvalidAttribute`] naming the
 /// first attribute whose declaration cannot run.
 pub fn validate(mapping: &Mapping) -> Result<()> {
@@ -43,6 +44,7 @@ fn validate_attributes(attributes: &Attributes) -> Result<()> {
 /// their parent's `type`, `transformation` and `geometry`, so they are already covered by it.
 fn validate_attribute(name: &NameBuf, attribute: &Attribute) -> Result<()> {
     validate_geo_property_conversion(name, attribute)?;
+    validate_assembled_object_conversion(name, attribute)?;
     validate_geometry_policy(name, attribute)?;
 
     validate_attributes(attribute.mappings())?;
@@ -76,6 +78,26 @@ fn validate_geo_property_conversion(name: &NameBuf, attribute: &Attribute) -> Re
     }
 
     Err(MappingError::GeoPropertyWithoutGeometry {
+        attribute: name.clone(),
+        transformation,
+    })
+}
+
+/// Refuses an attribute assembling its value from nested `mappings` whose declared transformation
+/// can never apply to the object they assemble.
+///
+/// A declaration naming no transformation always passes: it keeps the object as assembled, or, on
+/// a `GeoProperty`, reads the geometry the object spells (see
+/// [`ValueConversion::resolve_assembled`](crate::value_conversion::ValueConversion::resolve_assembled)).
+fn validate_assembled_object_conversion(name: &NameBuf, attribute: &Attribute) -> Result<()> {
+    let Some(transformation) = *attribute.transformation() else {
+        return Ok(());
+    };
+    if attribute.mappings().is_empty() || transformation.applies_to_object() {
+        return Ok(());
+    }
+
+    Err(MappingError::TransformationOnAssembledObject {
         attribute: name.clone(),
         transformation,
     })
@@ -366,6 +388,104 @@ mod tests {
                 }"#,
             ),
             "payload",
+        );
+    }
+
+    /// Asserts the declaration was refused because its transformation can never apply to the object
+    /// its nested `mappings` assemble, naming `expected` as the attribute and quoting
+    /// `transformation`.
+    fn assert_refused_as_transformation_on_assembled_object(result: Result<Mapping, MappingError>, expected: &str, transformation: &str) {
+        let error = result.expect_err("the transformation can never apply to the assembled object");
+
+        assert!(
+            matches!(&error, MappingError::TransformationOnAssembledObject { attribute, transformation: declared } if attribute.as_str() == expected && declared.to_string() == transformation),
+            "{error:?}"
+        );
+        let message = error.to_string();
+        assert!(message.contains(&format!("`{expected}`")), "{message}");
+        assert!(message.contains(&format!(r#"transformation: "{transformation}""#)), "{message}");
+        assert!(message.contains("remove the transformation"), "{message}");
+    }
+
+    #[test]
+    fn an_attribute_with_nested_mappings_under_a_transformation_that_never_applies_to_an_object_is_refused_naming_it() {
+        for transformation in ["boolean", "integer", "float", "datetime", "date", "time"] {
+            assert_refused_as_transformation_on_assembled_object(
+                load(&format!(
+                    r#"{{
+                        address: {{ transformation: "{transformation}", mappings: {{ street: {{ source: "{{{{ street }}}}" }} }} }},
+                    }}"#
+                )),
+                "address",
+                transformation,
+            );
+        }
+    }
+
+    #[test]
+    fn a_nested_mapping_under_a_transformation_that_never_applies_to_an_object_is_refused_naming_it() {
+        assert_refused_as_transformation_on_assembled_object(
+            load(
+                r#"{
+                    address: { mappings: { street: { transformation: "integer", mappings: { name: { source: "{{ street }}" } } } } },
+                }"#,
+            ),
+            "street",
+            "integer",
+        );
+    }
+
+    #[test]
+    fn a_sub_attribute_with_nested_mappings_under_a_transformation_that_never_applies_to_an_object_is_refused_naming_it() {
+        assert_refused_as_transformation_on_assembled_object(
+            load(
+                r#"{
+                    name: {
+                        source: "{{ name }}",
+                        properties: { origin: { transformation: "float", mappings: { street: { source: "{{ street }}" } } } },
+                    },
+                }"#,
+            ),
+            "origin",
+            "float",
+        );
+    }
+
+    #[test]
+    fn an_attribute_with_nested_mappings_under_a_transformation_that_applies_to_an_object_loads() {
+        for transformation in ["object", "json", "string", "array", "geometry", "point", "multipoint"] {
+            let result = load(&format!(
+                r#"{{
+                    address: {{ transformation: "{transformation}", mappings: {{ street: {{ source: "{{{{ street }}}}" }} }} }},
+                }}"#
+            ));
+
+            assert!(result.is_ok(), "{transformation}: {result:?}");
+        }
+    }
+
+    #[test]
+    fn a_leaf_under_a_scalar_transformation_is_left_alone() {
+        assert!(
+            load(
+                r#"{
+                    count: { source: "{{ count }}", transformation: "integer" },
+                }"#,
+            )
+            .is_ok()
+        );
+    }
+
+    #[test]
+    fn a_geo_property_with_nested_mappings_under_a_scalar_transformation_is_refused_for_producing_no_geometry() {
+        assert_refused_as_geo_property_without_geometry(
+            load(
+                r#"{
+                    location: { type: "GeoProperty", transformation: "integer", mappings: { type: { source: "Point" } } },
+                }"#,
+            ),
+            "location",
+            "integer",
         );
     }
 

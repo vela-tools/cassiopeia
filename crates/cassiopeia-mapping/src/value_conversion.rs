@@ -7,15 +7,17 @@ use cassiopeia_ngsi_ld::entity::attribute::NgsiLdAttributeKind;
 /// A declaration that names a `transformation` converts through exactly that transformation, except
 /// that `json` on a kind whose value is raw JSON decodes into raw JSON. One that names none converts
 /// through the default its NGSI-LD attribute kind implies, which [`ValueConversion::default_for`]
-/// decides. [`ValueConversion::resolve`] makes that choice. Keeping a value as it was read is not a
-/// transformation a mapping can name: it exists only for a kind whose value is raw JSON.
+/// decides. [`ValueConversion::resolve`] makes that choice, and [`ValueConversion::resolve_assembled`]
+/// makes it for a declaration assembling its value from nested `mappings`. Keeping a value as it was
+/// read or assembled is not a transformation a mapping can name: it exists only for a kind whose
+/// value is raw JSON, and for an object assembled from nested `mappings` under no transformation.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum ValueConversion {
     /// Convert through the named transformation.
     Transform(Transformation),
 
-    /// Keep the value read from the source as it is: no coercion, no stringification, and no
-    /// filtering by JSON type.
+    /// Keep the value read from the source, or assembled from nested `mappings`, as it is: no
+    /// coercion, no stringification, and no filtering by JSON type.
     Verbatim,
 
     /// Read text from the source as the JSON it is written as, then keep the result, and any value
@@ -36,6 +38,31 @@ impl ValueConversion {
             None => ValueConversion::default_for(kind),
             Some(Transformation::Json) if matches!(kind, NgsiLdAttributeKind::JsonProperty) => ValueConversion::Decoded,
             Some(transformation) => ValueConversion::Transform(transformation),
+        }
+    }
+
+    /// The conversion an attribute of `kind` declaring `transformation`, or none, uses for the object
+    /// its nested `mappings` assemble.
+    ///
+    /// A declared transformation converts the object exactly as [`ValueConversion::resolve`] would
+    /// convert a value read from one source. Naming none keeps the object as assembled, since the
+    /// mappings already spell out its structure field by field, except on a `GeoProperty`, whose
+    /// value shall be a `GeoJSON` geometry (ETSI GS CIM 009 v1.9.1 clause 4.7.1): there the object is
+    /// read as the geometry it spells, as [`ValueConversion::default_for`] reads one from a source.
+    #[must_use]
+    pub const fn resolve_assembled(kind: NgsiLdAttributeKind, transformation: Option<Transformation>) -> ValueConversion {
+        match (kind, transformation) {
+            (NgsiLdAttributeKind::GeoProperty, None) | (_, Some(_)) => ValueConversion::resolve(kind, transformation),
+            (
+                NgsiLdAttributeKind::Property
+                | NgsiLdAttributeKind::Relationship
+                | NgsiLdAttributeKind::ListProperty
+                | NgsiLdAttributeKind::ListRelationship
+                | NgsiLdAttributeKind::LanguageProperty
+                | NgsiLdAttributeKind::VocabProperty
+                | NgsiLdAttributeKind::JsonProperty,
+                None,
+            ) => ValueConversion::Verbatim,
         }
     }
 
@@ -184,6 +211,43 @@ mod tests {
                 ValueConversion::resolve(kind, Some(Transformation::Json)),
                 ValueConversion::Transform(Transformation::Json),
                 "{kind:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn an_assembled_object_under_no_transformation_is_kept_as_assembled() {
+        for kind in [
+            NgsiLdAttributeKind::Property,
+            NgsiLdAttributeKind::ListProperty,
+            NgsiLdAttributeKind::JsonProperty,
+            NgsiLdAttributeKind::LanguageProperty,
+            NgsiLdAttributeKind::VocabProperty,
+        ] {
+            assert_eq!(ValueConversion::resolve_assembled(kind, None), ValueConversion::Verbatim, "{kind:?}");
+        }
+    }
+
+    #[test]
+    fn an_assembled_object_on_a_geo_property_under_no_transformation_is_read_as_a_geometry() {
+        assert_eq!(
+            ValueConversion::resolve_assembled(NgsiLdAttributeKind::GeoProperty, None),
+            ValueConversion::Transform(Transformation::Geometry)
+        );
+    }
+
+    #[test]
+    fn an_assembled_object_converts_through_a_declared_transformation_as_a_source_value_does() {
+        for (kind, transformation) in [
+            (NgsiLdAttributeKind::Property, Transformation::String),
+            (NgsiLdAttributeKind::Property, Transformation::Array),
+            (NgsiLdAttributeKind::Property, Transformation::MultiPoint),
+            (NgsiLdAttributeKind::JsonProperty, Transformation::Json),
+        ] {
+            assert_eq!(
+                ValueConversion::resolve_assembled(kind, Some(transformation)),
+                ValueConversion::resolve(kind, Some(transformation)),
+                "{kind:?} {transformation}"
             );
         }
     }

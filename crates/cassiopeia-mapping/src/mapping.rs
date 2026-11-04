@@ -1,8 +1,8 @@
 use crate::{
     attribute::{Attribute, Attributes},
+    conversion_validation::validate,
     entity_members::EntityMembers,
     error::{MappingError, Result},
-    geometry_validation::validate,
     identity::Identity,
     mapping_role::MappingRole,
     observed_at::ObservedAt,

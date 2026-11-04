@@ -18,6 +18,10 @@ pub enum RequiredValue {
     /// The `object` transformation keeps a JSON object, or reads text as one (RFC 8259 clause 4).
     #[strum(to_string = "a JSON object")]
     JsonObject,
+    /// A geometry transformation reads an object assembled from nested `mappings` as the `GeoJSON`
+    /// geometry it spells (RFC 7946 clause 3.1).
+    #[strum(to_string = "a GeoJSON geometry")]
+    Geometry,
 }
 
 #[cfg(test)]
@@ -31,5 +35,6 @@ mod tests {
         assert_eq!(RequiredValue::LanguageMap.to_string(), "a language map of text keyed by language tag");
         assert_eq!(RequiredValue::Json.to_string(), "JSON");
         assert_eq!(RequiredValue::JsonObject.to_string(), "a JSON object");
+        assert_eq!(RequiredValue::Geometry.to_string(), "a GeoJSON geometry");
     }
 }

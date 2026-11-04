@@ -25,7 +25,8 @@ pub(crate) enum AttributeRefusal {
     },
     /// The source carried a value the declaration cannot use: text that is no IRI for a
     /// `VocabProperty`, anything but tagged text for a `LanguageProperty`, text the `json`
-    /// transformation cannot read, or a value the `object` transformation finds no object in.
+    /// transformation cannot read, a value the `object` transformation finds no object in, or an
+    /// object assembled from nested `mappings` that a geometry transformation finds no geometry in.
     #[from(ignore)]
     UnusableValue {
         /// What the kind or transformation needed the value to be.

@@ -179,15 +179,21 @@ impl Attribute {
         AttributeIterator::new(self)
     }
 
-    /// How this attribute's source values become its value: the declared `transformation`, or, when
-    /// none is declared, the default of its NGSI-LD kind, as [`ValueConversion::resolve`] decides.
+    /// How this attribute's source values, or the object its nested `mappings` assemble, become its
+    /// value: the declared `transformation`, or, when none is declared, the default of its NGSI-LD
+    /// kind, as [`ValueConversion::resolve`] decides for source values and
+    /// [`ValueConversion::resolve_assembled`] for an assembled object.
     ///
-    /// Every path that reads source values resolves its conversion here: the attribute itself, each
-    /// of its `instances` (which share its `type` and `transformation`), and each `languageMap`
-    /// entry, nested mapping, and sub-attribute through its own declaration.
+    /// Every path that converts a value resolves its conversion here: the attribute itself, each of
+    /// its `instances` (which share its `type` and `transformation`), and each `languageMap` entry,
+    /// nested mapping, and sub-attribute through its own declaration.
     #[must_use]
-    pub const fn conversion(&self) -> ValueConversion {
-        ValueConversion::resolve(self.kind, self.transformation)
+    pub fn conversion(&self) -> ValueConversion {
+        if self.mappings.is_empty() {
+            ValueConversion::resolve(self.kind, self.transformation)
+        } else {
+            ValueConversion::resolve_assembled(self.kind, self.transformation)
+        }
     }
 
     /// The raw `observedAt` template declared directly on this attribute, if any.
@@ -297,6 +303,20 @@ mod tests {
         let attribute = parse(r#"{"type": "JsonProperty", "source": "{{ payload }}", "transformation": "json"}"#);
 
         assert_eq!(attribute.conversion(), ValueConversion::Decoded);
+    }
+
+    #[test]
+    fn a_property_assembled_from_nested_mappings_without_a_transformation_keeps_the_object() {
+        let attribute = parse(r#"{"mappings": {"city": {"source": "{{ city }}"}}}"#);
+
+        assert_eq!(attribute.conversion(), ValueConversion::Verbatim);
+    }
+
+    #[test]
+    fn a_property_assembled_from_nested_mappings_converts_through_its_declared_transformation() {
+        let attribute = parse(r#"{"transformation": "string", "mappings": {"city": {"source": "{{ city }}"}}}"#);
+
+        assert_eq!(attribute.conversion(), ValueConversion::Transform(Transformation::String));
     }
 
     #[test]

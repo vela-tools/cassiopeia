@@ -2119,6 +2119,95 @@ mod tests {
     }
 
     #[test]
+    fn an_object_assembled_from_nested_mappings_without_a_transformation_is_kept_as_assembled() {
+        let value = extract_label(
+            r#"{ mappings: { street: { source: "{{ street }}" }, city: { source: "{{ city }}" } } }"#,
+            json!({"street": "Ring", "city": "Wien"}),
+        );
+
+        assert_eq!(value, Some(Value::try_from(json!({"street": "Ring", "city": "Wien"})).unwrap()));
+    }
+
+    #[test]
+    fn an_object_assembled_from_nested_mappings_under_a_string_transformation_becomes_its_compact_json_text() {
+        let value = extract_label(
+            r#"{ transformation: "string", mappings: { street: { source: "{{ street }}" }, city: { source: "{{ city }}" } } }"#,
+            json!({"street": "Ring", "city": "Wien"}),
+        );
+
+        assert_eq!(value, Some(Value::String(r#"{"street":"Ring","city":"Wien"}"#.into())));
+    }
+
+    #[test]
+    fn an_object_assembled_from_nested_mappings_under_an_array_transformation_becomes_a_list_of_the_object() {
+        let value = extract_label(
+            r#"{ transformation: "array", mappings: { street: { source: "{{ street }}" } } }"#,
+            json!({"street": "Ring"}),
+        );
+
+        assert_eq!(value, Some(Value::try_from(json!([{"street": "Ring"}])).unwrap()));
+    }
+
+    #[test]
+    fn an_object_assembled_from_nested_mappings_under_the_json_transformation_is_kept_as_assembled() {
+        let value = extract_label(
+            r#"{ transformation: "json", mappings: { street: { source: "{{ street }}" } } }"#,
+            json!({"street": "Ring"}),
+        );
+
+        assert_eq!(value, Some(Value::try_from(json!({"street": "Ring"})).unwrap()));
+    }
+
+    #[test]
+    fn a_point_assembled_from_nested_mappings_under_a_multipoint_transformation_becomes_a_multipoint() {
+        let value = extract_label(
+            r#"{
+                transformation: "multipoint",
+                mappings: { type: { source: "Point" }, coordinates: { source: ["{{ lon }}", "{{ lat }}"], transformation: "array" } },
+            }"#,
+            json!({"lon": 16.37, "lat": 48.2}),
+        );
+
+        let expected: NgsiLdGeometry = serde_json::from_value(json!({"type": "MultiPoint", "coordinates": [[16.37, 48.2]]})).unwrap();
+        assert_eq!(value, Some(Value::Geospatial(Box::new(expected))));
+    }
+
+    /// Extracts `label` over one record and returns it with every unusable value the extraction
+    /// recorded, as the attribute path, the requirement, and the first value met.
+    fn extract_label_with_unusable(declaration: &str, record: JsonValue) -> (Option<Value>, Vec<(String, RequiredValue, String)>) {
+        let dropped = DroppedAttributes::new();
+        let value = extract_label_recording(declaration, record, &dropped);
+        let recorded = BatchSink::from(dropped.unusable_values)
+            .into_entries()
+            .map(|(unusable, record)| (unusable.attribute.to_string(), unusable.required, record.example.to_string()))
+            .collect();
+
+        (value, recorded)
+    }
+
+    #[test]
+    fn an_object_assembled_from_nested_mappings_that_spells_no_geometry_under_a_point_transformation_is_dropped_and_recorded() {
+        let (value, recorded) = extract_label_with_unusable(
+            r#"{ transformation: "point", mappings: { street: { source: "{{ street }}" } } }"#,
+            json!({"street": "Ring"}),
+        );
+
+        assert_eq!(value, None);
+        assert_eq!(recorded, [("label".to_owned(), RequiredValue::Geometry, r#"{"street":"Ring"}"#.to_owned())]);
+    }
+
+    #[test]
+    fn an_object_assembled_from_nested_mappings_that_spells_no_geometry_under_a_geo_property_is_dropped_and_recorded() {
+        let (value, recorded) = extract_label_with_unusable(
+            r#"{ type: "GeoProperty", mappings: { street: { source: "{{ street }}" } } }"#,
+            json!({"street": "Ring"}),
+        );
+
+        assert_eq!(value, None);
+        assert_eq!(recorded, [("label".to_owned(), RequiredValue::Geometry, r#"{"street":"Ring"}"#.to_owned())]);
+    }
+
+    #[test]
     fn list_property_instances_without_a_transformation_each_take_their_field_array_as_their_list() {
         let resolved = resolve_label(
             r#"{
