@@ -18,8 +18,8 @@ pub enum RequiredValue {
     /// The `object` transformation keeps a JSON object, or reads text as one (RFC 8259 clause 4).
     #[strum(to_string = "a JSON object")]
     JsonObject,
-    /// A geometry transformation reads an object assembled from nested `mappings` as the `GeoJSON`
-    /// geometry it spells (RFC 7946 clause 3.1).
+    /// A geometry transformation, and a `GeoProperty` declaring none, reads a value as the `GeoJSON`
+    /// geometry it spells (RFC 7946 clause 3.1), or as the coordinates of the type it names.
     #[strum(to_string = "a GeoJSON geometry")]
     Geometry,
 }

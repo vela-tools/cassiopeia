@@ -11,7 +11,7 @@ use cassiopeia_extractor::{required_value::RequiredValue, unusable_value::Unusab
 /// The code a value its kind cannot hold, or its transformation cannot read, is published under.
 ///
 /// A non-IRI vocabulary value, a value that is no language map, text that is not JSON, a value that
-/// is no JSON object, and an assembled object that is no geometry are different mistakes with
+/// is no JSON object, and a value that spells no geometry are different mistakes with
 /// different fixes, so each publishes its own code.
 const fn code(required: RequiredValue) -> DiagnosticCode {
     match required {
@@ -19,7 +19,7 @@ const fn code(required: RequiredValue) -> DiagnosticCode {
         RequiredValue::LanguageMap => DiagnosticCode::Extractor(ExtractorCode::LanguageMapMisshapen),
         RequiredValue::Json => DiagnosticCode::Extractor(ExtractorCode::JsonTextUnreadable),
         RequiredValue::JsonObject => DiagnosticCode::Extractor(ExtractorCode::ObjectMisshapen),
-        RequiredValue::Geometry => DiagnosticCode::Extractor(ExtractorCode::ObjectNotAGeometry),
+        RequiredValue::Geometry => DiagnosticCode::Extractor(ExtractorCode::GeometryUnreadable),
     }
 }
 
@@ -128,7 +128,7 @@ mod tests {
     }
 
     #[test]
-    fn an_assembled_object_that_is_no_geometry_is_named_under_its_own_code() {
+    fn a_value_that_is_no_geometry_is_named_under_its_own_code() {
         let sink = RecordingReporter::new();
         let unusable = UnusableValues::new();
         unusable.record(
@@ -141,7 +141,7 @@ mod tests {
 
         let reported = sink.diagnostics();
         assert_eq!(reported.len(), 1);
-        assert_eq!(reported[0].code, DiagnosticCode::Extractor(ExtractorCode::ObjectNotAGeometry));
+        assert_eq!(reported[0].code, DiagnosticCode::Extractor(ExtractorCode::GeometryUnreadable));
         assert_eq!(
             reported[0].headline,
             r#"Attribute `location` dropped: `{"street":"Ring"}` is not a GeoJSON geometry"#

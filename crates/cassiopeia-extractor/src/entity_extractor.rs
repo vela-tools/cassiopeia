@@ -1921,25 +1921,31 @@ mod tests {
     }
 
     #[test]
-    fn a_geo_property_over_text_that_is_no_geometry_is_absent_without_a_refusal_with_or_without_a_transformation() {
+    fn a_geo_property_over_a_value_that_is_no_geometry_is_dropped_and_recorded_with_or_without_a_transformation() {
         for declaration in [
             r#"{ type: "GeoProperty", source: "{{ geometry }}" }"#,
             r#"{ type: "GeoProperty", source: "{{ geometry }}", transformation: "geometry" }"#,
         ] {
-            let dropped = DroppedAttributes::new();
-            let value = extract_label_recording(declaration, json!({"geometry": "somewhere near the river"}), &dropped);
+            for (geometry, quoted) in [
+                (json!("somewhere near the river"), "somewhere near the river"),
+                (json!({"type": "Point"}), r#"{"type":"Point"}"#),
+                (json!(42), "42"),
+            ] {
+                let (value, recorded) = extract_label_with_unusable(declaration, json!({"geometry": geometry}));
 
-            assert_eq!(value, None, "{declaration}");
-            assert!(dropped.geometries.is_empty(), "{declaration}");
+                assert_eq!(value, None, "{declaration} {quoted}");
+                assert_eq!(recorded, [("label".to_owned(), RequiredValue::Geometry, quoted.to_owned())], "{declaration}");
+            }
         }
     }
 
     #[test]
-    fn a_geo_property_without_a_transformation_over_a_null_or_blank_field_is_absent() {
-        for geometry in [JsonValue::Null, json!(""), json!("  ")] {
-            let value = extract_label(r#"{ type: "GeoProperty", source: "{{ geometry }}" }"#, json!({"geometry": geometry}));
+    fn a_geo_property_without_a_transformation_over_a_missing_null_or_blank_field_is_absent_without_a_refusal() {
+        for record in [json!({}), json!({"geometry": null}), json!({"geometry": ""}), json!({"geometry": "  "})] {
+            let (value, recorded) = extract_label_with_unusable(r#"{ type: "GeoProperty", source: "{{ geometry }}" }"#, record);
 
             assert_eq!(value, None);
+            assert!(recorded.is_empty(), "{recorded:?}");
         }
     }
 
@@ -2064,6 +2070,26 @@ mod tests {
         let entries = BatchSink::from(dropped.geometries).into_entries().collect::<Vec<_>>();
         assert_eq!(entries.len(), 1);
         assert_eq!(entries[0].0.attribute, name("footprint"));
+    }
+
+    #[test]
+    fn a_geo_property_sub_attribute_over_a_value_that_is_no_geometry_is_dropped_on_its_own_and_recorded_under_its_path() {
+        let dropped = DroppedAttributes::new();
+        let footprint = extract_footprint(
+            r#"{ type: "GeoProperty", source: "{{ geometry }}" }"#,
+            json!({"id": "1", "geometry": {"type": "Point"}}),
+            &dropped,
+        );
+
+        assert_eq!(footprint, None);
+        let recorded = BatchSink::from(dropped.unusable_values)
+            .into_entries()
+            .map(|(unusable, record)| (unusable.attribute.to_string(), unusable.required, record.example.to_string()))
+            .collect::<Vec<_>>();
+        assert_eq!(
+            recorded,
+            [("name.footprint".to_owned(), RequiredValue::Geometry, r#"{"type":"Point"}"#.to_owned())]
+        );
     }
 
     #[test]

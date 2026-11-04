@@ -28,9 +28,9 @@ pub enum ExtractorCode {
     /// An attribute declared the `object` transformation and its source carried no JSON object,
     /// either as a value or as JSON text, so the attribute was dropped.
     ObjectMisshapen,
-    /// An attribute assembled an object from nested `mappings` and declared a geometry
-    /// transformation, but the object spells no `GeoJSON` geometry, so the attribute was dropped.
-    ObjectNotAGeometry,
+    /// An attribute read as a geometry, a `GeoProperty` or one declaring a geometry transformation,
+    /// carried a value that spells no `GeoJSON` geometry, so the attribute was dropped.
+    GeometryUnreadable,
 }
 
 #[cfg(test)]
@@ -48,6 +48,6 @@ mod tests {
         assert_eq!(ExtractorCode::LanguageMapMisshapen.to_string(), "language-map-misshapen");
         assert_eq!(ExtractorCode::JsonTextUnreadable.to_string(), "json-text-unreadable");
         assert_eq!(ExtractorCode::ObjectMisshapen.to_string(), "object-misshapen");
-        assert_eq!(ExtractorCode::ObjectNotAGeometry.to_string(), "object-not-a-geometry");
+        assert_eq!(ExtractorCode::GeometryUnreadable.to_string(), "geometry-unreadable");
     }
 }

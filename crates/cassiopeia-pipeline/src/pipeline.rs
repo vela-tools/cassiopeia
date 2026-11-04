@@ -1311,17 +1311,33 @@ mod tests {
     }
 
     #[test]
-    fn a_geo_property_sub_attribute_over_text_that_is_no_geometry_or_over_null_is_absent_without_a_warning() {
-        for (store, geometry) in STORES
-            .into_iter()
-            .flat_map(|store| [(store, json!("somewhere near the river")), (store, Value::Null)])
-        {
+    fn a_geo_property_sub_attribute_over_null_or_blank_text_is_absent_without_a_warning() {
+        for (store, geometry) in STORES.into_iter().flat_map(|store| [(store, json!("")), (store, Value::Null)]) {
             let outcome = run_zone_footprint(store, "", &geometry);
 
             let name = &outcome.entities[0]["name"];
             assert_eq!(name["value"], "square", "{store:?} {geometry}");
             assert!(name.get("footprint").is_none(), "{store:?} {geometry}: {name:?}");
             assert_eq!(outcome.warnings, 0, "{store:?} {geometry}");
+        }
+    }
+
+    #[test]
+    fn a_geo_property_sub_attribute_over_a_value_that_is_no_geometry_is_dropped_with_a_warning_and_the_parent_still_published() {
+        for (store, geometry) in STORES.into_iter().flat_map(|store| {
+            [
+                (store, json!("somewhere near the river")),
+                (store, json!({ "type": "Point" })),
+                (store, json!(42)),
+            ]
+        }) {
+            let outcome = run_zone_footprint(store, "", &geometry);
+
+            assert_eq!(entity_ids(&outcome), ["urn:ngsi-ld:Zone:square"], "{store:?} {geometry}");
+            let name = &outcome.entities[0]["name"];
+            assert_eq!(name["value"], "square", "{store:?} {geometry}");
+            assert!(name.get("footprint").is_none(), "{store:?} {geometry}: {name:?}");
+            assert_eq!(outcome.warnings, 1, "{store:?} {geometry}");
         }
     }
 

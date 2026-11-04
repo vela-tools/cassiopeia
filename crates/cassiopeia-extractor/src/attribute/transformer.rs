@@ -1,5 +1,5 @@
 use crate::{attribute::refusal::AttributeRefusal, required_value::RequiredValue};
-use cassiopeia_geometry::{error::GeometryError, policy::GeometryPolicy, target::GeometryTarget};
+use cassiopeia_geometry::{policy::GeometryPolicy, target::GeometryTarget};
 use cassiopeia_ir::attribute_content::AttributeContent;
 use cassiopeia_mapping::{transformation::Transformation, value_conversion::ValueConversion};
 use cassiopeia_ngsi_ld::value::{
@@ -46,8 +46,8 @@ impl Transformer {
     ///
     /// `Ok(None)` means the source carried no value. Four conversions can refuse instead: a
     /// transformation naming a geometry type routes through the geometry lattice, where the source
-    /// may carry a geometry a `GeoProperty` cannot hold or one this mapping did not authorise
-    /// converting; a temporal transformation refuses text that reads as no supported spelling of a
+    /// may carry no geometry at all, a geometry a `GeoProperty` cannot hold, or one this mapping did
+    /// not authorise converting; a temporal transformation refuses text that reads as no supported spelling of a
     /// date-time; the `json` and `object` transformations, and a decoded conversion, refuse text
     /// that does not read as the JSON they ask for; and raw JSON that is no object or array of
     /// objects is no `JsonProperty` payload. Every other conversion drops an unusable value and
@@ -66,10 +66,7 @@ impl Transformer {
             ValueConversion::Decoded => Ok(Self::keep_as_read(Self::decode(parts)?)?.map(AttributeContent::Json)),
             ValueConversion::Transform(transformation) => {
                 let value = match transformation.geometry_target() {
-                    Some(target) => match Self::merge_structured(parts, omitted) {
-                        Some(merged) => Self::coerce_geometry(&merged, target, geometry)?,
-                        None => None,
-                    },
+                    Some(target) => Self::coerce_geometry_parts(parts, target, geometry, omitted)?,
                     None => Self::coerce_value(parts, transformation, omitted)?,
                 };
                 Ok(value.map(AttributeContent::Value))
@@ -87,9 +84,9 @@ impl Transformer {
     ///
     /// # Errors
     /// Returns the [`AttributeRefusal`] naming what the attribute could not take: under a geometry
-    /// transformation, a geometry the declared type cannot hold, or, since the object is there and
-    /// is not simply absent, [`RequiredValue::Geometry`] quoting an object that spells no geometry
-    /// at all; under any other transformation, what that transformation refuses.
+    /// transformation, a geometry the declared type cannot hold, or [`RequiredValue::Geometry`]
+    /// quoting an object that spells no geometry at all; under any other transformation, what that
+    /// transformation refuses.
     pub(crate) fn apply_to_object(
         object: ValueObject,
         conversion: ValueConversion,
@@ -100,10 +97,7 @@ impl Transformer {
         let value = match conversion {
             ValueConversion::Verbatim | ValueConversion::Decoded => Some(object),
             ValueConversion::Transform(transformation) => match transformation.geometry_target() {
-                Some(target) => match Self::coerce_geometry(&object, target, geometry)? {
-                    Some(geometry) => Some(geometry),
-                    None => return Err(AttributeRefusal::unusable(RequiredValue::Geometry, &object.to_string())),
-                },
+                Some(target) => Some(Self::coerce_geometry(&object, target, geometry)?),
                 None => Self::coerce_merged(object, transformation, omitted)?,
             },
         };
@@ -387,21 +381,60 @@ impl Transformer {
         }
     }
 
-    /// Reads the merged value as the geometry the transformation names, under the mapping's policy.
+    /// Reads the source parts as the geometry the transformation names, under the mapping's policy.
     ///
-    /// A value that carries no geometry at all yields no value, so the attribute is simply omitted,
-    /// the way an absent source field always has been. A value that carries a geometry which cannot
-    /// legally become the declared type is refused instead, so the run can say what it dropped and
-    /// why. A geometry assembled from nested `mappings` is read here too, with no source parts left
-    /// to merge (see [`Transformer::apply_to_object`]).
+    /// The parts carry no value when every one of them is null or blank text: CSV and spreadsheet
+    /// sources spell an empty field as an empty string, so an empty cell, or a pair of empty
+    /// coordinate cells, is a value the record does not carry, and naming every one would drown the
+    /// run. Any other parts are merged and read (see [`Transformer::coerce_geometry`]).
     ///
     /// # Errors
-    /// Returns the [`GeometryError`] naming why the geometry cannot become the declared type.
-    pub(crate) fn coerce_geometry(value: &Value, target: GeometryTarget, policy: Option<&GeometryPolicy>) -> Result<Option<Value>, GeometryError> {
-        let policy = policy.copied().unwrap_or_default();
-        let geometry = value.to_geometry(target, &policy)?;
+    /// Returns the [`AttributeRefusal`] naming why the merged value is no geometry the attribute can
+    /// hold.
+    fn coerce_geometry_parts(
+        parts: SourceParts,
+        target: GeometryTarget,
+        policy: Option<&GeometryPolicy>,
+        omitted: &mut OmittedNulls,
+    ) -> Result<Option<Value>, AttributeRefusal> {
+        if parts.iter().all(Self::is_absent) {
+            return Ok(None);
+        }
 
-        Ok(geometry.map(|geometry| Value::Geospatial(Box::new(geometry))))
+        Self::merge_structured(parts, omitted).map_or(Ok(None), |merged| Self::coerce_geometry(&merged, target, policy).map(Some))
+    }
+
+    /// Whether a source part is a field the record does not carry: null, or blank text.
+    fn is_absent(part: &JsonValue) -> bool {
+        match part {
+            JsonValue::Null => true,
+            JsonValue::String(text) => text.trim().is_empty(),
+            JsonValue::Bool(_) | JsonValue::Number(_) | JsonValue::Array(_) | JsonValue::Object(_) => false,
+        }
+    }
+
+    /// Reads a value that is there as the geometry the transformation names, under the mapping's
+    /// policy.
+    ///
+    /// The value is there, so one that spells no geometry at all is refused rather than left out,
+    /// the way unreadable text under `datetime` is: a `GeoProperty` that vanishes unannounced is
+    /// what leaves a published entity without its location. A geometry assembled from nested
+    /// `mappings` is read here too, with no source parts left to merge (see
+    /// [`Transformer::apply_to_object`]).
+    ///
+    /// # Errors
+    /// Returns [`AttributeRefusal::UnusableValue`] quoting a value that spells no geometry, text as
+    /// written and any other value as its rendering, or [`AttributeRefusal::Geometry`] naming why
+    /// the geometry it spells cannot become the declared type.
+    fn coerce_geometry(value: &Value, target: GeometryTarget, policy: Option<&GeometryPolicy>) -> Result<Value, AttributeRefusal> {
+        let policy = policy.copied().unwrap_or_default();
+        match value.to_geometry(target, &policy)? {
+            Some(geometry) => Ok(Value::Geospatial(Box::new(geometry))),
+            None => Err(AttributeRefusal::unusable(
+                RequiredValue::Geometry,
+                &value.as_str().map_or_else(|| value.to_string(), str::to_owned),
+            )),
+        }
     }
 
     /// Coerces the merged value to a temporal value of the given kind.
@@ -1174,10 +1207,11 @@ mod tests {
     }
 
     #[test]
-    fn a_geometry_transformation_on_a_non_geometry_value_is_null() {
-        let value = converted(smallvec![json!("not a geometry")], ValueConversion::Transform(Transformation::Geometry), None);
-
-        assert_eq!(value, None);
+    fn a_geometry_transformation_on_text_that_is_no_geometry_is_refused_quoting_the_text() {
+        assert_eq!(
+            apply(smallvec![json!("not a geometry")], ValueConversion::Transform(Transformation::Geometry), None),
+            Err(AttributeRefusal::unusable(RequiredValue::Geometry, "not a geometry"))
+        );
     }
 
     #[test]
@@ -1207,12 +1241,43 @@ mod tests {
     }
 
     #[test]
-    fn a_value_carrying_no_geometry_under_the_geo_property_default_is_no_value_rather_than_a_refusal() {
-        for part in [json!("not a geometry"), json!(""), json!("  "), json!(null)] {
+    fn a_null_or_blank_part_under_the_geo_property_default_is_no_value_rather_than_a_refusal() {
+        for part in [json!(""), json!("  "), json!(null)] {
             let value = converted(smallvec![part], default_of(NgsiLdAttributeKind::GeoProperty), None);
 
             assert_eq!(value, None, "{value:?}");
         }
+    }
+
+    #[test]
+    fn blank_or_null_coordinate_parts_under_a_point_transformation_are_no_value_rather_than_a_refusal() {
+        let value = converted(smallvec![json!(""), json!(null)], ValueConversion::Transform(Transformation::Point), None);
+
+        assert_eq!(value, None);
+    }
+
+    #[test]
+    fn a_value_spelling_no_geometry_under_the_geo_property_default_is_refused_quoting_it() {
+        for (part, quoted) in [
+            (json!("not geojson"), "not geojson"),
+            (json!({"type": "Point"}), r#"{"type":"Point"}"#),
+            (json!(42), "42"),
+            (json!(true), "true"),
+        ] {
+            assert_eq!(
+                apply(smallvec![part], default_of(NgsiLdAttributeKind::GeoProperty), None),
+                Err(AttributeRefusal::unusable(RequiredValue::Geometry, quoted)),
+                "{quoted}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_coordinate_part_left_blank_beside_one_present_under_a_point_transformation_is_refused_quoting_both() {
+        assert_eq!(
+            apply(smallvec![json!(""), json!("46.0")], ValueConversion::Transform(Transformation::Point), None),
+            Err(AttributeRefusal::unusable(RequiredValue::Geometry, r#"["","46.0"]"#))
+        );
     }
 
     #[test]
