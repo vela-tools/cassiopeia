@@ -1,6 +1,7 @@
 use crate::{
     error::ExpanderError,
     expander::Expander,
+    expansion_losses::ExpansionLosses,
     expiry_resolver::ExpiryResolver,
     router::MappingRouter,
     urn::{error::UrnError, generator::UrnGenerator},
@@ -17,7 +18,6 @@ use cassiopeia_ir::{
 };
 use cassiopeia_mapping::{attribute::Attribute, mapping::Mapping, template::resolver::TemplateResolver};
 use cassiopeia_ngsi_ld::entity::{attribute::NgsiLdAttributeKind, name::NameBuf};
-use cassiopeia_unreadable_timestamps::unreadable_expiries::UnreadableExpiries;
 use rayon::prelude::*;
 use serde_json::{Map, Value, json};
 use std::sync::Arc;
@@ -40,6 +40,42 @@ pub struct GenericExpander {
     /// top-level `vars` key, so a mapping reads them as `{{ vars.<name> }}`. Empty when the run
     /// declares none, in which case no key is inserted.
     vars: Map<String, Value>,
+}
+
+/// The record one expansion is working through: its entity, its data, and where its losses go.
+///
+/// Every relationship the record declares is minted against the same three, so they travel
+/// together rather than as three parameters threaded through each minting step.
+struct Expansion<'a> {
+    /// The entity the record expands into, which every link it loses is recorded against.
+    entity: &'a Urn,
+    /// The record's data, read by every relationship source and synthetic identity.
+    data: &'a Value,
+    /// Where the record's losses are recorded.
+    losses: &'a ExpansionLosses,
+}
+
+impl Expansion<'_> {
+    /// Keeps what minting one link yielded, or nothing when the link names no target.
+    ///
+    /// A source that resolves to no identifier names no target, exactly as an absent foreign key
+    /// does. A template that fails to render is the same gap in the data, so it too costs only the
+    /// link, not the record: the failure is recorded under the relationship's `path`, built only
+    /// then, so the run can still name it. Every other failure is a fault in the mapping and fails
+    /// the record.
+    fn keep<T>(&self, minted: Result<T, UrnError>, path: impl FnOnce() -> RelationshipPath) -> Result<Option<T>, ExpanderError> {
+        match minted {
+            Ok(minted) => Ok(Some(minted)),
+            Err(UrnError::GeneratedIdEmpty { .. }) => Ok(None),
+            Err(UrnError::Template(error)) => {
+                self.losses.links.record(&path(), self.entity, error);
+                Ok(None)
+            }
+            Err(other @ (UrnError::BuildUrn { .. } | UrnError::InvalidScope { .. } | UrnError::RelationshipMissingSource | UrnError::NoRelationshipTarget)) => {
+                Err(other.into())
+            }
+        }
+    }
 }
 
 impl GenericExpander {
@@ -76,19 +112,29 @@ impl GenericExpander {
 
     /// Expands one record's data into a main fragment plus any synthetic-entity fragments, under the
     /// mapping the router selected for it.
-    fn expand_value(&self, mapping: &Arc<Mapping>, data: Value, unreadable_expiries: &UnreadableExpiries) -> Result<Vec<Mapped<Fragment>>, ExpanderError> {
+    ///
+    /// Only the entity's own identity, scope, and `expiresAt` fail the record: there is no entity
+    /// without them. A relationship that names no target, because its source resolves to nothing or
+    /// fails to render, is left out, and the entity is still produced without it.
+    fn expand_value(&self, mapping: &Arc<Mapping>, data: Value, losses: &ExpansionLosses) -> Result<Vec<Mapped<Fragment>>, ExpanderError> {
         let mut fragments = Vec::new();
         let mut child_contexts = Vec::new();
 
         let main_urn = self.urn_generator.generate_id(mapping, &data)?;
         let main_scope = self.urn_generator.generate_scope(mapping, &data)?;
-        let main_expires_at = self.expiry_resolver.resolve(mapping, &main_urn, &data, unreadable_expiries)?;
+        let main_expires_at = self.expiry_resolver.resolve(mapping, &main_urn, &data, &losses.expiries)?;
+        let expansion = Expansion {
+            entity: &main_urn,
+            data: &data,
+            losses,
+        };
 
         for (attribute_name, attribute) in mapping.attributes() {
+            let path = || RelationshipPath::flat(attribute_name.clone());
             if let Some(synthetic) = attribute.synthetic_entity() {
                 if attribute.target().is_some() && matches!(attribute.kind(), NgsiLdAttributeKind::ListRelationship) {
-                    child_contexts.extend(self.expand_synthetic_targets(attribute_name, attribute, synthetic, &data, unreadable_expiries, &mut fragments)?);
-                } else if let Some(fragment) = self.expand_synthetic_entity(attribute_name, attribute, synthetic, &main_urn, &data, unreadable_expiries)? {
+                    child_contexts.extend(self.expand_synthetic_targets(attribute_name, attribute, synthetic, &expansion, &mut fragments)?);
+                } else if let Some(fragment) = self.expand_synthetic_entity(attribute_name, attribute, synthetic, &expansion)? {
                     fragments.push(fragment);
                 }
             } else if matches!(attribute.kind(), NgsiLdAttributeKind::ListRelationship) && attribute.target().is_some() && attribute.instances().is_some() {
@@ -97,7 +143,8 @@ impl GenericExpander {
                 // instance that minted it, so the instance boundaries reach the transformer intact
                 // however many tokens an instance dropped.
                 for (index, instance) in attribute.instances().iter().flatten().enumerate() {
-                    for child_urn in self.urn_generator.generate_instance_child_ids(instance, attribute, &data)? {
+                    let minted = self.urn_generator.generate_instance_child_ids(instance, attribute, &data);
+                    for child_urn in expansion.keep(minted, path)?.into_iter().flatten() {
                         child_contexts.push(ParentContext::new(
                             ParentContextType::Child(child_urn),
                             Self::instance_key(attribute_name, index),
@@ -107,37 +154,26 @@ impl GenericExpander {
             } else if attribute.target().is_some() && matches!(attribute.kind(), NgsiLdAttributeKind::ListRelationship) {
                 // A list relationship fans its source out into one object per identifier, so a field
                 // holding several ids links to each of them.
-                for child_urn in self.urn_generator.generate_child_ids(attribute, &data)? {
+                let minted = self.urn_generator.generate_child_ids(attribute, &data);
+                for child_urn in expansion.keep(minted, path)?.into_iter().flatten() {
                     child_contexts.push(ParentContext::new(ParentContextType::Child(child_urn), Self::top_level_key(attribute_name)));
                 }
             } else if Self::is_relationship(attribute) && attribute.target().is_some() {
                 if let Some(instances) = attribute.instances() {
                     // A multi-attribute Relationship (clause 4.5.5) mints one object per instance,
-                    // recorded under that instance; an instance whose foreign key is absent
-                    // contributes no link and so has no object under its index.
+                    // recorded under that instance; an instance that names no target contributes no
+                    // link and so has no object under its index.
                     for (index, instance) in instances.iter().enumerate() {
-                        match self.urn_generator.generate_instance_child_id(instance, attribute, &data) {
-                            Ok(child_urn) => {
-                                child_contexts.push(ParentContext::new(
-                                    ParentContextType::Child(child_urn),
-                                    Self::instance_key(attribute_name, index),
-                                ));
-                            }
-                            Err(UrnError::GeneratedIdEmpty { .. }) => {}
-                            Err(other) => return Err(other.into()),
+                        let minted = self.urn_generator.generate_instance_child_id(instance, attribute, &data);
+                        if let Some(child_urn) = expansion.keep(minted, path)? {
+                            child_contexts.push(ParentContext::new(
+                                ParentContextType::Child(child_urn),
+                                Self::instance_key(attribute_name, index),
+                            ));
                         }
                     }
-                } else {
-                    match self.urn_generator.generate_child_id(attribute, &data) {
-                        Ok(child_urn) => {
-                            child_contexts.push(ParentContext::new(ParentContextType::Child(child_urn), Self::top_level_key(attribute_name)));
-                        }
-                        // A relationship whose foreign key is absent in this record contributes no
-                        // link; the entity is still produced without it, rather than dropped over one
-                        // missing optional value.
-                        Err(UrnError::GeneratedIdEmpty { .. }) => {}
-                        Err(other) => return Err(other.into()),
-                    }
+                } else if let Some(child_urn) = expansion.keep(self.urn_generator.generate_child_id(attribute, &data), path)? {
+                    child_contexts.push(ParentContext::new(ParentContextType::Child(child_urn), Self::top_level_key(attribute_name)));
                 }
             }
         }
@@ -148,7 +184,7 @@ impl GenericExpander {
         if mapping.has_nested_relationships() {
             for (attribute_name, attribute) in mapping.attributes() {
                 let path = RelationshipPath::flat(attribute_name.clone());
-                self.mint_nested_relationships(attribute, &path, &data, &mut child_contexts)?;
+                self.mint_nested_relationships(attribute, &path, &expansion, &mut child_contexts)?;
             }
         }
 
@@ -166,31 +202,33 @@ impl GenericExpander {
     /// is emitted as that target's own entity. Each token is bound as a single-column positional
     /// record, so the synthetic mapping reads it with the same `this[0]` accessor a headerless source
     /// uses. Minting the id once and reusing it for the link keeps the relationship and the emitted
-    /// entity in step, so a token whose synthetic identity names no target contributes neither: the
-    /// rest of the list, and the main entity, are still produced. The parent-child contexts minted
-    /// for the tokens are returned, since they belong to the main entity's own fragment.
+    /// entity in step, so a token whose synthetic identity names no target, or fails to render,
+    /// contributes neither: the rest of the list, and the main entity, are still produced. The
+    /// parent-child contexts minted for the tokens are returned, since they belong to the main
+    /// entity's own fragment.
     fn expand_synthetic_targets(
         &self,
         attribute_name: &NameBuf,
         attribute: &Attribute,
         synthetic: &Mapping,
-        data: &Value,
-        unreadable_expiries: &UnreadableExpiries,
+        expansion: &Expansion<'_>,
         fragments: &mut Vec<Mapped<Fragment>>,
     ) -> Result<Vec<ParentContext>, ExpanderError> {
+        let path = || RelationshipPath::flat(attribute_name.clone());
         let mut child_contexts = Vec::new();
-        for token in self.urn_generator.source_identifiers(attribute, data)? {
+        let tokens = expansion.keep(self.urn_generator.source_identifiers(attribute, expansion.data), path)?;
+        for token in tokens.into_iter().flatten() {
             let mut token_data = json!({ "0": token });
             if let Value::Object(object) = &mut token_data {
                 self.inject_vars(object);
             }
-            let synthetic_urn = match self.urn_generator.generate_id(synthetic, &token_data) {
-                Ok(urn) => urn,
-                Err(UrnError::GeneratedIdEmpty { .. }) => continue,
-                Err(other) => return Err(other.into()),
+            let Some(synthetic_urn) = expansion.keep(self.urn_generator.generate_id(synthetic, &token_data), path)? else {
+                continue;
             };
             let synthetic_scope = self.urn_generator.generate_scope(synthetic, &token_data)?;
-            let synthetic_expires_at = self.expiry_resolver.resolve(synthetic, &synthetic_urn, &token_data, unreadable_expiries)?;
+            let synthetic_expires_at = self
+                .expiry_resolver
+                .resolve(synthetic, &synthetic_urn, &token_data, &expansion.losses.expiries)?;
 
             child_contexts.push(ParentContext::new(
                 ParentContextType::Child(synthetic_urn.clone()),
@@ -210,41 +248,39 @@ impl GenericExpander {
     ///
     /// The link the main entity carries is minted from the synthetic identity, so it always points at
     /// the entity emitted here. A record whose synthetic identity, or whose relationship source,
-    /// resolves to no identifier has no target to emit or link: the attribute contributes nothing and
-    /// the main entity is still produced, exactly as a plain Relationship with an absent foreign key
-    /// and a `ListRelationship` with no tokens behave.
+    /// resolves to no identifier or fails to render has no target to emit or link: the attribute
+    /// contributes nothing and the main entity is still produced, exactly as a plain Relationship
+    /// with an absent foreign key and a `ListRelationship` with no tokens behave.
     fn expand_synthetic_entity(
         &self,
         attribute_name: &NameBuf,
         attribute: &Attribute,
         synthetic: &Mapping,
-        main_urn: &Urn,
-        data: &Value,
-        unreadable_expiries: &UnreadableExpiries,
+        expansion: &Expansion<'_>,
     ) -> Result<Option<Mapped<Fragment>>, ExpanderError> {
-        if attribute.target().is_some() && attribute.source().is_some() {
-            // The minted object is discarded: this only asks whether the relationship source names a
-            // target, under the very definition the plain Relationship path uses.
-            match self.urn_generator.generate_child_id(attribute, data) {
-                Ok(_) => {}
-                Err(UrnError::GeneratedIdEmpty { .. }) => return Ok(None),
-                Err(other) => return Err(other.into()),
-            }
+        let path = || RelationshipPath::flat(attribute_name.clone());
+        // The minted object is discarded: this only asks whether the relationship source names a
+        // target, under the very definition the plain Relationship path uses.
+        if attribute.target().is_some()
+            && attribute.source().is_some()
+            && expansion.keep(self.urn_generator.generate_child_id(attribute, expansion.data), path)?.is_none()
+        {
+            return Ok(None);
         }
 
-        let synthetic_urn = match self.urn_generator.generate_id(synthetic, data) {
-            Ok(urn) => urn,
-            Err(UrnError::GeneratedIdEmpty { .. }) => return Ok(None),
-            Err(other) => return Err(other.into()),
+        let Some(synthetic_urn) = expansion.keep(self.urn_generator.generate_id(synthetic, expansion.data), path)? else {
+            return Ok(None);
         };
-        let synthetic_scope = self.urn_generator.generate_scope(synthetic, data)?;
-        let synthetic_expires_at = self.expiry_resolver.resolve(synthetic, &synthetic_urn, data, unreadable_expiries)?;
+        let synthetic_scope = self.urn_generator.generate_scope(synthetic, expansion.data)?;
+        let synthetic_expires_at = self
+            .expiry_resolver
+            .resolve(synthetic, &synthetic_urn, expansion.data, &expansion.losses.expiries)?;
 
         // The parent context owns its URN and path, while the main entity keeps its own for its fragment.
-        let parent = ParentContext::new(ParentContextType::Parent(main_urn.clone()), Self::top_level_key(attribute_name));
+        let parent = ParentContext::new(ParentContextType::Parent(expansion.entity.clone()), Self::top_level_key(attribute_name));
         // Each synthetic fragment carries its own copy of the source data; the main fragment consumes
         // the record once every attribute has been expanded.
-        let fragment = Fragment::new(data.clone(), synthetic_urn, synthetic_scope, synthetic_expires_at, Some(vec![parent]));
+        let fragment = Fragment::new(expansion.data.clone(), synthetic_urn, synthetic_scope, synthetic_expires_at, Some(vec![parent]));
         // The fragment owns its mapping behind an `Arc`, and the synthetic mapping is only borrowed
         // from the parent attribute here.
         Ok(Some(Mapped::new(fragment, Arc::new(synthetic.clone()))))
@@ -254,16 +290,17 @@ impl GenericExpander {
     /// each under its full [`RelationshipPath`] from the entity.
     ///
     /// The same minting primitives serve top-level and nested relationships, so a nested object is
-    /// shaped identically to a top-level one; only the path differs (multi-segment here). A single
-    /// nested Relationship whose foreign key is absent in this record mints nothing, dropped in
-    /// lockstep with the extractor's per-path lookup, exactly as a top-level relationship is. The walk
-    /// descends every sub-attribute, since a Property sub-attribute may itself carry a nested
-    /// relationship, and a nested relationship a further one.
+    /// shaped identically to a top-level one; only the path differs (multi-segment here). A nested
+    /// relationship that names no target in this record, because its source resolves to nothing or
+    /// fails to render, mints nothing, dropped in lockstep with the extractor's per-path lookup,
+    /// exactly as a top-level relationship is. The walk descends every sub-attribute, since a
+    /// Property sub-attribute may itself carry a nested relationship, and a nested relationship a
+    /// further one.
     fn mint_nested_relationships(
         &self,
         attribute: &Attribute,
         path: &RelationshipPath,
-        data: &Value,
+        expansion: &Expansion<'_>,
         child_contexts: &mut Vec<ParentContext>,
     ) -> Result<(), ExpanderError> {
         let Some(properties) = attribute.properties() else {
@@ -273,34 +310,29 @@ impl GenericExpander {
         for (name, property) in properties {
             let child_path = path.push(name.clone());
             if property.target().is_some() {
-                match property.kind() {
-                    NgsiLdAttributeKind::Relationship => match self.urn_generator.generate_child_id(property, data) {
-                        Ok(child_urn) => child_contexts.push(ParentContext::new(
-                            ParentContextType::Child(child_urn),
-                            RelationshipKey::Path(child_path.clone()),
-                        )),
-                        // A nested relationship whose foreign key is absent contributes no link, exactly
-                        // as an absent top-level relationship does.
-                        Err(UrnError::GeneratedIdEmpty { .. }) => {}
-                        Err(other) => return Err(other.into()),
-                    },
-                    NgsiLdAttributeKind::ListRelationship => {
-                        for child_urn in self.urn_generator.generate_child_ids(property, data)? {
-                            child_contexts.push(ParentContext::new(
-                                ParentContextType::Child(child_urn),
-                                RelationshipKey::Path(child_path.clone()),
-                            ));
-                        }
-                    }
+                let minted = match property.kind() {
+                    NgsiLdAttributeKind::Relationship => expansion
+                        .keep(self.urn_generator.generate_child_id(property, expansion.data), || child_path.clone())?
+                        .into_iter()
+                        .collect(),
+                    NgsiLdAttributeKind::ListRelationship => expansion
+                        .keep(self.urn_generator.generate_child_ids(property, expansion.data), || child_path.clone())?
+                        .unwrap_or_default(),
                     NgsiLdAttributeKind::Property
                     | NgsiLdAttributeKind::GeoProperty
                     | NgsiLdAttributeKind::LanguageProperty
                     | NgsiLdAttributeKind::VocabProperty
                     | NgsiLdAttributeKind::ListProperty
-                    | NgsiLdAttributeKind::JsonProperty => {}
+                    | NgsiLdAttributeKind::JsonProperty => Vec::new(),
+                };
+                for child_urn in minted {
+                    child_contexts.push(ParentContext::new(
+                        ParentContextType::Child(child_urn),
+                        RelationshipKey::Path(child_path.clone()),
+                    ));
                 }
             }
-            self.mint_nested_relationships(property, &child_path, data, child_contexts)?;
+            self.mint_nested_relationships(property, &child_path, expansion, child_contexts)?;
         }
 
         Ok(())
@@ -327,17 +359,17 @@ impl GenericExpander {
 }
 
 impl Expander for GenericExpander {
-    fn expand(&self, record: Record, unreadable_expiries: &UnreadableExpiries) -> Result<Vec<Mapped<Fragment>>, ExpanderError> {
+    fn expand(&self, record: Record, losses: &ExpansionLosses) -> Result<Vec<Mapped<Fragment>>, ExpanderError> {
         let mapping = self.router.select(record.collection().as_ref())?;
         let mut data = record.into_data();
         self.inject_vars(&mut data);
-        self.expand_value(mapping, Value::Object(data), unreadable_expiries)
+        self.expand_value(mapping, Value::Object(data), losses)
     }
 
-    fn expand_batch(&self, records: Vec<Record>, unreadable_expiries: &UnreadableExpiries) -> Vec<Result<Vec<Mapped<Fragment>>, ExpanderError>> {
+    fn expand_batch(&self, records: Vec<Record>, losses: &ExpansionLosses) -> Vec<Result<Vec<Mapped<Fragment>>, ExpanderError>> {
         match self.parallelism {
-            Parallelism::Parallel => records.into_par_iter().map(|record| self.expand(record, unreadable_expiries)).collect(),
-            Parallelism::Sequential => records.into_iter().map(|record| self.expand(record, unreadable_expiries)).collect(),
+            Parallelism::Parallel => records.into_par_iter().map(|record| self.expand(record, losses)).collect(),
+            Parallelism::Sequential => records.into_iter().map(|record| self.expand(record, losses)).collect(),
         }
     }
 }
@@ -348,6 +380,7 @@ mod tests {
         compiler::ExpanderCompiler,
         error::ExpanderError,
         expander::Expander,
+        expansion_losses::ExpansionLosses,
         generic::GenericExpander,
         router::{CollectionRoutes, MappingRouter},
         urn::error::UrnError,
@@ -356,7 +389,6 @@ mod tests {
     use cassiopeia_common::collection::CollectionName;
     use cassiopeia_ir::{fragment::Fragment, mapped::Mapped, parent_context::ParentContextType, record::Record};
     use cassiopeia_mapping::{mapping::Mapping, template::runner::TemplateRunner};
-    use cassiopeia_unreadable_timestamps::unreadable_expiries::UnreadableExpiries;
     use chrono::{TimeZone, Utc};
     use pretty_assertions::assert_eq;
     use serde_json::{Map, Value, json};
@@ -368,16 +400,25 @@ mod tests {
         Arc::new(mapping)
     }
 
-    /// An expander bundled with the fresh expiry-warning sink its expansions record into, so a test
-    /// that cares about the sink can read it and every other test passes it through untouched.
+    /// An expander bundled with the fresh loss sinks its expansions record into, so a test that cares
+    /// about a sink can read it and every other test passes them through untouched.
     struct ExpanderUnderTest {
         expander: GenericExpander,
-        unreadable_expiries: UnreadableExpiries,
+        losses: ExpansionLosses,
     }
 
     impl ExpanderUnderTest {
         fn expand(&self, record: Record) -> Result<Vec<Mapped<Fragment>>, ExpanderError> {
-            Expander::expand(&self.expander, record, &self.unreadable_expiries)
+            Expander::expand(&self.expander, record, &self.losses)
+        }
+
+        /// Every relationship whose template failed, as its dotted path, the first entity that lost
+        /// it, and how many entities did.
+        fn lost_links(self) -> Vec<(String, String, u64)> {
+            BatchSink::from(self.losses.links)
+                .into_entries()
+                .map(|(path, lost)| (path.to_string(), lost.entity.to_string(), lost.occurrences.get()))
+                .collect()
         }
     }
 
@@ -392,7 +433,7 @@ mod tests {
 
         ExpanderUnderTest {
             expander: GenericExpander::new(MappingRouter::Single(mapping), resolver, vars),
-            unreadable_expiries: UnreadableExpiries::new(),
+            losses: ExpansionLosses::new(),
         }
     }
 
@@ -715,7 +756,7 @@ mod tests {
         let fragments = expander.expand(record(json!({"id": 1, "temperature": 21.5}))).unwrap();
 
         assert_eq!(fragments[0].inner().expires_at(), &None);
-        assert!(expander.unreadable_expiries.is_empty());
+        assert!(expander.losses.expiries.is_empty());
     }
 
     #[test]
@@ -736,7 +777,7 @@ mod tests {
 
         assert_eq!(fragments[0].inner().expires_at(), &None);
         assert_eq!(fragments[0].inner().target_urn().to_string(), "urn:ngsi-ld:AirQualityObserved:S-1");
-        let entries = BatchSink::from(expander.unreadable_expiries).into_entries().collect::<Vec<_>>();
+        let entries = BatchSink::from(expander.losses.expiries).into_entries().collect::<Vec<_>>();
         assert_eq!(entries.len(), 1);
         assert_eq!(entries[0].0.as_str(), "AirQualityObserved");
         assert_eq!(entries[0].1.exemplar.to_string(), "urn:ngsi-ld:AirQualityObserved:S-1");
@@ -759,7 +800,7 @@ mod tests {
         let result = expander.expand(record(json!({"id": 1})));
 
         assert!(matches!(result, Err(ExpanderError::Expiry(_))), "{result:?}");
-        assert!(expander.unreadable_expiries.is_empty());
+        assert!(expander.losses.expiries.is_empty());
     }
 
     #[test]
@@ -777,7 +818,7 @@ mod tests {
         let fragments = expander.expand(record(json!({"id": 1, "until": "   "}))).unwrap();
 
         assert_eq!(fragments[0].inner().expires_at(), &None);
-        assert!(expander.unreadable_expiries.is_empty());
+        assert!(expander.losses.expiries.is_empty());
     }
 
     #[test]
@@ -1098,6 +1139,50 @@ mod tests {
         }
     }
 
+    #[test]
+    fn a_synthetic_relationship_whose_identity_fails_to_render_emits_no_target_and_no_link_and_records_the_failure() {
+        let expander = aircraft_expander("{{ missing | split(pat=' ') }}");
+
+        let fragments = expander.expand(record(json!({"0": "Beechcraft Baron", "1": "E7W", "2": "BE58"}))).unwrap();
+
+        assert_only_the_main_aircraft_model(&fragments);
+        assert_eq!(
+            expander.lost_links(),
+            [("belongsToAircraftType".to_string(), "urn:ngsi-ld:AircraftModel:BE58".to_string(), 1)]
+        );
+    }
+
+    #[test]
+    fn a_synthetic_relationship_whose_source_fails_to_render_emits_no_target_and_no_link_and_records_the_failure() {
+        let expander = expander(
+            r#"{
+                version: "v4",
+                dataModel: "AircraftModel",
+                identity: { entityName: "{{ this[2] }}" },
+                attributes: {
+                    belongsToAircraftType: {
+                        source: "{{ this[1] | lower }}",
+                        type: "Relationship",
+                        target: { entity: "AircraftType" },
+                        syntheticEntity: {
+                            dataModel: "AircraftType",
+                            identity: { entityName: "Type-{{ this[2] }}" },
+                            attributes: { codeIATA: { source: "{{ this[1] }}", type: "Property", transformation: "string" } },
+                        },
+                    },
+                },
+            }"#,
+        );
+
+        let fragments = expander.expand(record(json!({"0": "Beechcraft Baron", "1": null, "2": "BE58"}))).unwrap();
+
+        assert_only_the_main_aircraft_model(&fragments);
+        assert_eq!(
+            expander.lost_links(),
+            [("belongsToAircraftType".to_string(), "urn:ngsi-ld:AircraftModel:BE58".to_string(), 1)]
+        );
+    }
+
     fn child_urns(fragment: &Mapped<Fragment>) -> Vec<String> {
         fragment
             .inner()
@@ -1290,16 +1375,17 @@ mod tests {
     const FAILING_SPLIT: &str = r"{{ a | split(pat=' ') }}";
 
     #[test]
-    fn a_failing_list_relationship_instance_template_still_fails_expansion() {
+    fn a_failing_list_relationship_instance_template_drops_that_instance_and_records_the_failure() {
         let expander = route_instances_expander(FAILING_SPLIT);
 
-        let error = expander.expand(record(json!({"id": 1, "a": null, "b": "3"}))).unwrap_err();
+        let fragments = expander.expand(record(json!({"id": 1, "a": null, "b": "3"}))).unwrap();
 
-        assert!(matches!(error, ExpanderError::Urn(UrnError::Template(_))), "{error:?}");
+        assert_eq!(edges(&fragments[0]), [("servesAirports#1".to_string(), "urn:ngsi-ld:Airport:3".to_string())]);
+        assert_eq!(expander.lost_links(), [("servesAirports".to_string(), "urn:ngsi-ld:Route:R-1".to_string(), 1)]);
     }
 
     #[test]
-    fn a_failing_list_relationship_template_still_fails_expansion() {
+    fn a_failing_list_relationship_template_drops_the_link_keeps_the_entity_and_records_the_failure() {
         let expander = expander(&format!(
             r#"{{
                 version: "v4",
@@ -1309,13 +1395,16 @@ mod tests {
             }}"#
         ));
 
-        let error = expander.expand(record(json!({"id": 1, "a": null}))).unwrap_err();
+        let fragments = expander.expand(record(json!({"id": 1, "a": null}))).unwrap();
 
-        assert!(matches!(error, ExpanderError::Urn(UrnError::Template(_))), "{error:?}");
+        assert_eq!(fragments.len(), 1);
+        assert_eq!(urn(&fragments[0]), "urn:ngsi-ld:Route:R-1");
+        assert_eq!(fragments[0].inner().parent_context(), &None);
+        assert_eq!(expander.lost_links(), [("usesEquipment".to_string(), "urn:ngsi-ld:Route:R-1".to_string(), 1)]);
     }
 
     #[test]
-    fn a_failing_per_token_synthetic_identity_template_still_fails_expansion() {
+    fn a_failing_per_token_synthetic_identity_template_drops_that_target_and_its_link_and_records_the_failure() {
         let expander = expander(
             r#"{
                 version: "v4",
@@ -1336,9 +1425,87 @@ mod tests {
             }"#,
         );
 
-        let error = expander.expand(record(json!({"id": 1, "countries": "Nepal"}))).unwrap_err();
+        let fragments = expander.expand(record(json!({"id": 1, "countries": "Nepal China"}))).unwrap();
 
-        assert!(matches!(error, ExpanderError::Urn(UrnError::Template(_))), "{error:?}");
+        assert_eq!(fragments.len(), 1);
+        assert_eq!(urn(&fragments[0]), "urn:ngsi-ld:Mountain:M-1");
+        assert_eq!(fragments[0].inner().parent_context(), &None);
+        assert_eq!(expander.lost_links(), [("hasCountry".to_string(), "urn:ngsi-ld:Mountain:M-1".to_string(), 2)]);
+    }
+
+    /// A `Thing` whose `refRoad` Relationship reads its target through `source`.
+    fn thing_expander(source: &str) -> ExpanderUnderTest {
+        expander(&format!(
+            r#"{{
+                version: "v4",
+                dataModel: "Thing",
+                identity: {{ entityName: "{{{{ id }}}}" }},
+                attributes: {{
+                    name: {{ source: "{{{{ name }}}}" }},
+                    refRoad: {{ type: "Relationship", source: "{source}", target: {{ entity: "Road" }} }},
+                }},
+            }}"#
+        ))
+    }
+
+    #[test]
+    fn a_failing_relationship_source_template_drops_the_link_keeps_the_entity_and_records_the_failure() {
+        let expander = thing_expander("{{ road | lower }}");
+
+        let fragments = expander.expand(record(json!({"id": "B", "name": "Beta", "road": null}))).unwrap();
+
+        assert_eq!(fragments.len(), 1);
+        assert_eq!(urn(&fragments[0]), "urn:ngsi-ld:Thing:B");
+        assert_eq!(fragments[0].inner().parent_context(), &None);
+        assert_eq!(expander.lost_links(), [("refRoad".to_string(), "urn:ngsi-ld:Thing:B".to_string(), 1)]);
+    }
+
+    #[test]
+    fn a_relationship_source_resolving_to_nothing_drops_the_link_without_recording_a_failure() {
+        let expander = thing_expander("{{ road }}");
+
+        let fragments = expander.expand(record(json!({"id": "B", "name": "Beta", "road": null}))).unwrap();
+
+        assert_eq!(fragments[0].inner().parent_context(), &None);
+        assert_eq!(expander.lost_links(), []);
+    }
+
+    #[test]
+    fn every_entity_a_relationship_source_template_fails_for_is_counted_against_one_record() {
+        let expander = thing_expander("{{ road | lower }}");
+
+        expander.expand(record(json!({"id": "B", "road": null}))).unwrap();
+        expander.expand(record(json!({"id": "C", "road": null}))).unwrap();
+        let linked = expander.expand(record(json!({"id": "A", "road": "R1"}))).unwrap();
+
+        assert_eq!(edges(&linked[0]), [("refRoad".to_string(), "urn:ngsi-ld:Road:r1".to_string())]);
+        assert_eq!(expander.lost_links(), [("refRoad".to_string(), "urn:ngsi-ld:Thing:B".to_string(), 2)]);
+    }
+
+    #[test]
+    fn a_failing_relationship_instance_template_drops_that_instance_and_the_others_keep_their_index() {
+        let expander = expander(
+            r#"{
+                version: "v4",
+                dataModel: "Flight",
+                identity: { entityName: "F-{{ id }}" },
+                attributes: {
+                    servesAirport: {
+                        type: "Relationship",
+                        target: { entity: "Airport" },
+                        instances: [
+                            { source: "{{ a | lower }}", properties: { datasetId: { source: "urn:ngsi-ld:dataset:role:departure" } } },
+                            { source: "{{ b }}", properties: { datasetId: { source: "urn:ngsi-ld:dataset:role:arrival" } } },
+                        ],
+                    },
+                },
+            }"#,
+        );
+
+        let fragments = expander.expand(record(json!({"id": 1, "a": null, "b": "LJU"}))).unwrap();
+
+        assert_eq!(edges(&fragments[0]), [("servesAirport#1".to_string(), "urn:ngsi-ld:Airport:LJU".to_string())]);
+        assert_eq!(expander.lost_links(), [("servesAirport".to_string(), "urn:ngsi-ld:Flight:F-1".to_string(), 1)]);
     }
 
     /// A `Route` mapping whose `usesEquipment` `ListRelationship` reads its targets from `equipment`.
@@ -1463,7 +1630,7 @@ mod tests {
         mappings.insert(CollectionName::from("Flowcount"), sensor);
         ExpanderUnderTest {
             expander: GenericExpander::new(MappingRouter::Collections(mappings), resolver, Map::new()),
-            unreadable_expiries: UnreadableExpiries::new(),
+            losses: ExpansionLosses::new(),
         }
     }
 
@@ -1684,6 +1851,35 @@ mod tests {
     }
 
     #[test]
+    fn a_nested_relationship_whose_source_fails_to_render_drops_only_that_link_and_records_it_under_its_path() {
+        let expander = expander(
+            r#"{
+                version: "v4",
+                dataModel: "Movie",
+                identity: { entityName: "M-{{ id }}" },
+                attributes: {
+                    hasLeadActor: {
+                        type: "Relationship",
+                        target: { entity: "Person" },
+                        source: "{{ actor }}",
+                        properties: {
+                            playsCharacter: { type: "Relationship", target: { entity: "Character" }, source: "{{ character | lower }}" },
+                        },
+                    },
+                },
+            }"#,
+        );
+
+        let fragments = expander.expand(record(json!({"id": 1, "actor": 31, "character": null}))).unwrap();
+
+        assert_eq!(edges(&fragments[0]), vec![("hasLeadActor".to_string(), "urn:ngsi-ld:Person:31".to_string())]);
+        assert_eq!(
+            expander.lost_links(),
+            [("hasLeadActor.playsCharacter".to_string(), "urn:ngsi-ld:Movie:M-1".to_string(), 1)]
+        );
+    }
+
+    #[test]
     fn a_mapping_without_nested_relationships_reports_false_and_mints_only_the_flat_edge() {
         let mut runner = TemplateRunner::new();
         let mapping = compiled(
@@ -1699,7 +1895,7 @@ mod tests {
         let resolver = runner.resolver();
         let expander = ExpanderUnderTest {
             expander: GenericExpander::new(MappingRouter::Single(mapping), resolver, Map::new()),
-            unreadable_expiries: UnreadableExpiries::new(),
+            losses: ExpansionLosses::new(),
         };
 
         let fragments = expander.expand(record(json!({"id": 1, "road": 9}))).unwrap();

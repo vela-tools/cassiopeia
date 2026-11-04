@@ -125,6 +125,7 @@ cassiopeia-terminal-style = { path = "crates/cassiopeia-terminal-style" }
 cassiopeia-transformer = { path = "crates/cassiopeia-transformer" }
 cassiopeia-tui = { path = "crates/cassiopeia-tui" }
 cassiopeia-unreadable-timestamps = { path = "crates/cassiopeia-unreadable-timestamps" }
+cassiopeia-unresolved-templates = { path = "crates/cassiopeia-unresolved-templates" }
 cassiopeia-validator = { path = "crates/cassiopeia-validator" }
 cassiopeia-writer = { path = "crates/cassiopeia-writer" }
 

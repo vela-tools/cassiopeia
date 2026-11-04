@@ -17,7 +17,7 @@
 //! tag, are recorded in [`UnusableValues`](crate::unusable_values::UnusableValues), named by their
 //! [`AttributePath`](crate::attribute_path::AttributePath). An attribute whose
 //! template fails to render against the record is dropped the same way, and recorded in
-//! [`UnresolvedTemplates`](crate::unresolved_templates::UnresolvedTemplates).
+//! [`UnresolvedTemplates`](cassiopeia_unresolved_templates::unresolved_templates::UnresolvedTemplates).
 //!
 //! No value holds a null: NGSI-LD admits none anywhere in an entity (ETSI GS CIM 009 v1.9.1 clause
 //! 4.5.0), so a null nested in a source value is left out of it and recorded in
@@ -42,7 +42,5 @@ pub mod extractor;
 pub mod refused_json_payload;
 pub mod refused_json_payloads;
 pub mod required_value;
-pub mod unresolved_template;
-pub mod unresolved_templates;
 pub mod unusable_value;
 pub mod unusable_values;

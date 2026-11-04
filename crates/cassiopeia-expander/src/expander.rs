@@ -1,6 +1,5 @@
-use crate::error::ExpanderError;
+use crate::{error::ExpanderError, expansion_losses::ExpansionLosses};
 use cassiopeia_ir::{fragment::Fragment, mapped::Mapped, record::Record};
-use cassiopeia_unreadable_timestamps::unreadable_expiries::UnreadableExpiries;
 
 /// Expands raw records into mapped NGSI-LD fragments.
 ///
@@ -9,21 +8,22 @@ use cassiopeia_unreadable_timestamps::unreadable_expiries::UnreadableExpiries;
 pub trait Expander: Send + Sync {
     /// Expands a single record into one or more fragments.
     ///
-    /// An entity expiry that resolves to text no instant reads is dropped from the fragments and
-    /// recorded in `unreadable_expiries`, so the stage that owns the batch can name the loss; a
-    /// record is never failed over one.
+    /// What the record loses while it is still expanded is recorded in `losses`, so the stage that
+    /// owns the batch can name it; a record is never failed over one. An entity expiry that resolves
+    /// to text no instant reads is dropped from the fragments, and a relationship whose source, or
+    /// whose synthetic entity's identity, fails to render is left out with that synthetic entity.
     ///
     /// # Errors
     ///
-    /// Returns [`ExpanderError`] when the record's identity, scope, or a relationship target fails
-    /// to resolve into a valid URN.
-    fn expand(&self, record: Record, unreadable_expiries: &UnreadableExpiries) -> Result<Vec<Mapped<Fragment>>, ExpanderError>;
+    /// Returns [`ExpanderError`] when the record's identity or scope fails to resolve into a valid
+    /// URN or scope, or a relationship target cannot be minted for a reason other than its template.
+    fn expand(&self, record: Record, losses: &ExpansionLosses) -> Result<Vec<Mapped<Fragment>>, ExpanderError>;
 
     /// Expands a batch of records.
     ///
     /// The default implementation processes records sequentially; implementations may override it
     /// to provide an optimized execution strategy.
-    fn expand_batch(&self, records: Vec<Record>, unreadable_expiries: &UnreadableExpiries) -> Vec<Result<Vec<Mapped<Fragment>>, ExpanderError>> {
-        records.into_iter().map(|record| self.expand(record, unreadable_expiries)).collect()
+    fn expand_batch(&self, records: Vec<Record>, losses: &ExpansionLosses) -> Vec<Result<Vec<Mapped<Fragment>>, ExpanderError>> {
+        records.into_iter().map(|record| self.expand(record, losses)).collect()
     }
 }

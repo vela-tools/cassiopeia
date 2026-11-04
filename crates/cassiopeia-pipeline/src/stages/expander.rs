@@ -1,7 +1,13 @@
 use crate::{
     error::PipelineError,
     pipeline_stage::PipelineStage,
-    stages::{batch_sink_report::report_sink, skipped_records::SkippedRecords, stage_env::StageEnv, unreadable_expiry_report::unreadable_expiry_diagnostic},
+    stages::{
+        batch_sink_report::report_sink,
+        skipped_records::SkippedRecords,
+        stage_env::StageEnv,
+        unreadable_expiry_report::unreadable_expiry_diagnostic,
+        unresolved_link_report::unresolved_link_diagnostic,
+    },
 };
 use cassiopeia_common::{
     batch::Batch,
@@ -11,10 +17,9 @@ use cassiopeia_common::{
     telemetry::run::RunTelemetry,
 };
 use cassiopeia_diagnostic::severity::Severity;
-use cassiopeia_expander::{error::ExpanderError, expander::Expander};
+use cassiopeia_expander::{error::ExpanderError, expander::Expander, expansion_losses::ExpansionLosses};
 use cassiopeia_ir::{fragment::Fragment, mapped::Mapped, record::Record};
 use cassiopeia_reporter::guard::StageGuard;
-use cassiopeia_unreadable_timestamps::unreadable_expiries::UnreadableExpiries;
 use execution_time::ExecutionTime;
 use std::{mem, ops::ControlFlow, thread::spawn};
 
@@ -78,7 +83,8 @@ impl<'a> FragmentEmitter<'a> {
 /// A record that fails to expand is registered as a stage warning and skipped, so one bad record
 /// does not abort the lane. The refusals are grouped by reason and reported once each with a count,
 /// rather than surfacing as an anonymous tally. An entity `expiresAt` that resolves to text no
-/// instant reads is dropped from the fragments and named beside the refusals, counted the same way:
+/// instant reads is dropped from the fragments and named beside the refusals, counted the same way,
+/// and so is a relationship whose source, or whose synthetic entity's identity, failed to render:
 /// the entity still publishes, so nothing downstream can tell the member was ever meant to be there.
 /// Cancellation, upstream termination, or a lost downstream channel stops processing.
 pub(crate) fn spawn_expander_thread(
@@ -124,8 +130,8 @@ pub(crate) fn spawn_expander_thread(
                     // The service span covers expansion only; the handoff onto the resolver intake
                     // is output wait, measured inside the emitter.
                     let service = expander_stage.service_span();
-                    let unreadable_expiries = UnreadableExpiries::new();
-                    let results = expander.expand_batch(Vec::from(records), &unreadable_expiries);
+                    let losses = ExpansionLosses::new();
+                    let results = expander.expand_batch(Vec::from(records), &losses);
                     drop(service);
 
                     let mut skipped = SkippedRecords::<_, ExpanderError>::new();
@@ -145,7 +151,8 @@ pub(crate) fn spawn_expander_thread(
                     if !skipped.is_empty() {
                         skipped.report(reporter, Severity::Warning);
                     }
-                    warnings += report_sink(reporter, unreadable_expiries, unreadable_expiry_diagnostic);
+                    warnings += report_sink(reporter, losses.expiries, unreadable_expiry_diagnostic);
+                    warnings += report_sink(reporter, losses.links, unresolved_link_diagnostic);
                     if warnings > 0 {
                         expander_stage.warn_inc_by(warnings);
                         telemetry.add_warnings(warnings);

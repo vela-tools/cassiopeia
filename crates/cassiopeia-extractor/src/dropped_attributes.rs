@@ -1,11 +1,7 @@
-use crate::{
-    dropped_geometries::DroppedGeometries,
-    dropped_nulls::DroppedNulls,
-    refused_json_payloads::RefusedJsonPayloads,
-    unresolved_templates::UnresolvedTemplates,
-    unusable_values::UnusableValues,
-};
+use crate::{dropped_geometries::DroppedGeometries, dropped_nulls::DroppedNulls, refused_json_payloads::RefusedJsonPayloads, unusable_values::UnusableValues};
+use cassiopeia_ngsi_ld::entity::name::NameBuf;
 use cassiopeia_unreadable_timestamps::unreadable_timestamps::UnreadableTimestamps;
+use cassiopeia_unresolved_templates::unresolved_templates::UnresolvedTemplates;
 
 /// What one batch's extraction dropped while keeping its entities, one sink per reason: whole
 /// attributes, and the nulls left out of attribute values.
@@ -20,7 +16,7 @@ pub struct DroppedAttributes {
     /// Attribute values that read as no supported spelling of a date-time.
     pub timestamps: UnreadableTimestamps,
     /// Attributes whose template could not be resolved against the record.
-    pub templates: UnresolvedTemplates,
+    pub templates: UnresolvedTemplates<NameBuf>,
     /// `JsonProperty` values that are no JSON object or array of objects.
     pub json_payloads: RefusedJsonPayloads,
     /// `VocabProperty` and `LanguageProperty` values their kind cannot hold.

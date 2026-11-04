@@ -236,7 +236,7 @@ For a field that is present but null, the hint asks for `boolean=true`, because 
 
 Any other failure reads `` `…` failed to render ``. Run with `-v` to see Tera's reason and how many entities lost the attribute. The run summary counts these warnings under `extractor-template-unresolvable`.
 
-A template that names an entity fails differently. When `identity.entityName`, a `scope` template, a relationship's `source`, or a synthetic entity's identity fails for a record, Cassiopeia skips the whole record with a warning, counted under `expander-urn-ungeneratable`. An entity `expiresAt` template that fails skips the record the same way, counted under `expander-expires-at-unresolvable`.
+A relationship's `source`, or the identity of the synthetic entity it declares, that fails for a record costs only that link and that synthetic entity. The entity is still written, and the warning is counted under `expander-relationship-unresolvable`. A template that names the entity itself fails differently: there is no entity without an ID, so when `identity.entityName` or a `scope` template fails for a record, Cassiopeia skips the whole record with a warning, counted under `expander-urn-ungeneratable`. An entity `expiresAt` template that fails skips the record the same way, counted under `expander-expires-at-unresolvable`.
 
 To keep a field that can be absent from failing the template, guard it or give it a default:
 

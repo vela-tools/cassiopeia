@@ -14,6 +14,7 @@ cassiopeia-ir.workspace = true
 cassiopeia-mapping.workspace = true
 cassiopeia-ngsi-ld.workspace = true
 cassiopeia-unreadable-timestamps.workspace = true
+cassiopeia-unresolved-templates.workspace = true
 chrono = "0.4.45"
 deunicode = "1.6.2"
 rayon = "1.12.0"

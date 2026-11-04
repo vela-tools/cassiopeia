@@ -1,0 +1,23 @@
+[package]
+name = "cassiopeia-unresolved-templates"
+description = "The record of templates a pipeline stage could not render for a record, gathered per batch"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+cassiopeia-batch-sink.workspace = true
+cassiopeia-mapping.workspace = true
+derive-where = "1.7.0"
+derive_more = { version = "2.1.1", features = ["deref", "into"] }
+urn-rs = "0.9.2"
+
+[dev-dependencies]
+cassiopeia-ngsi-ld.workspace = true
+pretty_assertions = "1.4.1"
+serde_json = { version = "1.0.154", features = ["preserve_order"] }
+
+[lints]
+workspace = true

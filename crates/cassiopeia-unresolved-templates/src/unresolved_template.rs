@@ -3,32 +3,32 @@ use cassiopeia_mapping::template::error::TemplateError;
 use std::num::NonZeroU64;
 use urn_rs::Urn;
 
-/// What one attribute lost to a template that could not be resolved, over one batch.
+/// What one declaration lost to a template that could not be resolved, over one batch.
 ///
 /// Only the first entity and the first failure are kept. A template that fails on one record
 /// usually fails on every record carrying the same gap (a null column, a malformed cell), so keying
 /// the record on the entity would grow it with the input and hand the reporter a line per record.
-/// The attribute is the failure; the entity is one place to go and look, and the count says how far
-/// it spread.
+/// The declaration is the failure; the entity is one place to go and look, and the count says how
+/// far it spread.
 #[derive(Debug)]
 pub struct UnresolvedTemplate {
-    /// The first entity that lost the attribute, kept so a mapping author can find a record that
+    /// The first entity that lost what the declaration names, kept so a mapping author can find a record that
     /// shows the failure.
     pub entity: Urn,
     /// The first failure, kept whole so a report can walk its cause chain down to the templating
     /// engine's own reason.
     pub error: TemplateError,
-    /// How many entities lost the attribute.
+    /// How many entities lost what the declaration names.
     pub occurrences: NonZeroU64,
 }
 
 impl UnresolvedTemplate {
-    /// Opens a record for one attribute, holding `entity` and `error` as its first failure.
+    /// Opens a record for one declaration, holding `entity` and `error` as its first failure.
     #[must_use]
     pub fn first(entity: &Urn, error: TemplateError) -> UnresolvedTemplate {
         UnresolvedTemplate {
             // The entity keeps its own identifier, and the record outlives it, so the identifier is
-            // cloned; this runs once per attribute and batch, on the failure path only.
+            // cloned; this runs once per declaration and batch, on the failure path only.
             entity: entity.clone(),
             error,
             occurrences: NonZeroU64::MIN,

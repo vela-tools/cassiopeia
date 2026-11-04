@@ -1,34 +1,40 @@
 use crate::unresolved_template::UnresolvedTemplate;
 use cassiopeia_batch_sink::batch_sink::BatchSink;
 use cassiopeia_mapping::template::error::TemplateError;
-use cassiopeia_ngsi_ld::entity::name::NameBuf;
 use derive_more::{Deref, Into};
+use derive_where::derive_where;
+use std::hash::Hash;
 use urn_rs::Urn;
 
-/// The attributes one batch dropped because their template could not be resolved, one record per
-/// attribute.
+/// What one batch lost because a template could not be resolved, one record per declaration of
+/// type `K` that lost something.
 ///
-/// A template that fails to render for one record costs that record the attribute, not the whole
-/// entity: one optional attribute's gap must not take down everything else the record carries. The
-/// loss is still named, here, so the run can say which attribute it dropped and where.
-#[derive(Default, Deref, Into)]
-pub struct UnresolvedTemplates(BatchSink<NameBuf, UnresolvedTemplate>);
+/// A template that fails to render for one record costs that record what the template declares, not
+/// the whole entity: one optional attribute's gap must not take down everything else the record
+/// carries. The loss is still named, here, so the run can say what it dropped and where. The key is
+/// whatever names the declaration in the stage that met the loss: the extract stage keys on the
+/// attribute it dropped, the expand stage on the path of the relationship whose link it left out.
+#[derive(Deref, Into)]
+#[derive_where(Default)]
+pub struct UnresolvedTemplates<K>(BatchSink<K, UnresolvedTemplate>);
 
-impl UnresolvedTemplates {
+impl<K> UnresolvedTemplates<K> {
     /// Opens an empty sink.
     #[must_use]
-    pub fn new() -> UnresolvedTemplates {
+    pub fn new() -> UnresolvedTemplates<K> {
         UnresolvedTemplates::default()
     }
+}
 
-    /// Records that `entity` lost `attribute` because its template failed with `error`.
+impl<K: Clone + Hash + Eq> UnresolvedTemplates<K> {
+    /// Records that `entity` lost what `declaration` names because its template failed with `error`.
     ///
-    /// The first failure an attribute meets is kept as its example; every later one is counted
+    /// The first failure a declaration meets is kept as its example; every later one is counted
     /// against that same record.
-    pub fn record(&self, attribute: &NameBuf, entity: &Urn, error: TemplateError) {
-        // An attribute seen for the first time is the only case that owns anything: the map key
-        // must own the attribute name, which is only borrowed from the mapping.
-        self.0.tally(attribute, || (attribute.clone(), UnresolvedTemplate::first(entity, error)));
+    pub fn record(&self, declaration: &K, entity: &Urn, error: TemplateError) {
+        // A declaration seen for the first time is the only case that owns anything: the map key
+        // must own the declaration, which the caller only lends.
+        self.0.tally(declaration, || (declaration.clone(), UnresolvedTemplate::first(entity, error)));
     }
 }
 
@@ -57,7 +63,7 @@ mod tests {
         value.parse().unwrap()
     }
 
-    fn entries(sink: UnresolvedTemplates) -> Vec<(NameBuf, UnresolvedTemplate)> {
+    fn entries(sink: UnresolvedTemplates<NameBuf>) -> Vec<(NameBuf, UnresolvedTemplate)> {
         BatchSink::from(sink).into_entries().collect()
     }
 
@@ -73,12 +79,12 @@ mod tests {
 
     #[test]
     fn a_fresh_sink_holds_nothing() {
-        assert!(UnresolvedTemplates::new().is_empty());
+        assert!(UnresolvedTemplates::<NameBuf>::new().is_empty());
     }
 
     #[test]
     fn every_entity_one_attribute_fails_on_is_counted_against_one_record() {
-        let sink = UnresolvedTemplates::new();
+        let sink = UnresolvedTemplates::<NameBuf>::new();
         sink.record(&name("dafifCode"), &urn("urn:ngsi-ld:Country:A"), failure());
         sink.record(&name("dafifCode"), &urn("urn:ngsi-ld:Country:B"), failure());
 
@@ -90,7 +96,7 @@ mod tests {
 
     #[test]
     fn two_attributes_are_two_records_in_the_order_they_failed() {
-        let sink = UnresolvedTemplates::new();
+        let sink = UnresolvedTemplates::<NameBuf>::new();
         sink.record(&name("dafifCode"), &urn("urn:ngsi-ld:Country:A"), failure());
         sink.record(&name("isoCode"), &urn("urn:ngsi-ld:Country:A"), failure());
 

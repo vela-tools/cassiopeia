@@ -11,6 +11,9 @@ pub enum ExpanderCode {
     ExpiresAtUnreadable,
     /// The entity `expiresAt` template failed to render for a record, so the record was skipped.
     ExpiresAtUnresolvable,
+    /// A relationship's source, or its synthetic entity's identity, failed to render for a record,
+    /// so the entity was kept without that link and without the synthetic entity it would have named.
+    RelationshipUnresolvable,
     /// The record's source collection is bound to no mapping.
     CollectionUnmatched,
     /// The record carries no source collection, which a collections binding requires.
@@ -27,5 +30,6 @@ mod tests {
         assert_eq!(ExpanderCode::CollectionUnmatched.to_string(), "collection-unmatched");
         assert_eq!(ExpanderCode::ExpiresAtUnreadable.to_string(), "expires-at-unreadable");
         assert_eq!(ExpanderCode::ExpiresAtUnresolvable.to_string(), "expires-at-unresolvable");
+        assert_eq!(ExpanderCode::RelationshipUnresolvable.to_string(), "relationship-unresolvable");
     }
 }

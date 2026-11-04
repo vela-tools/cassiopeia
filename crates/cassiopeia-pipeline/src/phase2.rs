@@ -85,7 +85,13 @@ impl Pipeline {
 #[cfg(test)]
 mod tests {
     use cassiopeia_common::representation::NgsiLdRepresentation;
-    use cassiopeia_expander::{compiler::ExpanderCompiler, expander::Expander, generic::GenericExpander, router::MappingRouter};
+    use cassiopeia_expander::{
+        compiler::ExpanderCompiler,
+        expander::Expander,
+        expansion_losses::ExpansionLosses,
+        generic::GenericExpander,
+        router::MappingRouter,
+    };
     use cassiopeia_extractor::{dropped_attributes::DroppedAttributes, entity_extractor::EntityExtractor, extractor::Extractor};
     use cassiopeia_ir::{fragment::Fragment, mapped::Mapped, record::Record};
     use cassiopeia_mapping::{mapping::Mapping, template::runner::TemplateRunner};
@@ -104,7 +110,7 @@ mod tests {
         relationship_store::dashmap_store::DashMapRelationshipStore,
     };
     use cassiopeia_transformer::{ngsi_ld_transformer::NgsiLdTransformer, transformer::Transformer};
-    use cassiopeia_unreadable_timestamps::{unreadable_expiries::UnreadableExpiries, unreadable_timestamps::UnreadableTimestamps};
+    use cassiopeia_unreadable_timestamps::unreadable_timestamps::UnreadableTimestamps;
     use chrono::{TimeZone, Utc};
     use pretty_assertions::assert_eq;
     use serde_json::{Map, Value, json};
@@ -177,7 +183,7 @@ mod tests {
         };
 
         let expander = GenericExpander::new(MappingRouter::Single(Arc::clone(&mapping)), resolver.clone(), Map::new());
-        let fragments = Expander::expand(&expander, Record::new(None, data), &UnreadableExpiries::new()).unwrap();
+        let fragments = Expander::expand(&expander, Record::new(None, data), &ExpansionLosses::new()).unwrap();
         let fragment_resolver = FragmentResolver::new(
             Box::new(DashMapLatestEntityStore::new()),
             Box::new(DashMapRelationshipStore::new()),

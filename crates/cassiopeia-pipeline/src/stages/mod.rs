@@ -29,6 +29,7 @@ pub(crate) mod stream_outcome;
 pub(crate) mod transformer;
 pub(crate) mod unreadable_expiry_report;
 pub(crate) mod unreadable_timestamp_report;
+pub(crate) mod unresolved_link_report;
 pub(crate) mod unresolved_template_report;
 pub(crate) mod unusable_value_report;
 pub(crate) mod validation_abort;

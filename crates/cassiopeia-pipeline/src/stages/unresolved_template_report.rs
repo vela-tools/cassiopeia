@@ -6,8 +6,8 @@ use cassiopeia_diagnostic::{
     diagnostic_builder::DiagnosticBuilder,
     severity::Severity,
 };
-use cassiopeia_extractor::unresolved_template::UnresolvedTemplate;
 use cassiopeia_ngsi_ld::entity::name::NameBuf;
+use cassiopeia_unresolved_templates::unresolved_template::UnresolvedTemplate;
 
 /// The one-line summary: which template failed and where it is declared, an entity it failed for,
 /// the attribute that was dropped, and that the entity was kept.
@@ -54,7 +54,6 @@ mod tests {
         test_reporter::RecordingReporter,
     };
     use cassiopeia_diagnostic::code::{diagnostic_code::DiagnosticCode, extractor_code::ExtractorCode};
-    use cassiopeia_extractor::unresolved_templates::UnresolvedTemplates;
     use cassiopeia_mapping::{
         template::{
             TemplateSource,
@@ -64,6 +63,7 @@ mod tests {
         template_site::TemplateSite,
     };
     use cassiopeia_ngsi_ld::entity::name::NameBuf;
+    use cassiopeia_unresolved_templates::unresolved_templates::UnresolvedTemplates;
     use pretty_assertions::assert_eq;
     use std::{path::Path, sync::Arc};
     use urn_rs::Urn;
