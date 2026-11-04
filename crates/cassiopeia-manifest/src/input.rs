@@ -7,7 +7,10 @@ use cassiopeia_common::{context::mode::AtContextMode, format::DataFormat, input:
 use cassiopeia_csv_dialect::statement::DialectStatement;
 use getset::Getters;
 use serde::{Deserialize, Serialize};
-use std::{collections::HashSet, path::PathBuf};
+use std::{
+    collections::HashSet,
+    path::{Path, PathBuf},
+};
 use typed_builder::TypedBuilder;
 
 /// One source a run reads, together with how its records are routed to mappings.
@@ -83,6 +86,21 @@ impl ManifestInput {
         }
 
         Ok(ManifestInput { headers, ..self })
+    }
+
+    /// Resolves the input's relative local paths against `directory`: its `source`, its mappings, and
+    /// a local `context` file. Absolute paths and URLs are kept as they are.
+    ///
+    /// A local `schema` is left as written, because it is resolved next to the input's mapping, which
+    /// this already places under `directory`.
+    #[must_use]
+    pub fn resolved_against(self, directory: &Path) -> ManifestInput {
+        ManifestInput {
+            source: self.source.resolved_against(directory),
+            mapping_binding: self.mapping_binding.resolved_against(directory),
+            context: self.context.map(|context| context.resolved_against(directory)),
+            ..self
+        }
     }
 }
 
@@ -265,6 +283,42 @@ mod tests {
 
         let json = serde_json::to_string(&input).unwrap();
         assert_eq!(parse(&json).unwrap(), input);
+    }
+
+    #[test]
+    fn an_input_resolves_its_source_mapping_and_context_but_not_its_schema_against_the_given_directory() {
+        let input = parse(r#"{"source": "data/a.csv", "mapping": "m.json5", "context": "ctx.jsonld", "schema": "a.schema.json"}"#)
+            .unwrap()
+            .resolved_against(Path::new("runs/city"));
+
+        assert_eq!(input.source(), &Input::Local(PathBuf::from("runs/city/data/a.csv")));
+        assert_eq!(
+            input.mapping_binding(),
+            &MappingBinding::Single {
+                mapping: PathBuf::from("runs/city/m.json5")
+            }
+        );
+        assert_eq!(input.context(), &Some(AtContextMode::Local(PathBuf::from("runs/city/ctx.jsonld"))));
+        assert_eq!(input.schema(), &Some(SchemaSource::Local(PathBuf::from("a.schema.json"))));
+    }
+
+    #[test]
+    fn an_input_keeps_its_absolute_paths_and_urls_when_resolved() {
+        let input = parse(r#"{"source": "https://api.example/records", "mapping": "/srv/m.json5", "context": "https://example.org/ctx.jsonld"}"#)
+            .unwrap()
+            .resolved_against(Path::new("runs/city"));
+
+        assert_eq!(input.source().to_string(), "https://api.example/records");
+        assert_eq!(
+            input.mapping_binding(),
+            &MappingBinding::Single {
+                mapping: PathBuf::from("/srv/m.json5")
+            }
+        );
+        assert_eq!(
+            input.context(),
+            &Some(AtContextMode::Explicit(Url::parse("https://example.org/ctx.jsonld").unwrap()))
+        );
     }
 
     #[test]

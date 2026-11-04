@@ -843,6 +843,7 @@ dependencies = [
  "serde_json",
  "serde_json5",
  "strum",
+ "tempfile",
  "thiserror 2.0.21",
  "typed-builder",
  "url",

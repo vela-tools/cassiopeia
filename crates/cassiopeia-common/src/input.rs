@@ -1,7 +1,10 @@
 use crate::{environment::template::escape, error::input::InputError, masked_url::MaskedUrl};
 use derive_more::Display;
 use serde::{Serialize, Serializer};
-use std::{path::PathBuf, str::FromStr};
+use std::{
+    path::{Path, PathBuf},
+    str::FromStr,
+};
 use url::Url;
 
 /// A data source, which is either a file on this machine or something to be fetched over the
@@ -19,6 +22,18 @@ pub enum Input {
     /// environment masked.
     #[display("{_0}")]
     Remote(MaskedUrl),
+}
+
+impl Input {
+    /// Resolves a relative local path against `directory`. An absolute path and a remote source are
+    /// returned unchanged.
+    #[must_use]
+    pub fn resolved_against(self, directory: &Path) -> Input {
+        match self {
+            Input::Local(path) => Input::Local(directory.join(path)),
+            Input::Remote(url) => Input::Remote(url),
+        }
+    }
 }
 
 impl FromStr for Input {
@@ -53,7 +68,10 @@ impl Serialize for Input {
 mod tests {
     use crate::input::Input;
     use pretty_assertions::assert_eq;
-    use std::{path::PathBuf, str::FromStr};
+    use std::{
+        path::{Path, PathBuf},
+        str::FromStr,
+    };
 
     #[test]
     fn an_http_url_parses_as_a_remote_source() {
@@ -66,6 +84,24 @@ mod tests {
     #[test]
     fn a_relative_path_parses_as_a_local_source() {
         assert_eq!(Input::from_str("data/stations.csv").unwrap(), Input::Local(PathBuf::from("data/stations.csv")));
+    }
+
+    #[test]
+    fn a_relative_local_path_resolves_against_the_given_directory() {
+        let input = Input::from_str("data/stations.csv").unwrap().resolved_against(Path::new("runs/city"));
+
+        assert_eq!(input, Input::Local(PathBuf::from("runs/city/data/stations.csv")));
+    }
+
+    #[test]
+    fn an_absolute_local_path_and_a_remote_source_ignore_the_given_directory() {
+        let absolute = Input::from_str("/srv/data/stations.csv").unwrap().resolved_against(Path::new("runs/city"));
+        let remote = Input::from_str("https://example.org/stations.json")
+            .unwrap()
+            .resolved_against(Path::new("runs/city"));
+
+        assert_eq!(absolute, Input::Local(PathBuf::from("/srv/data/stations.csv")));
+        assert_eq!(remote.to_string(), "https://example.org/stations.json");
     }
 
     #[test]

@@ -76,6 +76,10 @@ pub struct Manifest {
 impl Manifest {
     /// Reads a manifest from a JSON5 document on disk.
     ///
+    /// Every relative local path the manifest names is resolved against the manifest's own
+    /// directory, as [`Manifest::resolved_against`] describes, so the manifest runs the same from any
+    /// working directory.
+    ///
     /// # Errors
     /// Returns [`ManifestError::Io`] if the file cannot be read, or a parse error via
     /// [`Manifest::from_json5`].
@@ -85,8 +89,23 @@ impl Manifest {
             path: path.to_path_buf(),
             action: IoAction::Read,
         })?;
+        // A bare file name has an empty parent, which joins to the working directory it lives in.
+        let directory = path.parent().unwrap_or(Path::new(""));
 
-        Manifest::from_json5(&content, path)
+        Ok(Manifest::from_json5(&content, path)?.resolved_against(directory))
+    }
+
+    /// Resolves every relative local path the manifest names against `directory`: each input's
+    /// `source`, mappings and `context`, and the output's `directory`, `context` and validation
+    /// `schema` and `report`. Absolute paths and URLs are kept as they are, and a per-input `schema`
+    /// keeps resolving next to its mapping.
+    #[must_use]
+    pub fn resolved_against(self, directory: &Path) -> Manifest {
+        Manifest {
+            inputs: self.inputs.resolved_against(directory),
+            output: self.output.map(|output| output.resolved_against(directory)),
+            ..self
+        }
     }
 
     /// Reads a manifest from a JSON5 document, naming `origin` in any parse failure.
@@ -145,13 +164,28 @@ mod tests {
         error::ManifestError,
         failure_policy::FailurePolicy,
         manifest::Manifest,
+        mapping_binding::{CollectionMapping, MappingBinding},
         output::{ManifestOutput, destination::Destination},
         schedule::{Schedule, trigger::Trigger},
         version::Version,
     };
-    use cassiopeia_common::{environment::registry::mask, input::Input, masked_url::MaskedUrl, request_header::RequestHeaders};
+    use cassiopeia_common::{
+        collection::CollectionName,
+        context::mode::AtContextMode,
+        environment::registry::mask,
+        file_framing::FileFraming,
+        input::Input,
+        masked_url::MaskedUrl,
+        request_header::RequestHeaders,
+        schema_source::SchemaSource,
+    };
     use pretty_assertions::assert_eq;
-    use std::{path::Path, time::Duration};
+    use std::{
+        fs::{create_dir, write},
+        path::{Path, PathBuf},
+        time::Duration,
+    };
+    use tempfile::TempDir;
 
     const MINIMAL: &str = r#"{
         version: "v1",
@@ -238,6 +272,66 @@ mod tests {
         );
 
         assert!(message.contains("unknown field `skipNull`"), "{message}");
+    }
+
+    /// A manifest naming a relative path in every field that resolves against the manifest's directory,
+    /// plus a per-input `schema`, which resolves next to its mapping instead.
+    const RELATIVE_PATHS: &str = r#"{
+        version: "v1",
+        inputs: [
+            { source: "data/a.csv", mapping: "m.json5", context: "ctx.jsonld", schema: "a.schema.json" },
+            { source: "https://example.org/b.json", mappings: [{ collection: "B", mapping: "/srv/b.json5" }] },
+        ],
+        output: {
+            target: "file",
+            directory: "out",
+            context: "out.jsonld",
+            validation: { schema: "g.schema.json", report: "report.json" },
+        },
+    }"#;
+
+    #[test]
+    fn a_manifest_read_from_a_file_resolves_its_relative_paths_against_the_manifest_directory() {
+        let root = TempDir::new().unwrap();
+        let directory = root.path().join("run");
+        create_dir(&directory).unwrap();
+        let path = directory.join("run.json5");
+        write(&path, RELATIVE_PATHS).unwrap();
+
+        let manifest = Manifest::from_file(&path).unwrap();
+        let mut inputs = manifest.inputs().iter();
+        let local = inputs.next().unwrap();
+        let remote = inputs.next().unwrap();
+        let output = manifest.output().as_ref().unwrap();
+        let validation = output.validation().as_ref().unwrap();
+
+        assert_eq!(local.source(), &Input::Local(directory.join("data/a.csv")));
+        assert_eq!(
+            local.mapping_binding(),
+            &MappingBinding::Single {
+                mapping: directory.join("m.json5")
+            }
+        );
+        assert_eq!(local.context(), &Some(AtContextMode::Local(directory.join("ctx.jsonld"))));
+        assert_eq!(local.schema(), &Some(SchemaSource::Local(PathBuf::from("a.schema.json"))));
+        assert_eq!(remote.source().to_string(), "https://example.org/b.json");
+        assert_eq!(
+            remote.mapping_binding(),
+            &MappingBinding::Collections {
+                mappings: vec![CollectionMapping::new(CollectionName::from("B"), PathBuf::from("/srv/b.json5"))],
+            }
+        );
+        assert_eq!(output.destination(), &Destination::file(Some(directory.join("out")), FileFraming::Array));
+        assert_eq!(output.context(), &Some(AtContextMode::Local(directory.join("out.jsonld"))));
+        assert_eq!(validation.schema(), &Some(SchemaSource::Local(directory.join("g.schema.json"))));
+        assert_eq!(validation.report(), &Some(directory.join("report.json")));
+    }
+
+    #[test]
+    fn a_manifest_read_from_a_document_keeps_its_relative_paths_as_written() {
+        let manifest = Manifest::from_json5(RELATIVE_PATHS, Path::new("run/run.json5")).unwrap();
+
+        assert_eq!(manifest.inputs().iter().next().unwrap().source(), &Input::Local(PathBuf::from("data/a.csv")));
     }
 
     #[test]

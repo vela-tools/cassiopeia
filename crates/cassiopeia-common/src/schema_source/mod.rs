@@ -1,5 +1,9 @@
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
-use std::{convert::Infallible, path::PathBuf, str::FromStr};
+use std::{
+    convert::Infallible,
+    path::{Path, PathBuf},
+    str::FromStr,
+};
 use url::Url;
 
 /// The origin of a custom JSON Schema validation source, given on the command line, in a manifest
@@ -18,6 +22,18 @@ pub enum SchemaSource {
 
     /// A schema document to download before it can be compiled.
     Remote(Url),
+}
+
+impl SchemaSource {
+    /// Resolves a relative local schema path against `directory`. An absolute path and a remote
+    /// source are returned unchanged.
+    #[must_use]
+    pub fn resolved_against(self, directory: &Path) -> SchemaSource {
+        match self {
+            SchemaSource::Local(path) => SchemaSource::Local(directory.join(path)),
+            SchemaSource::Remote(url) => SchemaSource::Remote(url),
+        }
+    }
 }
 
 impl FromStr for SchemaSource {
@@ -65,7 +81,7 @@ impl<'de> Deserialize<'de> for SchemaSource {
 mod tests {
     use crate::schema_source::{SchemaSource, parse_schema_source};
     use pretty_assertions::assert_eq;
-    use std::path::PathBuf;
+    use std::path::{Path, PathBuf};
     use url::Url;
 
     #[test]
@@ -88,6 +104,25 @@ mod tests {
     fn an_http_url_parses_as_a_remote_source() {
         let expected = Url::parse("http://example.org/x.schema.json").unwrap();
         assert_eq!(parse_schema_source("http://example.org/x.schema.json"), SchemaSource::Remote(expected));
+    }
+
+    #[test]
+    fn a_relative_local_source_resolves_against_the_given_directory() {
+        let source = parse_schema_source("schemas/x.json").resolved_against(Path::new("runs/city"));
+
+        assert_eq!(source, SchemaSource::Local(PathBuf::from("runs/city/schemas/x.json")));
+    }
+
+    #[test]
+    fn an_absolute_local_source_and_a_remote_source_ignore_the_given_directory() {
+        let directory = Path::new("runs/city");
+        let url = Url::parse("https://example.org/x.json").unwrap();
+
+        assert_eq!(
+            parse_schema_source("/srv/x.json").resolved_against(directory),
+            SchemaSource::Local(PathBuf::from("/srv/x.json"))
+        );
+        assert_eq!(SchemaSource::Remote(url.clone()).resolved_against(directory), SchemaSource::Remote(url));
     }
 
     #[test]

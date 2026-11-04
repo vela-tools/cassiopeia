@@ -11,7 +11,7 @@ use cassiopeia_common::{
     user_agent::UserAgent,
 };
 use serde::{Deserialize, Serialize};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 /// Where produced entities end up.
 ///
@@ -78,6 +78,19 @@ impl Destination {
     #[must_use]
     pub const fn file(directory: Option<PathBuf>, framing: FileFraming) -> Destination {
         Destination::File { directory, framing }
+    }
+
+    /// Resolves a file destination's relative `directory` against `base`. An absolute directory
+    /// and a broker destination are kept as they are.
+    #[must_use]
+    pub fn resolved_against(self, base: &Path) -> Destination {
+        match self {
+            Destination::File { directory, framing } => Destination::File {
+                directory: directory.map(|directory| base.join(directory)),
+                framing,
+            },
+            broker @ Destination::ContextBroker { .. } => broker,
+        }
     }
 }
 

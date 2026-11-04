@@ -96,7 +96,7 @@ There are two entry points, at two scopes:
 
 The schema override is never declared in the mapping document. It lives in the manifest, just like `@context`: a per-input `schema` for the types one source produces, or a global `output.validation.schema` for the whole run. A source can be a local path or an `http(s)` URL. Cassiopeia fetches a value that parses as an `http`/`https` URL and treats anything else, such as a bare filename or a relative or absolute path, as a local file.
 
-A per-input `schema` is resolved relative to that input's mapping, so a bare filename is read next to the mapping. A global source is resolved relative to the working directory.
+A per-input `schema` is resolved relative to that input's mapping, so a bare filename is read next to the mapping. A global `output.validation.schema` is resolved relative to the manifest's directory, and a `--validation-schema` given on the command line relative to the working directory.
 
 ~~~json5
 // A per-input schema binds the types that input produces.

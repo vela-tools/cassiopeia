@@ -38,6 +38,13 @@ Manifests are JSON5 documents, so comments, trailing commas, and unquoted keys a
 | `schedule` | No | Repeat the run on a schedule instead of running once. See [Schedule](#schedule). |
 | `memoryProfile` | No | `default` (the default) or `low-memory`, which trades throughput for a smaller footprint. |
 
+### Relative paths
+
+A relative path in a manifest is resolved against the directory the manifest file is in, not the directory Cassiopeia is started from. This covers each input's `source`, `mapping`, `mappings`, and `context`, and the output's `directory`, `context`, `validation.schema`, and `validation.report`. A manifest therefore runs the same from any working directory, so `cassiopeia map --manifest run/run.json5` reads `run/stations.csv` for a `source: "stations.csv"`. A per-input `schema` is the one exception: it is resolved next to the input's mapping. Absolute paths and URLs are used as written. Paths given on the command line, including `--manifest` itself, are resolved against the working directory.
+
+> [!WARNING]
+> Migrating from v1.1.1: relative paths in a manifest used to be resolved against the working directory, except a per-input `schema`. A manifest that was always run from its own directory behaves the same. A manifest run from another directory now reads its files from the manifest's directory instead, so rewrite each of its relative paths to be relative to the manifest file, or make it absolute.
+
 ## Inputs
 
 `inputs` is an array of one or more entries, each pairing a source with the mapping that shapes it. Cassiopeia processes multiple inputs independently, then merges their entities at the resolver. One manifest can therefore produce several entity types from the same source or from different sources.

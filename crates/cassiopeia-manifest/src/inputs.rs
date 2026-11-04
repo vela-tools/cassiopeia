@@ -4,6 +4,7 @@ use crate::{
 };
 use derive_more::Deref;
 use serde::{Deserialize, Serialize};
+use std::path::Path;
 
 /// The sources a run reads, guaranteed to hold at least one.
 ///
@@ -26,6 +27,13 @@ impl Inputs {
             Ok(Inputs(inputs))
         }
     }
+
+    /// Resolves every input's relative local paths against `directory`, as
+    /// [`ManifestInput::resolved_against`] describes.
+    #[must_use]
+    pub fn resolved_against(self, directory: &Path) -> Inputs {
+        Inputs(self.0.into_iter().map(|input| input.resolved_against(directory)).collect())
+    }
 }
 
 impl TryFrom<Vec<ManifestInput>> for Inputs {
@@ -41,7 +49,7 @@ mod tests {
     use crate::{input::ManifestInput, inputs::Inputs, mapping_binding::MappingBinding};
     use cassiopeia_common::input::Input;
     use pretty_assertions::assert_eq;
-    use std::path::PathBuf;
+    use std::path::{Path, PathBuf};
 
     fn an_input() -> ManifestInput {
         ManifestInput::builder()
@@ -64,5 +72,17 @@ mod tests {
 
         assert_eq!(inputs.len(), 1);
         assert_eq!(inputs.first(), Some(&an_input()));
+    }
+
+    #[test]
+    fn resolving_a_list_resolves_every_input_against_the_given_directory() {
+        let inputs = Inputs::new(vec![an_input(), an_input()]).unwrap().resolved_against(Path::new("runs/city"));
+
+        assert_eq!(inputs.len(), 2);
+        assert!(
+            inputs
+                .iter()
+                .all(|input| input.source() == &Input::Local(PathBuf::from("runs/city/data/stations.csv")))
+        );
     }
 }

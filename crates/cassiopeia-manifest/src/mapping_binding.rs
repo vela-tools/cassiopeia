@@ -1,7 +1,7 @@
 use cassiopeia_common::collection::CollectionName;
 use getset::Getters;
 use serde::{Deserialize, Serialize};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 /// One collection's mapping in a multi-collection source binding.
 ///
@@ -24,6 +24,15 @@ impl CollectionMapping {
     pub const fn new(collection: CollectionName, mapping: PathBuf) -> CollectionMapping {
         CollectionMapping { collection, mapping }
     }
+
+    /// Resolves a relative mapping path against `directory`. An absolute path is kept as it is.
+    #[must_use]
+    pub fn resolved_against(self, directory: &Path) -> CollectionMapping {
+        CollectionMapping {
+            mapping: directory.join(self.mapping),
+            ..self
+        }
+    }
 }
 
 /// How a source's records are routed to mappings.
@@ -44,4 +53,62 @@ pub enum MappingBinding {
         /// The per-collection mappings, guaranteed non-empty and free of duplicate labels.
         mappings: Vec<CollectionMapping>,
     },
+}
+
+impl MappingBinding {
+    /// Resolves every relative mapping path the binding names against `directory`. An absolute path
+    /// is kept as it is.
+    #[must_use]
+    pub fn resolved_against(self, directory: &Path) -> MappingBinding {
+        match self {
+            MappingBinding::Single { mapping } => MappingBinding::Single {
+                mapping: directory.join(mapping),
+            },
+            MappingBinding::Collections { mappings } => MappingBinding::Collections {
+                mappings: mappings.into_iter().map(|entry| entry.resolved_against(directory)).collect(),
+            },
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::mapping_binding::{CollectionMapping, MappingBinding};
+    use cassiopeia_common::collection::CollectionName;
+    use pretty_assertions::assert_eq;
+    use std::path::{Path, PathBuf};
+
+    #[test]
+    fn a_single_binding_resolves_its_relative_mapping_against_the_given_directory() {
+        let binding = MappingBinding::Single {
+            mapping: PathBuf::from("mappings/station.json5"),
+        };
+
+        assert_eq!(
+            binding.resolved_against(Path::new("runs/city")),
+            MappingBinding::Single {
+                mapping: PathBuf::from("runs/city/mappings/station.json5")
+            }
+        );
+    }
+
+    #[test]
+    fn a_collections_binding_resolves_each_relative_mapping_and_keeps_an_absolute_one() {
+        let binding = MappingBinding::Collections {
+            mappings: vec![
+                CollectionMapping::new(CollectionName::from("A"), PathBuf::from("a.json5")),
+                CollectionMapping::new(CollectionName::from("B"), PathBuf::from("/srv/b.json5")),
+            ],
+        };
+
+        assert_eq!(
+            binding.resolved_against(Path::new("runs/city")),
+            MappingBinding::Collections {
+                mappings: vec![
+                    CollectionMapping::new(CollectionName::from("A"), PathBuf::from("runs/city/a.json5")),
+                    CollectionMapping::new(CollectionName::from("B"), PathBuf::from("/srv/b.json5")),
+                ],
+            }
+        );
+    }
 }

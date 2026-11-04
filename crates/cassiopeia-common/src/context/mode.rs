@@ -1,5 +1,5 @@
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use url::Url;
 
 /// Determines how `@context` is attached to produced entities.
@@ -13,6 +13,18 @@ pub enum AtContextMode {
     Default,
     /// Read a local `.jsonld` file and inline its `@context` value into every entity.
     Local(PathBuf),
+}
+
+impl AtContextMode {
+    /// Resolves a relative local context file against `directory`. An absolute path and every other
+    /// mode are returned unchanged.
+    #[must_use]
+    pub fn resolved_against(self, directory: &Path) -> AtContextMode {
+        match self {
+            AtContextMode::Local(path) => AtContextMode::Local(directory.join(path)),
+            other @ (AtContextMode::None | AtContextMode::Explicit(_) | AtContextMode::Default) => other,
+        }
+    }
 }
 
 impl Serialize for AtContextMode {
@@ -67,7 +79,7 @@ fn parse_context_mode(s: &str) -> AtContextMode {
 mod tests {
     use crate::context::mode::{AtContextMode, parse_context_mode};
     use pretty_assertions::assert_eq;
-    use std::path::PathBuf;
+    use std::path::{Path, PathBuf};
     use url::Url;
 
     #[test]
@@ -108,6 +120,27 @@ mod tests {
     fn a_bare_url_parses_as_an_explicit_context() {
         let expected = Url::parse("http://x/ctx").unwrap();
         assert_eq!(parse_context_mode("http://x/ctx"), AtContextMode::Explicit(expected));
+    }
+
+    #[test]
+    fn a_relative_local_context_resolves_against_the_given_directory() {
+        let mode = parse_context_mode("ctx/city.jsonld").resolved_against(Path::new("runs/city"));
+
+        assert_eq!(mode, AtContextMode::Local(PathBuf::from("runs/city/ctx/city.jsonld")));
+    }
+
+    #[test]
+    fn an_absolute_local_context_and_the_other_modes_ignore_the_given_directory() {
+        let directory = Path::new("runs/city");
+        let url = Url::parse("https://example.org/ctx.jsonld").unwrap();
+
+        assert_eq!(
+            parse_context_mode("/srv/ctx.jsonld").resolved_against(directory),
+            AtContextMode::Local(PathBuf::from("/srv/ctx.jsonld"))
+        );
+        assert_eq!(AtContextMode::Explicit(url.clone()).resolved_against(directory), AtContextMode::Explicit(url));
+        assert_eq!(AtContextMode::None.resolved_against(directory), AtContextMode::None);
+        assert_eq!(AtContextMode::Default.resolved_against(directory), AtContextMode::Default);
     }
 
     #[test]

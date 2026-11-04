@@ -12,6 +12,7 @@ use cassiopeia_common::{context::mode::AtContextMode, representation::NgsiLdRepr
 use getset::Getters;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value as JsonValue};
+use std::path::Path;
 use typed_builder::TypedBuilder;
 
 /// Where a run's entities go and in what shape they are written.
@@ -55,6 +56,21 @@ pub struct ManifestOutput {
     temporal: Option<ManifestTemporal>,
 }
 
+impl ManifestOutput {
+    /// Resolves the output's relative local paths against `directory`: a file destination's
+    /// `directory`, a local `context` file, and the validation `schema` and `report`. Absolute paths
+    /// and URLs are kept as they are.
+    #[must_use]
+    pub fn resolved_against(self, directory: &Path) -> ManifestOutput {
+        ManifestOutput {
+            destination: self.destination.resolved_against(directory),
+            context: self.context.map(|context| context.resolved_against(directory)),
+            validation: self.validation.map(|validation| validation.resolved_against(directory)),
+            ..self
+        }
+    }
+}
+
 /// The on-the-wire shape of a manifest output, before its destination settings are read.
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -96,9 +112,9 @@ mod tests {
         temporal::{ManifestTemporal, TemporalRepresentation},
         validation_mode::ValidationMode,
     };
-    use cassiopeia_common::{file_framing::FileFraming, representation::NgsiLdRepresentation, schema_source::SchemaSource};
+    use cassiopeia_common::{context::mode::AtContextMode, file_framing::FileFraming, representation::NgsiLdRepresentation, schema_source::SchemaSource};
     use pretty_assertions::assert_eq;
-    use std::path::PathBuf;
+    use std::path::{Path, PathBuf};
 
     #[test]
     fn reads_a_full_nested_validation_object() {
@@ -216,5 +232,41 @@ mod tests {
         let encoded = serde_json::to_string(&output).unwrap();
         assert!(!encoded.contains("temporal"));
         assert_eq!(serde_json::from_str::<ManifestOutput>(&encoded).unwrap(), output);
+    }
+
+    #[test]
+    fn a_file_output_resolves_its_directory_context_and_validation_paths_against_the_given_directory() {
+        let output: ManifestOutput = serde_json::from_str(
+            r#"{"target": "file", "directory": "out", "context": "ctx.jsonld", "validation": {"schema": "x.schema.json", "report": "report.json"}}"#,
+        )
+        .unwrap();
+        let output = output.resolved_against(Path::new("runs/city"));
+
+        assert_eq!(
+            output.destination(),
+            &Destination::File {
+                directory: Some(PathBuf::from("runs/city/out")),
+                framing: FileFraming::Array
+            }
+        );
+        assert_eq!(output.context(), &Some(AtContextMode::Local(PathBuf::from("runs/city/ctx.jsonld"))));
+        let validation = output.validation().as_ref().unwrap();
+        assert_eq!(validation.schema(), &Some(SchemaSource::Local(PathBuf::from("runs/city/x.schema.json"))));
+        assert_eq!(validation.report(), &Some(PathBuf::from("runs/city/report.json")));
+    }
+
+    #[test]
+    fn a_file_output_without_a_directory_keeps_the_run_time_default_when_resolved() {
+        let output: ManifestOutput = serde_json::from_str(r#"{"target": "file"}"#).unwrap();
+        let output = output.resolved_against(Path::new("runs/city"));
+
+        assert_eq!(output.destination(), &Destination::file(None, FileFraming::Array));
+    }
+
+    #[test]
+    fn a_broker_output_is_unchanged_by_resolution() {
+        let output: ManifestOutput = serde_json::from_str(r#"{"target": "context-broker", "url": "http://localhost:9090/", "tenant": "city"}"#).unwrap();
+
+        assert_eq!(output.clone().resolved_against(Path::new("runs/city")), output);
     }
 }
