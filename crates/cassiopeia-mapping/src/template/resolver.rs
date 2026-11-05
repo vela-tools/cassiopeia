@@ -91,6 +91,38 @@ impl TemplateResolver {
         Ok(Some(combined))
     }
 
+    /// Resolves the templates of a list-form source, one value per template in order, or yields
+    /// `None` when the list reads the record and every template that reads it resolves to an absent
+    /// value (see [`present`]).
+    ///
+    /// The values are what [`resolve`](Self::resolve) yields, absent ones included, for the
+    /// declaration's conversion to merge: a source such as `["{{ street }}", " ", "{{ no }}"]` with
+    /// only `no` present still joins to ` 7`. Only when nothing the list reads is there do its static
+    /// parts stand alone, and they are then no value, whatever text they hold, so `["Station-",
+    /// "{{ id }}"]` over a record with no `id` is absent rather than `Station-`. A list of static
+    /// parts alone reads no field and resolves to them.
+    ///
+    /// # Errors
+    /// Returns the errors of [`resolve`](Self::resolve).
+    pub fn resolve_parts(&self, templates: &[CompiledTemplate], data: &JsonValue) -> Result<Option<Vec<JsonValue>>> {
+        let mut values = Vec::with_capacity(templates.len());
+        let mut reads = Reads::Nothing;
+        for template in templates {
+            let value = self.resolve(template, data)?;
+            reads = match (reads, template) {
+                (Reads::Present, _) | (_, CompiledTemplate::Static(_)) => reads,
+                (Reads::Nothing | Reads::OnlyAbsent, _) if is_absent(&value) => Reads::OnlyAbsent,
+                (Reads::Nothing | Reads::OnlyAbsent, _) => Reads::Present,
+            };
+            values.push(value);
+        }
+
+        Ok(match reads {
+            Reads::Nothing | Reads::Present => Some(values),
+            Reads::OnlyAbsent => None,
+        })
+    }
+
     /// Resolves several templates and splits their combined output into identifier tokens.
     ///
     /// A resolved array contributes one token per element and a string one per whitespace- or
@@ -226,11 +258,27 @@ impl TemplateResolver {
 
 /// Keeps a resolved field value, or yields `None` when it is absent: null or empty text.
 fn present(value: JsonValue) -> Option<JsonValue> {
+    if is_absent(&value) { None } else { Some(value) }
+}
+
+/// Whether a resolved value is absent: null, or empty text.
+const fn is_absent(value: &JsonValue) -> bool {
     match value {
-        JsonValue::Null => None,
-        JsonValue::String(text) if text.is_empty() => None,
-        other @ (JsonValue::String(_) | JsonValue::Bool(_) | JsonValue::Number(_) | JsonValue::Array(_) | JsonValue::Object(_)) => Some(other),
+        JsonValue::Null => true,
+        JsonValue::String(text) => text.is_empty(),
+        JsonValue::Bool(_) | JsonValue::Number(_) | JsonValue::Array(_) | JsonValue::Object(_) => false,
     }
+}
+
+/// What the templates of a list-form source resolved so far have found of the record.
+#[derive(Clone, Copy)]
+enum Reads {
+    /// No template read the record: every one so far is static.
+    Nothing,
+    /// Every template that read the record resolved to an absent value.
+    OnlyAbsent,
+    /// A template that read the record resolved to a value.
+    Present,
 }
 
 /// Appends one field value to a composite's output, a string as its text and anything else as its
@@ -487,6 +535,62 @@ mod tests {
         for record in [json!({}), json!({"id": null}), json!({"id": ""})] {
             assert_eq!(resolver.resolve_joined(&templates, &record).unwrap(), None, "{record}");
         }
+    }
+
+    /// The list-form source `["{{ street }}", separator, "{{ no }}"]`.
+    fn address(separator: &str) -> Vec<CompiledTemplate> {
+        vec![
+            CompiledTemplate::Simple(FieldPath::new("street")),
+            CompiledTemplate::Static(separator.to_string()),
+            CompiledTemplate::Simple(FieldPath::new("no")),
+        ]
+    }
+
+    #[test]
+    fn resolve_parts_is_absent_when_no_field_the_list_reads_is_present_whatever_its_static_parts_hold() {
+        let resolver = TemplateRunner::new().resolver();
+
+        for separator in [" ", ", ", "Station-"] {
+            for record in [json!({}), json!({"street": null, "no": ""}), json!({"street": "", "no": null})] {
+                assert_eq!(resolver.resolve_parts(&address(separator), &record).unwrap(), None, "{separator:?} {record}");
+            }
+        }
+    }
+
+    #[test]
+    fn resolve_parts_keeps_every_value_absent_ones_included_when_one_field_is_present() {
+        let resolver = TemplateRunner::new().resolver();
+
+        assert_eq!(
+            resolver.resolve_parts(&address(", "), &json!({"no": 7})).unwrap(),
+            Some(vec![JsonValue::Null, json!(", "), json!(7)])
+        );
+    }
+
+    #[test]
+    fn resolve_parts_of_static_parts_alone_resolves_to_them() {
+        let resolver = TemplateRunner::new().resolver();
+        let templates = vec![CompiledTemplate::Static("N/A".to_string()), CompiledTemplate::Static(" ".to_string())];
+
+        assert_eq!(resolver.resolve_parts(&templates, &json!({})).unwrap(), Some(vec![json!("N/A"), json!(" ")]));
+    }
+
+    #[test]
+    fn resolve_parts_counts_a_template_that_renders_its_own_fallback_as_present() {
+        let mut runner = TemplateRunner::new();
+        let source = TemplateSource::new("{% if street %}{{ street }}{% else %}unknown{% endif %}");
+        let fallback = runner.compile(&source, &location()).unwrap();
+        let resolver = runner.resolver();
+        let templates = vec![
+            fallback,
+            CompiledTemplate::Static(" ".to_string()),
+            CompiledTemplate::Simple(FieldPath::new("no")),
+        ];
+
+        assert_eq!(
+            resolver.resolve_parts(&templates, &json!({})).unwrap(),
+            Some(vec![json!("unknown"), json!(" "), JsonValue::Null])
+        );
     }
 
     #[test]

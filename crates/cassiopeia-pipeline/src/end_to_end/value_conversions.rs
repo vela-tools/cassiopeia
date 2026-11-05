@@ -382,3 +382,54 @@ fn splitting_text_into_a_list_leaves_out_its_empty_pieces_and_blank_text_gives_n
         assert_eq!(outcome.warnings, 0, "{store:?}: {:?}", outcome.diagnostics);
     }
 }
+
+/// A thing whose address joins a street and a house number with a literal separator, and whose
+/// code puts a literal prefix in front of a field.
+const LIST_SOURCES: &str = r#"{
+    version: "v4",
+    dataModel: "Thing",
+    identity: { entityName: "{{ id }}" },
+    attributes: {
+        address: { source: ["{{ street }}", ", ", "{{ no }}"] },
+        code: { source: ["Station-", "{{ code }}"] },
+        kind: { source: ["fixed", " ", "site"] },
+    },
+}"#;
+
+#[test]
+fn a_list_source_whose_fields_are_all_absent_gives_no_attribute_while_a_partial_join_and_a_constant_are_written() {
+    for store in STORES {
+        let outcome = run_end_to_end(
+            store,
+            &[RunInput {
+                binding: RunBinding::Mapping(LIST_SOURCES),
+                records: json!([
+                    { "id": "A", "street": "Main St", "no": 7, "code": "17" },
+                    { "id": "B", "street": "", "no": 7, "code": null },
+                    { "id": "C", "street": "", "no": null },
+                ]),
+            }],
+            &["Thing"],
+            "",
+        );
+
+        assert_eq!(
+            entity_ids(&outcome),
+            ["urn:ngsi-ld:Thing:A", "urn:ngsi-ld:Thing:B", "urn:ngsi-ld:Thing:C"],
+            "{store:?}"
+        );
+        let full = entity(&outcome.entities, "urn:ngsi-ld:Thing:A");
+        assert_eq!(full["address"]["value"], "Main St, 7", "{store:?}");
+        assert_eq!(full["code"]["value"], "Station-17", "{store:?}");
+        let partial = entity(&outcome.entities, "urn:ngsi-ld:Thing:B");
+        assert_eq!(partial["address"]["value"], ", 7", "{store:?}");
+        assert!(partial.get("code").is_none(), "{store:?}: {partial:?}");
+        let empty = entity(&outcome.entities, "urn:ngsi-ld:Thing:C");
+        assert!(empty.get("address").is_none(), "{store:?}: {empty:?}");
+        assert!(empty.get("code").is_none(), "{store:?}: {empty:?}");
+        for thing in [full, partial, empty] {
+            assert_eq!(thing["kind"]["value"], "fixed site", "{store:?}");
+        }
+        assert_eq!(outcome.warnings, 0, "{store:?}: {:?}", outcome.diagnostics);
+    }
+}

@@ -244,9 +244,13 @@ fn bind_refusal<T>(ctx: &ResolutionContext, attr_name: &NameBuf, outcome: result
 ///
 /// A single source string that is the lone reference `{{ context }}` binds the whole record;
 /// otherwise each source template is evaluated against the record, or, when a source was written as
-/// a literal that never compiled, taken verbatim. Taking the source and its compiled templates as
-/// arguments lets both an [`Attribute`] and one of its [`AttributeInstance`]s be read through the
-/// same path.
+/// a literal that never compiled, taken verbatim. A list-form source that reads the record but finds
+/// none of what it reads yields no values (see [`TemplateResolver::resolve_parts`]), so its literal
+/// parts are not written alone, as a single template's would not be. Taking the source and its
+/// compiled templates as arguments lets both an [`Attribute`] and one of its [`AttributeInstance`]s
+/// be read through the same path.
+///
+/// [`TemplateResolver::resolve_parts`]: cassiopeia_mapping::template::resolver::TemplateResolver::resolve_parts
 fn collect_source_parts(ctx: &ResolutionContext, source: Option<&JsonValue>, compiled: Option<&Vec<CompiledTemplate>>) -> Result<SourceParts> {
     // The compiled form, not the source text, decides: `{{context}}` and `{{ context }}` are the
     // same reference however they are spaced.
@@ -261,12 +265,12 @@ fn collect_source_parts(ctx: &ResolutionContext, source: Option<&JsonValue>, com
             None => parts.push(JsonValue::String(literal.clone())),
         },
         Some(JsonValue::Array(sources)) => match compiled {
+            // The resolved values move into the parts on the heap buffer they were gathered in.
             Some(templates) => {
-                for (index, _source) in sources.iter().enumerate() {
-                    if let Some(template) = templates.get(index) {
-                        parts.push(ctx.resolver.resolve(template, ctx.data)?);
-                    }
-                }
+                return Ok(ctx
+                    .resolver
+                    .resolve_parts(templates, ctx.data)?
+                    .map_or_else(SourceParts::new, SourceParts::from_vec));
             }
             None => parts.extend(sources.iter().cloned()),
         },

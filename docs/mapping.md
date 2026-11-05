@@ -208,7 +208,7 @@ source: [
 transformation: "string",
 ~~~
 
-For a text transformation, Cassiopeia concatenates the resolved parts in order. Include separators such as a space in the source array when needed. A part that resolves to nothing is left out and the other parts are still joined, so a record with no `street` gets its house number with the space still in front of it. When the value should exist only if every field is present, write one template instead, as described next.
+For a text transformation, Cassiopeia concatenates the resolved parts in order. Include separators such as a space in the source array when needed. A part that resolves to nothing is left out and the other parts are still joined, so a record with no `street` gets its house number with the space still in front of it. When none of the fields the parts read is present, the source resolves to nothing, whatever text its literal parts hold: a record with neither `street` nor `house_number` gets no attribute rather than a lone space, and `["Station-", "{{ code }}"]` over a record with no `code` gets no attribute rather than `Station-`. A source made only of literal parts reads no field and always writes its text. When the value should exist only if every field is present, write one template instead, as described next.
 
 A plain reference to a missing or null field resolves to nothing. So does a template of literal text and plain references, such as `{{ street }} {{ house_number }}`, when any field it reads is missing, null, or empty: a record with no `house_number` gets no value, not `Main St null`. An attribute whose source resolves to nothing is left out of the entity.
 
