@@ -256,14 +256,12 @@ mod tests {
     fn the_editor_offers_only_the_transformations_the_selected_type_admits() {
         assert_eq!(offered_labels(NgsiLdAttributeKind::JsonProperty), ["Array", "Object", "Json"]);
         assert_eq!(offered_labels(NgsiLdAttributeKind::Relationship), Vec::<String>::new());
-        assert_eq!(offered_labels(NgsiLdAttributeKind::ListProperty), ["Array"]);
-        assert_eq!(
-            offered_labels(NgsiLdAttributeKind::Property),
-            AttributeEditorState::TRANSFORMS
-                .iter()
-                .map(|(label, _)| (*label).to_owned())
-                .collect::<Vec<_>>()
-        );
+        let every_transformation = AttributeEditorState::TRANSFORMS
+            .iter()
+            .map(|(label, _)| (*label).to_owned())
+            .collect::<Vec<_>>();
+        assert_eq!(offered_labels(NgsiLdAttributeKind::Property), every_transformation);
+        assert_eq!(offered_labels(NgsiLdAttributeKind::ListProperty), every_transformation);
     }
 
     #[test]

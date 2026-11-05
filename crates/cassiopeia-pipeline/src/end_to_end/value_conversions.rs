@@ -174,3 +174,58 @@ fn a_json_property_built_from_mappings_keeps_a_member_s_null() {
         },
     );
 }
+
+/// A route whose stop codes are a list read item by item as integers.
+const ROUTE: &str = r#"{
+    version: "v4",
+    dataModel: "Route",
+    identity: { entityName: "{{ id }}" },
+    attributes: {
+        name: { source: "{{ name }}" },
+        codes: { type: "ListProperty", source: "{{ codes }}", transformation: "integer" },
+    },
+}"#;
+
+#[test]
+fn a_list_property_under_integer_types_each_item() {
+    for store in STORES {
+        let outcome = run_end_to_end(
+            store,
+            &[RunInput {
+                binding: RunBinding::Mapping(ROUTE),
+                records: json!([{ "id": "a", "name": "north", "codes": ["1", "2"] }]),
+            }],
+            &["Route"],
+            "",
+        );
+
+        let route = entity(&outcome.entities, "urn:ngsi-ld:Route:a");
+        assert_eq!(route["codes"]["type"], "ListProperty", "{store:?}: {route:?}");
+        assert_eq!(route["codes"]["valueList"], json!([1, 2]), "{store:?}");
+        assert_eq!(outcome.warnings, 0, "{store:?}: {:?}", outcome.diagnostics);
+    }
+}
+
+#[test]
+fn a_list_property_with_an_unreadable_item_is_dropped_with_a_warning() {
+    for store in STORES {
+        let outcome = run_end_to_end(
+            store,
+            &[RunInput {
+                binding: RunBinding::Mapping(ROUTE),
+                records: json!([{ "id": "a", "name": "north", "codes": ["1", "x"] }]),
+            }],
+            &["Route"],
+            "",
+        );
+
+        assert_eq!(entity_ids(&outcome), ["urn:ngsi-ld:Route:a"], "{store:?}");
+        let route = entity(&outcome.entities, "urn:ngsi-ld:Route:a");
+        assert!(route.get("codes").is_none(), "{store:?}: {route:?}");
+        assert_eq!(route["name"]["value"], "north", "{store:?}");
+        let unreadable = outcome.coded(DiagnosticCode::Extractor(ExtractorCode::NumberUnreadable));
+        assert_eq!(unreadable.len(), 1, "{store:?}: {:?}", outcome.diagnostics);
+        assert_eq!(unreadable[0].headline, "Attribute `codes` dropped: `x` is not an integer", "{store:?}");
+        assert_eq!(outcome.warnings, 1, "{store:?}");
+    }
+}

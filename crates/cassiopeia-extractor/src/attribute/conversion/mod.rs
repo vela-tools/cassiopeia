@@ -45,7 +45,7 @@ pub(crate) fn apply(
 ) -> Result<Option<AttributeContent>, AttributeRefusal> {
     Ok(match conversion {
         Conversion::Property(conversion) => property::apply(parts, conversion, policy, omitted)?.map(AttributeContent::Value),
-        Conversion::ListProperty => list_property::apply(parts, omitted)?.map(AttributeContent::Value),
+        Conversion::ListProperty(conversion) => list_property::apply(parts, conversion, policy, omitted)?.map(AttributeContent::Value),
         Conversion::JsonProperty(conversion) => json_property::apply(parts, conversion)?.map(AttributeContent::Json),
         Conversion::GeoProperty(target) => geo_property::apply(parts, target, policy, omitted)?.map(AttributeContent::Value),
         Conversion::LanguageProperty => language_property::apply(parts)?.map(AttributeContent::Language),
@@ -76,7 +76,7 @@ pub(crate) fn read_member(
 ) -> Result<Option<JsonValue>, AttributeRefusal> {
     match conversion {
         Conversion::Property(conversion) => Ok(property::read(parts, conversion, policy, omitted)?.map(ReadValue::into_json)),
-        Conversion::ListProperty => Ok(list_property::read(parts)),
+        Conversion::ListProperty(conversion) => list_property::read(parts, conversion, policy, omitted),
         Conversion::JsonProperty(conversion) => json_property::read(parts, conversion),
         Conversion::GeoProperty(_) | Conversion::LanguageProperty | Conversion::LanguageText | Conversion::VocabProperty | Conversion::Relationship => {
             Ok(apply(parts, conversion, policy, omitted)?.map(JsonValue::from))

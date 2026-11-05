@@ -65,12 +65,13 @@ pub(crate) fn read(
     merged.map_or(Ok(None), |value| read_value(value, reading, policy, omitted))
 }
 
-/// Reads one value, already merged from the parts, the way `reading` names.
+/// Reads one value, already merged from the parts or taken as one item of a list, the way
+/// `reading` names.
 ///
 /// The object and JSON readings keep raw JSON with every null in it. Every other reading builds a
 /// value, which holds no null (ETSI GS CIM 009 v1.9.1 clause 4.5.0): a null nested in what it reads
 /// is left out and counted in `omitted`.
-fn read_value(
+pub(crate) fn read_value(
     value: JsonValue,
     reading: ValueReading,
     policy: Option<&GeometryPolicy>,

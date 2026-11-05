@@ -2,6 +2,7 @@ pub mod admitted_transformations;
 pub mod conversion_refusal;
 pub mod declaration_shape;
 pub mod json_conversion;
+pub mod list_conversion;
 pub mod property_conversion;
 pub mod value_reading;
 
@@ -11,6 +12,7 @@ use crate::{
         conversion_refusal::ConversionRefusal,
         declaration_shape::{DeclarationShape, ValueOrigin},
         json_conversion::JsonConversion,
+        list_conversion::ListConversion,
         property_conversion::PropertyConversion,
         value_reading::ValueReading,
     },
@@ -33,8 +35,8 @@ pub enum Conversion {
     /// A `GeoProperty`'s value, a `GeoJSON` geometry of one of the types clause 4.7.1 admits.
     GeoProperty(GeometryTarget),
     /// A `ListProperty`'s `valueList`, an ordered array of values (clause 4.5.21.2), gathered as
-    /// the `array` transformation gathers them.
-    ListProperty,
+    /// the `array` transformation gathers them, its items kept as read or each read one way.
+    ListProperty(ListConversion),
     /// A `JsonProperty`'s `json` member, raw JSON that is never interpreted (clause 4.5.24.2).
     JsonProperty(JsonConversion),
     /// A `LanguageProperty`'s `languageMap` (clause 4.5.18), read from one object of text keyed by
@@ -108,9 +110,9 @@ impl Conversion {
                     None => Err(refused),
                 },
             },
-            NgsiLdAttributeKind::ListProperty => match transformation {
-                None | Some(Transformation::Array) => Ok(Conversion::ListProperty),
-                Some(_) => Err(refused),
+            NgsiLdAttributeKind::ListProperty => match Conversion::list(transformation, origin) {
+                Some(conversion) => Ok(Conversion::ListProperty(conversion)),
+                None => Err(refused),
             },
             NgsiLdAttributeKind::JsonProperty => match transformation {
                 None => Ok(Conversion::JsonProperty(JsonConversion::Verbatim)),
@@ -163,6 +165,30 @@ impl Conversion {
         }
     }
 
+    /// A `ListProperty`'s conversion, or `None` when the transformation cannot apply to what the
+    /// origin reads.
+    ///
+    /// Naming no transformation, or `array`, keeps every item as read; any other transformation
+    /// reads each item as it would read one value. The list nested `mappings` assemble holds the one
+    /// object they build, so a reading that never applies to an object cannot read its item.
+    const fn list(transformation: Option<Transformation>, origin: ValueOrigin) -> Option<ListConversion> {
+        let Some(transformation) = transformation else {
+            return Some(ListConversion::AsRead);
+        };
+
+        match (ValueReading::of(transformation), origin) {
+            (None, ValueOrigin::Sourced | ValueOrigin::Assembled) => Some(ListConversion::AsRead),
+            (Some(reading), ValueOrigin::Sourced) => Some(ListConversion::Each(reading)),
+            (Some(reading), ValueOrigin::Assembled) => {
+                if reading.applies_to_object() {
+                    Some(ListConversion::Each(reading))
+                } else {
+                    None
+                }
+            }
+        }
+    }
+
     /// Every transformation a declaration of `kind` and `shape` admits, in declaration order.
     ///
     /// Derived from [`Conversion::resolve`], so the list a load error offers can never disagree
@@ -180,10 +206,10 @@ impl Conversion {
     #[must_use]
     pub const fn geometry_target(self) -> Option<GeometryTarget> {
         match self {
-            Conversion::Property(PropertyConversion::One(reading)) => reading.geometry_target(),
+            Conversion::Property(PropertyConversion::One(reading)) | Conversion::ListProperty(ListConversion::Each(reading)) => reading.geometry_target(),
             Conversion::GeoProperty(target) => Some(target),
             Conversion::Property(PropertyConversion::Array)
-            | Conversion::ListProperty
+            | Conversion::ListProperty(ListConversion::AsRead)
             | Conversion::JsonProperty(_)
             | Conversion::LanguageProperty
             | Conversion::LanguageText
@@ -201,6 +227,7 @@ mod tests {
             conversion_refusal::ConversionRefusal,
             declaration_shape::{DeclarationShape, ValueOrigin},
             json_conversion::JsonConversion,
+            list_conversion::ListConversion,
             property_conversion::PropertyConversion,
             value_reading::{TemporalReading, ValueReading},
         },
@@ -239,8 +266,13 @@ mod tests {
             (GeoProperty, SOURCED, default: true, [Geometry, Point, MultiPoint, LineString, MultiLineString, Polygon, MultiPolygon]),
             (GeoProperty, ASSEMBLED, default: true, [Geometry, Point, MultiPoint, LineString, MultiLineString, Polygon, MultiPolygon]),
             (GeoProperty, DeclarationShape::LanguageMap, default: false, []),
-            (ListProperty, SOURCED, default: true, [Array]),
-            (ListProperty, ASSEMBLED, default: true, [Array]),
+            (ListProperty, SOURCED, default: true, [
+                Boolean, Integer, Float, String, Array, Object, Json, Geometry, Point, MultiPoint, LineString,
+                MultiLineString, Polygon, MultiPolygon, DateTime, Date, Time,
+            ]),
+            (ListProperty, ASSEMBLED, default: true, [
+                String, Array, Object, Json, Geometry, Point, MultiPoint, LineString, MultiLineString, Polygon, MultiPolygon,
+            ]),
             (ListProperty, DeclarationShape::LanguageMap, default: false, []),
             (JsonProperty, SOURCED, default: true, [Array, Object, Json]),
             (JsonProperty, ASSEMBLED, default: true, [Array, Object, Json]),
@@ -295,7 +327,7 @@ mod tests {
         for (kind, expected) in [
             (NgsiLdAttributeKind::Property, Conversion::Property(PropertyConversion::One(ValueReading::Text))),
             (NgsiLdAttributeKind::GeoProperty, Conversion::GeoProperty(GeometryTarget::Preserve)),
-            (NgsiLdAttributeKind::ListProperty, Conversion::ListProperty),
+            (NgsiLdAttributeKind::ListProperty, Conversion::ListProperty(ListConversion::AsRead)),
             (NgsiLdAttributeKind::JsonProperty, Conversion::JsonProperty(JsonConversion::Verbatim)),
             (NgsiLdAttributeKind::LanguageProperty, Conversion::LanguageProperty),
             (NgsiLdAttributeKind::VocabProperty, Conversion::VocabProperty),
@@ -314,7 +346,7 @@ mod tests {
                 Ok(Conversion::Property(PropertyConversion::One(ValueReading::Object))),
             ),
             (NgsiLdAttributeKind::GeoProperty, Ok(Conversion::GeoProperty(GeometryTarget::Preserve))),
-            (NgsiLdAttributeKind::ListProperty, Ok(Conversion::ListProperty)),
+            (NgsiLdAttributeKind::ListProperty, Ok(Conversion::ListProperty(ListConversion::AsRead))),
             (NgsiLdAttributeKind::JsonProperty, Ok(Conversion::JsonProperty(JsonConversion::Verbatim))),
             (NgsiLdAttributeKind::LanguageProperty, Ok(Conversion::LanguageProperty)),
             (NgsiLdAttributeKind::VocabProperty, Err(ConversionRefusal::Shape)),
@@ -363,7 +395,21 @@ mod tests {
                 Transformation::Geometry,
                 Conversion::Property(PropertyConversion::One(ValueReading::Geometry(GeometryTarget::Preserve))),
             ),
-            (NgsiLdAttributeKind::ListProperty, Transformation::Array, Conversion::ListProperty),
+            (
+                NgsiLdAttributeKind::ListProperty,
+                Transformation::Array,
+                Conversion::ListProperty(ListConversion::AsRead),
+            ),
+            (
+                NgsiLdAttributeKind::ListProperty,
+                Transformation::Integer,
+                Conversion::ListProperty(ListConversion::Each(ValueReading::Integer)),
+            ),
+            (
+                NgsiLdAttributeKind::ListProperty,
+                Transformation::Point,
+                Conversion::ListProperty(ListConversion::Each(ValueReading::Geometry(GeometryTarget::Coerce(GeometryKind::Point)))),
+            ),
             (
                 NgsiLdAttributeKind::JsonProperty,
                 Transformation::Object,
@@ -455,10 +501,15 @@ mod tests {
             Conversion::GeoProperty(GeometryTarget::Coerce(GeometryKind::Polygon)).geometry_target(),
             Some(GeometryTarget::Coerce(GeometryKind::Polygon))
         );
+        assert_eq!(
+            Conversion::ListProperty(ListConversion::Each(ValueReading::Geometry(GeometryTarget::Coerce(GeometryKind::Point)))).geometry_target(),
+            Some(GeometryTarget::Coerce(GeometryKind::Point))
+        );
         for conversion in [
             Conversion::Property(PropertyConversion::One(ValueReading::Integer)),
             Conversion::Property(PropertyConversion::Array),
-            Conversion::ListProperty,
+            Conversion::ListProperty(ListConversion::AsRead),
+            Conversion::ListProperty(ListConversion::Each(ValueReading::Integer)),
             Conversion::JsonProperty(JsonConversion::Verbatim),
             Conversion::LanguageProperty,
             Conversion::LanguageText,

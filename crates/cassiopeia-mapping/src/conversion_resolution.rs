@@ -120,6 +120,7 @@ mod tests {
             Conversion,
             declaration_shape::{DeclarationShape, ValueOrigin},
             json_conversion::JsonConversion,
+            list_conversion::ListConversion,
             property_conversion::PropertyConversion,
             value_reading::{TemporalReading, ValueReading},
         },
@@ -592,18 +593,62 @@ mod tests {
     }
 
     #[test]
-    fn a_list_property_under_anything_but_array_is_refused() {
-        for transformation in ["string", "integer", "object", "json"] {
-            assert_not_admitted(
-                load(&format!(
-                    r#"{{ codes: {{ type: "ListProperty", source: "{{{{ codes }}}}", transformation: "{transformation}" }} }}"#
-                )),
-                "codes",
-                (NgsiLdAttributeKind::ListProperty, SOURCED),
-                transformation,
-                &["array"],
+    fn a_list_property_under_an_item_transformation_loads() {
+        let mapping = load(
+            r#"{
+                integers: { type: "ListProperty", source: "{{ codes }}", transformation: "integer" },
+                texts: { type: "ListProperty", source: "{{ codes }}", transformation: "string" },
+                objects: { type: "ListProperty", source: "{{ codes }}", transformation: "object" },
+                decoded: { type: "ListProperty", source: "{{ codes }}", transformation: "json" },
+                pins: { type: "ListProperty", source: "{{ pins }}", transformation: "point", geometry: { altitude: "drop" } },
+            }"#,
+        )
+        .unwrap();
+
+        for (name, reading) in [
+            ("integers", ValueReading::Integer),
+            ("texts", ValueReading::Text),
+            ("objects", ValueReading::Object),
+            ("decoded", ValueReading::Json),
+            ("pins", ValueReading::Geometry(GeometryTarget::Coerce(GeometryKind::Point))),
+        ] {
+            assert_eq!(
+                attribute(&mapping, name).conversion(),
+                Conversion::ListProperty(ListConversion::Each(reading)),
+                "{name}"
             );
         }
+    }
+
+    #[test]
+    fn a_list_property_built_from_nested_mappings_under_a_reading_that_never_applies_to_an_object_is_refused() {
+        assert_not_admitted(
+            load(r#"{ codes: { type: "ListProperty", transformation: "integer", mappings: { code: { source: "{{ code }}" } } } }"#),
+            "codes",
+            (NgsiLdAttributeKind::ListProperty, ASSEMBLED),
+            "integer",
+            &[
+                "string",
+                "array",
+                "object",
+                "json",
+                "geometry",
+                "point",
+                "multipoint",
+                "linestring",
+                "multilinestring",
+                "polygon",
+                "multipolygon",
+            ],
+        );
+    }
+
+    #[test]
+    fn a_geometry_block_on_a_list_property_reading_no_geometry_is_refused() {
+        assert_refused_as_policy_without_geometry(
+            load(r#"{ codes: { type: "ListProperty", source: "{{ codes }}", transformation: "integer", geometry: { convert: "first" } } }"#),
+            "codes",
+        );
     }
 
     #[test]
@@ -828,7 +873,7 @@ mod tests {
         .unwrap();
 
         for (name, expected) in [
-            ("codes", Conversion::ListProperty),
+            ("codes", Conversion::ListProperty(ListConversion::AsRead)),
             ("payload", Conversion::JsonProperty(JsonConversion::Verbatim)),
             ("name", Conversion::Property(PropertyConversion::One(ValueReading::Text))),
             ("location", Conversion::GeoProperty(GeometryTarget::Preserve)),
