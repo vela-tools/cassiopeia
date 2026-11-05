@@ -10,11 +10,14 @@ use cassiopeia_extractor::{required_value::RequiredValue, unusable_value::Unusab
 
 /// The code a value its kind cannot hold, or its transformation cannot read, is published under.
 ///
-/// A non-IRI vocabulary value, a value that is no language map, text that is not JSON, a value that
-/// is no JSON object, and a value that spells no geometry are different mistakes with
-/// different fixes, so each publishes its own code.
+/// A value that spells no boolean, one that spells no number, a non-IRI vocabulary value, a value
+/// that is no language map, text that is not JSON, a value that is no JSON object, and a value that
+/// spells no geometry are different mistakes with different fixes, so each publishes its own code.
+/// An integer and a float share one, since both read a number and differ only in its kind.
 const fn code(required: RequiredValue) -> DiagnosticCode {
     match required {
+        RequiredValue::Boolean => DiagnosticCode::Extractor(ExtractorCode::BooleanUnreadable),
+        RequiredValue::Integer | RequiredValue::Float => DiagnosticCode::Extractor(ExtractorCode::NumberUnreadable),
         RequiredValue::Iri => DiagnosticCode::Extractor(ExtractorCode::VocabNotAnIri),
         RequiredValue::LanguageMap => DiagnosticCode::Extractor(ExtractorCode::LanguageMapMisshapen),
         RequiredValue::Json => DiagnosticCode::Extractor(ExtractorCode::JsonTextUnreadable),
@@ -146,5 +149,25 @@ mod tests {
             reported[0].headline,
             r#"Attribute `location` dropped: `{"street":"Ring"}` is not a GeoJSON geometry"#
         );
+    }
+
+    #[test]
+    fn each_scalar_requirement_is_reported_under_its_code_naming_the_value_and_the_requirement() {
+        for (required, value, code, requirement) in [
+            (RequiredValue::Boolean, "maybe", ExtractorCode::BooleanUnreadable, "a boolean"),
+            (RequiredValue::Integer, "abc", ExtractorCode::NumberUnreadable, "an integer"),
+            (RequiredValue::Float, "x", ExtractorCode::NumberUnreadable, "a number"),
+        ] {
+            let unusable = UnusableValues::new();
+            let sink = RecordingReporter::new();
+            unusable.record(AttributePath::new(name("count"), Vec::new(), Vec::new()), required, value);
+
+            report_sink(&sink, unusable, unusable_value_diagnostic);
+
+            let reported = sink.diagnostics();
+            assert_eq!(reported.len(), 1, "{required}");
+            assert_eq!(reported[0].code, DiagnosticCode::Extractor(code), "{required}");
+            assert_eq!(reported[0].headline, format!("Attribute `count` dropped: `{value}` is not {requirement}"));
+        }
     }
 }

@@ -248,8 +248,8 @@ The transformation determines the value Cassiopeia builds. If you omit it, the a
 
 | Transformation | Result |
 | --- | --- |
-| `boolean` | A boolean value. |
-| `integer` | A signed integer. |
+| `boolean` | A boolean value. `true`, `yes`, `on`, and `1` read as true and `false`, `no`, `off`, and `0` as false, in any case, and a number reads as true unless it is zero. |
+| `integer` | A signed 64-bit integer. A fraction is truncated toward zero, so `"7.9"` becomes `7`. |
 | `float` | A floating-point number. Comma decimal separators are accepted. |
 | `string` | Text. Several source parts are concatenated. A number becomes its text, and an array or object becomes its compact JSON text. |
 | `array` | An array containing the source parts. A part that is already an array contributes its elements, without any element that is `null`, and so does text that reads as a JSON array, such as `[1,2]`. Any other part contributes itself, so text that is no JSON array, such as `BS IN`, is one element; split it with a template such as `{{ codes \| split(pat=' ') }}` (see [Keep a value's type](templates.md#keep-a-values-type)). A null or blank part contributes nothing, and no parts left means no attribute. |
@@ -265,6 +265,8 @@ The transformation determines the value Cassiopeia builds. If you omit it, the a
 | `multilinestring` | A GeoJSON `MultiLineString`. |
 | `polygon` | A GeoJSON `Polygon`. |
 | `multipolygon` | A GeoJSON `MultiPolygon`. |
+
+`boolean`, `integer`, and `float` read text without the whitespace around it, so a padded CSV cell such as ` 12 ` becomes `12`. A value they cannot read is not dropped quietly: text such as `abc` under `integer` or `maybe` under `boolean`, an array, an object, a number outside the 64-bit range under `integer`, and text such as `NaN` that spells no finite number under `float` cost the attribute, sub-attribute, or instance, and the entity is still written. The run warns under `extractor-boolean-unreadable` or `extractor-number-unreadable`, naming the attribute and the first value it could not read. A missing, null, or blank source produces no attribute and no warning.
 
 NGSI-LD admits no `null` anywhere in an entity's values (ETSI GS CIM 009 v1.9.1 clause 4.5.0): a broker running JSON-LD expansion would delete it without a word (clause 5.2.1). So a `null` nested inside a source array or object is left out of the value Cassiopeia builds. A source array `["a", null, "b"]` becomes `["a", "b"]`, and an object `{"value": 21.5, "unit": null}` under `object` becomes `{"value": 21.5}`. The attribute itself is kept, and the run warns once per attribute under `extractor-null-dropped`, counting the records that lost a `null`. Only a `JsonProperty` keeps such a `null` as the source has it (see [ListProperty and JsonProperty](#listproperty-and-jsonproperty)). An empty string is a value, not a `null`, and is written as `""`.
 

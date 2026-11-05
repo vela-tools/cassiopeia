@@ -31,6 +31,12 @@ pub enum ExtractorCode {
     /// An attribute read as a geometry, a `GeoProperty` or one declaring a geometry transformation,
     /// carried a value that spells no `GeoJSON` geometry, so the attribute was dropped.
     GeometryUnreadable,
+    /// An attribute declared the `boolean` transformation and its source carried a value that spells
+    /// no boolean, so the attribute was dropped.
+    BooleanUnreadable,
+    /// An attribute declared the `integer` or `float` transformation and its source carried a value
+    /// that spells no number of that kind, so the attribute was dropped.
+    NumberUnreadable,
 }
 
 #[cfg(test)]
@@ -49,5 +55,7 @@ mod tests {
         assert_eq!(ExtractorCode::JsonTextUnreadable.to_string(), "json-text-unreadable");
         assert_eq!(ExtractorCode::ObjectMisshapen.to_string(), "object-misshapen");
         assert_eq!(ExtractorCode::GeometryUnreadable.to_string(), "geometry-unreadable");
+        assert_eq!(ExtractorCode::BooleanUnreadable.to_string(), "boolean-unreadable");
+        assert_eq!(ExtractorCode::NumberUnreadable.to_string(), "number-unreadable");
     }
 }

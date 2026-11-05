@@ -5,6 +5,7 @@ use crate::{
     test_reporter::{RecordedDiagnostic, RecordingReporter},
 };
 use cassiopeia_common::{context::mode::AtContextMode, store_kind::StoreKind};
+use cassiopeia_diagnostic::code::diagnostic_code::DiagnosticCode;
 use cassiopeia_manifest::manifest::Manifest;
 use cassiopeia_reporter::reporter::Reporter;
 use serde_json::Value;
@@ -14,9 +15,6 @@ use std::{
     sync::{Arc, Mutex, PoisonError},
 };
 use temp_dir::TempDir;
-
-/// The code a record-merge warning is published under, compared as its rendered token.
-const RECORDS_MERGED: &str = "resolver-records-merged";
 
 /// How one end-to-end input binds its records to mapping documents.
 pub(crate) enum RunBinding {
@@ -35,12 +33,19 @@ pub(crate) struct RunInput {
 
 /// What one end-to-end run left behind.
 pub(crate) struct RunOutcome {
-    /// The record-merge warnings the run reported.
-    pub(crate) merges: Vec<RecordedDiagnostic>,
+    /// Every diagnostic the run reported, in the order it reported them.
+    pub(crate) diagnostics: Vec<RecordedDiagnostic>,
     /// The warning total of the run's one completed cycle.
     pub(crate) warnings: u64,
     /// Every entity the run wrote, across all of its output files.
     pub(crate) entities: Vec<Value>,
+}
+
+impl RunOutcome {
+    /// The diagnostics the run reported under `code`, in the order it reported them.
+    pub(crate) fn coded(&self, code: DiagnosticCode) -> Vec<&RecordedDiagnostic> {
+        self.diagnostics.iter().filter(|diagnostic| diagnostic.code == code).collect()
+    }
 }
 
 /// An observer that keeps the warning total of every completed cycle.
@@ -122,13 +127,13 @@ pub(crate) fn run_end_to_end(store: StoreKind, inputs: &[RunInput], entity_types
         entities.extend(written);
     }
     let warnings = totals.0.lock().unwrap_or_else(PoisonError::into_inner).iter().sum();
-    let merges = reporter
-        .diagnostics()
-        .into_iter()
-        .filter(|diagnostic| diagnostic.code.to_string() == RECORDS_MERGED)
-        .collect();
+    let diagnostics = reporter.diagnostics();
 
-    RunOutcome { merges, warnings, entities }
+    RunOutcome {
+        diagnostics,
+        warnings,
+        entities,
+    }
 }
 
 /// Writes the mapping documents of the input at `index` into `root` and declares them as the input's

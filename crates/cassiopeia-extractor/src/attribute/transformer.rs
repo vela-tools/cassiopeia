@@ -44,14 +44,15 @@ impl Transformer {
     /// in a Value (ETSI GS CIM 009 v1.9.1 clause 4.5.0), and counts each in `omitted`. Raw JSON keeps
     /// its nulls.
     ///
-    /// `Ok(None)` means the source carried no value. Four conversions can refuse instead: a
+    /// `Ok(None)` means the source carried no value. Five conversions can refuse instead: a
     /// transformation naming a geometry type routes through the geometry lattice, where the source
     /// may carry no geometry at all, a geometry a `GeoProperty` cannot hold, or one this mapping did
-    /// not authorise converting; a temporal transformation refuses text that reads as no supported spelling of a
-    /// date-time; the `json` and `object` transformations, and a decoded conversion, refuse text
-    /// that does not read as the JSON they ask for; and raw JSON that is no object or array of
-    /// objects is no `JsonProperty` payload. Every other conversion drops an unusable value and
-    /// cannot fail.
+    /// not authorise converting; a temporal transformation refuses text that reads as no supported
+    /// spelling of a date-time; the `boolean`, `integer`, and `float` transformations refuse a value
+    /// that spells no such scalar; the `json` and `object` transformations, and a decoded
+    /// conversion, refuse text that does not read as the JSON they ask for; and raw JSON that is no
+    /// object or array of objects is no `JsonProperty` payload. The `string` and `array`
+    /// transformations, and a verbatim conversion, can use any value and never refuse one.
     ///
     /// # Errors
     /// Returns the [`AttributeRefusal`] naming what the attribute could not take.
@@ -196,9 +197,9 @@ impl Transformer {
                     Value::Array(vec![other])
                 }
             })),
-            Transformation::Boolean => Ok(value.to_boolean().map(Value::from)),
-            Transformation::Integer => Ok(Self::coerce_integer(&value)),
-            Transformation::Float => Ok(Self::coerce_float(&value)),
+            Transformation::Boolean => Self::coerce_scalar(&value, RequiredValue::Boolean, |value| value.to_boolean().map(Value::from)),
+            Transformation::Integer => Self::coerce_scalar(&value, RequiredValue::Integer, Self::coerce_integer),
+            Transformation::Float => Self::coerce_scalar(&value, RequiredValue::Float, Self::coerce_float),
             Transformation::String => Ok(Some(Self::coerce_string(value))),
             Transformation::Object => Self::coerce_object(value, omitted),
             Transformation::Json => Self::coerce_json(value, omitted),
@@ -297,22 +298,45 @@ impl Transformer {
         Value::from_json(JsonValue::Array(present), omitted)
     }
 
+    /// Reads the merged value as the scalar a transformation names, through `read`.
+    ///
+    /// A blank value resolves to no value, as an absent source does: CSV and spreadsheet sources
+    /// spell an empty field as an empty string, so a blank is a value the record does not carry
+    /// rather than one it carries wrongly. Any other value that `read` finds no scalar in is
+    /// refused, text and non-text alike (text such as `abc` under `integer`, an array, an object),
+    /// because a reading that vanishes unannounced is a value the published entity silently lacks.
+    ///
+    /// # Errors
+    /// Returns [`AttributeRefusal::UnusableValue`] quoting the value as not the `required` scalar:
+    /// text as written, any other value as its rendering.
+    fn coerce_scalar(value: &Value, required: RequiredValue, read: impl FnOnce(&Value) -> Option<Value>) -> Result<Option<Value>, AttributeRefusal> {
+        if let Some(scalar) = read(value) {
+            return Ok(Some(scalar));
+        }
+
+        value.reported_text().map_or(Ok(None), |text| Err(AttributeRefusal::unusable(required, &text)))
+    }
+
     /// Coerces the merged value to an integer, parsing numeric strings explicitly.
     ///
-    /// A float-shaped string truncates toward zero through the same conversion the value model uses,
-    /// so a value outside the `i64` range is no integer rather than saturating.
+    /// Text is read without the whitespace around it, as a padded CSV cell such as ` 12 ` spells
+    /// the number it surrounds. A float-shaped string truncates toward zero through the same
+    /// conversion the value model uses, so a value outside the `i64` range is no integer rather than
+    /// saturating.
     fn coerce_integer(value: &Value) -> Option<Value> {
         match value {
-            Value::String(text) => text
-                .parse::<i64>()
-                .ok()
-                .or_else(|| {
-                    text.parse::<f64>()
-                        .ok()
-                        .and_then(|float| Value::try_from(float).ok())
-                        .and_then(|parsed| parsed.to_integer())
-                })
-                .map(Value::from),
+            Value::String(text) => {
+                let text = text.trim();
+                text.parse::<i64>()
+                    .ok()
+                    .or_else(|| {
+                        text.parse::<f64>()
+                            .ok()
+                            .and_then(|float| Value::try_from(float).ok())
+                            .and_then(|parsed| parsed.to_integer())
+                    })
+                    .map(Value::from)
+            }
             Value::Boolean(_) | Value::Number(_) | Value::Temporal(_) | Value::Geospatial(_) | Value::Array(_) | Value::Object(_) => {
                 value.to_integer().map(Value::from)
             }
@@ -320,9 +344,11 @@ impl Transformer {
     }
 
     /// Coerces the merged value to a float, accepting a comma as a decimal separator.
+    ///
+    /// Text is read without the whitespace around it, as [`Transformer::coerce_integer`] reads it.
     fn coerce_float(value: &Value) -> Option<Value> {
         match value {
-            Value::String(text) => parse_decimal(text.as_str()).and_then(|float| Value::try_from(float).ok()),
+            Value::String(text) => parse_decimal(text.trim()).and_then(|float| Value::try_from(float).ok()),
             Value::Boolean(_) | Value::Number(_) | Value::Temporal(_) | Value::Geospatial(_) | Value::Array(_) | Value::Object(_) => {
                 value.to_float().and_then(|float| Value::try_from(float).ok())
             }
@@ -849,10 +875,139 @@ mod tests {
     }
 
     #[test]
-    fn text_spelling_no_finite_number_under_a_float_transformation_is_no_value() {
+    fn text_spelling_no_finite_number_under_a_float_transformation_is_refused_quoting_it() {
         assert_eq!(
-            converted(smallvec![json!("NaN")], ValueConversion::Transform(Transformation::Float), None),
-            None
+            apply(smallvec![json!("NaN")], ValueConversion::Transform(Transformation::Float), None),
+            Err(AttributeRefusal::unusable(RequiredValue::Float, "NaN"))
+        );
+    }
+
+    /// Asserts that `part` under `transformation` is refused as not the `required` scalar, quoting
+    /// `quoted`.
+    fn assert_scalar_refused(part: JsonValue, transformation: Transformation, required: RequiredValue, quoted: &str) {
+        assert_eq!(
+            apply(smallvec![part], ValueConversion::Transform(transformation), None),
+            Err(AttributeRefusal::unusable(required, quoted)),
+            "{transformation}"
+        );
+    }
+
+    /// Asserts that `part` under `transformation` resolves to no value and is not refused.
+    fn assert_scalar_absent(part: JsonValue, transformation: Transformation) {
+        assert_eq!(
+            converted(smallvec![part], ValueConversion::Transform(transformation), None),
+            None,
+            "{transformation}"
+        );
+    }
+
+    #[test]
+    fn an_integer_part_and_a_whole_float_read_as_an_integer() {
+        assert_eq!(
+            converted(smallvec![json!("12")], ValueConversion::Transform(Transformation::Integer), None),
+            Some(Value::Number(Number::Integer(12)))
+        );
+        assert_eq!(
+            converted(smallvec![json!(12.0)], ValueConversion::Transform(Transformation::Integer), None),
+            Some(Value::Number(Number::Integer(12)))
+        );
+    }
+
+    #[test]
+    fn a_number_padded_with_whitespace_reads_as_the_number_it_surrounds() {
+        assert_eq!(
+            converted(smallvec![json!(" 12 ")], ValueConversion::Transform(Transformation::Integer), None),
+            Some(Value::Number(Number::Integer(12)))
+        );
+        assert_eq!(
+            converted(smallvec![json!("\t2,5 ")], ValueConversion::Transform(Transformation::Float), None),
+            Some(Value::try_from(2.5).unwrap())
+        );
+    }
+
+    #[test]
+    fn text_that_spells_no_integer_under_an_integer_transformation_is_refused_quoting_it() {
+        assert_scalar_refused(json!("abc"), Transformation::Integer, RequiredValue::Integer, "abc");
+        assert_scalar_refused(json!(" 12 apples "), Transformation::Integer, RequiredValue::Integer, "12 apples");
+    }
+
+    #[test]
+    fn a_structured_value_under_an_integer_transformation_is_refused_quoting_its_rendering() {
+        assert_scalar_refused(json!([1]), Transformation::Integer, RequiredValue::Integer, "[1]");
+        assert_scalar_refused(json!({"n": 1}), Transformation::Integer, RequiredValue::Integer, r#"{"n":1}"#);
+    }
+
+    #[test]
+    fn an_integer_out_of_the_signed_64_bit_range_is_refused_quoting_it() {
+        assert_scalar_refused(
+            json!("99999999999999999999"),
+            Transformation::Integer,
+            RequiredValue::Integer,
+            "99999999999999999999",
+        );
+    }
+
+    #[test]
+    fn text_that_spells_no_number_under_a_float_transformation_is_refused_quoting_it() {
+        assert_scalar_refused(json!("x"), Transformation::Float, RequiredValue::Float, "x");
+        assert_scalar_refused(json!([1.5]), Transformation::Float, RequiredValue::Float, "[1.5]");
+    }
+
+    #[test]
+    fn a_boolean_reads_its_spellings_and_a_number_as_its_truthiness() {
+        for (part, expected) in [
+            (json!("true"), true),
+            (json!("No"), false),
+            (json!(1), true),
+            (json!(0.0), false),
+            (json!(false), false),
+        ] {
+            assert_eq!(
+                converted(smallvec![part.clone()], ValueConversion::Transform(Transformation::Boolean), None),
+                Some(Value::Boolean(expected)),
+                "{part}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_value_that_spells_no_boolean_under_a_boolean_transformation_is_refused_quoting_it() {
+        assert_scalar_refused(json!("maybe"), Transformation::Boolean, RequiredValue::Boolean, "maybe");
+        assert_scalar_refused(json!(["true"]), Transformation::Boolean, RequiredValue::Boolean, r#"["true"]"#);
+    }
+
+    #[test]
+    fn blank_text_under_a_scalar_transformation_is_absent_rather_than_refused() {
+        for transformation in [Transformation::Boolean, Transformation::Integer, Transformation::Float] {
+            assert_scalar_absent(json!(""), transformation);
+            assert_scalar_absent(json!("   "), transformation);
+        }
+    }
+
+    #[test]
+    fn a_null_part_under_a_scalar_transformation_is_absent_rather_than_refused() {
+        for transformation in [Transformation::Boolean, Transformation::Integer, Transformation::Float] {
+            assert_scalar_absent(json!(null), transformation);
+        }
+    }
+
+    #[test]
+    fn several_parts_under_a_scalar_transformation_read_the_first_present_one() {
+        assert_eq!(
+            converted(
+                smallvec![json!(null), json!("7"), json!("x")],
+                ValueConversion::Transform(Transformation::Integer),
+                None
+            ),
+            Some(Value::Number(Number::Integer(7)))
+        );
+        assert_eq!(
+            apply(
+                smallvec![json!(null), json!("x"), json!("7")],
+                ValueConversion::Transform(Transformation::Integer),
+                None
+            ),
+            Err(AttributeRefusal::unusable(RequiredValue::Integer, "x"))
         );
     }
 
@@ -1396,12 +1551,5 @@ mod tests {
                 ]],
             }
         );
-    }
-
-    #[test]
-    fn a_null_part_under_a_scalar_transformation_stays_null() {
-        let value = converted(smallvec![json!(null)], ValueConversion::Transform(Transformation::Integer), None);
-
-        assert_eq!(value, None);
     }
 }

@@ -147,7 +147,7 @@ mod tests {
         entity::{attribute::NgsiLdAttributeKind, name::NameBuf},
         value::{
             json_payload_error::{JsonPayloadError, JsonShape},
-            types::{TemporalValue, Value},
+            types::{Number, TemporalValue, Value},
         },
     };
     use cassiopeia_unreadable_timestamps::{attribute_loss::AttributeLoss, timestamp_loss::TimestampLoss};
@@ -644,6 +644,42 @@ mod tests {
             ])
         );
         assert_eq!(BatchSink::from(dropped.unusable_values).into_entries().count(), 1);
+    }
+
+    #[test]
+    fn an_unreadable_integer_instance_leaves_its_index_empty_keeps_the_others_and_is_recorded() {
+        let (resolver, mapping) = prepare(
+            r#"{
+                version: "v4",
+                dataModel: "Sensor",
+                identity: { entityName: "S-{{ id }}" },
+                attributes: {
+                    reading: {
+                        transformation: "integer",
+                        instances: [
+                            { source: "{{ a }}", datasetId: "urn:ngsi-ld:Dataset:a" },
+                            { source: "{{ b }}", datasetId: "urn:ngsi-ld:Dataset:b" },
+                        ],
+                    },
+                },
+            }"#,
+        );
+        let extractor = EntityExtractor::new(resolver);
+        let mapped = AssembledEntity::from_single(entity("urn:ngsi-ld:Sensor:1", json!({"id": "1", "a": "x", "b": "7"})), mapping);
+        let dropped = DroppedAttributes::new();
+
+        let (result, _) = extractor.extract(mapped, &dropped).unwrap().into_parts();
+
+        let reading = result.values().as_ref().and_then(|values| values.get("reading")).expect("reading resolved");
+        assert_eq!(
+            reading,
+            &ResolvedAttribute::Instances(vec![None, Some(AttributeContent::Value(Value::Number(Number::Integer(7))))])
+        );
+        let recorded = BatchSink::from(dropped.unusable_values)
+            .into_entries()
+            .map(|(unusable, record)| (unusable.attribute.to_string(), unusable.required, record.example.to_string()))
+            .collect::<Vec<_>>();
+        assert_eq!(recorded, [("reading".to_owned(), RequiredValue::Integer, "x".to_owned())]);
     }
 
     #[test]
