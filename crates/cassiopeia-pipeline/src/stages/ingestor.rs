@@ -17,12 +17,13 @@ use cassiopeia_ingestor::{
     geojson::ingestor::GeoJsonIngestor,
     grib::ingestor::GribIngestor,
     ingestor::Ingestor,
-    json::ingestor::JsonIngestor,
+    json::{ingestor::JsonIngestor, record_selection::JsonRecordSelection},
     kml::ingestor::KmlIngestor,
     shapefile::ingestor::ShapefileIngestor,
     xml::ingestor::XmlIngestor,
 };
 use cassiopeia_ir::{payload::ProfiledPayload, record::Record};
+use cassiopeia_manifest::mapping_binding::MappingBinding;
 use cassiopeia_profiler::{error::ProfilerError, profiler::ProfilerRoutes};
 use cassiopeia_reporter::reporter::{DiagnosticSink, Reporter};
 use execution_time::ExecutionTime;
@@ -30,8 +31,10 @@ use std::{collections::HashMap, sync::Arc, thread::spawn};
 
 /// Builds a boxed ingestor for one profiled payload, reporting to the sink what building it found
 /// about the source. One factory exists per concrete format, which is why `DataFormat::Auto`
-/// (resolved away by the profiler before this point) has no entry and cannot reach an ingestor.
-type IngestorFactory = fn(ProfiledPayload, usize, &dyn DiagnosticSink) -> Result<PreparedIngestor, IngestorError>;
+/// (resolved away by the profiler before this point) has no entry and cannot reach an ingestor. A
+/// factory may carry what its format needs to know about the lane's input, such as how JSON records
+/// are selected.
+type IngestorFactory = Box<dyn Fn(ProfiledPayload, usize, &dyn DiagnosticSink) -> Result<PreparedIngestor, IngestorError> + Send>;
 
 /// Reports to the sink what an ingestor met while it read its source, once it has read all of it,
 /// and returns how many warnings that was.
@@ -70,7 +73,10 @@ pub(crate) struct IngestorBank {
 }
 
 /// Spawns one ingestor thread per supported format, each idle until a payload for its format arrives.
+///
+/// `mapping_binding` is the lane's binding, which decides how a JSON source is split into records.
 pub(crate) fn spawn_ingestor_bank(
+    mapping_binding: &MappingBinding,
     batch_size: usize,
     channel_policy: ChannelPolicy,
     reporter: &'static dyn Reporter,
@@ -83,42 +89,59 @@ pub(crate) fn spawn_ingestor_bank(
     );
     let mut routes: ProfilerRoutes = HashMap::new();
 
+    let json_selection = Arc::new(json_record_selection(mapping_binding));
     let factories: [(DataFormat, IngestorFactory); 8] = [
-        (DataFormat::Csv, |payload, batch, sink| {
-            let ingestor = CsvIngestor::from_payload(payload, batch)?;
-            let warnings = report_renamed_columns(sink, ingestor.source(), ingestor.renamed_columns());
-            let misshapen = ingestor.misshapen_rows();
-            // The ingestor is given up when it runs, while the report names its source after.
-            let source = ingestor.source().clone();
-            Ok(PreparedIngestor {
-                ingestor: Box::new(ingestor),
-                warnings,
-                after_ingest: Some(Box::new(move |sink: &dyn DiagnosticSink| {
-                    report_misshapen_rows(sink, &source, &misshapen.lock())
-                })),
-            })
-        }),
-        (DataFormat::Json, |payload, batch, _| {
-            Ok(PreparedIngestor::quiet(Box::new(JsonIngestor::from_payload(payload, batch)?)))
-        }),
-        (DataFormat::GeoJson, |payload, batch, _| {
-            Ok(PreparedIngestor::quiet(Box::new(GeoJsonIngestor::from_payload(payload, batch)?)))
-        }),
-        (DataFormat::Kml, |payload, batch, _| {
-            Ok(PreparedIngestor::quiet(Box::new(KmlIngestor::from_payload(payload, batch)?)))
-        }),
-        (DataFormat::Kmz, |payload, batch, _| {
-            Ok(PreparedIngestor::quiet(Box::new(KmlIngestor::from_payload(payload, batch)?)))
-        }),
-        (DataFormat::Grib, |payload, batch, _| {
-            Ok(PreparedIngestor::quiet(Box::new(GribIngestor::from_payload(payload, batch)?)))
-        }),
-        (DataFormat::Shapefile, |payload, batch, _| {
-            Ok(PreparedIngestor::quiet(Box::new(ShapefileIngestor::from_payload(payload, batch)?)))
-        }),
-        (DataFormat::Xml, |payload, batch, _| {
-            Ok(PreparedIngestor::quiet(Box::new(XmlIngestor::from_payload(payload, batch)?)))
-        }),
+        (
+            DataFormat::Csv,
+            Box::new(|payload, batch, sink| {
+                let ingestor = CsvIngestor::from_payload(payload, batch)?;
+                let warnings = report_renamed_columns(sink, ingestor.source(), ingestor.renamed_columns());
+                let misshapen = ingestor.misshapen_rows();
+                // The ingestor is given up when it runs, while the report names its source after.
+                let source = ingestor.source().clone();
+                Ok(PreparedIngestor {
+                    ingestor: Box::new(ingestor),
+                    warnings,
+                    after_ingest: Some(Box::new(move |sink: &dyn DiagnosticSink| {
+                        report_misshapen_rows(sink, &source, &misshapen.lock())
+                    })),
+                })
+            }),
+        ),
+        (
+            DataFormat::Json,
+            Box::new(move |payload, batch, _| {
+                Ok(PreparedIngestor::quiet(Box::new(JsonIngestor::from_payload(
+                    payload,
+                    batch,
+                    Arc::clone(&json_selection),
+                )?)))
+            }),
+        ),
+        (
+            DataFormat::GeoJson,
+            Box::new(|payload, batch, _| Ok(PreparedIngestor::quiet(Box::new(GeoJsonIngestor::from_payload(payload, batch)?)))),
+        ),
+        (
+            DataFormat::Kml,
+            Box::new(|payload, batch, _| Ok(PreparedIngestor::quiet(Box::new(KmlIngestor::from_payload(payload, batch)?)))),
+        ),
+        (
+            DataFormat::Kmz,
+            Box::new(|payload, batch, _| Ok(PreparedIngestor::quiet(Box::new(KmlIngestor::from_payload(payload, batch)?)))),
+        ),
+        (
+            DataFormat::Grib,
+            Box::new(|payload, batch, _| Ok(PreparedIngestor::quiet(Box::new(GribIngestor::from_payload(payload, batch)?)))),
+        ),
+        (
+            DataFormat::Shapefile,
+            Box::new(|payload, batch, _| Ok(PreparedIngestor::quiet(Box::new(ShapefileIngestor::from_payload(payload, batch)?)))),
+        ),
+        (
+            DataFormat::Xml,
+            Box::new(|payload, batch, _| Ok(PreparedIngestor::quiet(Box::new(XmlIngestor::from_payload(payload, batch)?)))),
+        ),
     ];
 
     for (format, factory) in factories {
@@ -129,7 +152,7 @@ pub(crate) fn spawn_ingestor_bank(
         );
         let shared_tx = output_tx.clone();
         let lane_telemetry = Arc::clone(telemetry);
-        spawn(move || run_ingestor_lane(factory, batch_size, channel_policy, ingestor_rx, &shared_tx, reporter, &lane_telemetry));
+        spawn(move || run_ingestor_lane(&factory, batch_size, channel_policy, ingestor_rx, &shared_tx, reporter, &lane_telemetry));
         routes.insert(format, ingestor_tx);
     }
 
@@ -139,11 +162,23 @@ pub(crate) fn spawn_ingestor_bank(
     IngestorBank { routes, output_rx }
 }
 
+/// Picks how a lane's JSON source is split into records from the lane's mapping binding.
+///
+/// A lone `mapping` keeps the lone-array convention; a `mappings` list reads the nested collections
+/// it names.
+fn json_record_selection(mapping_binding: &MappingBinding) -> JsonRecordSelection {
+    match mapping_binding {
+        MappingBinding::Single { .. } => JsonRecordSelection::LoneArray,
+        // The selection outlives the binding, which the lane keeps for routing.
+        MappingBinding::Collections { mappings } => JsonRecordSelection::Collections(mappings.iter().map(|entry| entry.collection().clone()).collect()),
+    }
+}
+
 /// Waits for payloads of one format, building and running an ingestor for each.
 ///
 /// The stage guard finishes when the lane's input closes, after the last payload has been counted.
 fn run_ingestor_lane(
-    factory: IngestorFactory,
+    factory: &IngestorFactory,
     batch_size: usize,
     channel_policy: ChannelPolicy,
     ingestor_rx: ChannelReceiver<Signal<ProfiledPayload, ProfilerError>>,
@@ -245,5 +280,39 @@ fn ingest_one(ingestor: Box<dyn Ingestor>, channel_policy: ChannelPolicy, shared
                 stage: PipelineStage::Ingestor,
             }));
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::stages::ingestor::json_record_selection;
+    use cassiopeia_common::collection::CollectionName;
+    use cassiopeia_ingestor::json::record_selection::JsonRecordSelection;
+    use cassiopeia_manifest::mapping_binding::{CollectionMapping, MappingBinding};
+    use pretty_assertions::assert_eq;
+    use std::path::PathBuf;
+
+    #[test]
+    fn a_single_mapping_keeps_the_lone_array_convention_for_json() {
+        let binding = MappingBinding::Single {
+            mapping: PathBuf::from("m.json5"),
+        };
+
+        assert_eq!(json_record_selection(&binding), JsonRecordSelection::LoneArray);
+    }
+
+    #[test]
+    fn a_mappings_list_selects_its_collections_for_json_in_order() {
+        let binding = MappingBinding::Collections {
+            mappings: vec![
+                CollectionMapping::new(CollectionName::from("data.lines"), PathBuf::from("line.json5")),
+                CollectionMapping::new(CollectionName::from("data.lines.stops"), PathBuf::from("stop.json5")),
+            ],
+        };
+
+        assert_eq!(
+            json_record_selection(&binding),
+            JsonRecordSelection::Collections(vec![CollectionName::from("data.lines"), CollectionName::from("data.lines.stops")])
+        );
     }
 }

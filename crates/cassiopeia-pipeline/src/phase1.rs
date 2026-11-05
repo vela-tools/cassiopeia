@@ -57,7 +57,7 @@ impl Pipeline {
         let _ = shared_tx.send(Signal::Meta(schedule_meta.clone()));
 
         for (input, router) in loaded {
-            let ingestor_bank = spawn_ingestor_bank(batch_size, channel_policy, self.context.reporter, &env.telemetry);
+            let ingestor_bank = spawn_ingestor_bank(&input.mapping_binding, batch_size, channel_policy, self.context.reporter, &env.telemetry);
 
             let downloader = Downloader::new(
                 self.config.default_user_agent.clone(),

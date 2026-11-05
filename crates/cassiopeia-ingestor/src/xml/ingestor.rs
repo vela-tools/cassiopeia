@@ -19,8 +19,8 @@ use tracing::info;
 /// Ingestor for generic XML data.
 ///
 /// Reads the whole document, folds it into a value under Cassiopeia's XML convention, and splits it
-/// into records on a single repeated child element. It is single-collection like JSON, so every record
-/// carries no collection label. External and DTD entities are never expanded, so it is XXE-safe.
+/// into records on a single repeated child element. It is single-collection, so every record carries no
+/// collection label. External and DTD entities are never expanded, so it is XXE-safe.
 pub struct XmlIngestor {
     reader: Option<BufReader<File>>,
     /// The file the reader was opened on, so a read failure can name it.

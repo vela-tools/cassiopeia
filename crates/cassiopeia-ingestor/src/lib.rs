@@ -6,5 +6,6 @@ pub mod ingestor;
 pub mod json;
 pub mod kml;
 pub mod lone_array;
+pub mod record_batches;
 pub mod shapefile;
 pub mod xml;

@@ -11,14 +11,14 @@ The format can be set on a manifest input with `format`, or through the equivale
 | Format | Records | Important source shape | Collections |
 | --- | --- | --- | --- |
 | CSV | One record per data row | Column names become fields | No |
-| JSON | One record per object in a top-level array | The object is used as-is | No |
+| JSON | One record per object in a top-level array, or per item of a listed nested array | The object is used as-is | Nested arrays of objects become collections |
 | GeoJSON | One record per feature | `id`, `properties`, `geometry`, and `bbox` | No |
 | KML or KMZ | One record per placemark | `properties` and `geometry` | Folders become collections |
 | XML | Determined by the repeated-child convention | Folded element tree with `@` and `#` keys | No |
 | ESRI Shapefile | One record per feature | `properties` and WGS84 `geometry` | Multiple layers become collections |
 | GRIB | One record per unmasked grid cell | Coordinates, times, level, and parameter columns | No |
 
-The collection column matters when a source contains several logical groups that need different mappings. KML folders and multi-layer Shapefile archives are currently the only formats that provide collections.
+The collection column matters when a source contains several logical groups that need different mappings. KML folders, multi-layer Shapefile archives, and nested JSON arrays are currently the only formats that provide collections.
 
 ## Automatic detection and explicit format
 
@@ -220,6 +220,93 @@ The envelope rule limits what a single record can hold. A single object with exa
 This document yields one record, `{"id": "x"}`, and `C-1` is lost. When the array holds scalars, as in `"tags": ["a", "b"]`, the document is refused. Wrap such a record in an array, `[{...}]`, so that the array is the top-level value and the record is read whole.
 
 Generic JSON and GeoJSON use the same syntax, but they have different record conventions. Cassiopeia routes a valid GeoJSON document to the GeoJSON ingestor.
+
+### Nested collections
+
+The rules above apply to an input with a single `mapping`. An input with a `mappings` list reads the JSON document as collections instead, which reaches records that sit below the top level.
+
+Every non-empty array whose items are all objects is a collection. Its label is the path of member names that leads to it from the root, joined with `.` and without array indices. The root array has no member path, so it is not a collection itself, but the members of its items are. An array that holds anything other than objects is a plain value. This document has the collections `data.monitors`, `data.monitors.lines`, and `data.monitors.lines.departures.departure`:
+
+~~~json
+{
+    "data": {
+        "monitors": [
+            {
+                "locationStop": {
+                    "properties": {
+                        "title": "Schwedenplatz",
+                        "attributes": {
+                            "rbl": 4116
+                        }
+                    }
+                },
+                "lines": [
+                    {
+                        "name": "U1",
+                        "towards": "Oberlaa",
+                        "departures": {
+                            "departure": [
+                                {
+                                    "departureTime": {
+                                        "countdown": 5
+                                    }
+                                }
+                            ]
+                        }
+                    }
+                ]
+            }
+        ]
+    },
+    "message": {
+        "value": "OK"
+    }
+}
+~~~
+
+Each item of a listed collection becomes one record. A collection that is not listed yields no records, and the members outside every listed collection, such as `message` above, are dropped. The input below maps one record per departure:
+
+~~~json5
+{
+    source: "https://www.wienerlinien.at/ogd_realtime/monitor?stopId=4116",
+    format: "json",
+    mappings: [
+        {
+            collection: "data.monitors.lines.departures.departure",
+            mapping: "departure.json5",
+        },
+    ],
+}
+~~~
+
+A record keeps its own fields whole, nested collections included. It also carries every item that encloses it in an outer collection, under the name of the member that holds the outer array. An enclosing item comes without its own nested collections, because those are records of their own. The departure record above is:
+
+~~~json
+{
+    "departureTime": {
+        "countdown": 5
+    },
+    "lines": {
+        "name": "U1",
+        "towards": "Oberlaa",
+        "departures": {}
+    },
+    "monitors": {
+        "locationStop": {
+            "properties": {
+                "title": "Schwedenplatz",
+                "attributes": {
+                    "rbl": 4116
+                }
+            }
+        }
+    }
+}
+~~~
+
+Its mapping can read `{{ departureTime.countdown }}`, `{{ lines.name }}`, and `{{ monitors.locationStop.properties.attributes.rbl }}`. When a name clashes, the record's own field wins, and then the nearest enclosing item. The items of a root array enclose nothing, because the root array has no name to file them under.
+
+Listing both a collection and one nested in it yields records from both, in document order. A label that matches no collection yields no records. A top-level scalar is refused as it is under a single `mapping`.
 
 ## GeoJSON
 

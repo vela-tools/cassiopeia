@@ -356,6 +356,19 @@ mod tests {
     }
 
     #[test]
+    fn collections_under_json_are_accepted() {
+        let input =
+            parse(r#"{"source": "monitor.json", "format": "json", "mappings": [{"collection": "data.monitors.lines", "mapping": "line.json5"}]}"#).unwrap();
+
+        assert_eq!(
+            input.mapping_binding(),
+            &MappingBinding::Collections {
+                mappings: vec![CollectionMapping::new(CollectionName::from("data.monitors.lines"), PathBuf::from("line.json5"))],
+            }
+        );
+    }
+
+    #[test]
     fn collections_with_an_omitted_format_defer_to_the_runtime_router() {
         assert!(parse(r#"{"source": "a.kml", "mappings": [{"collection": "A", "mapping": "a.json5"}]}"#).is_ok());
     }

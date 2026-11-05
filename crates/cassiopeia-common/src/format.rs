@@ -18,7 +18,7 @@ pub enum DataFormat {
     #[strum(serialize = "CSV")]
     Csv,
 
-    /// A JSON array of objects.
+    /// A JSON document: an array of objects, or objects whose arrays of objects nest at any depth.
     #[strum(serialize = "JSON")]
     Json,
 
@@ -92,9 +92,10 @@ impl DataFormat {
 
     /// Whether this format can pack several logical record collections into one source.
     ///
-    /// KML nests placemarks under sibling `<Folder>`s, and a shapefile `.zip` bundle can hold several
-    /// `.shp` layers (each becoming one collection), so one source can carry collections a manifest
-    /// routes to different entity types; the row-and-object formats are always a single collection.
+    /// KML nests placemarks under sibling `<Folder>`s, a shapefile `.zip` bundle can hold several
+    /// `.shp` layers (each becoming one collection), and a JSON document can nest arrays of objects
+    /// (each labelled by its member path), so one source can carry collections a manifest routes to
+    /// different entity types; CSV, `GeoJSON`, and XML are always a single collection.
     /// GRIB is single-collection too: its parameters are pivoted into columns of one location record
     /// (like a CSV row), not split into separate collections. This is the static, format-stated
     /// guarantee used for an early manifest check; when the format is `Auto`/omitted the runtime router
@@ -102,8 +103,8 @@ impl DataFormat {
     #[must_use]
     pub const fn supports_collections(&self) -> bool {
         match self {
-            DataFormat::Kml | DataFormat::Kmz | DataFormat::Shapefile => true,
-            DataFormat::Auto | DataFormat::Csv | DataFormat::Json | DataFormat::GeoJson | DataFormat::Grib | DataFormat::Xml => false,
+            DataFormat::Kml | DataFormat::Kmz | DataFormat::Shapefile | DataFormat::Json => true,
+            DataFormat::Auto | DataFormat::Csv | DataFormat::GeoJson | DataFormat::Grib | DataFormat::Xml => false,
         }
     }
 
@@ -149,16 +150,16 @@ mod tests {
     }
 
     #[test]
-    fn only_the_kml_family_supports_multiple_collections() {
+    fn only_the_kml_family_shapefile_and_json_support_multiple_collections() {
         assert!(DataFormat::Kml.supports_collections());
         assert!(DataFormat::Kmz.supports_collections());
         assert!(!DataFormat::Auto.supports_collections());
         assert!(!DataFormat::Csv.supports_collections());
-        assert!(!DataFormat::Json.supports_collections());
+        assert!(DataFormat::Json.supports_collections());
         assert!(!DataFormat::GeoJson.supports_collections());
         // GRIB pivots parameters into columns of one location record, so it is single-collection.
         assert!(!DataFormat::Grib.supports_collections());
-        // XML is single-collection like JSON; records come from one repeated child element.
+        // XML is single-collection; records come from one repeated child element.
         assert!(!DataFormat::Xml.supports_collections());
     }
 
