@@ -369,7 +369,7 @@ impl WizardReducer {
     /// Cycles the type or transformation field left or right, respecting schema-derived locks.
     fn cycle_field(editor: &mut AttributeEditorState, idx: usize, direction: CycleDirection) {
         if idx == 1 && !editor.is_schema_derived {
-            editor.attr_type_idx = direction.step(editor.attr_type_idx, AttributeEditorState::TYPES.len());
+            editor.attr_type_idx = editor.next_admitted_type(direction);
             editor.drop_inadmissible_transformation();
         }
 

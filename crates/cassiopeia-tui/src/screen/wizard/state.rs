@@ -22,7 +22,6 @@ use cassiopeia_mapping::{
     identity::Identity,
     mapping::Mapping,
     template::{TemplateSource, runner::TemplateRunner},
-    transformation::Transformation,
     version::Version,
 };
 use cassiopeia_ngsi_ld::{data_model::DataModel, entity::attribute::NgsiLdAttributeKind};
@@ -291,13 +290,7 @@ impl WizardState {
         }
 
         let attr_type = AttributeEditorState::TYPES[state.attr_type_idx];
-        let transformation = if state.is_container_mode {
-            Some(Transformation::Object)
-        } else if state.transform_idx == 0 {
-            None
-        } else {
-            Some(AttributeEditorState::TRANSFORMS[state.transform_idx - 1].1)
-        };
+        let transformation = state.selected_transformation();
         let target_entity = matches!(attr_type, NgsiLdAttributeKind::Relationship | NgsiLdAttributeKind::ListRelationship).then(|| state.target_entity.clone());
         let source = match combined_source.as_slice() {
             [] => None,
@@ -399,10 +392,10 @@ impl WizardState {
 #[cfg(test)]
 mod tests {
     use crate::{
-        editor::EditorAttribute,
+        editor::{EditorAttribute, conversion::ConversionError},
         screen::wizard::{attribute_editor::AttributeEditorState, editor_key::EditorKey, state::WizardState},
     };
-    use cassiopeia_mapping::{template::runner::TemplateRunner, transformation::Transformation};
+    use cassiopeia_mapping::{error::MappingError, template::runner::TemplateRunner, transformation::Transformation};
     use cassiopeia_ngsi_ld::{data_model::DataModel, entity::attribute::NgsiLdAttributeKind};
     use pretty_assertions::assert_eq;
     use serde_json::Value;
@@ -509,5 +502,47 @@ mod tests {
             json,
             r#"{"version":"v4","dataModel":"Sensor","identity":{"entityName":"Sensor-{{ id }}"},"attributes":{"temperature":{"type":"Property","transformation":"string","source":"{{ t }}"}}}"#
         );
+    }
+
+    #[test]
+    fn build_mapping_refuses_a_transformation_the_attribute_type_does_not_admit() {
+        let mut state = WizardState::new(Vec::new());
+        state.identity_form.entity_id_template = "Sensor-{{ id }}".to_string();
+        let mut location = EditorAttribute::new(NgsiLdAttributeKind::GeoProperty, Some(Transformation::String));
+        location.source = Some(Value::String("{{ location }}".to_string()));
+        state.root_attributes.insert(field("location"), location);
+
+        let model = DataModel::from_str("Sensor").unwrap();
+        let mut runner = TemplateRunner::new();
+        let refusal = state.build_mapping(&model, &mut runner).unwrap_err();
+
+        assert!(matches!(
+            refusal,
+            ConversionError::Mapping(MappingError::TransformationNotAdmitted {
+                ref attribute,
+                kind: NgsiLdAttributeKind::GeoProperty,
+                transformation: Transformation::String,
+                ..
+            }) if attribute.as_str() == "location"
+        ));
+    }
+
+    #[test]
+    fn saving_a_container_writes_its_locked_object_transformation() {
+        let mut state = WizardState::new(Vec::new());
+        let mut editor = AttributeEditorState::new();
+        editor.name = "address".to_string();
+        editor.attr_type_idx = AttributeEditorState::TYPES
+            .iter()
+            .position(|kind| *kind == NgsiLdAttributeKind::JsonProperty)
+            .unwrap();
+        editor.is_container_mode = true;
+        state.attribute_editor = editor;
+
+        state.save_attribute();
+
+        let saved = &state.root_attributes[&field("address")];
+        assert_eq!(saved.attribute_type, NgsiLdAttributeKind::JsonProperty);
+        assert_eq!(saved.transformation, Some(Transformation::Object));
     }
 }

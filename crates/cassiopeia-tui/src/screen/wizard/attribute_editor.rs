@@ -8,6 +8,7 @@ use cassiopeia_mapping::{
 };
 use cassiopeia_ngsi_ld::entity::attribute::NgsiLdAttributeKind;
 use serde_json::Value;
+use std::iter::successors;
 
 /// The direction the editor cycles a selectable field, driven by the left/right arrows.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -153,16 +154,56 @@ impl AttributeEditorState {
         }
     }
 
+    /// The conversion listed at `transform_idx`, offset by one so `0` is "no conversion".
+    fn transformation_at(transform_idx: usize) -> Option<Transformation> {
+        transform_idx
+            .checked_sub(1)
+            .and_then(|index| Self::TRANSFORMS.get(index))
+            .map(|(_, transform)| *transform)
+    }
+
+    /// The conversion a container is locked to: its nested `mappings` assemble one object, kept as
+    /// the `object` conversion reads it. `None` outside container mode, where the conversion is
+    /// chosen freely.
+    fn locked_transformation(&self) -> Option<Transformation> {
+        self.is_container_mode.then_some(Transformation::Object)
+    }
+
+    /// The conversion the attribute is saved with: the locked one in container mode, the selected
+    /// one otherwise.
+    #[must_use]
+    pub fn selected_transformation(&self) -> Option<Transformation> {
+        self.locked_transformation().or_else(|| Self::transformation_at(self.transform_idx))
+    }
+
+    /// Whether an attribute of `kind` declaring `transformation` loads in the attribute's shape.
+    const fn loads(&self, kind: NgsiLdAttributeKind, transformation: Option<Transformation>) -> bool {
+        Conversion::resolve(kind, transformation, self.shape()).is_ok()
+    }
+
     /// Whether the conversion at `transform_idx` (offset by one, so `0` is "no conversion") loads
     /// under the selected type and the attribute's shape.
     fn admits(&self, transform_idx: usize) -> bool {
-        let kind = Self::TYPES[self.attr_type_idx];
-        let transformation = transform_idx
-            .checked_sub(1)
-            .and_then(|index| Self::TRANSFORMS.get(index))
-            .map(|(_, transform)| *transform);
+        self.loads(Self::TYPES[self.attr_type_idx], Self::transformation_at(transform_idx))
+    }
 
-        Conversion::resolve(kind, transformation, self.shape()).is_ok()
+    /// The next type in `direction` the attribute can take, wrapping around.
+    ///
+    /// Outside container mode every type loads with no conversion, and a conversion the new type
+    /// does not admit is dropped afterwards (see
+    /// [`AttributeEditorState::drop_inadmissible_transformation`]). A container's conversion is
+    /// locked, so only the types that can be assembled into the locked conversion are offered: no
+    /// `GeoProperty`, `VocabProperty`, or relationship is built from an object of nested `mappings`
+    /// read as `object`.
+    #[must_use]
+    pub fn next_admitted_type(&self, direction: CycleDirection) -> usize {
+        let count = Self::TYPES.len();
+        successors(Some(direction.step(self.attr_type_idx, count)), |candidate| {
+            Some(direction.step(*candidate, count))
+        })
+        .take(count)
+        .find(|candidate| self.loads(Self::TYPES[*candidate], self.locked_transformation()))
+        .unwrap_or(self.attr_type_idx)
     }
 
     /// The next conversion in `direction` that the selected type admits, wrapping through "no
@@ -196,11 +237,7 @@ impl AttributeEditorState {
     #[must_use]
     pub fn get_next_number_transformation(&self, direction: CycleDirection) -> usize {
         let number_transforms = [Transformation::Integer, Transformation::Float];
-        let current_transform = self
-            .transform_idx
-            .checked_sub(1)
-            .and_then(|index| Self::TRANSFORMS.get(index))
-            .map(|(_, transform)| *transform);
+        let current_transform = Self::transformation_at(self.transform_idx);
         let current_idx = current_transform
             .and_then(|transform| number_transforms.iter().position(|number| *number == transform))
             .unwrap_or(0);
@@ -323,5 +360,66 @@ mod tests {
         assert_eq!(editor.attr_type_idx, 0);
         assert_eq!(editor.transform_idx, 0);
         assert_eq!(editor.transform_label(), "None (Default)");
+    }
+
+    /// The types the editor offers, in order, cycling forward from `kind` until it returns to it.
+    fn offered_types(kind: NgsiLdAttributeKind, is_container_mode: bool) -> Vec<NgsiLdAttributeKind> {
+        let mut editor = AttributeEditorState::new();
+        editor.is_container_mode = is_container_mode;
+        editor.attr_type_idx = AttributeEditorState::TYPES.iter().position(|candidate| *candidate == kind).unwrap();
+        let start = editor.attr_type_idx;
+        let mut offered = vec![kind];
+        loop {
+            editor.attr_type_idx = editor.next_admitted_type(CycleDirection::Next);
+            if editor.attr_type_idx == start {
+                return offered;
+            }
+            offered.push(AttributeEditorState::TYPES[editor.attr_type_idx]);
+        }
+    }
+
+    #[test]
+    fn the_editor_offers_every_type_for_an_attribute_read_from_its_source() {
+        assert_eq!(offered_types(NgsiLdAttributeKind::Property, false), AttributeEditorState::TYPES);
+    }
+
+    #[test]
+    fn the_editor_offers_a_container_only_the_types_an_assembled_object_loads_as() {
+        assert_eq!(
+            offered_types(NgsiLdAttributeKind::Property, true),
+            [
+                NgsiLdAttributeKind::Property,
+                NgsiLdAttributeKind::LanguageProperty,
+                NgsiLdAttributeKind::ListProperty,
+                NgsiLdAttributeKind::JsonProperty,
+            ]
+        );
+    }
+
+    #[test]
+    fn cycling_a_container_backwards_skips_the_types_it_cannot_take() {
+        let mut editor = AttributeEditorState::new();
+        editor.is_container_mode = true;
+
+        editor.attr_type_idx = editor.next_admitted_type(CycleDirection::Previous);
+
+        assert_eq!(AttributeEditorState::TYPES[editor.attr_type_idx], NgsiLdAttributeKind::JsonProperty);
+    }
+
+    #[test]
+    fn a_container_is_saved_with_its_locked_conversion_and_a_leaf_with_its_selection() {
+        let mut editor = AttributeEditorState::new();
+        let integer = AttributeEditorState::TRANSFORMS
+            .iter()
+            .position(|(_, transform)| *transform == Transformation::Integer)
+            .unwrap()
+            + 1;
+        editor.transform_idx = integer;
+        assert_eq!(editor.selected_transformation(), Some(Transformation::Integer));
+
+        editor.is_container_mode = true;
+        assert_eq!(editor.selected_transformation(), Some(Transformation::Object));
+
+        assert_eq!(AttributeEditorState::new().selected_transformation(), None);
     }
 }
