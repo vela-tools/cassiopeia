@@ -73,6 +73,14 @@ impl EngineReport {
         Some((kind.parse().ok()?, name))
     }
 
+    /// The variable Tera reports as not defined when the template prints it, if that is what it
+    /// reports. Tera names the variable itself here, rather than the kind of value it found.
+    pub(crate) fn undefined_variable(&self) -> Option<&str> {
+        let (_, name) = regex_captures!(r"^Variable `([^`]+)` is not defined", &self.message)?;
+
+        Some(name)
+    }
+
     /// Whether Tera reports a value that is not defined in the record, which Tera names `undefined`.
     pub(crate) fn mentions_undefined_value(&self) -> bool {
         self.message.contains("`undefined`")
@@ -197,5 +205,16 @@ mod tests {
 
         assert!(undefined.mentions_undefined_value() && !undefined.mentions_null_value());
         assert!(null.mentions_null_value() && !null.mentions_undefined_value());
+    }
+
+    #[test]
+    fn an_undefined_variable_is_read_by_name_from_the_message() {
+        let printed = EngineReport::unlocated(tera::Error::message("Variable `nothere` is not defined. Available variables: id, this"));
+        let alone = EngineReport::unlocated(tera::Error::message("Variable `nothere` is not defined."));
+        let field = EngineReport::unlocated(tera::Error::message("Field `nothere` is not defined. Available fields: a"));
+
+        assert_eq!(printed.undefined_variable(), Some("nothere"));
+        assert_eq!(alone.undefined_variable(), Some("nothere"));
+        assert_eq!(field.undefined_variable(), None);
     }
 }

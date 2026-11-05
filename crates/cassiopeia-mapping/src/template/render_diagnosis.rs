@@ -1,11 +1,12 @@
 //! Turns Tera's failure to render a template against one record into the [`ResolutionFailure`] that
 //! says what the author should change.
 //!
-//! The usual cause is a field the record does not have, or has as null, reaching an operator or a
-//! filter that needs a value. Tera reports the value's kind (`undefined`, `none`) but not the field
-//! it came from, so the field is found by checking the variables the template reads against the
-//! record. The hint is only given when Tera's report names that kind of value, so a field that is
-//! merely absent elsewhere in the template is not blamed for an unrelated failure.
+//! The usual cause is a field the record does not have, or has as null. A field the template prints
+//! is named by Tera itself. One that reaches an operator or a filter is not: Tera reports the
+//! value's kind (`undefined`, `none`) but not the field it came from, so the field is found by
+//! checking the variables the template reads against the record. That hint is only given when
+//! Tera's report names that kind of value, so a field that is merely absent elsewhere in the
+//! template is not blamed for an unrelated failure.
 
 use crate::template::{engine_report::EngineReport, error::ResolutionFailure, field_path::FieldPath, registered_template::RegisteredTemplate};
 use serde_json::{Map, Value as JsonValue};
@@ -19,6 +20,9 @@ pub(crate) fn diagnose(tera: &Tera, template: &RegisteredTemplate, data: &JsonVa
     let source = EngineReport::unlocated(engine);
     // The failure outlives the record and the mapping the template is borrowed from.
     let text = template.source.clone();
+    if let Some(field) = source.undefined_variable().map(FieldPath::new) {
+        return ResolutionFailure::MissingField { template: text, field, source };
+    }
     let Some(fields) = data.as_object() else {
         return ResolutionFailure::Render { template: text, source };
     };
@@ -106,6 +110,22 @@ mod tests {
         assert!(matches!(
             diagnosis("{{ missing | upper }}", &json!({"id": "a"})),
             ResolutionFailure::MissingField { field, .. } if field.as_str() == "missing"
+        ));
+    }
+
+    #[test]
+    fn a_missing_field_the_template_prints_is_named() {
+        assert!(matches!(
+            diagnosis("{{ nothere }}-{{ id | lower }}", &json!({"id": "A"})),
+            ResolutionFailure::MissingField { field, .. } if field.as_str() == "nothere"
+        ));
+    }
+
+    #[test]
+    fn a_missing_field_the_template_prints_is_named_over_one_it_only_guards() {
+        assert!(matches!(
+            diagnosis("{% if absent %}{{ absent }}{% endif %}{{ printed }}", &json!({"id": "A"})),
+            ResolutionFailure::MissingField { field, .. } if field.as_str() == "printed"
         ));
     }
 

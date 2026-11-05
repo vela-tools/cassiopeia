@@ -490,6 +490,19 @@ mod tests {
     }
 
     #[test]
+    fn a_failure_to_render_a_printed_field_the_record_lacks_gives_the_missing_field_hint() {
+        let mut runner = TemplateRunner::new();
+        let compiled = runner.compile(&TemplateSource::new("{{ nothere }}-{{ id | lower }}"), &location()).unwrap();
+
+        let error = runner.resolver().resolve(&compiled, &json!({"id": "A"})).unwrap_err();
+
+        assert_eq!(
+            error.failure.to_string(),
+            "`{{ nothere }}-{{ id | lower }}` reads `nothere`, which this record does not have: guard it with `{% if nothere %}…{% endif %}` or default it with `nothere | default(value=…)`"
+        );
+    }
+
+    #[test]
     fn a_failure_on_a_null_field_names_that_field() {
         let mut runner = TemplateRunner::new();
         let compiled = runner.compile(&TemplateSource::new("{{ code | split(pat=' ') }}"), &location()).unwrap();
