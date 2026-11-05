@@ -1,6 +1,7 @@
 use crate::{
     error::IngestorError,
     ingestor::Ingestor,
+    record_batches::RecordBatches,
     shapefile::{
         crs_source::read_source_crs,
         error::ShapefileIngestError,
@@ -14,7 +15,7 @@ use cassiopeia_ir::{
     record::Record,
 };
 use shapefile::{Error as ShapefileError, Reader};
-use std::{mem, path::Path};
+use std::path::Path;
 
 /// Ingestor for ESRI Shapefiles, in either carrier: a bare local `.shp` (its `.dbf`/`.shx`/`.prj`/
 /// `.cpg` companions resolved from the same directory) or a `.zip` bundle of the companion set.
@@ -56,33 +57,21 @@ impl ShapefileIngestor {
 impl Ingestor for ShapefileIngestor {
     fn ingest(mut self: Box<Self>, sender: ChannelSender<Signal<Vec<Record>, IngestorError>>) -> Result<(), IngestorError> {
         let source = self.source.take().ok_or(IngestorError::CannotBeStreamedTwice)?;
-        let batch_size = self.batch_size;
-
         // The extraction directory (for a zip bundle) is bound for the whole read: its `Drop` deletes
         // the extracted members, so it must outlive every layer's reader.
         let discovered = source.discover()?;
         let _extraction = discovered.extraction;
 
-        let mut batch_buffer: Vec<Record> = Vec::new();
+        let mut batches = RecordBatches::new(&sender, self.batch_size);
         for layer in discovered.layers {
-            ingest_layer(&layer, batch_size, &sender, &mut batch_buffer)?;
+            ingest_layer(&layer, &mut batches)?;
         }
-
-        if !batch_buffer.is_empty() {
-            sender.send(Signal::Data(batch_buffer)).map_err(|_| IngestorError::ChannelClosed)?;
-        }
-
-        Ok(())
+        batches.finish()
     }
 }
 
-/// Reads one layer's features into the shared batch buffer, flushing full batches to the channel.
-fn ingest_layer(
-    layer: &Layer,
-    batch_size: usize,
-    sender: &ChannelSender<Signal<Vec<Record>, IngestorError>>,
-    batch_buffer: &mut Vec<Record>,
-) -> Result<(), IngestorError> {
+/// Reads one layer's features into the batches shared by every layer of the bundle.
+fn ingest_layer(layer: &Layer, batches: &mut RecordBatches<'_>) -> Result<(), IngestorError> {
     let crs = read_source_crs(&layer.shp_path)?;
 
     let mut reader = match Reader::from_path(&layer.shp_path) {
@@ -101,12 +90,7 @@ fn ingest_layer(
     for result in reader.iter_shapes_and_records() {
         let (shape, attributes) = result.map_err(ShapefileIngestError::Read)?;
         let record = shape_and_record_to_record(shape, attributes, crs.as_ref(), layer.collection.clone())?;
-        batch_buffer.push(record);
-
-        if batch_buffer.len() >= batch_size {
-            let batch = mem::take(batch_buffer);
-            sender.send(Signal::Data(batch)).map_err(|_| IngestorError::ChannelClosed)?;
-        }
+        batches.push(record)?;
     }
 
     Ok(())

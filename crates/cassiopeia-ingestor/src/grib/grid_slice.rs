@@ -5,12 +5,12 @@ use crate::{
         level::{GribLevel, LevelGroupKey},
         parameter::ParameterName,
     },
+    record_batches::RecordBatches,
 };
 use cassiopeia_common::{channel::ChannelSender, signal::Signal};
 use cassiopeia_ir::record::Record;
 use indexmap::{IndexMap, map::Entry};
 use serde_json::{Map, Number, Value};
-use std::mem;
 
 /// Identity of a grid slice: GRIB fields sharing all of these describe the same locations at the same
 /// level and time, so their parameters pivot into columns of one shared set of records.
@@ -80,22 +80,12 @@ impl GridSliceSet {
     ///
     /// Returns [`IngestorError::ChannelClosed`] if the receiver is dropped before all batches are sent.
     pub fn flush(self, batch_size: usize, sender: &ChannelSender<Signal<Vec<Record>, IngestorError>>) -> Result<(), IngestorError> {
-        let mut batch: Vec<Record> = Vec::new();
-        for (_key, slice) in self.slices {
-            for record in slice.into_records() {
-                batch.push(record);
-                if batch.len() >= batch_size {
-                    let full = mem::take(&mut batch);
-                    sender.send(Signal::Data(full)).map_err(|_| IngestorError::ChannelClosed)?;
-                }
-            }
-        }
-
-        if !batch.is_empty() {
-            sender.send(Signal::Data(batch)).map_err(|_| IngestorError::ChannelClosed)?;
-        }
-
-        Ok(())
+        let mut batches = RecordBatches::new(sender, batch_size);
+        self.slices
+            .into_values()
+            .flat_map(GridSlice::into_records)
+            .try_for_each(|record| batches.push(record))?;
+        batches.finish()
     }
 }
 

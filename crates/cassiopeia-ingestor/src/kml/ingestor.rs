@@ -2,6 +2,7 @@ use crate::{
     error::IngestorError,
     ingestor::Ingestor,
     kml::{error::KmlIngestError, extended_data::extract_extended_data, geometry::kml_geometry_to_geojson, time_primitive::extract_time_primitive},
+    record_batches::RecordBatches,
 };
 use ::kml::{Kml, KmlReader, types::Placemark};
 use cassiopeia_common::{channel::ChannelSender, collection::CollectionName, format::DataFormat, signal::Signal};
@@ -11,7 +12,7 @@ use cassiopeia_ir::{
 };
 use convert_case::ccase;
 use serde_json::{Map, Value};
-use std::{fs::File, io::BufReader, mem, path::PathBuf};
+use std::{fs::File, io::BufReader, path::PathBuf};
 
 enum KmlSource {
     Kml(BufReader<File>),
@@ -176,9 +177,6 @@ impl KmlIngestor {
 impl Ingestor for KmlIngestor {
     fn ingest(mut self: Box<Self>, sender: ChannelSender<Signal<Vec<Record>, IngestorError>>) -> Result<(), IngestorError> {
         let source = self.reader.take().ok_or(IngestorError::CannotBeStreamedTwice)?;
-        let batch_size = self.batch_size;
-        let mut batch_buffer: Vec<Record> = Vec::new();
-
         let kml = match source {
             KmlSource::Kml(reader) => KmlReader::<_, f64>::from_reader(reader).read().map_err(KmlIngestError::Read)?,
             KmlSource::Kmz(path) => KmlReader::<_, f64>::from_kmz_path(path)
@@ -190,25 +188,17 @@ impl Ingestor for KmlIngestor {
         let mut placemarks = Vec::new();
         Self::collect_placemarks(kml, None, &mut placemarks);
 
+        let mut batches = RecordBatches::new(&sender, self.batch_size);
+
         for (folder_name, placemark) in placemarks {
             let namespace = folder_name.as_deref().map(|n| ccase!(snake, n));
             // The verbatim folder name is the routing key; a folder-less placemark stays `None` and
             // ingests fine, becoming an error only under a `Collections` mapping binding.
             let collection = folder_name.as_deref().map(CollectionName::from);
             let record = Self::placemark_to_record(folder_name, namespace.as_deref(), placemark, collection);
-            batch_buffer.push(record);
-
-            if batch_buffer.len() >= batch_size {
-                let batch = mem::take(&mut batch_buffer);
-                sender.send(Signal::Data(batch)).map_err(|_| IngestorError::ChannelClosed)?;
-            }
+            batches.push(record)?;
         }
-
-        if !batch_buffer.is_empty() {
-            sender.send(Signal::Data(batch_buffer)).map_err(|_| IngestorError::ChannelClosed)?;
-        }
-
-        Ok(())
+        batches.finish()
     }
 }
 

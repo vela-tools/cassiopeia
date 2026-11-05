@@ -1,4 +1,4 @@
-use crate::{error::IngestorError, geojson::error::GeoJsonIngestError, ingestor::Ingestor};
+use crate::{error::IngestorError, geojson::error::GeoJsonIngestError, ingestor::Ingestor, record_batches::RecordBatches};
 use ::geojson::{Feature, GeoJson};
 use cassiopeia_common::{channel::ChannelSender, signal::Signal};
 use cassiopeia_ir::{
@@ -6,7 +6,7 @@ use cassiopeia_ir::{
     record::Record,
 };
 use serde_json::{Map, Value};
-use std::{fs::File, io::BufReader, mem};
+use std::{fs::File, io::BufReader};
 
 /// Ingestor for `GeoJSON` data.
 ///
@@ -69,29 +69,19 @@ impl GeoJsonIngestor {
 impl Ingestor for GeoJsonIngestor {
     fn ingest(mut self: Box<Self>, sender: ChannelSender<Signal<Vec<Record>, IngestorError>>) -> Result<(), IngestorError> {
         let reader = self.reader.take().ok_or(IngestorError::CannotBeStreamedTwice)?;
-        let batch_size = self.batch_size;
-        let mut batch_buffer: Vec<Record> = Vec::new();
+        let mut batches = RecordBatches::new(&sender, self.batch_size);
 
         let parsed: Result<GeoJson, _> = serde_json::from_reader(reader);
         match parsed {
             Ok(GeoJson::FeatureCollection(collection)) => {
                 for feature in collection.features {
-                    batch_buffer.push(Self::feature_to_record(feature)?);
-                    if batch_buffer.len() >= batch_size {
-                        let batch = mem::take(&mut batch_buffer);
-                        sender.send(Signal::Data(batch)).map_err(|_| IngestorError::ChannelClosed)?;
-                    }
+                    batches.push(Self::feature_to_record(feature)?)?;
                 }
-
-                if !batch_buffer.is_empty() {
-                    sender.send(Signal::Data(batch_buffer)).map_err(|_| IngestorError::ChannelClosed)?;
-                }
-                Ok(())
+                batches.finish()
             }
             Ok(GeoJson::Feature(feature)) => {
-                let record = Self::feature_to_record(feature)?;
-                sender.send(Signal::Data(vec![record])).map_err(|_| IngestorError::ChannelClosed)?;
-                Ok(())
+                batches.push(Self::feature_to_record(feature)?)?;
+                batches.finish()
             }
             Ok(GeoJson::Geometry(_)) => Err(GeoJsonIngestError::UnsupportedInput.into()),
             Err(e) => Err(GeoJsonIngestError::Parse(::geojson::Error::from(e)).into()),

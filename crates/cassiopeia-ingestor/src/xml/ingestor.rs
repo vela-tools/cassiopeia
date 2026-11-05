@@ -1,6 +1,7 @@
 use crate::{
     error::IngestorError,
     ingestor::Ingestor,
+    record_batches::RecordBatches,
     xml::{error::XmlIngestError, record_split::split, value::document_to_value},
 };
 use cassiopeia_common::{channel::ChannelSender, signal::Signal};
@@ -11,7 +12,6 @@ use cassiopeia_ir::{
 use std::{
     fs::File,
     io::{BufReader, Read},
-    mem,
     path::PathBuf,
 };
 use tracing::info;
@@ -53,8 +53,6 @@ impl XmlIngestor {
 impl Ingestor for XmlIngestor {
     fn ingest(mut self: Box<Self>, sender: ChannelSender<Signal<Vec<Record>, IngestorError>>) -> Result<(), IngestorError> {
         let mut reader = self.reader.take().ok_or(IngestorError::CannotBeStreamedTwice)?;
-        let batch_size = self.batch_size;
-
         let mut buffer = Vec::new();
         reader.read_to_end(&mut buffer).map_err(|source| XmlIngestError::Read {
             source,
@@ -63,22 +61,9 @@ impl Ingestor for XmlIngestor {
         info!("Using XML ingestor");
 
         let document = document_to_value(&buffer)?;
-        let records = split(document);
-
-        let mut batch_buffer: Vec<Record> = Vec::new();
-        for record in records {
-            batch_buffer.push(record);
-            if batch_buffer.len() >= batch_size {
-                let batch = mem::take(&mut batch_buffer);
-                sender.send(Signal::Data(batch)).map_err(|_| IngestorError::ChannelClosed)?;
-            }
-        }
-
-        if !batch_buffer.is_empty() {
-            sender.send(Signal::Data(batch_buffer)).map_err(|_| IngestorError::ChannelClosed)?;
-        }
-
-        Ok(())
+        let mut batches = RecordBatches::new(&sender, self.batch_size);
+        split(document).into_iter().try_for_each(|record| batches.push(record))?;
+        batches.finish()
     }
 }
 

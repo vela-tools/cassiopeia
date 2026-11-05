@@ -7,6 +7,7 @@ use crate::{
     },
     error::IngestorError,
     ingestor::Ingestor,
+    record_batches::RecordBatches,
 };
 use ::csv::StringRecord;
 use cassiopeia_common::{channel::ChannelSender, input::Input, signal::Signal};
@@ -31,7 +32,6 @@ use std::{
     borrow::Cow,
     fs::File,
     io::BufReader,
-    mem,
     path::{Path, PathBuf},
     sync::Arc,
 };
@@ -266,8 +266,8 @@ impl CsvIngestor {
 impl Ingestor for CsvIngestor {
     fn ingest(mut self: Box<Self>, sender: ChannelSender<Signal<Vec<Record>, IngestorError>>) -> Result<(), IngestorError> {
         let mut reader = self.reader.take().ok_or(IngestorError::CannotBeStreamedTwice)?;
-        let batch_size = self.batch_size;
-        let mut batch_buffer: Vec<Record> = Vec::new();
+        let mut batches = RecordBatches::new(&sender, self.batch_size);
+        let channel_closed = |_: &IngestorError| warn!("CSV ingestor stopping early: downstream channel closed");
 
         let encoding = self.encoding;
         for result in reader.records() {
@@ -284,25 +284,9 @@ impl Ingestor for CsvIngestor {
                 None => Self::keyed_by_position(&record, &self.notation),
             };
 
-            batch_buffer.push(Record::new(None, data));
-
-            if batch_buffer.len() >= batch_size {
-                let batch = mem::take(&mut batch_buffer);
-                sender.send(Signal::Data(batch)).map_err(|_| {
-                    warn!("CSV ingestor stopping early: downstream channel closed");
-                    IngestorError::ChannelClosed
-                })?;
-            }
+            batches.push(Record::new(None, data)).inspect_err(channel_closed)?;
         }
-
-        if !batch_buffer.is_empty() {
-            sender.send(Signal::Data(batch_buffer)).map_err(|_| {
-                warn!("CSV ingestor stopping early: downstream channel closed");
-                IngestorError::ChannelClosed
-            })?;
-        }
-
-        Ok(())
+        batches.finish().inspect_err(channel_closed)
     }
 }
 
