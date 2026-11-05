@@ -88,12 +88,15 @@ mod tests {
         template_location::TemplateLocation,
         template_site::TemplateSite,
     };
-    use cassiopeia_ngsi_ld::entity::name::NameBuf;
+    use cassiopeia_ngsi_ld::entity::{attribute_path::AttributePath, name::NameBuf};
     use pretty_assertions::assert_eq;
     use std::{error::Error, path::Path, sync::Arc};
 
     fn location() -> TemplateLocation {
-        TemplateLocation::new(Arc::from(Path::new("sensor.json5")), TemplateSite::Attribute(NameBuf::new("codes").unwrap()))
+        TemplateLocation::new(
+            Arc::from(Path::new("sensor.json5")),
+            TemplateSite::Attribute(AttributePath::top_level(NameBuf::new("codes").unwrap())),
+        )
     }
 
     fn report(message: &str) -> EngineReport {

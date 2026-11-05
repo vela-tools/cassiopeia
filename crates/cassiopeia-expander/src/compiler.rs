@@ -1,5 +1,9 @@
 use cassiopeia_mapping::{
-    attribute::{Attribute, instance::AttributeInstance},
+    attribute::{
+        Attribute,
+        declaration_trail::{DeclarationTrail, Nesting},
+        instance::AttributeInstance,
+    },
     error::{MappingError, Result},
     mapping::Mapping,
     scope::{CompiledScope, Scope},
@@ -8,7 +12,7 @@ use cassiopeia_mapping::{
     template_location::TemplateLocation,
     template_site::TemplateSite,
 };
-use cassiopeia_ngsi_ld::entity::name::NameBuf;
+use cassiopeia_ngsi_ld::entity::{attribute_path::AttributePath, name::NameBuf};
 use serde_json::Value;
 use std::{path::Path, sync::Arc};
 
@@ -62,7 +66,7 @@ impl ExpanderCompiler {
         }
 
         for (name, attribute) in mapping.attributes_mut() {
-            Self::compile_attribute(name, attribute, document, runner, &mut reads)?;
+            Self::compile_attribute(name, None, attribute, document, runner, &mut reads)?;
         }
         mapping.set_source_reads(reads);
 
@@ -71,26 +75,37 @@ impl ExpanderCompiler {
 
     /// Compiles one attribute's source and recurses into everything nested beneath it.
     ///
-    /// A failure is reported under `name`, the key the attribute is declared under; a per-language
-    /// entry or an instance has no key of its own and is reported under its parent's.
-    fn compile_attribute(name: &NameBuf, attribute: &mut Attribute, document: &Arc<Path>, runner: &mut TemplateRunner, reads: &mut SourceReads) -> Result<()> {
-        let compiled = Self::compile_source_templates(attribute.source().as_ref(), name, document, runner, reads)?;
+    /// A failure is reported under the path of `name`, the key the attribute is declared under,
+    /// held beneath the declarations `owners` frames; a per-language entry or an instance has no key
+    /// of its own and is reported under its parent's.
+    fn compile_attribute(
+        name: &NameBuf,
+        owners: Option<&DeclarationTrail<'_>>,
+        attribute: &mut Attribute,
+        document: &Arc<Path>,
+        runner: &mut TemplateRunner,
+        reads: &mut SourceReads,
+    ) -> Result<()> {
+        let path = DeclarationTrail::path_of(owners, name);
+        let compiled = Self::compile_source_templates(attribute.source().as_ref(), &path, document, runner, reads)?;
         attribute.set_compiled_source(compiled);
 
+        let members = DeclarationTrail::below(name, Nesting::Member, owners);
         for (nested_name, nested) in attribute.mappings_mut() {
-            Self::compile_attribute(nested_name, nested, document, runner, reads)?;
+            Self::compile_attribute(nested_name, Some(&members), nested, document, runner, reads)?;
         }
         for language in attribute.language_map_mut().values_mut() {
-            Self::compile_attribute(name, language, document, runner, reads)?;
+            Self::compile_attribute(name, owners, language, document, runner, reads)?;
         }
+        let sub_attributes = DeclarationTrail::below(name, Nesting::SubAttribute, owners);
         if let Some(properties) = attribute.properties_mut() {
             for (property_name, property) in properties {
-                Self::compile_attribute(property_name, property, document, runner, reads)?;
+                Self::compile_attribute(property_name, Some(&sub_attributes), property, document, runner, reads)?;
             }
         }
         if let Some(instances) = attribute.instances_mut() {
             for instance in instances {
-                Self::compile_instance(name, instance, document, runner, reads)?;
+                Self::compile_instance(&path, &sub_attributes, instance, document, runner, reads)?;
             }
         }
         if let Some(synthetic) = attribute.synthetic_entity_mut() {
@@ -101,20 +116,22 @@ impl ExpanderCompiler {
     }
 
     /// Compiles one multi-instance instance's source and its own properties, reporting a failure in
-    /// its source under `name`, the attribute declaring the instance.
+    /// its source under `path`, the attribute declaring the instance, and one in a property beneath
+    /// `sub_attributes`, that attribute's frame.
     fn compile_instance(
-        name: &NameBuf,
+        path: &AttributePath,
+        sub_attributes: &DeclarationTrail<'_>,
         instance: &mut AttributeInstance,
         document: &Arc<Path>,
         runner: &mut TemplateRunner,
         reads: &mut SourceReads,
     ) -> Result<()> {
-        let compiled = Self::compile_source_templates(instance.source().as_ref(), name, document, runner, reads)?;
+        let compiled = Self::compile_source_templates(instance.source().as_ref(), path, document, runner, reads)?;
         instance.set_compiled_source(compiled);
 
         if let Some(properties) = instance.properties_mut() {
             for (property_name, property) in properties {
-                Self::compile_attribute(property_name, property, document, runner, reads)?;
+                Self::compile_attribute(property_name, Some(sub_attributes), property, document, runner, reads)?;
             }
         }
 
@@ -125,15 +142,15 @@ impl ExpanderCompiler {
     /// carried verbatim. Returns `None` when there is no source to compile.
     fn compile_source_templates(
         source: Option<&Value>,
-        name: &NameBuf,
+        path: &AttributePath,
         document: &Arc<Path>,
         runner: &mut TemplateRunner,
         reads: &mut SourceReads,
     ) -> Result<Option<Vec<CompiledTemplate>>> {
         let mut compiled = Vec::new();
-        // Each compiled template keeps the site it is declared at, so the attribute name is copied
+        // Each compiled template keeps the site it is declared at, so the attribute path is copied
         // once per template.
-        let site = || TemplateSite::Attribute(name.clone());
+        let site = || TemplateSite::Attribute(path.clone());
 
         if let Some(source) = source {
             match source {
@@ -187,7 +204,7 @@ mod tests {
         template::{CompiledTemplate, TemplateSource, runner::TemplateRunner},
         template_site::TemplateSite,
     };
-    use cassiopeia_ngsi_ld::entity::name::NameBuf;
+    use cassiopeia_ngsi_ld::entity::{attribute_path::AttributePath, name::NameBuf};
     use pretty_assertions::assert_eq;
     use std::{error::Error, path::Path};
 
@@ -223,8 +240,21 @@ mod tests {
         error.source().expect("the hint is chained").to_string()
     }
 
-    fn attribute(name: &str) -> TemplateSite {
-        TemplateSite::Attribute(NameBuf::new(name).unwrap())
+    fn name(value: &str) -> NameBuf {
+        NameBuf::new(value).unwrap()
+    }
+
+    fn attribute(value: &str) -> TemplateSite {
+        TemplateSite::Attribute(AttributePath::top_level(name(value)))
+    }
+
+    /// The site of the sub-attribute `sub_attributes` name, outermost first, beneath `root`.
+    fn sub_attribute(root: &str, sub_attributes: &[&str]) -> TemplateSite {
+        TemplateSite::Attribute(AttributePath::new(
+            name(root),
+            sub_attributes.iter().map(|value| name(value)).collect(),
+            Vec::new(),
+        ))
     }
 
     #[test]
@@ -343,21 +373,75 @@ mod tests {
     }
 
     #[test]
-    fn a_nested_mapping_with_a_syntax_error_is_reported_under_its_own_key() {
+    fn a_nested_mapping_with_a_syntax_error_is_reported_as_a_member_of_its_attribute() {
         let document = document("S-{{ id }}", "", r#"{ address: { mappings: { city: { source: "{{ city | upper " } } } }"#);
 
-        assert_eq!(rejection(&document).0, attribute("city"));
+        assert_eq!(
+            rejection(&document).0,
+            TemplateSite::Attribute(AttributePath::new(name("address"), Vec::new(), vec![name("city")]))
+        );
     }
 
     #[test]
-    fn a_property_with_a_syntax_error_is_reported_under_the_property() {
+    fn a_property_with_a_syntax_error_is_reported_under_its_path_from_the_attribute() {
         let document = document(
             "S-{{ id }}",
             "",
             r#"{ temperature: { source: "{{ t }}", properties: { unitCode: { source: "{{ u | upper " } } } }"#,
         );
 
-        assert_eq!(rejection(&document).0, attribute("unitCode"));
+        assert_eq!(rejection(&document).0, sub_attribute("temperature", &["unitCode"]));
+        assert!(compile(&document).unwrap_err().to_string().contains("attribute `temperature.unitCode`"));
+    }
+
+    #[test]
+    fn a_property_of_a_relationship_with_a_syntax_error_is_reported_under_its_path_from_the_relationship() {
+        let document = document(
+            "S-{{ id }}",
+            "",
+            r#"{ hasLeadActor: { type: "Relationship", source: "{{ actor }}", target: { entity: "Person" }, properties: { castSize: { source: "{{ n | lower " } } } }"#,
+        );
+
+        assert_eq!(rejection(&document).0, sub_attribute("hasLeadActor", &["castSize"]));
+    }
+
+    #[test]
+    fn a_sub_attribute_two_levels_down_with_a_syntax_error_is_reported_under_its_whole_path() {
+        let document = document(
+            "S-{{ id }}",
+            "",
+            r#"{ temperature: { source: "{{ t }}", properties: { accuracy: { source: "{{ a }}", properties: { level: { source: "{{ l | upper " } } } } } }"#,
+        );
+
+        assert_eq!(rejection(&document).0, sub_attribute("temperature", &["accuracy", "level"]));
+    }
+
+    #[test]
+    fn a_compiled_observed_at_qualifier_remembers_its_path_from_the_attribute() {
+        let mapping = compile(&document(
+            "S-{{ id }}",
+            "",
+            r#"{ temperature: { source: "{{ t }}", properties: { observedAt: { source: "{{ at | upper }}" } } } }"#,
+        ))
+        .unwrap();
+
+        let temperature = &mapping.attributes()[&name("temperature")];
+        let observed_at = &temperature.properties().as_ref().expect("the attribute declares properties")[&name("observedAt")];
+        let Some([CompiledTemplate::Expression(template)]) = observed_at.compiled_source().as_deref() else {
+            panic!("expected one typed Tera template");
+        };
+        assert_eq!(template.location.site, sub_attribute("temperature", &["observedAt"]));
+    }
+
+    #[test]
+    fn a_property_of_an_instance_with_a_syntax_error_is_reported_under_the_attribute_declaring_the_instance() {
+        let document = document(
+            "S-{{ id }}",
+            "",
+            r#"{ temperature: { instances: [{ source: "{{ a }}", properties: { unitCode: { source: "{{ u | upper " } } }] } }"#,
+        );
+
+        assert_eq!(rejection(&document).0, sub_attribute("temperature", &["unitCode"]));
     }
 
     #[test]

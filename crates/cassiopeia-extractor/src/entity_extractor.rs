@@ -140,7 +140,11 @@ mod tests {
     };
     use cassiopeia_mapping::{
         mapping::Mapping,
-        template::{error::ResolutionFailure, resolver::TemplateResolver, runner::TemplateRunner},
+        template::{
+            error::{ResolutionFailure, TemplateError},
+            resolver::TemplateResolver,
+            runner::TemplateRunner,
+        },
         template_site::TemplateSite,
     };
     use cassiopeia_ngsi_ld::{
@@ -2093,8 +2097,223 @@ mod tests {
 
         let entries = BatchSink::from(dropped.templates).into_entries().collect::<Vec<_>>();
         let error = &entries[0].1.error;
-        assert_eq!(error.location.site, TemplateSite::Attribute(name("codes")));
+        assert_eq!(error.location.site, TemplateSite::Attribute(AttributePath::top_level(name("codes"))));
         assert_eq!(*error.location.document, *Path::new("test.json5"));
         assert!(matches!(error.failure.as_ref(), ResolutionFailure::NullField { field, .. } if field.as_str() == "code"));
+    }
+
+    /// The attribute the first template failure dropped while extracting `source` under the mapping
+    /// `document`, and that failure.
+    fn first_template_failure(document: &str, source: Entity) -> (NameBuf, TemplateError) {
+        let (resolver, mapping) = prepare(document);
+        let dropped = DroppedAttributes::new();
+
+        EntityExtractor::new(resolver)
+            .extract(AssembledEntity::from_single(source, mapping), &dropped)
+            .unwrap();
+
+        let (attribute, record) = BatchSink::from(dropped.templates)
+            .into_entries()
+            .next()
+            .expect("a template failure is recorded");
+        (attribute, record.error)
+    }
+
+    /// The site of the declaration `sub_attributes` name, outermost first, beneath `root`.
+    fn sub_attribute_site(root: &str, sub_attributes: &[&str]) -> TemplateSite {
+        TemplateSite::Attribute(AttributePath::new(
+            name(root),
+            sub_attributes.iter().map(|value| name(value)).collect(),
+            Vec::new(),
+        ))
+    }
+
+    #[test]
+    fn a_failing_sub_attribute_of_a_relationship_is_named_by_its_path_and_drops_the_relationship() {
+        let mut relationships = Relationships::default();
+        relationships.insert(name("hasLeadActor"), vec![urn("urn:ngsi-ld:Person:X1")]);
+        let source = Entity::new(
+            urn("urn:ngsi-ld:Film:A"),
+            json!({"id": "A", "actor": "X1", "n": null}),
+            None,
+            None,
+            relationships,
+            None,
+        );
+
+        let (attribute, error) = first_template_failure(
+            r#"{
+                version: "v4",
+                dataModel: "Film",
+                identity: { entityName: "{{ id }}" },
+                attributes: {
+                    hasLeadActor: {
+                        type: "Relationship",
+                        source: "{{ actor }}",
+                        target: { entity: "Person" },
+                        properties: { castSize: { source: "{{ n | lower }}" } },
+                    },
+                },
+            }"#,
+            source,
+        );
+
+        assert_eq!(attribute, name("hasLeadActor"));
+        assert_eq!(error.location.site, sub_attribute_site("hasLeadActor", &["castSize"]));
+        assert_eq!(
+            error.to_string(),
+            "The attribute `hasLeadActor.castSize` template in the mapping document at 'test.json5' could not be resolved"
+        );
+    }
+
+    #[test]
+    fn a_failing_sub_attribute_of_a_property_is_named_by_its_path_and_drops_the_property() {
+        let (attribute, error) = first_template_failure(
+            r#"{
+                version: "v4",
+                dataModel: "Sensor",
+                identity: { entityName: "{{ id }}" },
+                attributes: {
+                    temperature: { source: "{{ t }}", properties: { accuracy: { source: "{{ n | lower }}" } } },
+                },
+            }"#,
+            entity("urn:ngsi-ld:Sensor:A", json!({"id": "A", "t": 21, "n": null})),
+        );
+
+        assert_eq!(attribute, name("temperature"));
+        assert_eq!(error.location.site, sub_attribute_site("temperature", &["accuracy"]));
+        assert_eq!(
+            error.to_string(),
+            "The attribute `temperature.accuracy` template in the mapping document at 'test.json5' could not be resolved"
+        );
+    }
+
+    #[test]
+    fn a_failing_sub_attribute_two_levels_down_is_named_by_its_whole_path_and_drops_the_top_level_attribute() {
+        let (attribute, error) = first_template_failure(
+            r#"{
+                version: "v4",
+                dataModel: "Sensor",
+                identity: { entityName: "{{ id }}" },
+                attributes: {
+                    temperature: {
+                        source: "{{ t }}",
+                        properties: { accuracy: { source: "{{ t }}", properties: { level: { source: "{{ n | lower }}" } } } },
+                    },
+                },
+            }"#,
+            entity("urn:ngsi-ld:Sensor:A", json!({"id": "A", "t": 21, "n": null})),
+        );
+
+        assert_eq!(attribute, name("temperature"));
+        assert_eq!(error.location.site, sub_attribute_site("temperature", &["accuracy", "level"]));
+    }
+
+    #[test]
+    fn a_failing_observed_at_qualifier_is_named_by_its_path_from_the_attribute() {
+        let (attribute, error) = first_template_failure(
+            r#"{
+                version: "v4",
+                dataModel: "Film",
+                identity: { entityName: "{{ id }}" },
+                attributes: {
+                    title: { source: "{{ id }}", properties: { observedAt: { source: "{{ n | lower }}" } } },
+                },
+            }"#,
+            entity("urn:ngsi-ld:Film:A", json!({"id": "A", "n": null})),
+        );
+
+        assert_eq!(attribute, name("title"));
+        assert_eq!(error.location.site, sub_attribute_site("title", &["observedAt"]));
+    }
+
+    #[test]
+    fn a_failing_property_of_an_instance_is_named_by_its_path_from_the_attribute_declaring_the_instance() {
+        let (attribute, error) = first_template_failure(
+            r#"{
+                version: "v4",
+                dataModel: "Sensor",
+                identity: { entityName: "{{ id }}" },
+                attributes: {
+                    temperature: { instances: [{ source: "{{ t }}", properties: { unitCode: { source: "{{ n | lower }}" } } }] },
+                },
+            }"#,
+            entity("urn:ngsi-ld:Sensor:A", json!({"id": "A", "t": 21, "n": null})),
+        );
+
+        assert_eq!(attribute, name("temperature"));
+        assert_eq!(error.location.site, sub_attribute_site("temperature", &["unitCode"]));
+    }
+
+    #[test]
+    fn a_failing_property_of_a_relationship_instance_is_named_by_its_path_from_the_relationship() {
+        let source = entity_with_instances(
+            "urn:ngsi-ld:Flight:1",
+            json!({"id": "1", "dep": "535", "n": null}),
+            "servesAirport",
+            instance_objects(&[(0, &["urn:ngsi-ld:Airport:535"])]),
+        );
+
+        let (attribute, error) = first_template_failure(
+            r#"{
+                version: "v4",
+                dataModel: "Flight",
+                identity: { entityName: "F-{{ id }}" },
+                attributes: {
+                    servesAirport: {
+                        type: "Relationship",
+                        target: { entity: "Airport" },
+                        instances: [{ source: "{{ dep }}", properties: { gate: { source: "{{ n | lower }}" } } }],
+                    },
+                },
+            }"#,
+            source,
+        );
+
+        assert_eq!(attribute, name("servesAirport"));
+        assert_eq!(error.location.site, sub_attribute_site("servesAirport", &["gate"]));
+    }
+
+    #[test]
+    fn a_failing_member_of_a_structured_value_is_named_as_a_member_of_its_attribute() {
+        let (attribute, error) = first_template_failure(
+            r#"{
+                version: "v4",
+                dataModel: "Building",
+                identity: { entityName: "{{ id }}" },
+                attributes: {
+                    address: { mappings: { city: { source: "{{ n | lower }}" } } },
+                },
+            }"#,
+            entity("urn:ngsi-ld:Building:A", json!({"id": "A", "n": null})),
+        );
+
+        assert_eq!(attribute, name("address"));
+        assert_eq!(
+            error.location.site,
+            TemplateSite::Attribute(AttributePath::new(name("address"), Vec::new(), vec![name("city")]))
+        );
+        assert_eq!(
+            error.to_string(),
+            "The attribute `address[city]` template in the mapping document at 'test.json5' could not be resolved"
+        );
+    }
+
+    #[test]
+    fn a_failing_language_map_entry_is_named_by_the_attribute_declaring_it() {
+        let (attribute, error) = first_template_failure(
+            r#"{
+                version: "v4",
+                dataModel: "Film",
+                identity: { entityName: "{{ id }}" },
+                attributes: {
+                    title: { type: "LanguageProperty", languageMap: { en: { source: "{{ n | lower }}" } } },
+                },
+            }"#,
+            entity("urn:ngsi-ld:Film:A", json!({"id": "A", "n": null})),
+        );
+
+        assert_eq!(attribute, name("title"));
+        assert_eq!(error.location.site, TemplateSite::Attribute(AttributePath::top_level(name("title"))));
     }
 }

@@ -29,7 +29,7 @@ impl TemplateLocation {
 #[cfg(test)]
 mod tests {
     use crate::{template_location::TemplateLocation, template_site::TemplateSite};
-    use cassiopeia_ngsi_ld::entity::name::NameBuf;
+    use cassiopeia_ngsi_ld::entity::{attribute_path::AttributePath, name::NameBuf};
     use pretty_assertions::assert_eq;
     use std::{path::Path, sync::Arc};
 
@@ -37,7 +37,7 @@ mod tests {
     fn a_location_names_the_site_and_the_document() {
         let location = TemplateLocation::new(
             Arc::from(Path::new("/maps/sensor.json5")),
-            TemplateSite::Attribute(NameBuf::new("temperature").unwrap()),
+            TemplateSite::Attribute(AttributePath::top_level(NameBuf::new("temperature").unwrap())),
         );
 
         assert_eq!(

@@ -188,7 +188,7 @@ A template can fail in two places: when Cassiopeia loads the mapping, or when it
 
 ### At load time
 
-Cassiopeia checks every template when it loads the mapping, before it reads any input. A template that cannot work for any record stops the run. The error names the mapping file and where the template sits (`identity.entityName`, `scope`, `observedAt`, or an attribute), then says what to change:
+Cassiopeia checks every template when it loads the mapping, before it reads any input. A template that cannot work for any record stops the run. The error names the mapping file and where the template sits (`identity.entityName`, `scope`, `observedAt`, or an attribute), then says what to change. An attribute's template under `properties` is named by its path from the top-level attribute, such as `hasLeadActor.castSize`, and one under `mappings` as a member, such as `address[city]`, so two attributes that both declare an `accuracy` stay apart. A template that fails at render time is named the same way. A compile error looks like this:
 
 ~~~text
 × The attribute `code` template in the mapping document at 'maps/thing.json5' cannot be compiled

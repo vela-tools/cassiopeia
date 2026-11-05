@@ -62,7 +62,7 @@ mod tests {
         template_location::TemplateLocation,
         template_site::TemplateSite,
     };
-    use cassiopeia_ngsi_ld::entity::name::NameBuf;
+    use cassiopeia_ngsi_ld::entity::{attribute_path::AttributePath, name::NameBuf};
     use cassiopeia_unresolved_templates::unresolved_templates::UnresolvedTemplates;
     use pretty_assertions::assert_eq;
     use std::{path::Path, sync::Arc};
@@ -78,7 +78,10 @@ mod tests {
 
     fn failure() -> TemplateError {
         TemplateError {
-            location: TemplateLocation::new(Arc::from(Path::new("sensor.json5")), TemplateSite::Attribute(NameBuf::new("codes").unwrap())),
+            location: TemplateLocation::new(
+                Arc::from(Path::new("sensor.json5")),
+                TemplateSite::Attribute(AttributePath::top_level(NameBuf::new("codes").unwrap())),
+            ),
             failure: Box::new(ResolutionFailure::Decode {
                 template: TemplateSource::new("{{ codes | split(pat=' ') }}"),
                 source: serde_json::from_str::<serde_json::Value>("[").unwrap_err(),
@@ -119,5 +122,29 @@ mod tests {
             "The attribute `codes` template in the mapping document at 'sensor.json5' could not be resolved for `urn:ngsi-ld:Sensor:a`, so attribute `codes` was dropped; the entity itself was kept"
         );
         assert_eq!(reported[0].causes[0], "`{{ codes | split(pat=' ') }}` did not render its value as JSON");
+    }
+
+    #[test]
+    fn a_failing_sub_attribute_is_named_by_its_path_and_the_headline_names_the_attribute_it_dropped() {
+        let sink = RecordingReporter::new();
+        let unresolved = UnresolvedTemplates::new();
+        let error = TemplateError {
+            location: TemplateLocation::new(
+                Arc::from(Path::new("rel.json5")),
+                TemplateSite::Attribute(AttributePath::new(name("hasLeadActor"), vec![name("castSize")], Vec::new())),
+            ),
+            failure: Box::new(ResolutionFailure::Decode {
+                template: TemplateSource::new("{{ n | lower }}"),
+                source: serde_json::from_str::<serde_json::Value>("[").unwrap_err(),
+            }),
+        };
+        unresolved.record(&name("hasLeadActor"), &urn("urn:ngsi-ld:Film:A"), error);
+
+        report_sink(&sink, unresolved, unresolved_template_diagnostic);
+
+        assert_eq!(
+            sink.diagnostics()[0].headline,
+            "The attribute `hasLeadActor.castSize` template in the mapping document at 'rel.json5' could not be resolved for `urn:ngsi-ld:Film:A`, so attribute `hasLeadActor` was dropped; the entity itself was kept"
+        );
     }
 }

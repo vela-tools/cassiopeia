@@ -38,13 +38,16 @@ mod tests {
         template_location::TemplateLocation,
         template_site::TemplateSite,
     };
-    use cassiopeia_ngsi_ld::entity::name::NameBuf;
+    use cassiopeia_ngsi_ld::entity::{attribute_path::AttributePath, name::NameBuf};
     use std::{path::Path, sync::Arc};
 
     #[test]
     fn a_template_failure_converts_into_the_template_variant() {
         let failure = TemplateError {
-            location: TemplateLocation::new(Arc::from(Path::new("sensor.json5")), TemplateSite::Attribute(NameBuf::new("codes").unwrap())),
+            location: TemplateLocation::new(
+                Arc::from(Path::new("sensor.json5")),
+                TemplateSite::Attribute(AttributePath::top_level(NameBuf::new("codes").unwrap())),
+            ),
             failure: Box::new(ResolutionFailure::Decode {
                 template: TemplateSource::new("{{ a | json_decode }}"),
                 source: serde_json::from_str::<serde_json::Value>("[").unwrap_err(),

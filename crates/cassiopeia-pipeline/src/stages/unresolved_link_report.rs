@@ -87,7 +87,10 @@ mod tests {
 
     fn failure() -> TemplateError {
         TemplateError {
-            location: TemplateLocation::new(Arc::from(Path::new("thing.json5")), TemplateSite::Attribute(name("refRoad"))),
+            location: TemplateLocation::new(
+                Arc::from(Path::new("thing.json5")),
+                TemplateSite::Attribute(AttributePath::top_level(name("refRoad"))),
+            ),
             failure: Box::new(ResolutionFailure::Decode {
                 template: TemplateSource::new("{{ road | split(pat=' ') }}"),
                 source: serde_json::from_str::<serde_json::Value>("[").unwrap_err(),

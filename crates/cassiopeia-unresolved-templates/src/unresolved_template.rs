@@ -58,14 +58,17 @@ mod tests {
         template_location::TemplateLocation,
         template_site::TemplateSite,
     };
-    use cassiopeia_ngsi_ld::entity::name::NameBuf;
+    use cassiopeia_ngsi_ld::entity::{attribute_path::AttributePath, name::NameBuf};
     use pretty_assertions::assert_eq;
     use std::{path::Path, sync::Arc};
     use urn_rs::Urn;
 
     fn failure(source: &str) -> TemplateError {
         TemplateError {
-            location: TemplateLocation::new(Arc::from(Path::new("sensor.json5")), TemplateSite::Attribute(NameBuf::new("codes").unwrap())),
+            location: TemplateLocation::new(
+                Arc::from(Path::new("sensor.json5")),
+                TemplateSite::Attribute(AttributePath::top_level(NameBuf::new("codes").unwrap())),
+            ),
             failure: Box::new(ResolutionFailure::Decode {
                 template: TemplateSource::new(source),
                 source: serde_json::from_str::<serde_json::Value>("[").unwrap_err(),

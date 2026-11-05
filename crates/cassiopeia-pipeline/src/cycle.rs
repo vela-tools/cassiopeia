@@ -178,7 +178,7 @@ mod tests {
     use cassiopeia_expander::router::MappingRouter;
     use cassiopeia_manifest::mapping_binding::{CollectionMapping, MappingBinding};
     use cassiopeia_mapping::{error::MappingError, template::runner::TemplateRunner, template_site::TemplateSite};
-    use cassiopeia_ngsi_ld::entity::name::NameBuf;
+    use cassiopeia_ngsi_ld::entity::{attribute_path::AttributePath, name::NameBuf};
     use pretty_assertions::assert_eq;
     use std::{collections::HashMap, fs, path::PathBuf, sync::Arc};
     use temp_dir::TempDir;
@@ -254,7 +254,7 @@ mod tests {
         assert!(matches!(
             &error,
             PipelineError::Mapping(MappingError::UncompilableTemplate { location, .. })
-                if *location.document == *path && location.site == TemplateSite::Attribute(NameBuf::new("temperature").unwrap())
+                if *location.document == *path && location.site == TemplateSite::Attribute(AttributePath::top_level(NameBuf::new("temperature").unwrap()))
         ));
         assert_eq!(DiagnosticCode::from(&error), DiagnosticCode::Run(RunCode::MappingUnusable));
         assert!(compiled.is_empty());

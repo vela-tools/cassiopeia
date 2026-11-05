@@ -342,13 +342,16 @@ mod tests {
         template_location::TemplateLocation,
         template_site::TemplateSite,
     };
-    use cassiopeia_ngsi_ld::entity::name::NameBuf;
+    use cassiopeia_ngsi_ld::entity::{attribute_path::AttributePath, name::NameBuf};
     use pretty_assertions::assert_eq;
     use serde_json::{Value as JsonValue, json};
     use std::{path::Path, sync::Arc};
 
     fn location() -> TemplateLocation {
-        TemplateLocation::new(Arc::from(Path::new("sensor.json5")), TemplateSite::Attribute(NameBuf::new("value").unwrap()))
+        TemplateLocation::new(
+            Arc::from(Path::new("sensor.json5")),
+            TemplateSite::Attribute(AttributePath::top_level(NameBuf::new("value").unwrap())),
+        )
     }
 
     #[test]

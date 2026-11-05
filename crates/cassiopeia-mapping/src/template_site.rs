@@ -1,4 +1,4 @@
-use cassiopeia_ngsi_ld::entity::name::NameBuf;
+use cassiopeia_ngsi_ld::entity::attribute_path::AttributePath;
 use derive_more::Display;
 
 /// Where in a mapping document a template expression is declared.
@@ -24,16 +24,18 @@ pub enum TemplateSite {
     #[display("observedAt")]
     ObservedAt,
 
-    /// The `source` of the named attribute. A per-language entry or an instance is reported under
-    /// the attribute that declares it, since neither carries an attribute name of its own.
+    /// The `source` of the attribute at the path, which runs from the top-level attribute down, so a
+    /// sub-attribute two attributes both declare, such as `accuracy`, says which one it qualifies. A
+    /// per-language entry or an instance is reported under the attribute that declares it, since
+    /// neither carries an attribute name of its own.
     #[display("attribute `{_0}`")]
-    Attribute(NameBuf),
+    Attribute(AttributePath),
 }
 
 #[cfg(test)]
 mod tests {
     use crate::template_site::TemplateSite;
-    use cassiopeia_ngsi_ld::entity::name::NameBuf;
+    use cassiopeia_ngsi_ld::entity::{attribute_path::AttributePath, name::NameBuf};
     use pretty_assertions::assert_eq;
 
     #[test]
@@ -43,8 +45,15 @@ mod tests {
         assert_eq!(TemplateSite::ExpiresAt.to_string(), "expiresAt");
         assert_eq!(TemplateSite::ObservedAt.to_string(), "observedAt");
         assert_eq!(
-            TemplateSite::Attribute(NameBuf::new("temperature").unwrap()).to_string(),
+            TemplateSite::Attribute(AttributePath::top_level(NameBuf::new("temperature").unwrap())).to_string(),
             "attribute `temperature`"
         );
+    }
+
+    #[test]
+    fn a_sub_attribute_site_renders_its_path_from_the_top_level_attribute() {
+        let path = AttributePath::new(NameBuf::new("hasLeadActor").unwrap(), vec![NameBuf::new("castSize").unwrap()], Vec::new());
+
+        assert_eq!(TemplateSite::Attribute(path).to_string(), "attribute `hasLeadActor.castSize`");
     }
 }
