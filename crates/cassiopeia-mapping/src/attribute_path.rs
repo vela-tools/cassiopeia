@@ -31,7 +31,8 @@ impl AttributePath {
     }
 
     /// The path of `leaf`, resolved beneath the declarations `owners` holds.
-    pub(crate) fn beneath(owners: Option<&DeclarationTrail<'_>>, leaf: &NameBuf) -> AttributePath {
+    #[must_use]
+    pub fn beneath(owners: Option<&DeclarationTrail<'_>>, leaf: &NameBuf) -> AttributePath {
         // The trail runs innermost first; reversed, it runs from the top-level attribute down, and
         // each frame says how the next name is nested in it.
         let mut frames = iter::successors(owners, |frame| frame.parent()).collect::<Vec<&DeclarationTrail<'_>>>();

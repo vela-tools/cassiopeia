@@ -1,7 +1,6 @@
 use crate::attribute::{
     conversion::{self, attribute_conversion::ConversionOutput, read_context::ReadContext, source_parts::SourceParts},
     declaration_output::DeclarationOutput,
-    declaration_trail::{DeclarationTrail, Nesting},
     metadata::MetadataExtractor,
     refusal::AttributeRefusal,
     resolution_context::ResolutionContext,
@@ -10,7 +9,11 @@ use crate::attribute::{
 use cassiopeia_geometry::refusal::GeometryRefusal;
 use cassiopeia_ir::{attribute_content::AttributeContent, resolved_attribute::ResolvedAttribute};
 use cassiopeia_mapping::{
-    attribute::{Attribute, instance::AttributeInstance},
+    attribute::{
+        Attribute,
+        declaration_trail::{DeclarationTrail, Nesting},
+        instance::AttributeInstance,
+    },
     template::CompiledTemplate,
 };
 use cassiopeia_ngsi_ld::{
@@ -27,13 +30,18 @@ use std::result;
 
 /// Resolves one top-level attribute declaration into what it carries against the record, or `None`
 /// when it carries nothing.
+///
+/// Only a top-level attribute can declare instances: the mapping is refused at load time when any
+/// declaration beneath one does (ETSI GS CIM 009 v1.9.1 clause 4.5.5). A relationship's instances
+/// were minted by the expander and travel on the entity, so it resolves like any other relationship.
 pub(crate) fn resolve(ctx: &mut ResolutionContext, attr_name: &NameBuf, config: &Attribute) -> Result<Option<ResolvedAttribute>> {
-    resolve_declaration(ctx, attr_name, config)
+    match (config.kind(), config.instances()) {
+        (NgsiLdAttributeKind::Relationship | NgsiLdAttributeKind::ListRelationship, _) | (_, None) => resolve_declaration(ctx, attr_name, config),
+        (_, Some(instances)) => resolve_instances(ctx, attr_name, config, instances),
+    }
 }
 
-/// Resolves a sub-attribute's declaration into the one content it contributes: what a
-/// single-instance declaration resolved to, or, for one declaring instances, a value listing every
-/// instance that resolved.
+/// Resolves a sub-attribute's declaration into the one content it contributes.
 pub(crate) fn resolve_content(ctx: &ResolutionContext, key: &NameBuf, config: &Attribute) -> Result<Option<AttributeContent>> {
     resolve_declaration(&mut ctx.child(ctx.data), key, config)
 }
@@ -42,8 +50,7 @@ pub(crate) fn resolve_content(ctx: &ResolutionContext, key: &NameBuf, config: &A
 /// `None` when it carries nothing.
 ///
 /// The declaration's [`NgsiLdAttributeKind`] and shape select the resolution path: a relationship
-/// reads the entity's pre-resolved targets, a declaration declaring instances converts each, a
-/// language property declaring a `languageMap` builds it entry by entry, a declaration carrying
+/// reads the entity's pre-resolved targets, a language property declaring a `languageMap` builds it entry by entry, a declaration carrying
 /// nested `mappings` builds a structured object, and everything else reads and converts source
 /// values.
 fn resolve_declaration<O: DeclarationOutput>(ctx: &mut ResolutionContext, attr_name: &NameBuf, config: &Attribute) -> Result<Option<O>> {
@@ -56,10 +63,6 @@ fn resolve_declaration<O: DeclarationOutput>(ctx: &mut ResolutionContext, attr_n
         resolve_relationship(ctx, attr_name, config)?;
         return Ok(None);
     }
-    if let Some(instances) = config.instances() {
-        return resolve_instances(ctx, attr_name, config, instances);
-    }
-
     let content = if matches!(kind, NgsiLdAttributeKind::LanguageProperty) && !config.language_map().is_empty() {
         resolve_language_property(ctx, attr_name, config)?.map(|map| O::Content::from(AttributeContent::Language(map)))
     } else if !config.mappings().is_empty() {
@@ -91,18 +94,19 @@ fn assemble(ctx: &ResolutionContext, attr_name: &NameBuf, config: &Attribute) ->
     Ok(if object.is_empty() { None } else { Some(object) })
 }
 
-/// Resolves a declaration declaring instances into what its instances combine into (see
-/// [`DeclarationOutput::instances`]), or `None` when no instance resolved.
+/// Resolves a top-level attribute declaring instances into one entry per declared instance, or
+/// `None` when no instance resolved.
 ///
-/// Each instance's `source` is read and converted with the attribute's shared conversion; the entry
-/// at index `i` aligns with the per-item metadata recorded for instance `i` (its `datasetId` and the
-/// shared attribute-level properties).
-fn resolve_instances<O: DeclarationOutput>(
+/// Each instance's `source` is read and converted with the attribute's shared conversion. An
+/// instance that resolved to nothing stays `None`, so the entry at index `i` stays aligned with the
+/// per-item metadata recorded for instance `i`: its `datasetId` and the shared attribute-level
+/// properties (ETSI GS CIM 009 v1.9.1 clause 4.5.5).
+fn resolve_instances(
     ctx: &mut ResolutionContext,
     attr_name: &NameBuf,
     config: &Attribute,
     instances: &[AttributeInstance],
-) -> Result<Option<O>> {
+) -> Result<Option<ResolvedAttribute>> {
     let mut contents = Vec::with_capacity(instances.len());
     for instance in instances {
         let parts = collect_source_parts(ctx, instance.source().as_ref(), instance.compiled_source().as_ref())?;
@@ -115,10 +119,7 @@ fn resolve_instances<O: DeclarationOutput>(
         return Ok(None);
     }
 
-    let mut omitted = OmittedNulls::default();
-    let resolved = O::instances(contents, &mut omitted);
-    ctx.dropped.nulls.record(attr_name, omitted);
-    Ok(Some(resolved))
+    Ok(Some(ResolvedAttribute::Instances(contents)))
 }
 
 /// Resolves a relationship attribute.

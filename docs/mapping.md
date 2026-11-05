@@ -602,6 +602,8 @@ The result is serialized as a JSON array of attribute objects, one per instance.
 
 `observedAt`, `expiresAt`, and `unitCode` are qualifiers themselves, so clause 4.5.5 does not allow them to be multi-attributes. They may appear only inside an instance's shared or per-instance `properties`.
 
+Only a top-level attribute can declare `instances`, including a top-level attribute of a `syntheticEntity`. An entity can hold several instances of one attribute, but a sub-attribute under `properties` is a single Property or Relationship (clauses 4.5.2.2 and 4.5.3.2). A member under `mappings` is a single JSON member, and a `languageMap` entry is a single localized string. A mapping that declares `instances` on any of them is rejected when it loads. The error names the declaration by its path, such as `temperature.accuracy` or `address[street]`.
+
 ## Emit a related entity
 
 Sometimes a record contains enough information to describe a related entity as well as the main one. Add `syntheticEntity` to the attribute that links the entities:

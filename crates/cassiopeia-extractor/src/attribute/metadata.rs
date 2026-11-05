@@ -1,15 +1,15 @@
-use crate::attribute::{
-    declaration_trail::{DeclarationTrail, Nesting},
-    resolution_context::ResolutionContext,
-    resolution_error::Result,
-    resolver::resolve_content,
-};
+use crate::attribute::{resolution_context::ResolutionContext, resolution_error::Result, resolver::resolve_content};
 use cassiopeia_ir::{
     metadata::MetadataStorage,
     relationship_path::RelationshipPath,
     sub_attribute::{SubAttribute, SubAttributes},
 };
-use cassiopeia_mapping::attribute::{Attribute, Attributes, instance::AttributeInstance};
+use cassiopeia_mapping::attribute::{
+    Attribute,
+    Attributes,
+    declaration_trail::{DeclarationTrail, Nesting},
+    instance::AttributeInstance,
+};
 use cassiopeia_ngsi_ld::{
     entity::{attribute::NgsiLdAttributeKind, name::NameBuf},
     value::types::Value,

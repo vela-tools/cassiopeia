@@ -1,4 +1,5 @@
-use crate::{attribute_path::AttributePath, required_value::RequiredValue};
+use crate::required_value::RequiredValue;
+use cassiopeia_mapping::attribute_path::AttributePath;
 
 /// One attribute, sub-attribute, or instance dropped because its value is not what its NGSI-LD kind
 /// has to hold, or is not what its transformation can read: the key the unusable-value sink files its

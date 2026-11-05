@@ -56,7 +56,8 @@ mod tests {
         code::{diagnostic_code::DiagnosticCode, extractor_code::ExtractorCode},
         context_field::ContextField,
     };
-    use cassiopeia_extractor::{attribute_path::AttributePath, required_value::RequiredValue, unusable_values::UnusableValues};
+    use cassiopeia_extractor::{required_value::RequiredValue, unusable_values::UnusableValues};
+    use cassiopeia_mapping::attribute_path::AttributePath;
     use cassiopeia_ngsi_ld::entity::name::NameBuf;
     use pretty_assertions::assert_eq;
 

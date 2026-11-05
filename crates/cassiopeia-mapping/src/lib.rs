@@ -1,9 +1,11 @@
 pub mod attribute;
+pub mod attribute_path;
 pub mod conversion;
 pub mod conversion_resolution;
 pub mod entity_members;
 pub mod error;
 pub mod identity;
+pub mod instance_placement;
 pub mod mapping;
 pub mod mapping_role;
 pub mod observed_at;

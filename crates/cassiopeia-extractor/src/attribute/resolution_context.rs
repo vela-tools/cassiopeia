@@ -1,6 +1,6 @@
-use crate::{attribute::declaration_trail::DeclarationTrail, attribute_path::AttributePath, dropped_attributes::DroppedAttributes};
+use crate::dropped_attributes::DroppedAttributes;
 use cassiopeia_ir::{entity_relationships::EntityRelationships, metadata::EntityMetadata};
-use cassiopeia_mapping::template::resolver::TemplateResolver;
+use cassiopeia_mapping::{attribute::declaration_trail::DeclarationTrail, attribute_path::AttributePath, template::resolver::TemplateResolver};
 use cassiopeia_ngsi_ld::entity::name::NameBuf;
 use serde_json::Value as JsonValue;
 

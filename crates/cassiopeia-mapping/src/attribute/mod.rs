@@ -1,3 +1,4 @@
+pub mod declaration_trail;
 pub mod instance;
 pub mod iterator;
 

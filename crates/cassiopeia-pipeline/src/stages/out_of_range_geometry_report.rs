@@ -6,7 +6,7 @@ use cassiopeia_diagnostic::{
     diagnostic_builder::DiagnosticBuilder,
     severity::Severity,
 };
-use cassiopeia_extractor::attribute_path::AttributePath;
+use cassiopeia_mapping::attribute_path::AttributePath;
 
 /// The diagnostic naming one declaration whose geometries carried a position outside WGS 84.
 ///
@@ -37,11 +37,12 @@ mod tests {
         code::{diagnostic_code::DiagnosticCode, geometry_code::GeometryCode},
         context_field::ContextField,
     };
-    use cassiopeia_extractor::{attribute_path::AttributePath, out_of_range_geometries::OutOfRangeGeometries};
+    use cassiopeia_extractor::out_of_range_geometries::OutOfRangeGeometries;
     use cassiopeia_geometry::{
         geometry::NgsiLdGeometry,
         wgs84::{OutOfRangePosition, check_range},
     };
+    use cassiopeia_mapping::attribute_path::AttributePath;
     use cassiopeia_ngsi_ld::entity::name::NameBuf;
     use pretty_assertions::assert_eq;
 

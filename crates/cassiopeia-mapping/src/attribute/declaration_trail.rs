@@ -2,7 +2,7 @@ use cassiopeia_ngsi_ld::entity::name::NameBuf;
 
 /// How the declarations beneath one frame relate to the declaration it descended through.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(crate) enum Nesting {
+pub enum Nesting {
     /// They are its sub-attributes, declared under `properties`.
     SubAttribute,
     /// They are members of its structured value, declared under `mappings`.
@@ -17,7 +17,7 @@ pub(crate) enum Nesting {
 /// nested. Nothing is allocated on the way down: a path is built from the frames only when a loss
 /// has to be named.
 #[derive(Clone, Copy, Debug)]
-pub(crate) struct DeclarationTrail<'a> {
+pub struct DeclarationTrail<'a> {
     /// The declaration this frame descended through.
     name: &'a NameBuf,
     /// How the declarations beneath this one are nested in it.
@@ -28,22 +28,26 @@ pub(crate) struct DeclarationTrail<'a> {
 
 impl<'a> DeclarationTrail<'a> {
     /// The frame for descending through `name` into its `nesting`, held beneath `parent`.
-    pub(crate) const fn below(name: &'a NameBuf, nesting: Nesting, parent: Option<&'a DeclarationTrail<'a>>) -> DeclarationTrail<'a> {
+    #[must_use]
+    pub const fn below(name: &'a NameBuf, nesting: Nesting, parent: Option<&'a DeclarationTrail<'a>>) -> DeclarationTrail<'a> {
         DeclarationTrail { name, nesting, parent }
     }
 
     /// The declaration this frame descended through.
-    pub(crate) const fn name(&self) -> &'a NameBuf {
+    #[must_use]
+    pub const fn name(&self) -> &'a NameBuf {
         self.name
     }
 
     /// How the declarations beneath this one are nested in it.
-    pub(crate) const fn nesting(&self) -> Nesting {
+    #[must_use]
+    pub const fn nesting(&self) -> Nesting {
         self.nesting
     }
 
     /// The frame of the declaration holding this one.
-    pub(crate) const fn parent(&self) -> Option<&'a DeclarationTrail<'a>> {
+    #[must_use]
+    pub const fn parent(&self) -> Option<&'a DeclarationTrail<'a>> {
         self.parent
     }
 }

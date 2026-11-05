@@ -1,4 +1,5 @@
 use crate::{
+    attribute_path::AttributePath,
     conversion::{admitted_transformations::AdmittedTransformations, declaration_shape::DeclarationShape},
     template::compile_error::TemplateCompileError,
     template_location::TemplateLocation,
@@ -7,6 +8,7 @@ use crate::{
 use cassiopeia_common::error::io::IoError;
 use cassiopeia_geometry::error::GeometryError;
 use cassiopeia_ngsi_ld::entity::{attribute::NgsiLdAttributeKind, name::NameBuf};
+use langtag::LangTagBuf;
 use std::{path::PathBuf, result};
 use thiserror::Error;
 
@@ -101,6 +103,34 @@ pub enum MappingError {
         kind: NgsiLdAttributeKind,
         /// What it is built from.
         shape: DeclarationShape,
+    },
+
+    /// A sub-attribute, or a member of a structured value, declares `instances`.
+    ///
+    /// Several instances of one attribute exist only on an Entity (ETSI GS CIM 009 v1.9.1 clauses
+    /// 4.5.1 and 4.5.5): a sub-attribute is one serialized Property or Relationship (clauses 4.5.2.2
+    /// and 4.5.3.2), and a member is one JSON member of the value holding it, so the instances would
+    /// be folded into one value or lost.
+    #[error(
+        "Attribute `{attribute}` declares `instances`, which only a top-level attribute can: several instances of one attribute exist only on an entity (ETSI GS CIM 009 v1.9.1 clause 4.5.5), so declare one `source` instead"
+    )]
+    InstancesBelowTopLevel {
+        /// Where the declaration sits, from its top-level attribute down.
+        attribute: AttributePath,
+    },
+
+    /// A `languageMap` entry declares `instances`.
+    ///
+    /// Each entry of a `languageMap` is the one localized string for its language (ETSI GS CIM 009
+    /// v1.9.1 clause 4.5.18), so it has nowhere to put a second instance.
+    #[error(
+        "Attribute `{attribute}` declares `instances` in its `languageMap` entry `{language}`, which holds one localized string (ETSI GS CIM 009 v1.9.1 clause 4.5.18); only a top-level attribute can declare instances"
+    )]
+    InstancesInLanguageEntry {
+        /// Where the `LanguageProperty` holding the entry sits.
+        attribute: AttributePath,
+        /// The language the entry is keyed by.
+        language: LangTagBuf,
     },
 }
 

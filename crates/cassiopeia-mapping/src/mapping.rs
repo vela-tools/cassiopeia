@@ -4,6 +4,7 @@ use crate::{
     entity_members::EntityMembers,
     error::{MappingError, Result},
     identity::Identity,
+    instance_placement,
     mapping_role::MappingRole,
     observed_at::ObservedAt,
     scope::{CompiledScope, Scope},
@@ -113,7 +114,8 @@ impl Mapping {
     /// names the document in error messages.
     ///
     /// # Errors
-    /// Returns a [`MappingError`] when an attribute declares a conversion that cannot run (see
+    /// Returns a [`MappingError`] when a declaration below the top level declares `instances` (see
+    /// [`instance_placement::check`]), when an attribute declares a conversion that cannot run (see
     /// [`resolve`]), or [`MappingError::UncompilableTemplate`] when the `observedAt` template cannot
     /// be compiled.
     pub fn new(
@@ -125,6 +127,7 @@ impl Mapping {
         origin: &Path,
         runner: &mut TemplateRunner,
     ) -> Result<Mapping> {
+        instance_placement::check(&attributes)?;
         resolve(&mut attributes)?;
         let EntityMembers { scope, expires_at } = members;
         let mut mapping = Mapping {
@@ -169,13 +172,14 @@ impl Mapping {
     /// reports a template it cannot compile against the same `origin`.
     ///
     /// # Errors
-    /// Returns a [`MappingError`] when the document cannot be parsed, declares an attribute that
-    /// cannot run, or its `observedAt` template cannot be compiled.
+    /// Returns a [`MappingError`] when the document cannot be parsed, declares `instances` below the
+    /// top level, declares an attribute that cannot run, or its `observedAt` template cannot be compiled.
     pub fn from_json5(content: &str, origin: &Path, runner: &mut TemplateRunner) -> Result<Mapping> {
         let mut mapping: Mapping = serde_json5::from_str(content).map_err(|source| MappingError::Parse {
             path: origin.to_path_buf(),
             source,
         })?;
+        instance_placement::check(mapping.attributes())?;
         resolve(mapping.attributes_mut())?;
         mapping.compile_temporal_fields(origin, runner)?;
         mapping.has_nested_relationships = mapping.detect_nested_relationships();
@@ -679,6 +683,85 @@ mod tests {
             result,
             Err(MappingError::UncompilableTemplate { location, .. }) if location.site == TemplateSite::ObservedAt
         ));
+    }
+
+    #[test]
+    fn a_document_declaring_instances_on_a_sub_attribute_is_refused_naming_its_path() {
+        let document = r#"{
+            version: "v4",
+            dataModel: "Thing",
+            identity: { entityName: "{{ id }}" },
+            attributes: {
+                temperature: {
+                    source: "{{ t }}",
+                    transformation: "float",
+                    properties: {
+                        accuracy: {
+                            transformation: "float",
+                            instances: [
+                                { source: "{{ a }}", properties: { datasetId: { source: "urn:ngsi-ld:dataset:a" } } },
+                                { source: "{{ b }}", properties: { datasetId: { source: "urn:ngsi-ld:dataset:b" } } },
+                            ],
+                        },
+                        where: {
+                            type: "GeoProperty",
+                            instances: [
+                                { source: "{{ p1 }}", properties: { datasetId: { source: "urn:ngsi-ld:dataset:a" } } },
+                                { source: "{{ p2 }}", properties: { datasetId: { source: "urn:ngsi-ld:dataset:b" } } },
+                            ],
+                        },
+                    },
+                },
+            },
+        }"#;
+
+        let error = Mapping::from_json5(document, Path::new("m.json5"), &mut TemplateRunner::new()).unwrap_err();
+
+        assert!(matches!(error, MappingError::InstancesBelowTopLevel { .. }));
+        assert!(
+            error
+                .to_string()
+                .starts_with("Attribute `temperature.accuracy` declares `instances`, which only a top-level attribute can")
+        );
+    }
+
+    #[test]
+    fn a_declared_mapping_with_instances_on_a_sub_attribute_is_refused() {
+        let temperature: Attribute =
+            serde_json5::from_str(r#"{ source: "{{ t }}", properties: { accuracy: { instances: [{ source: "{{ a }}" }, { source: "{{ b }}" }] } } }"#).unwrap();
+        let attributes = IndexMap::from([(NameBuf::new("temperature").unwrap(), temperature)]);
+
+        let result = Mapping::new(
+            Version::V4,
+            "Sensor".parse::<DataModel>().unwrap(),
+            Identity::new(TemplateSource::new("S-{{ id }}")),
+            EntityMembers::default(),
+            attributes,
+            Path::new("Sensor.json5"),
+            &mut TemplateRunner::new(),
+        );
+
+        assert!(matches!(result, Err(MappingError::InstancesBelowTopLevel { attribute }) if attribute.to_string() == "temperature.accuracy"));
+    }
+
+    #[test]
+    fn a_document_declaring_instances_on_a_top_level_attribute_loads() {
+        let document = r#"{
+            version: "v4",
+            dataModel: "Thing",
+            identity: { entityName: "{{ id }}" },
+            attributes: {
+                temperature: {
+                    transformation: "float",
+                    instances: [
+                        { source: "{{ a }}", properties: { datasetId: { source: "urn:ngsi-ld:dataset:a" } } },
+                        { source: "{{ b }}", properties: { datasetId: { source: "urn:ngsi-ld:dataset:b" } } },
+                    ],
+                },
+            },
+        }"#;
+
+        assert_eq!(parse(document).attributes().len(), 1);
     }
 
     #[test]
