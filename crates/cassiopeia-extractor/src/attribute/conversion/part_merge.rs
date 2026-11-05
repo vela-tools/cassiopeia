@@ -89,18 +89,19 @@ pub(crate) fn keep_as_read(parts: SourceParts) -> Option<JsonValue> {
 /// A part that is absent (see [`is_absent`]) contributes nothing: keeping a blank would emit `[""]`
 /// for an empty cell. A text part that reads as a JSON array is spliced in like an array part, since
 /// a CSV source can carry an array only as its text; any other text, such as `BS IN`, is one item.
-/// Only whole parts are judged that way: the items of an array part are the source's own data and
-/// are spliced in as they are, nulls included, for the declaration's type to admit. An empty list
-/// carries no value.
+/// A blank text item of a spliced array contributes nothing either, as a blank part does, so
+/// splitting `BS  IN` on a space gives `["BS", "IN"]` and splitting blank text gives no value. Every
+/// other item is spliced in as it is, nulls included, for the declaration's type to admit. An empty
+/// list carries no value.
 pub(crate) fn aggregate(parts: SourceParts) -> Option<Vec<JsonValue>> {
     let mut items = Vec::new();
     for part in parts {
         match part {
-            JsonValue::Array(array) => items.extend(array),
+            JsonValue::Array(array) => splice(&mut items, array),
             JsonValue::Null => {}
             JsonValue::String(text) if is_blank(&text) => {}
             JsonValue::String(text) => match serde_json::from_str::<JsonValue>(&text).ok() {
-                Some(JsonValue::Array(array)) => items.extend(array),
+                Some(JsonValue::Array(array)) => splice(&mut items, array),
                 Some(JsonValue::Null | JsonValue::Bool(_) | JsonValue::Number(_) | JsonValue::String(_) | JsonValue::Object(_)) | None => {
                     items.push(JsonValue::String(text));
                 }
@@ -110,6 +111,11 @@ pub(crate) fn aggregate(parts: SourceParts) -> Option<Vec<JsonValue>> {
     }
 
     if items.is_empty() { None } else { Some(items) }
+}
+
+/// Appends the items of `array` to `items`, leaving out each blank text item.
+fn splice(items: &mut Vec<JsonValue>, array: Vec<JsonValue>) {
+    items.extend(array.into_iter().filter(|item| !matches!(item, JsonValue::String(text) if is_blank(text))));
 }
 
 #[cfg(test)]
@@ -190,6 +196,19 @@ mod tests {
             aggregate(smallvec![json!("[1,null]"), json!(2)]),
             Some(vec![json!(1), JsonValue::Null, json!(2)])
         );
+    }
+
+    #[test]
+    fn aggregating_leaves_out_the_blank_text_items_of_an_array_part_and_of_array_text() {
+        assert_eq!(
+            aggregate(smallvec![json!(["BS", "", "IN"]), json!(r#"["  ",null,7]"#)]),
+            Some(vec![json!("BS"), json!("IN"), JsonValue::Null, json!(7)])
+        );
+    }
+
+    #[test]
+    fn aggregating_array_parts_of_only_blank_text_items_reads_nothing() {
+        assert_eq!(aggregate(smallvec![json!([""]), json!(["", ""]), json!(r#"[" "]"#)]), None);
     }
 
     #[test]

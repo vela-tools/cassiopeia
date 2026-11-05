@@ -221,10 +221,17 @@ mod tests {
     }
 
     #[test]
-    fn an_array_transformation_keeps_blank_elements_of_an_array_part() {
-        let value = converted(smallvec![json!(["a", ""])], property(Transformation::Array), None);
+    fn an_array_transformation_leaves_out_blank_elements_of_an_array_part() {
+        let value = converted(smallvec![json!(["BS", "", "IN"])], property(Transformation::Array), None);
 
-        assert_eq!(value, Some(Value::try_from(json!(["a", ""])).unwrap()));
+        assert_eq!(value, Some(Value::try_from(json!(["BS", "IN"])).unwrap()));
+    }
+
+    #[test]
+    fn an_array_transformation_over_an_array_part_of_only_blank_elements_is_no_value() {
+        for part in [json!([""]), json!(["", ""]), json!(["  "])] {
+            assert_eq!(converted(smallvec![part.clone()], property(Transformation::Array), None), None, "{part}");
+        }
     }
 
     #[test]

@@ -336,3 +336,49 @@ fn an_identifier_that_does_not_parse_is_dropped_with_a_warning_under_its_code() 
         },
     );
 }
+
+/// A thing whose codes are split on a space, once into a `ListProperty` and once into a `Property`
+/// read with the `array` transformation.
+const SPLIT_CODES: &str = r#"{
+    version: "v4",
+    dataModel: "Thing",
+    identity: { entityName: "{{ id }}" },
+    attributes: {
+        codes: { type: "ListProperty", source: "{{ codes | split(pat=' ') }}" },
+        tags: { source: "{{ codes | split(pat=' ') }}", transformation: "array" },
+    },
+}"#;
+
+#[test]
+fn splitting_text_into_a_list_leaves_out_its_empty_pieces_and_blank_text_gives_no_attribute() {
+    for store in STORES {
+        let outcome = run_end_to_end(
+            store,
+            &[RunInput {
+                binding: RunBinding::Mapping(SPLIT_CODES),
+                records: json!([
+                    { "id": "B", "codes": "" },
+                    { "id": "C", "codes": " " },
+                    { "id": "D", "codes": "BS  IN" },
+                ]),
+            }],
+            &["Thing"],
+            "",
+        );
+
+        assert_eq!(
+            entity_ids(&outcome),
+            ["urn:ngsi-ld:Thing:B", "urn:ngsi-ld:Thing:C", "urn:ngsi-ld:Thing:D"],
+            "{store:?}"
+        );
+        for id in ["urn:ngsi-ld:Thing:B", "urn:ngsi-ld:Thing:C"] {
+            let blank = entity(&outcome.entities, id);
+            assert!(blank.get("codes").is_none(), "{store:?}: {blank:?}");
+            assert!(blank.get("tags").is_none(), "{store:?}: {blank:?}");
+        }
+        let split = entity(&outcome.entities, "urn:ngsi-ld:Thing:D");
+        assert_eq!(split["codes"]["valueList"], json!(["BS", "IN"]), "{store:?}");
+        assert_eq!(split["tags"]["value"], json!(["BS", "IN"]), "{store:?}");
+        assert_eq!(outcome.warnings, 0, "{store:?}: {:?}", outcome.diagnostics);
+    }
+}

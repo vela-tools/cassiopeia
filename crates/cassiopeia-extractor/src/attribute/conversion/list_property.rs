@@ -57,9 +57,9 @@ impl AttributeConversion for ListConversion {
 /// Reads one item the way `reading` names (see [`value_reading::read_value`]), or `None` for a null
 /// item, which [`admit_each`] leaves out, refusing an item that is there but reads as nothing.
 ///
-/// Blank text is a value the record carries in a list, since the list was there, so every reading
-/// that reads it as nothing refuses it, quoting it as written; so does the `json` reading text
-/// spelling `null`.
+/// A blank item never reaches a reading, since gathering the list leaves it out (see
+/// [`part_merge::aggregate`]); the `json` reading text spelling `null` is an item that is there but
+/// reads as nothing, so it refuses the list, quoting it.
 ///
 /// # Errors
 /// Returns the refusal of the reading, or of an item that reads as nothing (see
@@ -142,6 +142,23 @@ mod tests {
             let value = converted(smallvec![part], default_of(NgsiLdAttributeKind::ListProperty), None);
 
             assert_eq!(value, None, "{value:?}");
+        }
+    }
+
+    #[test]
+    fn a_blank_item_of_an_array_part_under_the_list_property_default_is_left_out_without_being_counted() {
+        let (value, omitted) = omitted(smallvec![json!(["BS", "", "IN"])], default_of(NgsiLdAttributeKind::ListProperty));
+
+        assert_eq!(value, Some(Value::try_from(json!(["BS", "IN"])).unwrap()));
+        assert!(omitted.is_empty());
+    }
+
+    #[test]
+    fn an_array_part_of_only_blank_items_under_the_list_property_default_is_no_value() {
+        for part in [json!([""]), json!(["", ""])] {
+            let value = converted(smallvec![part.clone()], default_of(NgsiLdAttributeKind::ListProperty), None);
+
+            assert_eq!(value, None, "{part}");
         }
     }
 
@@ -243,11 +260,11 @@ mod tests {
     }
 
     #[test]
-    fn a_blank_item_refuses_a_typed_list() {
-        assert_eq!(
-            apply(smallvec![json!(["1", "", "3"])], list(Transformation::Integer), None),
-            Err(AttributeRefusal::unusable(RequiredValue::Integer, ""))
-        );
+    fn a_blank_item_is_left_out_of_a_typed_list_without_being_counted() {
+        let (value, omitted) = omitted(smallvec![json!(["1", "", " ", "3"])], list(Transformation::Integer));
+
+        assert_eq!(value, Some(integers(&[1, 3])));
+        assert!(omitted.is_empty());
     }
 
     #[test]

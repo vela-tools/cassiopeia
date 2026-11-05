@@ -44,7 +44,7 @@ pub enum Transformation {
     /// A part that is already an array contributes its elements, and so does text that reads as a
     /// JSON array, the way every value arrives from a CSV source; any other part contributes itself,
     /// so text that is no JSON array becomes one element. A null or blank part contributes nothing,
-    /// and no parts left means no value.
+    /// and so does a blank text element of an array; no elements left means no value.
     Array,
 
     /// Keep a JSON object, reading one from text written as a JSON object.
