@@ -81,6 +81,15 @@ impl EngineReport {
         Some(name)
     }
 
+    /// The segment Tera reports as not defined beneath a value it did find, such as `city` when
+    /// `address.city` is read from an `address` without one, if that is what it reports. Tera names
+    /// only that segment, not the path leading to it.
+    pub(crate) fn undefined_field(&self) -> Option<&str> {
+        let (_, name) = regex_captures!(r"^Field `([^`]+)` is not defined", &self.message)?;
+
+        Some(name)
+    }
+
     /// Whether Tera reports a value that is not defined in the record, which Tera names `undefined`.
     pub(crate) fn mentions_undefined_value(&self) -> bool {
         self.message.contains("`undefined`")
@@ -216,5 +225,16 @@ mod tests {
         assert_eq!(printed.undefined_variable(), Some("nothere"));
         assert_eq!(alone.undefined_variable(), Some("nothere"));
         assert_eq!(field.undefined_variable(), None);
+    }
+
+    #[test]
+    fn an_undefined_field_is_read_by_its_segment_from_the_message() {
+        let listed = EngineReport::unlocated(tera::Error::message("Field `city` is not defined. Available fields: street"));
+        let alone = EngineReport::unlocated(tera::Error::message("Field `city` is not defined."));
+        let variable = EngineReport::unlocated(tera::Error::message("Variable `city` is not defined."));
+
+        assert_eq!(listed.undefined_field(), Some("city"));
+        assert_eq!(alone.undefined_field(), Some("city"));
+        assert_eq!(variable.undefined_field(), None);
     }
 }

@@ -1,4 +1,4 @@
-use crate::template::{CompiledTemplate, TemplatePart, field_path::FieldPath, identifier::is_identifier};
+use crate::template::{CompiledTemplate, TemplatePart, field_path::FieldPath, identifier::is_identifier, resolver::RECORD_VARIABLE};
 use lazy_regex::regex;
 
 /// Head identifiers a bare reference may not start with, because Tera does not read them as a
@@ -8,7 +8,18 @@ use lazy_regex::regex;
 /// `None`, and `null` into the empty value and `not` into negation, and its interpreter answers
 /// `__tera_context` with a dump of the whole context. `this` is bound to the record itself by the
 /// resolver, not to a field named `this`.
-const ENGINE_HEADS: [&str; 10] = ["true", "True", "false", "False", "none", "None", "null", "not", "__tera_context", "this"];
+const ENGINE_HEADS: [&str; 10] = [
+    "true",
+    "True",
+    "false",
+    "False",
+    "none",
+    "None",
+    "null",
+    "not",
+    "__tera_context",
+    RECORD_VARIABLE,
+];
 
 /// Path segments after a dot that Tera's lexer reads as booleans rather than as an attribute name.
 const BOOLEAN_SEGMENTS: [&str; 4] = ["true", "True", "false", "False"];

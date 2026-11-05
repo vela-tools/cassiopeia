@@ -9,6 +9,10 @@ use serde_json::{Map, Value as JsonValue};
 use std::sync::Arc;
 use tera::{Context, Tera};
 
+/// The variable a template reads the whole record through, so it can reach any field, one whose
+/// name Tera cannot read as an identifier included.
+pub(crate) const RECORD_VARIABLE: &str = "this";
+
 /// A lock-free view over a compiled Tera engine, used to evaluate templates per record.
 ///
 /// Cloning shares the engine through an `Arc`, so every pipeline worker can hold its own resolver
@@ -211,12 +215,12 @@ impl TemplateResolver {
             }
 
             if let Some(positional) = Self::positional_array(fields) {
-                context.insert("this", &positional);
+                context.insert(RECORD_VARIABLE, &positional);
             } else {
-                context.insert("this", data);
+                context.insert(RECORD_VARIABLE, data);
             }
         } else {
-            context.insert("this", data);
+            context.insert(RECORD_VARIABLE, data);
         }
 
         self.tera
@@ -503,6 +507,62 @@ mod tests {
             error.failure.to_string(),
             "`{{ nothere }}-{{ id | lower }}` reads `nothere`, which this record does not have: guard it with `{% if nothere %}…{% endif %}` or default it with `nothere | default(value=…)`"
         );
+    }
+
+    #[test]
+    fn a_failure_to_render_a_printed_nested_field_the_record_lacks_gives_the_missing_field_hint() {
+        let mut runner = TemplateRunner::new();
+        let compiled = runner
+            .compile(&TemplateSource::new("{{ address.city }}-{{ id | lower }}"), &location())
+            .unwrap();
+
+        let error = runner
+            .resolver()
+            .resolve(&compiled, &json!({"id": "A", "address": {"street": "Main"}}))
+            .unwrap_err();
+
+        assert_eq!(
+            error.failure.to_string(),
+            "`{{ address.city }}-{{ id | lower }}` reads `address.city`, which this record does not have: guard it with `{% if address.city %}…{% endif %}` or default it with `address.city | default(value=…)`"
+        );
+    }
+
+    #[test]
+    fn the_default_a_missing_nested_field_hint_suggests_resolves_on_the_same_record() {
+        let mut runner = TemplateRunner::new();
+        let failing = runner
+            .compile(&TemplateSource::new("{{ address.street.name }}-{{ id | lower }}"), &location())
+            .unwrap();
+        let defaulted = runner
+            .compile(
+                &TemplateSource::new("{{ address.street | default(value='none') }}-{{ id | lower }}"),
+                &location(),
+            )
+            .unwrap();
+        let guarded = runner
+            .compile(
+                &TemplateSource::new("{% if address.street %}{{ address.street.name }}{% endif %}-{{ id | lower }}"),
+                &location(),
+            )
+            .unwrap();
+        let record = json!({"id": "A", "address": {}});
+        let resolver = runner.resolver();
+
+        let error = resolver.resolve(&failing, &record).unwrap_err();
+
+        assert!(matches!(error.failure.as_ref(), ResolutionFailure::MissingField { field, .. } if field.as_str() == "address.street"));
+        assert_eq!(resolver.resolve(&defaulted, &record).unwrap(), json!("none-a"));
+        assert_eq!(resolver.resolve(&guarded, &record).unwrap(), json!("-a"));
+    }
+
+    #[test]
+    fn a_failure_on_a_null_nested_field_names_its_whole_path() {
+        let mut runner = TemplateRunner::new();
+        let compiled = runner.compile(&TemplateSource::new("{{ address.city | upper }}"), &location()).unwrap();
+
+        let error = runner.resolver().resolve(&compiled, &json!({"address": {"city": null}})).unwrap_err();
+
+        assert!(matches!(error.failure.as_ref(), ResolutionFailure::NullField { field, .. } if field.as_str() == "address.city"));
     }
 
     #[test]

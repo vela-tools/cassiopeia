@@ -6,6 +6,7 @@ pub(crate) mod direct_form;
 pub mod engine_report;
 pub mod error;
 pub mod field_path;
+pub(crate) mod field_reads;
 pub mod filter;
 pub mod function;
 pub(crate) mod identifier;

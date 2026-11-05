@@ -228,7 +228,7 @@ The run warns once per attribute, however many entities lost it. The warning nam
   ╰─ `{{ n + 1 }}` reads `n`, which this record does not have: guard it with `{% if n %}…{% endif %}` or default it with `n | default(value=…)`
 ~~~
 
-For a field that is present but null, the hint asks for `boolean=true`, because `default` on its own replaces only a missing field:
+A nested field is named by its path, down to the first part the record does not have: `{{ address.street.name }}` over a record whose `address` has no `street` names `address.street`, since that is the part a guard or a default can stand in for. For a field that is present but null, the hint asks for `boolean=true`, because `default` on its own replaces only a missing field:
 
 ~~~text
 `{{ code | split(pat=' ') }}` reads `code`, which is null in this record: guard it with `{% if code %}…{% endif %}` or default it with `code | default(value=…, boolean=true)`

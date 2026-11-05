@@ -1,10 +1,7 @@
-use crate::template::field_path::FieldPath;
+use crate::template::{field_path::FieldPath, resolver::RECORD_VARIABLE};
 use derive_more::Display;
 use lazy_regex::regex;
 use std::collections::BTreeSet;
-
-/// The name the engine binds the whole record to, so a template reading it can reach any field.
-const RECORD_VARIABLE: &str = "this";
 
 /// The prefix of the engine's own variables, such as `__tera_context`, which dumps the whole context
 /// and which the engine leaves out of the variables it reports a template reading.
