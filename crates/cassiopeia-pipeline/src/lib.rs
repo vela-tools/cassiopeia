@@ -12,6 +12,8 @@ mod completion;
 mod context_resolution;
 pub mod controller;
 mod cycle;
+#[cfg(test)]
+mod end_to_end;
 pub mod error;
 mod factories;
 mod failure_code;
@@ -27,5 +29,7 @@ mod schedule_driver;
 mod schema_resolution;
 mod stages;
 
+#[cfg(test)]
+mod test_engine;
 #[cfg(test)]
 mod test_reporter;
