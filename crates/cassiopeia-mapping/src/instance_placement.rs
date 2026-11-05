@@ -4,7 +4,6 @@ use crate::{
         Attributes,
         declaration_trail::{DeclarationTrail, Nesting},
     },
-    attribute_path::AttributePath,
     error::{MappingError, Result},
 };
 use cassiopeia_ngsi_ld::entity::name::NameBuf;
@@ -30,7 +29,7 @@ pub fn check(attributes: &Attributes) -> Result<()> {
 fn check_beneath(owners: Option<&DeclarationTrail<'_>>, name: &NameBuf, attribute: &Attribute) -> Result<()> {
     if let Some((language, _)) = attribute.language_map().iter().find(|(_, entry)| entry.instances().is_some()) {
         return Err(MappingError::InstancesInLanguageEntry {
-            attribute: AttributePath::beneath(owners, name),
+            attribute: DeclarationTrail::path_of(owners, name),
             language: language.clone(),
         });
     }
@@ -57,7 +56,7 @@ fn check_nested(owner: &DeclarationTrail<'_>, declarations: &Attributes) -> Resu
     declarations.iter().try_for_each(|(name, declaration)| {
         if declaration.instances().is_some() {
             return Err(MappingError::InstancesBelowTopLevel {
-                attribute: AttributePath::beneath(Some(owner), name),
+                attribute: DeclarationTrail::path_of(Some(owner), name),
             });
         }
 

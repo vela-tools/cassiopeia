@@ -6,7 +6,7 @@ use cassiopeia_diagnostic::{
     diagnostic_builder::DiagnosticBuilder,
     severity::Severity,
 };
-use cassiopeia_mapping::attribute_path::AttributePath;
+use cassiopeia_ngsi_ld::entity::attribute_path::AttributePath;
 
 /// The diagnostic naming one declaration whose geometries carried a position outside WGS 84.
 ///
@@ -22,7 +22,7 @@ pub(crate) fn out_of_range_geometry_diagnostic(attribute: AttributePath, record:
     );
 
     DiagnosticBuilder::new(Severity::Warning, DiagnosticCode::Geometry(GeometryCode::CoordinatesOutOfRange), headline)
-        .with_context(ContextField::Attribute(attribute.into_root()))
+        .with_context(ContextField::Attribute(attribute))
         .with_occurrences(record.occurrences())
         .build()
 }
@@ -42,8 +42,7 @@ mod tests {
         geometry::NgsiLdGeometry,
         wgs84::{OutOfRangePosition, check_range},
     };
-    use cassiopeia_mapping::attribute_path::AttributePath;
-    use cassiopeia_ngsi_ld::entity::name::NameBuf;
+    use cassiopeia_ngsi_ld::entity::{attribute_path::AttributePath, name::NameBuf};
     use pretty_assertions::assert_eq;
 
     fn name(value: &str) -> NameBuf {
@@ -76,11 +75,11 @@ mod tests {
             reported[0].headline,
             "Attribute `location` dropped: the position `[2600.5, 341870.2]` at `coordinates` has a longitude outside WGS 84; GeoJSON coordinates are WGS 84 longitude and latitude in decimal degrees (RFC 7946 section 4), so the source may be in a coordinate reference system it does not declare, have longitude and latitude swapped, or need another conversion or scale"
         );
-        assert_eq!(reported[0].defining, [ContextField::Attribute(name("location"))]);
+        assert_eq!(reported[0].defining, [ContextField::Attribute(AttributePath::top_level(name("location")))]);
     }
 
     #[test]
-    fn a_sub_attribute_is_named_by_its_path_and_its_top_level_attribute_is_the_context() {
+    fn a_sub_attribute_is_named_by_its_path_in_the_headline_and_the_context() {
         let sink = RecordingReporter::new();
         let geometries = OutOfRangeGeometries::new();
         geometries.record(
@@ -98,6 +97,13 @@ mod tests {
             "{}",
             reported[0].headline
         );
-        assert_eq!(reported[0].defining, [ContextField::Attribute(name("observation"))]);
+        assert_eq!(
+            reported[0].defining,
+            [ContextField::Attribute(AttributePath::new(
+                name("observation"),
+                vec![name("location")],
+                Vec::new()
+            ))]
+        );
     }
 }

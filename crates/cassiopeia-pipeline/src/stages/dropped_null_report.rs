@@ -7,6 +7,7 @@ use cassiopeia_diagnostic::{
     severity::Severity,
 };
 use cassiopeia_extractor::dropped_null::DroppedNull;
+use cassiopeia_ngsi_ld::entity::attribute_path::AttributePath;
 
 /// The diagnostic naming one attribute whose values were written without the nulls their source
 /// held at one site.
@@ -18,7 +19,7 @@ pub(crate) fn dropped_null_diagnostic(dropped: DroppedNull, record: &Occurrences
     let headline = dropped.to_string();
 
     DiagnosticBuilder::new(Severity::Warning, DiagnosticCode::Extractor(ExtractorCode::NullDropped), headline)
-        .with_context(ContextField::Attribute(dropped.attribute))
+        .with_context(ContextField::Attribute(AttributePath::top_level(dropped.attribute)))
         .with_occurrences(record.occurrences())
         .build()
 }
@@ -34,7 +35,10 @@ mod tests {
         context_field::ContextField,
     };
     use cassiopeia_extractor::dropped_nulls::DroppedNulls;
-    use cassiopeia_ngsi_ld::{entity::name::NameBuf, value::omitted_nulls::OmittedNulls};
+    use cassiopeia_ngsi_ld::{
+        entity::{attribute_path::AttributePath, name::NameBuf},
+        value::omitted_nulls::OmittedNulls,
+    };
     use pretty_assertions::assert_eq;
 
     fn name(value: &str) -> NameBuf {
@@ -60,6 +64,6 @@ mod tests {
         assert_eq!(reported[0].occurrences, 2);
         assert_eq!(reported[0].code, DiagnosticCode::Extractor(ExtractorCode::NullDropped));
         assert!(reported[0].headline.contains("`tags`"), "{}", reported[0].headline);
-        assert_eq!(reported[0].defining, [ContextField::Attribute(name("tags"))]);
+        assert_eq!(reported[0].defining, [ContextField::Attribute(AttributePath::top_level(name("tags")))]);
     }
 }

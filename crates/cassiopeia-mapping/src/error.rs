@@ -1,5 +1,4 @@
 use crate::{
-    attribute_path::AttributePath,
     conversion::{admitted_transformations::AdmittedTransformations, declaration_shape::DeclarationShape},
     template::compile_error::TemplateCompileError,
     template_location::TemplateLocation,
@@ -7,7 +6,7 @@ use crate::{
 };
 use cassiopeia_common::error::io::IoError;
 use cassiopeia_geometry::error::GeometryError;
-use cassiopeia_ngsi_ld::entity::{attribute::NgsiLdAttributeKind, name::NameBuf};
+use cassiopeia_ngsi_ld::entity::{attribute::NgsiLdAttributeKind, attribute_path::AttributePath, name::NameBuf};
 use langtag::LangTagBuf;
 use std::{path::PathBuf, result};
 use thiserror::Error;

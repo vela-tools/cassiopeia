@@ -1,5 +1,4 @@
 pub mod attribute;
-pub mod attribute_path;
 pub mod conversion;
 pub mod conversion_resolution;
 pub mod entity_members;

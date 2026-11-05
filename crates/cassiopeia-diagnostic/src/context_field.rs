@@ -1,7 +1,7 @@
 use crate::{detail::Detail, json_pointer::JsonPointer, schema_keyword::SchemaKeyword};
 use cassiopeia_common::{captured_body::CapturedBody, input::Input, masked_url::MaskedUrl};
 use cassiopeia_csv_column::renamed_column::RenamedColumn;
-use cassiopeia_ngsi_ld::entity::name::NameBuf;
+use cassiopeia_ngsi_ld::entity::{attribute_path::AttributePath, name::NameBuf};
 use http::StatusCode;
 use iri_rs::IriBuf;
 use strum::EnumDiscriminants;
@@ -25,8 +25,9 @@ pub enum ContextField {
     ProblemType(iri_rs::IriRefBuf),
     /// The NGSI-LD entity type involved.
     EntityType(NameBuf),
-    /// The attribute involved.
-    Attribute(NameBuf),
+    /// The attribute involved, named by its path from the top-level attribute so that two
+    /// sub-attributes of one name under different attributes stay two findings.
+    Attribute(AttributePath),
     /// Where inside the instance a schema violation sits.
     InstancePath(JsonPointer),
     /// Where inside the schema the violated rule lives.

@@ -1,6 +1,6 @@
 use cassiopeia_batch_sink::{batch_sink::BatchSink, counted_example::CountedExample};
 use cassiopeia_geometry::wgs84::OutOfRangePosition;
-use cassiopeia_mapping::attribute_path::AttributePath;
+use cassiopeia_ngsi_ld::entity::attribute_path::AttributePath;
 use derive_more::{Deref, Into};
 
 /// The geometries one batch dropped because a position lay outside WGS 84, one record per
@@ -38,8 +38,7 @@ mod tests {
         geometry::NgsiLdGeometry,
         wgs84::{OutOfRangePosition, check_range},
     };
-    use cassiopeia_mapping::attribute_path::AttributePath;
-    use cassiopeia_ngsi_ld::entity::name::NameBuf;
+    use cassiopeia_ngsi_ld::entity::{attribute_path::AttributePath, name::NameBuf};
     use pretty_assertions::assert_eq;
 
     fn path(root: &str, nested: &[&str]) -> AttributePath {

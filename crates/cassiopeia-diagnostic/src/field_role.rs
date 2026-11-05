@@ -53,7 +53,7 @@ mod tests {
     };
     use cassiopeia_common::{captured_body::CapturedBody, input::Input, masked_url::MaskedUrl};
     use cassiopeia_csv_column::{column_key::ColumnKey, column_number::ColumnNumber, renamed_column::RenamedColumn};
-    use cassiopeia_ngsi_ld::entity::name::NameBuf;
+    use cassiopeia_ngsi_ld::entity::{attribute_path::AttributePath, name::NameBuf};
     use http::StatusCode;
     use iri_rs::IriBuf;
     use pretty_assertions::assert_eq;
@@ -68,7 +68,7 @@ mod tests {
             ContextField::Endpoint(MaskedUrl::plain(Url::parse("https://broker/ngsi-ld/v1/entityOperations/upsert").unwrap())),
             ContextField::ProblemType("about:blank".parse().unwrap()),
             ContextField::EntityType(NameBuf::new("AirQualityObserved").unwrap()),
-            ContextField::Attribute(NameBuf::new("dateObserved").unwrap()),
+            ContextField::Attribute(AttributePath::top_level(NameBuf::new("dateObserved").unwrap())),
             ContextField::InstancePath(JsonPointer::new("/dateObserved")),
             ContextField::SchemaPath(JsonPointer::new("/properties/dateObserved/format")),
             ContextField::Keyword(SchemaKeyword::Format),

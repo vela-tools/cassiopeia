@@ -17,7 +17,7 @@
 //! [`RefusedJsonPayloads`](crate::refused_json_payloads::RefusedJsonPayloads). A `VocabProperty`
 //! source that is no IRI, and a `LanguageProperty` source that is no map of text keyed by language
 //! tag, are recorded in [`UnusableValues`](crate::unusable_values::UnusableValues), named by their
-//! [`AttributePath`](cassiopeia_mapping::attribute_path::AttributePath). An attribute whose
+//! [`AttributePath`](cassiopeia_ngsi_ld::entity::attribute_path::AttributePath). An attribute whose
 //! template fails to render against the record is dropped the same way, and recorded in
 //! [`UnresolvedTemplates`](cassiopeia_unresolved_templates::unresolved_templates::UnresolvedTemplates).
 //!

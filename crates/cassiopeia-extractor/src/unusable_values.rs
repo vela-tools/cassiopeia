@@ -1,6 +1,6 @@
 use crate::{required_value::RequiredValue, unusable_value::UnusableValue};
 use cassiopeia_batch_sink::{batch_sink::BatchSink, counted_example::CountedExample};
-use cassiopeia_mapping::attribute_path::AttributePath;
+use cassiopeia_ngsi_ld::entity::attribute_path::AttributePath;
 use derive_more::{Deref, Into};
 
 /// The values one batch dropped because their attribute's kind cannot hold them, one record per
@@ -29,8 +29,7 @@ impl UnusableValues {
 mod tests {
     use crate::{required_value::RequiredValue, unusable_value::UnusableValue, unusable_values::UnusableValues};
     use cassiopeia_batch_sink::{batch_sink::BatchSink, counted_example::CountedExample, recurring::Recurring};
-    use cassiopeia_mapping::attribute_path::AttributePath;
-    use cassiopeia_ngsi_ld::entity::name::NameBuf;
+    use cassiopeia_ngsi_ld::entity::{attribute_path::AttributePath, name::NameBuf};
     use pretty_assertions::assert_eq;
 
     fn path(root: &str, nested: &[&str]) -> AttributePath {

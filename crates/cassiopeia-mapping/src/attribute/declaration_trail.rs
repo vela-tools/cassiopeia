@@ -1,4 +1,5 @@
-use cassiopeia_ngsi_ld::entity::name::NameBuf;
+use cassiopeia_ngsi_ld::entity::{attribute_path::AttributePath, name::NameBuf};
+use std::iter;
 
 /// How the declarations beneath one frame relate to the declaration it descended through.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -50,13 +51,43 @@ impl<'a> DeclarationTrail<'a> {
     pub const fn parent(&self) -> Option<&'a DeclarationTrail<'a>> {
         self.parent
     }
+
+    /// The path of `leaf`, a declaration held beneath the declarations `owners` frames, or a
+    /// top-level attribute when `owners` is `None`.
+    #[must_use]
+    pub fn path_of(owners: Option<&DeclarationTrail<'_>>, leaf: &NameBuf) -> AttributePath {
+        // The trail runs innermost first; reversed, it runs from the top-level attribute down, and
+        // each frame says how the next name is nested in it.
+        let mut frames = iter::successors(owners, |frame| frame.parent()).collect::<Vec<&DeclarationTrail<'_>>>();
+        frames.reverse();
+        let Some((root, held)) = frames.split_first() else {
+            return AttributePath::top_level(leaf.clone());
+        };
+
+        // The path owns its names because a sink keeps it past the record it was met on; only a
+        // refused value pays for this.
+        let (mut sub_attributes, mut members) = (Vec::new(), Vec::new());
+        let names = held.iter().map(|frame| frame.name()).chain(iter::once(leaf));
+        let nestings = frames.iter().map(|frame| frame.nesting());
+        for (name, nesting) in names.zip(nestings) {
+            match nesting {
+                Nesting::SubAttribute => sub_attributes.push(name.clone()),
+                Nesting::Member => members.push(name.clone()),
+            }
+        }
+        AttributePath::new(root.name().clone(), sub_attributes, members)
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use crate::attribute::declaration_trail::{DeclarationTrail, Nesting};
-    use cassiopeia_ngsi_ld::entity::name::NameBuf;
+    use cassiopeia_ngsi_ld::entity::{attribute_path::AttributePath, name::NameBuf};
     use pretty_assertions::assert_eq;
+
+    fn name(value: &str) -> NameBuf {
+        NameBuf::new(value).expect("valid name")
+    }
 
     #[test]
     fn a_frame_names_its_declaration_its_nesting_and_reaches_its_holder() {
@@ -68,5 +99,46 @@ mod tests {
         assert_eq!(inner.nesting(), Nesting::Member);
         assert_eq!(inner.parent().map(DeclarationTrail::name), Some(&outer_name));
         assert!(outer.parent().is_none());
+    }
+
+    #[test]
+    fn a_declaration_beneath_no_frame_is_a_top_level_attribute() {
+        assert_eq!(DeclarationTrail::path_of(None, &name("category")), AttributePath::top_level(name("category")));
+    }
+
+    #[test]
+    fn sub_attributes_are_named_from_the_top_level_attribute_down() {
+        let (temperature, accuracy) = (name("temperature"), name("accuracy"));
+        let outer = DeclarationTrail::below(&temperature, Nesting::SubAttribute, None);
+        let inner = DeclarationTrail::below(&accuracy, Nesting::SubAttribute, Some(&outer));
+
+        assert_eq!(
+            DeclarationTrail::path_of(Some(&inner), &name("level")),
+            AttributePath::new(name("temperature"), vec![name("accuracy"), name("level")], Vec::new())
+        );
+    }
+
+    #[test]
+    fn members_beneath_a_sub_attribute_follow_it_as_members() {
+        let (temperature, reading, origin) = (name("temperature"), name("reading"), name("origin"));
+        let outer = DeclarationTrail::below(&temperature, Nesting::SubAttribute, None);
+        let middle = DeclarationTrail::below(&reading, Nesting::Member, Some(&outer));
+        let inner = DeclarationTrail::below(&origin, Nesting::Member, Some(&middle));
+
+        assert_eq!(
+            DeclarationTrail::path_of(Some(&inner), &name("kind")),
+            AttributePath::new(name("temperature"), vec![name("reading")], vec![name("origin"), name("kind")])
+        );
+    }
+
+    #[test]
+    fn a_member_of_a_top_level_attribute_is_a_member_right_beneath_it() {
+        let address = name("address");
+        let frame = DeclarationTrail::below(&address, Nesting::Member, None);
+
+        assert_eq!(
+            DeclarationTrail::path_of(Some(&frame), &name("street")),
+            AttributePath::new(name("address"), Vec::new(), vec![name("street")])
+        );
     }
 }

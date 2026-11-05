@@ -218,7 +218,7 @@ fn bind_refusal<T>(ctx: &ResolutionContext, attr_name: &NameBuf, outcome: result
     match outcome {
         Ok(value) => value,
         Err(AttributeRefusal::Geometry(GeometryRefusal::Inadmissible(refusal))) => {
-            ctx.dropped.geometries.record(attr_name, refusal);
+            ctx.dropped.geometries.record(ctx.path_of(attr_name), refusal);
             None
         }
         Err(AttributeRefusal::Geometry(GeometryRefusal::OutsideWgs84(position))) => {

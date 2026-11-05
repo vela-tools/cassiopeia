@@ -6,7 +6,7 @@ use cassiopeia_diagnostic::{
     diagnostic_builder::DiagnosticBuilder,
     severity::Severity,
 };
-use cassiopeia_ngsi_ld::entity::name::NameBuf;
+use cassiopeia_ngsi_ld::entity::{attribute_path::AttributePath, name::NameBuf};
 use cassiopeia_unreadable_timestamps::{attribute_loss::AttributeLoss, timestamp_loss::TimestampLoss};
 
 /// The code the loss of one attribute timestamp is published under.
@@ -47,7 +47,7 @@ fn headline(loss: TimestampLoss, attribute: &NameBuf, record: &CountedExample) -
 /// cannot split one group into a line per batch.
 pub(crate) fn unreadable_timestamp_diagnostic(AttributeLoss { loss, attribute }: AttributeLoss, record: &CountedExample) -> Diagnostic {
     DiagnosticBuilder::new(Severity::Warning, code(loss), headline(loss, &attribute, record))
-        .with_context(ContextField::Attribute(attribute))
+        .with_context(ContextField::Attribute(AttributePath::top_level(attribute)))
         .with_occurrences(record.occurrences())
         .build()
 }

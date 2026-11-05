@@ -41,7 +41,7 @@ pub(crate) fn unusable_value_diagnostic(UnusableValue { attribute, required }: U
     let headline = format!("Attribute `{attribute}` dropped: `{}` is not {required}", record.example);
 
     DiagnosticBuilder::new(Severity::Warning, code(required), headline)
-        .with_context(ContextField::Attribute(attribute.root().clone()))
+        .with_context(ContextField::Attribute(attribute))
         .with_occurrences(record.occurrences())
         .build()
 }
@@ -57,8 +57,7 @@ mod tests {
         context_field::ContextField,
     };
     use cassiopeia_extractor::{required_value::RequiredValue, unusable_values::UnusableValues};
-    use cassiopeia_mapping::attribute_path::AttributePath;
-    use cassiopeia_ngsi_ld::entity::name::NameBuf;
+    use cassiopeia_ngsi_ld::entity::{attribute_path::AttributePath, name::NameBuf};
     use pretty_assertions::assert_eq;
 
     fn name(value: &str) -> NameBuf {
@@ -80,11 +79,11 @@ mod tests {
         assert_eq!(reported[0].occurrences, 2);
         assert_eq!(reported[0].code, DiagnosticCode::Extractor(ExtractorCode::IriUnreadable));
         assert_eq!(reported[0].headline, "Attribute `category` dropped: `not an iri` is not an IRI");
-        assert_eq!(reported[0].defining, [ContextField::Attribute(name("category"))]);
+        assert_eq!(reported[0].defining, [ContextField::Attribute(AttributePath::top_level(name("category")))]);
     }
 
     #[test]
-    fn a_sub_attribute_is_named_by_its_path_and_its_top_level_attribute_is_the_context() {
+    fn a_sub_attribute_is_named_by_its_path_in_the_headline_and_the_context() {
         let sink = RecordingReporter::new();
         let unusable = UnusableValues::new();
         unusable.record(
@@ -101,7 +100,14 @@ mod tests {
             reported[0].headline,
             "Attribute `temperature.label` dropped: `plain text` is not a language map of text keyed by language tag"
         );
-        assert_eq!(reported[0].defining, [ContextField::Attribute(name("temperature"))]);
+        assert_eq!(
+            reported[0].defining,
+            [ContextField::Attribute(AttributePath::new(
+                name("temperature"),
+                vec![name("label")],
+                Vec::new()
+            ))]
+        );
     }
 
     #[test]

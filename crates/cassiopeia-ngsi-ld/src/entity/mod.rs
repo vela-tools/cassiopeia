@@ -1,4 +1,5 @@
 pub mod attribute;
+pub mod attribute_path;
 pub mod builder;
 pub mod context;
 pub mod error;

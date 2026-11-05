@@ -144,7 +144,7 @@ mod tests {
         template_site::TemplateSite,
     };
     use cassiopeia_ngsi_ld::{
-        entity::{attribute::NgsiLdAttributeKind, name::NameBuf},
+        entity::{attribute::NgsiLdAttributeKind, attribute_path::AttributePath, name::NameBuf},
         value::{
             json_payload_error::{JsonPayloadError, JsonShape},
             types::{Number, Value},
@@ -273,7 +273,7 @@ mod tests {
 
         let entries = BatchSink::from(dropped.geometries).into_entries().collect::<Vec<_>>();
         assert_eq!(entries.len(), 1);
-        assert_eq!(entries[0].0.attribute, name("location"));
+        assert_eq!(entries[0].0.attribute, AttributePath::top_level(name("location")));
         assert_eq!(entries[0].1.occurrences().get(), 1);
     }
 
@@ -1819,7 +1819,7 @@ mod tests {
         assert_eq!(value, None);
         let entries = BatchSink::from(dropped.geometries).into_entries().collect::<Vec<_>>();
         assert_eq!(entries.len(), 1);
-        assert_eq!(entries[0].0.attribute, name("label"));
+        assert_eq!(entries[0].0.attribute, AttributePath::top_level(name("label")));
     }
 
     #[test]
@@ -1893,7 +1893,7 @@ mod tests {
     }
 
     #[test]
-    fn a_geometry_collection_under_a_geo_property_sub_attribute_is_refused_and_recorded_under_its_name() {
+    fn a_geometry_collection_under_a_geo_property_sub_attribute_is_refused_and_recorded_under_its_path() {
         let dropped = DroppedAttributes::new();
         let collection = json!({"type": "GeometryCollection", "geometries": [{"type": "Point", "coordinates": [1.0, 2.0]}]});
 
@@ -1906,7 +1906,7 @@ mod tests {
         assert_eq!(footprint, None);
         let entries = BatchSink::from(dropped.geometries).into_entries().collect::<Vec<_>>();
         assert_eq!(entries.len(), 1);
-        assert_eq!(entries[0].0.attribute, name("footprint"));
+        assert_eq!(entries[0].0.attribute.to_string(), "name.footprint");
     }
 
     #[test]
@@ -1968,7 +1968,7 @@ mod tests {
         assert_eq!(value, None);
         let entries = BatchSink::from(dropped.geometries).into_entries().collect::<Vec<_>>();
         assert_eq!(entries.len(), 1);
-        assert_eq!(entries[0].0.attribute, name("label"));
+        assert_eq!(entries[0].0.attribute, AttributePath::top_level(name("label")));
     }
 
     #[test]

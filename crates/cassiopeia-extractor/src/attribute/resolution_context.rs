@@ -1,7 +1,7 @@
 use crate::dropped_attributes::DroppedAttributes;
 use cassiopeia_ir::{entity_relationships::EntityRelationships, metadata::EntityMetadata};
-use cassiopeia_mapping::{attribute::declaration_trail::DeclarationTrail, attribute_path::AttributePath, template::resolver::TemplateResolver};
-use cassiopeia_ngsi_ld::entity::name::NameBuf;
+use cassiopeia_mapping::{attribute::declaration_trail::DeclarationTrail, template::resolver::TemplateResolver};
+use cassiopeia_ngsi_ld::entity::{attribute_path::AttributePath, name::NameBuf};
 use serde_json::Value as JsonValue;
 
 /// The guard depth for nested attribute resolution. A mapping nested past this is treated as
@@ -88,7 +88,7 @@ impl<'a> ResolutionContext<'a> {
 
     /// The path of the declaration `name`, resolved in this context.
     pub(crate) fn path_of(&self, name: &NameBuf) -> AttributePath {
-        AttributePath::beneath(self.owners, name)
+        DeclarationTrail::path_of(self.owners, name)
     }
 
     /// Whether resolution has recursed past the guard depth.

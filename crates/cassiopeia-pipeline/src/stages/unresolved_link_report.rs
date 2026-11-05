@@ -7,6 +7,7 @@ use cassiopeia_diagnostic::{
     severity::Severity,
 };
 use cassiopeia_ir::relationship_path::RelationshipPath;
+use cassiopeia_ngsi_ld::entity::attribute_path::AttributePath;
 use cassiopeia_unresolved_templates::unresolved_template::UnresolvedTemplate;
 
 /// The one-line summary: which template failed and where it is declared, an entity it failed for,
@@ -41,7 +42,7 @@ pub(crate) fn unresolved_link_diagnostic(relationship: RelationshipPath, record:
         RelationshipPath::Flat(attribute) => Some(attribute),
         RelationshipPath::Nested(segments) => segments.into_vec().into_iter().next(),
     }
-    .map(ContextField::Attribute);
+    .map(|root| ContextField::Attribute(AttributePath::top_level(root)));
 
     DiagnosticBuilder::new(Severity::Warning, DiagnosticCode::Expander(ExpanderCode::RelationshipUnresolvable), headline)
         .with_causes(causes_of(&record.error))
@@ -70,7 +71,7 @@ mod tests {
         template_location::TemplateLocation,
         template_site::TemplateSite,
     };
-    use cassiopeia_ngsi_ld::entity::name::NameBuf;
+    use cassiopeia_ngsi_ld::entity::{attribute_path::AttributePath, name::NameBuf};
     use cassiopeia_unresolved_templates::unresolved_templates::UnresolvedTemplates;
     use pretty_assertions::assert_eq;
     use std::{path::Path, sync::Arc};
@@ -113,7 +114,7 @@ mod tests {
             "The attribute `refRoad` template in the mapping document at 'thing.json5' could not be resolved for `urn:ngsi-ld:Thing:B`, so relationship `refRoad` was left out; the entity itself was kept"
         );
         assert_eq!(reported[0].causes[0], "`{{ road | split(pat=' ') }}` did not render its value as JSON");
-        assert_eq!(reported[0].defining, [ContextField::Attribute(name("refRoad"))]);
+        assert_eq!(reported[0].defining, [ContextField::Attribute(AttributePath::top_level(name("refRoad")))]);
     }
 
     #[test]
@@ -136,6 +137,6 @@ mod tests {
             "{}",
             reported[0].headline
         );
-        assert_eq!(reported[0].defining, [ContextField::Attribute(name("hasLeadActor"))]);
+        assert_eq!(reported[0].defining, [ContextField::Attribute(AttributePath::top_level(name("hasLeadActor")))]);
     }
 }

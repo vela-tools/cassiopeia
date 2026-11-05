@@ -7,6 +7,7 @@ use cassiopeia_diagnostic::{
     severity::Severity,
 };
 use cassiopeia_extractor::refused_json_payload::RefusedJsonPayload;
+use cassiopeia_ngsi_ld::entity::attribute_path::AttributePath;
 
 /// The diagnostic naming one `JsonProperty` whose source was no JSON object or array of objects.
 ///
@@ -16,7 +17,7 @@ pub(crate) fn refused_json_payload_diagnostic(refused: RefusedJsonPayload, recor
     let headline = refused.to_string();
 
     DiagnosticBuilder::new(Severity::Warning, DiagnosticCode::Extractor(ExtractorCode::JsonPayloadMisshapen), headline)
-        .with_context(ContextField::Attribute(refused.attribute))
+        .with_context(ContextField::Attribute(AttributePath::top_level(refused.attribute)))
         .with_occurrences(record.occurrences())
         .build()
 }
@@ -33,7 +34,7 @@ mod tests {
     };
     use cassiopeia_extractor::refused_json_payloads::RefusedJsonPayloads;
     use cassiopeia_ngsi_ld::{
-        entity::name::NameBuf,
+        entity::{attribute_path::AttributePath, name::NameBuf},
         value::json_payload_error::{JsonPayloadError, JsonShape},
     };
     use pretty_assertions::assert_eq;
@@ -57,6 +58,6 @@ mod tests {
         assert_eq!(reported[0].code, DiagnosticCode::Extractor(ExtractorCode::JsonPayloadMisshapen));
         assert!(reported[0].headline.contains("`payload`"), "{}", reported[0].headline);
         assert!(reported[0].headline.contains("a string"), "{}", reported[0].headline);
-        assert_eq!(reported[0].defining, [ContextField::Attribute(name("payload"))]);
+        assert_eq!(reported[0].defining, [ContextField::Attribute(AttributePath::top_level(name("payload")))]);
     }
 }

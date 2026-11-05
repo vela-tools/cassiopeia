@@ -6,7 +6,7 @@ use cassiopeia_diagnostic::{
     diagnostic_builder::DiagnosticBuilder,
     severity::Severity,
 };
-use cassiopeia_ngsi_ld::entity::name::NameBuf;
+use cassiopeia_ngsi_ld::entity::{attribute_path::AttributePath, name::NameBuf};
 use cassiopeia_unresolved_templates::unresolved_template::UnresolvedTemplate;
 
 /// The one-line summary: which template failed and where it is declared, an entity it failed for,
@@ -41,7 +41,7 @@ pub(crate) fn unresolved_template_diagnostic(attribute: NameBuf, record: &Unreso
         headline(&attribute, record),
     )
     .with_causes(causes_of(&record.error))
-    .with_context(ContextField::Attribute(attribute))
+    .with_context(ContextField::Attribute(AttributePath::top_level(attribute)))
     .with_optional_context(entities)
     .with_occurrences(record.occurrences)
     .build()
