@@ -98,6 +98,20 @@ mod tests {
     }
 
     #[test]
+    fn a_name_may_use_unicode_letters_and_continue_with_a_number_of_any_unicode_number_category() {
+        for text in ["čas", "東京_2", "levelⅫ", "half½", "a٣", "schema:levelⅫ"] {
+            assert!(NameBuf::new(text).is_ok(), "{text}");
+        }
+    }
+
+    #[test]
+    fn a_name_starting_with_a_unicode_number_or_holding_a_combining_mark_is_rejected() {
+        for text in ["Ⅻlevel", "½half", "हिन्दी", "S\u{30C}tevilka"] {
+            assert!(NameBuf::new(text).is_err(), "{text}");
+        }
+    }
+
+    #[test]
     fn a_name_keyed_map_can_be_looked_up_by_a_string_slice() {
         let mut map = HashMap::new();
         map.insert(NameBuf::new("observedAt").unwrap(), 1);

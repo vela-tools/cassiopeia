@@ -197,6 +197,20 @@ mod tests {
     }
 
     #[test]
+    fn a_scope_level_may_continue_with_a_number_of_any_unicode_number_category() {
+        for text in ["/LevelⅫ", "/Half½", "/A٣"] {
+            assert!(ScopeBuf::new(text).is_ok(), "{text}");
+        }
+    }
+
+    #[test]
+    fn a_scope_level_holding_a_combining_mark_is_rejected() {
+        for text in ["/हिन्दी", "/S\u{30C}iška"] {
+            assert!(ScopeBuf::new(text).is_err(), "{text}");
+        }
+    }
+
+    #[test]
     fn a_malformed_scope_is_rejected() {
         for text in ["//bad//", "", "/", "/Madrid/", "/1Madrid", "/_Madrid", "/Madrid Centro", "/Madrid-Centro"] {
             assert!(ScopeBuf::new(text).is_err(), "{text}");

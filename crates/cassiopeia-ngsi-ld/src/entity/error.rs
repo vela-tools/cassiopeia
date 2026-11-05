@@ -29,7 +29,7 @@ pub enum NgsiLdError {
     /// The rejected text is kept as-is: it is unvalidated input, and giving it the type it failed to
     /// become would be a lie.
     #[error(
-        "'{rejected}' is not a legal NGSI-LD name: a name starts with a letter and continues with letters, digits or underscores, optionally prefixed by one such segment and a colon"
+        "'{rejected}' is not a legal NGSI-LD name: a name starts with a Unicode letter and continues with Unicode letters, numbers or underscores, optionally prefixed by one such segment and a colon (ETSI GS CIM 009 v1.9.1 clause 4.6.2)"
     )]
     InvalidAttributeName {
         /// The value that was rejected.
@@ -38,7 +38,7 @@ pub enum NgsiLdError {
 
     /// A value was not a legal NGSI-LD scope.
     #[error(
-        "'{rejected}' is not a legal NGSI-LD scope: a scope is one or more '/'-separated segments, each starting with a letter and continuing with letters, digits or underscores (ETSI GS CIM 009 v1.9.1 clause 4.18)"
+        "'{rejected}' is not a legal NGSI-LD scope: a scope is one or more '/'-separated levels, each starting with a Unicode letter and continuing with Unicode letters, numbers or underscores (ETSI GS CIM 009 v1.9.1 clause 4.18)"
     )]
     InvalidScope {
         /// The value that was rejected.
@@ -83,10 +83,25 @@ mod tests {
     use pretty_assertions::assert_eq;
 
     #[test]
-    fn each_variant_renders_a_message_naming_the_offending_value() {
+    fn an_illegal_name_is_described_by_the_unicode_categories_of_clause_4_6_2() {
         let invalid = NgsiLdError::InvalidAttributeName { rejected: "1bad".into() };
-        assert!(invalid.to_string().contains("1bad"));
-        assert!(invalid.to_string().contains("starts with a letter"));
+
+        assert_eq!(
+            invalid.to_string(),
+            "'1bad' is not a legal NGSI-LD name: a name starts with a Unicode letter and continues with Unicode letters, numbers or underscores, optionally prefixed by one such segment and a colon (ETSI GS CIM 009 v1.9.1 clause 4.6.2)"
+        );
+    }
+
+    #[test]
+    fn an_illegal_scope_is_described_by_its_levels_and_the_unicode_categories_of_clause_4_18() {
+        let invalid = NgsiLdError::InvalidScope {
+            rejected: "/Novo-mesto".into(),
+        };
+
+        assert_eq!(
+            invalid.to_string(),
+            "'/Novo-mesto' is not a legal NGSI-LD scope: a scope is one or more '/'-separated levels, each starting with a Unicode letter and continuing with Unicode letters, numbers or underscores (ETSI GS CIM 009 v1.9.1 clause 4.18)"
+        );
     }
 
     #[test]
