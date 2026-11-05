@@ -8,7 +8,8 @@
 //!
 //! On top of that type the crate declares a conversion lattice: which source geometry may become
 //! which target geometry, which of those conversions are lossless enough to apply automatically,
-//! and which must be named in the mapping before any coordinate is discarded.
+//! and which must be named in the mapping before any coordinate is discarded. Every geometry it
+//! types is also checked against the WGS 84 range RFC 7946 section 4 fixes its coordinates to.
 
 pub mod area_derivation;
 pub mod collection;
@@ -23,6 +24,7 @@ pub mod normalisation;
 pub mod planar;
 pub mod point_derivation;
 pub mod policy;
+pub mod refusal;
 pub mod rfc7946;
 pub mod ring;
 pub mod selection;
@@ -30,3 +32,4 @@ pub mod strategy;
 pub mod target;
 pub mod validity;
 pub mod vertex_derivation;
+pub mod wgs84;

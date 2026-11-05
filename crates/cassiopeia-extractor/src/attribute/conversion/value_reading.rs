@@ -164,6 +164,7 @@ mod tests {
         error::GeometryError,
         geometry::{GeometryKind, NgsiLdGeometry},
         policy::GeometryPolicy,
+        refusal::GeometryRefusal,
         strategy::ConversionStrategy,
         target::GeometryTarget,
     };
@@ -449,10 +450,12 @@ mod tests {
                 smallvec![two_squares(1.0)],
                 ValueReading::Geometry(GeometryTarget::Coerce(GeometryKind::Polygon))
             ),
-            Err(AttributeRefusal::Geometry(GeometryError::AmbiguousMultiGeometry {
-                origin: GeometryKind::MultiPolygon,
-                members: 2,
-            }))
+            Err(AttributeRefusal::Geometry(GeometryRefusal::Inadmissible(
+                GeometryError::AmbiguousMultiGeometry {
+                    origin: GeometryKind::MultiPolygon,
+                    members: 2,
+                }
+            )))
         );
     }
 

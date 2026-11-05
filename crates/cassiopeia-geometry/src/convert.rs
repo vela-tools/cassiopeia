@@ -8,21 +8,23 @@ use crate::{
     normalisation::normalise,
     point_derivation,
     policy::GeometryPolicy,
+    refusal::GeometryRefusal,
     rfc7946::fold_collection,
     selection,
     strategy::ConversionStrategy,
     target::GeometryTarget,
     vertex_derivation,
+    wgs84::check_range,
 };
 use geojson::{Geometry, GeometryValue};
 
 /// Admits a source `GeoJSON` geometry and converts it to the target under the mapping's policy.
 ///
 /// # Errors
-/// Returns the [`GeometryError`] naming why the source cannot become the target: a geometry type a
-/// `GeoProperty` cannot hold, a loss the mapping did not authorise, or a result that breaks RFC 7946
-/// clause 3.1's structural rules.
-pub fn from_geojson(geometry: Geometry, target: GeometryTarget, policy: &GeometryPolicy) -> Result<NgsiLdGeometry, GeometryError> {
+/// Returns the [`GeometryRefusal`] naming why the source cannot become the target: a geometry type a
+/// `GeoProperty` cannot hold, a loss the mapping did not authorise, a result that breaks RFC 7946
+/// clause 3.1's structural rules, or a position outside WGS 84.
+pub fn from_geojson(geometry: Geometry, target: GeometryTarget, policy: &GeometryPolicy) -> Result<NgsiLdGeometry, GeometryRefusal> {
     let admitted = admit(geometry, *policy.convert())?;
 
     convert(admitted, target, policy)
@@ -35,20 +37,28 @@ pub fn from_geojson(geometry: Geometry, target: GeometryTarget, policy: &Geometr
 ///
 /// # Errors
 /// Returns [`GeometryError::Unbuildable`] when the coordinates are not nested the way the type
-/// requires, or the [`GeometryError`] naming the structural rule the result breaks.
-pub fn from_coordinates(shape: CoordinateShape, kind: GeometryKind, policy: &GeometryPolicy) -> Result<NgsiLdGeometry, GeometryError> {
+/// requires, or the [`GeometryRefusal`] naming the structural rule the result breaks or the position
+/// outside WGS 84 it carries.
+pub fn from_coordinates(shape: CoordinateShape, kind: GeometryKind, policy: &GeometryPolicy) -> Result<NgsiLdGeometry, GeometryRefusal> {
     let built = build(shape, kind)?;
 
     convert(built, GeometryTarget::Coerce(kind), policy)
 }
 
-/// Converts an admitted geometry to the target: the declared conversion first, then the lossless
-/// reconciliation with the target type, then normalisation and the structural check.
+/// Converts an admitted geometry to the target: the range check first, then the declared
+/// conversion, then the lossless reconciliation with the target type, then normalisation and the
+/// structural check.
+///
+/// The range is checked before anything is converted, so a refused position is named where the
+/// geometry as read carries it, and a centroid or an envelope is never derived from coordinates
+/// that are no WGS 84 longitude and latitude (RFC 7946 section 4).
 ///
 /// # Errors
-/// Returns the [`GeometryError`] naming the conversion that was refused or the structural rule the
-/// result breaks.
-pub fn convert(geometry: NgsiLdGeometry, target: GeometryTarget, policy: &GeometryPolicy) -> Result<NgsiLdGeometry, GeometryError> {
+/// Returns the [`GeometryRefusal`] naming the position outside WGS 84, the conversion that was
+/// refused, or the structural rule the result breaks.
+pub fn convert(geometry: NgsiLdGeometry, target: GeometryTarget, policy: &GeometryPolicy) -> Result<NgsiLdGeometry, GeometryRefusal> {
+    check_range(&geometry)?;
+
     let converted = match policy.convert() {
         Some(strategy) => apply(geometry, *strategy)?,
         None => geometry,
@@ -160,6 +170,7 @@ mod tests {
         error::GeometryError,
         geometry::{GeometryKind, NgsiLdGeometry},
         policy::GeometryPolicy,
+        refusal::GeometryRefusal,
         strategy::ConversionStrategy,
         target::GeometryTarget,
     };
@@ -204,10 +215,10 @@ mod tests {
     fn a_multipolygon_of_several_members_is_refused_toward_a_polygon_without_a_declaration() {
         assert_eq!(
             convert(multi_polygon(), GeometryTarget::Coerce(GeometryKind::Polygon), &GeometryPolicy::default()),
-            Err(GeometryError::AmbiguousMultiGeometry {
+            Err(GeometryRefusal::from(GeometryError::AmbiguousMultiGeometry {
                 origin: GeometryKind::MultiPolygon,
                 members: 2,
-            })
+            }))
         );
     }
 
@@ -252,7 +263,7 @@ mod tests {
 
         assert_eq!(
             from_geojson(collection.clone(), GeometryTarget::Preserve, &GeometryPolicy::default()),
-            Err(GeometryError::GeometryCollection)
+            Err(GeometryRefusal::from(GeometryError::GeometryCollection))
         );
         assert_eq!(
             from_geojson(collection, GeometryTarget::Preserve, &declaring(ConversionStrategy::Flatten)),
@@ -330,7 +341,7 @@ mod tests {
 
         assert_eq!(
             from_coordinates(shape, GeometryKind::Polygon, &GeometryPolicy::default()),
-            Err(GeometryError::ShortRing { positions: 3 })
+            Err(GeometryRefusal::from(GeometryError::ShortRing { positions: 3 }))
         );
     }
 
@@ -340,7 +351,7 @@ mod tests {
 
         assert_eq!(
             from_coordinates(shape, GeometryKind::LineString, &GeometryPolicy::default()),
-            Err(GeometryError::ShortLineString { positions: 1 })
+            Err(GeometryRefusal::from(GeometryError::ShortLineString { positions: 1 }))
         );
     }
 
@@ -350,9 +361,50 @@ mod tests {
 
         assert_eq!(
             from_coordinates(shape, GeometryKind::MultiPoint, &GeometryPolicy::default()),
-            Err(GeometryError::Unbuildable {
+            Err(GeometryRefusal::from(GeometryError::Unbuildable {
                 target: GeometryKind::MultiPoint,
-            })
+            }))
         );
+    }
+
+    #[test]
+    fn a_geometry_outside_wgs_84_is_refused_before_a_declared_conversion_runs() {
+        let source = Geometry::new(GeometryValue::Polygon {
+            coordinates: vec![vec![
+                Position::from([0.0, 0.0]),
+                Position::from([2600.5, 0.0]),
+                Position::from([2600.5, 2.0]),
+                Position::from([0.0, 0.0]),
+            ]],
+        });
+
+        let refused = from_geojson(source, GeometryTarget::Coerce(GeometryKind::Point), &declaring(ConversionStrategy::Centroid));
+
+        assert_eq!(
+            refused.map_err(|refusal| refusal.to_string()),
+            Err("the position `[2600.5, 0]` at `coordinates[0][1]` has a longitude outside WGS 84".to_owned())
+        );
+    }
+
+    #[test]
+    fn bare_coordinates_outside_wgs_84_are_refused() {
+        let shape = CoordinateShape::Position(Position::from([16.37, 91.0]));
+
+        assert!(matches!(
+            from_coordinates(shape, GeometryKind::Point, &GeometryPolicy::default()),
+            Err(GeometryRefusal::OutsideWgs84(_))
+        ));
+    }
+
+    #[test]
+    fn an_already_typed_geometry_outside_wgs_84_is_refused() {
+        let point = NgsiLdGeometry::Point {
+            coordinates: Position::from([-181.0, 0.0]),
+        };
+
+        assert!(matches!(
+            convert(point, GeometryTarget::Preserve, &GeometryPolicy::default()),
+            Err(GeometryRefusal::OutsideWgs84(_))
+        ));
     }
 }

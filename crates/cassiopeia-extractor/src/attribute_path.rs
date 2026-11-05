@@ -59,6 +59,12 @@ impl AttributePath {
     pub const fn root(&self) -> &NameBuf {
         &self.root
     }
+
+    /// The top-level attribute the declaration sits under, or is, taken out of the path.
+    #[must_use]
+    pub fn into_root(self) -> NameBuf {
+        self.root
+    }
 }
 
 // Manual because the path joins a variable number of names in two separators, which no derive
@@ -129,5 +135,12 @@ mod tests {
         let frame = DeclarationTrail::below(&address, Nesting::Member, None);
 
         assert_eq!(AttributePath::beneath(Some(&frame), &name("street")).to_string(), "address[street]");
+    }
+
+    #[test]
+    fn taking_the_root_out_of_a_path_yields_its_top_level_attribute() {
+        let path = AttributePath::new(name("temperature"), vec![name("accuracy")], vec![name("value")]);
+
+        assert_eq!(path.into_root(), name("temperature"));
     }
 }

@@ -7,6 +7,7 @@ use crate::attribute::{
     resolution_context::ResolutionContext,
     resolution_error::{ResolutionError, Result},
 };
+use cassiopeia_geometry::refusal::GeometryRefusal;
 use cassiopeia_ir::{attribute_content::AttributeContent, resolved_attribute::ResolvedAttribute};
 use cassiopeia_mapping::{
     attribute::{Attribute, instance::AttributeInstance},
@@ -215,8 +216,12 @@ fn transform<C: ConversionOutput>(ctx: &ResolutionContext, attr_name: &NameBuf, 
 fn bind_refusal<T>(ctx: &ResolutionContext, attr_name: &NameBuf, outcome: result::Result<Option<T>, AttributeRefusal>) -> Option<T> {
     match outcome {
         Ok(value) => value,
-        Err(AttributeRefusal::Geometry(refusal)) => {
+        Err(AttributeRefusal::Geometry(GeometryRefusal::Inadmissible(refusal))) => {
             ctx.dropped.geometries.record(attr_name, refusal);
+            None
+        }
+        Err(AttributeRefusal::Geometry(GeometryRefusal::OutsideWgs84(position))) => {
+            ctx.dropped.out_of_range_geometries.record(ctx.path_of(attr_name), &position);
             None
         }
         Err(AttributeRefusal::JsonPayload(refusal)) => {

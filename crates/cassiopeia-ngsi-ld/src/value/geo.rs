@@ -3,9 +3,9 @@ use cassiopeia_geometry::{
     collection::{CollectionMember, GeometryCollection},
     convert::{convert, from_coordinates, from_geojson},
     coordinates::CoordinateShape,
-    error::GeometryError,
     geometry::NgsiLdGeometry,
     policy::GeometryPolicy,
+    refusal::GeometryRefusal,
     target::GeometryTarget,
 };
 use compact_str::CompactString;
@@ -25,11 +25,12 @@ impl Value {
     ///
     /// `Ok(None)` means *absent*: this value carries no geometry, the attribute is simply omitted,
     /// exactly as before. An `Err` means *refused*: the value carries a geometry a `GeoProperty`
-    /// cannot hold, or one this mapping did not authorise converting.
+    /// cannot hold, one this mapping did not authorise converting, or one with a position outside
+    /// WGS 84.
     ///
     /// # Errors
-    /// Returns the [`GeometryError`] naming the refusal.
-    pub fn to_geometry(&self, target: GeometryTarget, policy: &GeometryPolicy) -> Result<Option<NgsiLdGeometry>, GeometryError> {
+    /// Returns the [`GeometryRefusal`] naming the refusal.
+    pub fn to_geometry(&self, target: GeometryTarget, policy: &GeometryPolicy) -> Result<Option<NgsiLdGeometry>, GeometryRefusal> {
         if let Value::Geospatial(geometry) = self {
             // The geometry is borrowed from the value and the conversion consumes what it converts,
             // so this is the one copy the typed path makes.
@@ -63,9 +64,9 @@ impl Value {
     /// value is read as [`Value::to_geometry`] reads it, and becomes the typed geometry it spells.
     ///
     /// # Errors
-    /// Returns the [`GeometryError`] naming why the value, or a member of the collection it spells,
+    /// Returns the [`GeometryRefusal`] naming why the value, or a member of the collection it spells,
     /// is no geometry the attribute can hold.
-    pub fn to_any_geometry(&self, target: GeometryTarget, policy: &GeometryPolicy) -> Result<Option<Value>, GeometryError> {
+    pub fn to_any_geometry(&self, target: GeometryTarget, policy: &GeometryPolicy) -> Result<Option<Value>, GeometryRefusal> {
         let keeps_collection = matches!(target, GeometryTarget::Preserve) && policy.convert().is_none();
         if !keeps_collection || matches!(self, Value::Geospatial(_)) {
             return Ok(self.to_geometry(target, policy)?.map(|geometry| Value::Geospatial(Box::new(geometry))));
@@ -177,6 +178,7 @@ mod tests {
         error::GeometryError,
         geometry::{GeometryKind, NgsiLdGeometry},
         policy::GeometryPolicy,
+        refusal::GeometryRefusal,
         strategy::ConversionStrategy,
         target::GeometryTarget,
     };
@@ -184,11 +186,11 @@ mod tests {
     use pretty_assertions::assert_eq;
     use serde_json::{Value as JsonValue, json};
 
-    fn preserve(value: &Value) -> Result<Option<NgsiLdGeometry>, GeometryError> {
+    fn preserve(value: &Value) -> Result<Option<NgsiLdGeometry>, GeometryRefusal> {
         value.to_geometry(GeometryTarget::Preserve, &GeometryPolicy::default())
     }
 
-    fn coerce(value: &Value, kind: GeometryKind) -> Result<Option<NgsiLdGeometry>, GeometryError> {
+    fn coerce(value: &Value, kind: GeometryKind) -> Result<Option<NgsiLdGeometry>, GeometryRefusal> {
         value.to_geometry(GeometryTarget::Coerce(kind), &GeometryPolicy::default())
     }
 
@@ -282,7 +284,7 @@ mod tests {
     fn a_source_geometry_collection_is_refused_rather_than_carried() {
         let value = Value::try_from(json!({"type": "GeometryCollection", "geometries": []})).unwrap();
 
-        assert_eq!(preserve(&value), Err(GeometryError::GeometryCollection));
+        assert_eq!(preserve(&value), Err(GeometryRefusal::from(GeometryError::GeometryCollection)));
     }
 
     #[test]
@@ -330,19 +332,19 @@ mod tests {
 
         assert_eq!(
             coerce(&value, GeometryKind::Polygon),
-            Err(GeometryError::AmbiguousMultiGeometry {
+            Err(GeometryRefusal::from(GeometryError::AmbiguousMultiGeometry {
                 origin: GeometryKind::MultiPolygon,
                 members: 2,
-            })
+            }))
         );
     }
 
-    fn any(value: &Value, policy: GeometryPolicy) -> Result<Option<Value>, GeometryError> {
+    fn any(value: &Value, policy: GeometryPolicy) -> Result<Option<Value>, GeometryRefusal> {
         value.to_any_geometry(GeometryTarget::Preserve, &policy)
     }
 
     /// The JSON the geometry `value` reads as writes, under the default policy.
-    fn any_json(value: &Value) -> Result<Option<JsonValue>, GeometryError> {
+    fn any_json(value: &Value) -> Result<Option<JsonValue>, GeometryRefusal> {
         any(value, GeometryPolicy::default()).map(|read| read.map(JsonValue::from))
     }
 
@@ -416,7 +418,7 @@ mod tests {
 
         assert_eq!(
             any(&collection, GeometryPolicy::default()),
-            Err(GeometryError::ShortLineString { positions: 1 })
+            Err(GeometryRefusal::from(GeometryError::ShortLineString { positions: 1 }))
         );
     }
 
@@ -433,7 +435,7 @@ mod tests {
         );
         assert_eq!(
             collection.to_any_geometry(GeometryTarget::Coerce(GeometryKind::Point), &GeometryPolicy::default()),
-            Err(GeometryError::GeometryCollection)
+            Err(GeometryRefusal::from(GeometryError::GeometryCollection))
         );
     }
 
@@ -447,5 +449,19 @@ mod tests {
                 coordinates: [16.37, 48.2].into(),
             }))))
         );
+    }
+
+    #[test]
+    fn a_geometry_outside_wgs_84_is_refused_whichever_shape_the_source_spells_it_in() {
+        for value in [
+            Value::String(r#"{"type":"Point","coordinates":[2600.5,341870.2]}"#.into()),
+            Value::try_from(json!({"type": "Point", "coordinates": [16.37, 91]})).unwrap(),
+            Value::try_from(json!(["16,37", "91"])).unwrap(),
+        ] {
+            assert!(
+                matches!(coerce(&value, GeometryKind::Point), Err(GeometryRefusal::OutsideWgs84(_))),
+                "{value:?}"
+            );
+        }
     }
 }

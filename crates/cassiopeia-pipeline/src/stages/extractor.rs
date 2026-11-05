@@ -6,6 +6,7 @@ use crate::{
         batch_sink_report::report_sink,
         dropped_geometry_report::dropped_geometry_diagnostic,
         dropped_null_report::dropped_null_diagnostic,
+        out_of_range_geometry_report::out_of_range_geometry_diagnostic,
         pump::{BatchSender, PumpConfig, PumpProcessor, run_pump_stage},
         refused_json_payload_report::refused_json_payload_diagnostic,
         skipped_records::SkippedRecords,
@@ -76,6 +77,7 @@ impl PumpProcessor for ExtractorProcessor {
         }
         let DroppedAttributes {
             geometries,
+            out_of_range_geometries,
             timestamps,
             templates,
             json_payloads,
@@ -84,6 +86,7 @@ impl PumpProcessor for ExtractorProcessor {
         } = dropped;
         let warnings = failed
             + report_sink(self.reporter, geometries, dropped_geometry_diagnostic)
+            + report_sink(self.reporter, out_of_range_geometries, out_of_range_geometry_diagnostic)
             + report_sink(self.reporter, timestamps, unreadable_timestamp_diagnostic)
             + report_sink(self.reporter, templates, unresolved_template_diagnostic)
             + report_sink(self.reporter, json_payloads, refused_json_payload_diagnostic)

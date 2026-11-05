@@ -3,6 +3,7 @@ use crate::end_to_end::{
     station_mappings::STATION_READINGS,
 };
 use cassiopeia_common::store_kind::StoreKind;
+use cassiopeia_diagnostic::code::{diagnostic_code::DiagnosticCode, geometry_code::GeometryCode};
 use pretty_assertions::{assert_eq, assert_ne};
 use serde_json::{Value, json};
 
@@ -248,5 +249,71 @@ fn a_refused_geometry_in_one_instance_of_a_multi_instance_geo_property_is_droppe
         assert_eq!(location[0]["type"], "GeoProperty", "{store:?}: {location:?}");
         assert_eq!(location[0]["datasetId"], "urn:ngsi-ld:Dataset:surveyed", "{store:?}: {location:?}");
         assert_eq!(outcome.warnings, 1, "{store:?}");
+    }
+}
+
+#[test]
+fn geometries_outside_wgs_84_are_dropped_with_one_warning_naming_the_first_position_and_the_entities_still_published() {
+    for store in STORES {
+        let outcome = run_end_to_end(
+            store,
+            &[RunInput {
+                binding: RunBinding::Mapping(STATION_READINGS),
+                records: json!([
+                    { "id": "projected", "geometry": { "type": "Point", "coordinates": [2600.5, 341_870.2] }, "temperature": 20.5 },
+                    { "id": "swapped", "geometry": { "type": "LineString", "coordinates": [[16.37, 48.2], [16.37, 91.0]] }, "temperature": 21.0 },
+                    { "id": "here", "geometry": { "type": "Point", "coordinates": [16.37, 48.2, 9000.0] }, "temperature": 19.0 },
+                ]),
+            }],
+            &["Station"],
+            "",
+        );
+
+        assert_eq!(
+            entity_ids(&outcome),
+            ["urn:ngsi-ld:Station:here", "urn:ngsi-ld:Station:projected", "urn:ngsi-ld:Station:swapped"],
+            "{store:?}"
+        );
+        let located = outcome
+            .entities
+            .iter()
+            .filter(|entity| entity.get("location").is_some())
+            .map(|entity| &entity["id"])
+            .collect::<Vec<&Value>>();
+        assert_eq!(located, ["urn:ngsi-ld:Station:here"], "{store:?}");
+        let refused = outcome.coded(DiagnosticCode::Geometry(GeometryCode::CoordinatesOutOfRange));
+        assert_eq!(refused.len(), 1, "{store:?}: {:?}", outcome.diagnostics);
+        assert_eq!(refused[0].occurrences, 2, "{store:?}");
+        // The store decides which record of the batch is resolved first, so either refused position may
+        // be the example the warning quotes.
+        let examples = [
+            "Attribute `location` dropped: the position `[2600.5, 341870.2]` at `coordinates` has a longitude outside WGS 84;",
+            "Attribute `location` dropped: the position `[16.37, 91]` at `coordinates[1]` has a latitude outside WGS 84;",
+        ];
+        assert!(
+            examples.iter().any(|example| refused[0].headline.starts_with(example)),
+            "{store:?}: {}",
+            refused[0].headline
+        );
+        assert_eq!(outcome.warnings, 2, "{store:?}");
+    }
+}
+
+#[test]
+fn a_geo_property_sub_attribute_outside_wgs_84_is_dropped_with_a_warning_naming_its_path_and_the_parent_still_published() {
+    let polygon = json!({ "type": "Polygon", "coordinates": [[[0.0, 0.0], [2.0, 0.0], [2.0, -95.0], [0.0, 0.0]]] });
+    for store in STORES {
+        let outcome = run_zone_footprint(store, "", &polygon);
+
+        assert!(outcome.entities[0]["name"].get("footprint").is_none(), "{store:?}: {:?}", outcome.entities[0]);
+        let refused = outcome.coded(DiagnosticCode::Geometry(GeometryCode::CoordinatesOutOfRange));
+        assert_eq!(refused.len(), 1, "{store:?}: {:?}", outcome.diagnostics);
+        assert!(
+            refused[0]
+                .headline
+                .starts_with("Attribute `name.footprint` dropped: the position `[2, -95]` at `coordinates[0][2]` has a latitude outside WGS 84;"),
+            "{store:?}: {}",
+            refused[0].headline
+        );
     }
 }

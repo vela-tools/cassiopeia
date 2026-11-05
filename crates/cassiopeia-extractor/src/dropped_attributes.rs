@@ -1,4 +1,10 @@
-use crate::{dropped_geometries::DroppedGeometries, dropped_nulls::DroppedNulls, refused_json_payloads::RefusedJsonPayloads, unusable_values::UnusableValues};
+use crate::{
+    dropped_geometries::DroppedGeometries,
+    dropped_nulls::DroppedNulls,
+    out_of_range_geometries::OutOfRangeGeometries,
+    refused_json_payloads::RefusedJsonPayloads,
+    unusable_values::UnusableValues,
+};
 use cassiopeia_ngsi_ld::entity::name::NameBuf;
 use cassiopeia_unreadable_timestamps::unreadable_timestamps::UnreadableTimestamps;
 use cassiopeia_unresolved_templates::unresolved_templates::UnresolvedTemplates;
@@ -13,6 +19,8 @@ use cassiopeia_unresolved_templates::unresolved_templates::UnresolvedTemplates;
 pub struct DroppedAttributes {
     /// Geometries the declared type cannot hold, or that this mapping did not authorise converting.
     pub geometries: DroppedGeometries,
+    /// Geometries with a position outside WGS 84.
+    pub out_of_range_geometries: OutOfRangeGeometries,
     /// Attribute values that read as no supported spelling of a date-time.
     pub timestamps: UnreadableTimestamps,
     /// Attributes whose template could not be resolved against the record.
@@ -42,6 +50,7 @@ mod tests {
         let dropped = DroppedAttributes::new();
 
         assert!(dropped.geometries.is_empty());
+        assert!(dropped.out_of_range_geometries.is_empty());
         assert!(dropped.timestamps.is_empty());
         assert!(dropped.templates.is_empty());
         assert!(dropped.json_payloads.is_empty());

@@ -1,5 +1,5 @@
 use crate::required_value::RequiredValue;
-use cassiopeia_geometry::error::GeometryError;
+use cassiopeia_geometry::refusal::GeometryRefusal;
 use cassiopeia_mapping::conversion::value_reading::{IdentifierReading, ValueReading};
 use cassiopeia_ngsi_ld::value::json_payload_error::JsonPayloadError;
 use derive_more::From;
@@ -10,11 +10,11 @@ use derive_more::From;
 /// what it lost. They share one type because they arrive from one place (applying an attribute's
 /// declared transformation) and are told apart again where each is bound to the sink that gathers
 /// it.
-#[derive(Clone, Debug, Eq, From, PartialEq)]
+#[derive(Clone, Debug, From, PartialEq)]
 pub(crate) enum AttributeRefusal {
-    /// The source carried a geometry the declared type cannot hold, or one this mapping did not
-    /// authorise converting.
-    Geometry(GeometryError),
+    /// The source carried a geometry the declared type cannot hold, one this mapping did not
+    /// authorise converting, or one with a position outside WGS 84.
+    Geometry(GeometryRefusal),
     /// A `JsonProperty`'s source was not "a raw JSON object (or array of objects)" (ETSI GS CIM 009
     /// v1.9.1 clause 4.5.24.2).
     JsonPayload(JsonPayloadError),
@@ -74,7 +74,7 @@ impl AttributeRefusal {
 #[cfg(test)]
 mod tests {
     use crate::{attribute::refusal::AttributeRefusal, required_value::RequiredValue};
-    use cassiopeia_geometry::{error::GeometryError, target::GeometryTarget};
+    use cassiopeia_geometry::{error::GeometryError, refusal::GeometryRefusal, target::GeometryTarget};
     use cassiopeia_mapping::conversion::value_reading::{IdentifierReading, ValueReading};
     use cassiopeia_ngsi_ld::value::{
         json_payload_error::{JsonPayloadError, JsonShape},
@@ -83,10 +83,10 @@ mod tests {
     use pretty_assertions::assert_eq;
 
     #[test]
-    fn a_geometry_error_converts_into_a_refusal() {
+    fn a_geometry_refusal_converts_into_a_refusal() {
         assert_eq!(
-            AttributeRefusal::from(GeometryError::GeometryCollection),
-            AttributeRefusal::Geometry(GeometryError::GeometryCollection)
+            AttributeRefusal::from(GeometryRefusal::from(GeometryError::GeometryCollection)),
+            AttributeRefusal::Geometry(GeometryRefusal::Inadmissible(GeometryError::GeometryCollection))
         );
     }
 

@@ -2,8 +2,8 @@ use strum::{Display, EnumCount, EnumIter};
 
 /// Why a `GeoProperty`'s geometry was refused rather than emitted.
 ///
-/// One code per refusal in the geometry layer, so a run summary can say which structural rule the
-/// source data broke without repeating the full sentence for every affected record.
+/// One code per refusal in the geometry layer, so a run summary can say which rule the source data
+/// broke without repeating the full sentence for every affected record.
 #[derive(Clone, Copy, Debug, Display, EnumCount, EnumIter, Eq, Hash, Ord, PartialEq, PartialOrd)]
 #[strum(serialize_all = "kebab-case")]
 pub enum GeometryCode {
@@ -30,6 +30,9 @@ pub enum GeometryCode {
     EmptyGeometry,
     /// A `GeometryCollection` of mixed geometry families cannot fold into one geometry.
     MixedCollection,
+    /// A position's longitude or latitude lies outside WGS 84, which RFC 7946 section 4 fixes every
+    /// `GeoJSON` coordinate to.
+    CoordinatesOutOfRange,
 }
 
 #[cfg(test)]
@@ -40,5 +43,6 @@ mod tests {
     #[test]
     fn a_geometry_code_renders_a_kebab_case_token() {
         assert_eq!(GeometryCode::AmbiguousMultiGeometry.to_string(), "ambiguous-multi-geometry");
+        assert_eq!(GeometryCode::CoordinatesOutOfRange.to_string(), "coordinates-out-of-range");
     }
 }

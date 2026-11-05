@@ -45,7 +45,7 @@ mod tests {
         },
         required_value::RequiredValue,
     };
-    use cassiopeia_geometry::{error::GeometryError, geometry::NgsiLdGeometry, policy::GeometryPolicy, strategy::ConversionStrategy};
+    use cassiopeia_geometry::{error::GeometryError, geometry::NgsiLdGeometry, policy::GeometryPolicy, refusal::GeometryRefusal, strategy::ConversionStrategy};
     use cassiopeia_ngsi_ld::{entity::attribute::NgsiLdAttributeKind, value::types::Value};
     use pretty_assertions::assert_eq;
     use serde_json::json;
@@ -125,7 +125,7 @@ mod tests {
 
         assert_eq!(
             apply(smallvec![source], default_of(NgsiLdAttributeKind::GeoProperty), None),
-            Err(AttributeRefusal::Geometry(GeometryError::GeometryCollection))
+            Err(AttributeRefusal::Geometry(GeometryRefusal::Inadmissible(GeometryError::GeometryCollection)))
         );
     }
 }

@@ -1,4 +1,4 @@
-use crate::{convert::from_geojson, error::GeometryError, geometry::NgsiLdGeometry, policy::GeometryPolicy, target::GeometryTarget};
+use crate::{convert::from_geojson, geometry::NgsiLdGeometry, policy::GeometryPolicy, refusal::GeometryRefusal, target::GeometryTarget};
 use derive_more::Into;
 use geojson::{Geometry, GeometryValue};
 
@@ -26,12 +26,13 @@ impl GeometryCollection {
     /// keeping a nested collection as a collection of its members.
     ///
     /// # Errors
-    /// Returns the [`GeometryError`] of the first member that is no valid geometry.
-    pub fn from_geojson(members: Vec<Geometry>, policy: &GeometryPolicy) -> Result<GeometryCollection, GeometryError> {
+    /// Returns the [`GeometryRefusal`] of the first member that is no valid geometry, or that
+    /// carries a position outside WGS 84.
+    pub fn from_geojson(members: Vec<Geometry>, policy: &GeometryPolicy) -> Result<GeometryCollection, GeometryRefusal> {
         members
             .into_iter()
             .map(|member| CollectionMember::from_geojson(member, *policy))
-            .collect::<Result<Vec<CollectionMember>, GeometryError>>()
+            .collect::<Result<Vec<CollectionMember>, GeometryRefusal>>()
             .map(GeometryCollection)
     }
 }
@@ -41,9 +42,9 @@ impl CollectionMember {
     /// type preserved, and a nested collection as a collection of its members.
     ///
     /// # Errors
-    /// Returns the [`GeometryError`] naming why the member, or a member nested in it, is no valid
+    /// Returns the [`GeometryRefusal`] naming why the member, or a member nested in it, is no valid
     /// geometry.
-    fn from_geojson(member: Geometry, policy: GeometryPolicy) -> Result<CollectionMember, GeometryError> {
+    fn from_geojson(member: Geometry, policy: GeometryPolicy) -> Result<CollectionMember, GeometryRefusal> {
         match member.value {
             GeometryValue::GeometryCollection { geometries } => GeometryCollection::from_geojson(geometries, &policy).map(CollectionMember::Collection),
             value @ (GeometryValue::Point { .. }
@@ -63,13 +64,14 @@ mod tests {
         error::GeometryError,
         geometry::NgsiLdGeometry,
         policy::GeometryPolicy,
+        refusal::GeometryRefusal,
     };
     use geojson::{Geometry, GeometryValue};
     use pretty_assertions::assert_eq;
     use serde_json::json;
 
     /// The members of the collection read from `members` under `policy`.
-    fn read(members: Vec<Geometry>, policy: GeometryPolicy) -> Result<Vec<CollectionMember>, GeometryError> {
+    fn read(members: Vec<Geometry>, policy: GeometryPolicy) -> Result<Vec<CollectionMember>, GeometryRefusal> {
         GeometryCollection::from_geojson(members, &policy).map(Vec::from)
     }
 
@@ -124,7 +126,15 @@ mod tests {
 
         assert_eq!(
             read(vec![point(vec![1.0, 2.0]), short], GeometryPolicy::default()),
-            Err(GeometryError::ShortLineString { positions: 1 })
+            Err(GeometryRefusal::from(GeometryError::ShortLineString { positions: 1 }))
         );
+    }
+
+    #[test]
+    fn a_member_outside_wgs_84_refuses_the_collection() {
+        assert!(matches!(
+            read(vec![point(vec![1.0, 2.0]), point(vec![1.0, 95.0])], GeometryPolicy::default()),
+            Err(GeometryRefusal::OutsideWgs84(_))
+        ));
     }
 }

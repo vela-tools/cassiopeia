@@ -8,7 +8,9 @@
 //! An attribute whose source value the declared transformation refuses is dropped rather than
 //! emitted, and the refusal is recorded in a sink the caller supplies: a geometry the mapping did
 //! not authorise converting in
-//! [`DroppedGeometries`](crate::dropped_geometries::DroppedGeometries), text that reads as no
+//! [`DroppedGeometries`](crate::dropped_geometries::DroppedGeometries), a geometry with a position
+//! outside WGS 84 in [`OutOfRangeGeometries`](crate::out_of_range_geometries::OutOfRangeGeometries),
+//! text that reads as no
 //! date-time in
 //! [`UnreadableTimestamps`](cassiopeia_unreadable_timestamps::unreadable_timestamps::UnreadableTimestamps),
 //! and a `JsonProperty` source that is no JSON object in
@@ -39,6 +41,7 @@ pub mod dropped_nulls;
 pub mod entity_extractor;
 pub mod error;
 pub mod extractor;
+pub mod out_of_range_geometries;
 pub mod refused_json_payload;
 pub mod refused_json_payloads;
 pub mod required_value;
