@@ -10,7 +10,10 @@ use crate::{
     required_value::RequiredValue,
 };
 use cassiopeia_geometry::policy::GeometryPolicy;
-use cassiopeia_mapping::conversion::{list_conversion::ListConversion, value_reading::ValueReading};
+use cassiopeia_mapping::conversion::{
+    list_conversion::ListConversion,
+    value_reading::{IdentifierReading, ValueReading},
+};
 use cassiopeia_ngsi_ld::value::{omitted_nulls::OmittedNulls, types::Value};
 use serde_json::Value as JsonValue;
 
@@ -127,6 +130,8 @@ fn absent_item(reading: ValueReading, text: &str) -> AttributeRefusal {
         ValueReading::Object => RequiredValue::JsonObject,
         ValueReading::Json => RequiredValue::Json,
         ValueReading::Geometry(_) => RequiredValue::Geometry,
+        ValueReading::Identifier(IdentifierReading::Iri) => RequiredValue::Iri,
+        ValueReading::Identifier(IdentifierReading::Urn) => RequiredValue::Urn,
         ValueReading::Text => RequiredValue::NonNull,
     };
 
@@ -389,6 +394,18 @@ mod tests {
         assert_eq!(
             converted(smallvec![json!([collection])], list(Transformation::Geometry), None),
             Some(Value::Array(vec![Value::try_from(collection).unwrap()]))
+        );
+    }
+
+    #[test]
+    fn iri_on_a_list_normalizes_each_item() {
+        assert_eq!(
+            converted(smallvec![json!(["HTTP://A.org/x"])], list(Transformation::Iri), None),
+            Some(Value::try_from(json!(["http://a.org/x"])).unwrap())
+        );
+        assert_eq!(
+            apply(smallvec![json!(["urn:ex:b", "nope"])], list(Transformation::Urn), None),
+            Err(AttributeRefusal::unusable(RequiredValue::Urn, "nope"))
         );
     }
 }

@@ -144,6 +144,7 @@ const fn attr_icon(attribute_type: NgsiLdAttributeKind, transformation: Option<T
             Some(Transformation::Array) => ("[]", Color::Blue),
             Some(Transformation::DateTime | Transformation::Date | Transformation::Time) => ("::", Color::Green),
             Some(Transformation::Json) => ("{}", Color::Yellow),
+            Some(Transformation::Iri | Transformation::Urn) => ("@", Color::Cyan),
             Some(
                 Transformation::String
                 | Transformation::Object
@@ -168,6 +169,8 @@ const fn attr_icon(attribute_type: NgsiLdAttributeKind, transformation: Option<T
                 | Transformation::Integer
                 | Transformation::Float
                 | Transformation::String
+                | Transformation::Iri
+                | Transformation::Urn
                 | Transformation::Array
                 | Transformation::Object
                 | Transformation::Json

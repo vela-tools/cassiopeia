@@ -261,3 +261,78 @@ fn a_property_under_geometry_keeps_a_geometry_collection() {
         assert_eq!(outcome.warnings, 0, "{store:?}: {:?}", outcome.diagnostics);
     }
 }
+
+/// A building whose energy class is a vocabulary IRI and whose reference is a URN.
+const BUILDING: &str = r#"{
+    version: "v4",
+    dataModel: "Building",
+    identity: { entityName: "{{ id }}" },
+    attributes: {
+        level: { type: "VocabProperty", source: "{{ level }}" },
+        reference: { source: "{{ reference }}", transformation: "urn" },
+    },
+}"#;
+
+/// Runs the building mapping over `records` against every store, handing each outcome to `check`.
+fn run_buildings(records: impl Fn() -> Value, check: impl Fn(&str, &RunOutcome)) {
+    for store in STORES {
+        let outcome = run_end_to_end(
+            store,
+            &[RunInput {
+                binding: RunBinding::Mapping(BUILDING),
+                records: records(),
+            }],
+            &["Building"],
+            "",
+        );
+
+        check(&format!("{store:?}"), &outcome);
+    }
+}
+
+#[test]
+fn a_vocab_property_writes_its_iri_normalized() {
+    run_buildings(
+        || json!([{ "id": "a", "level": "HTTPS://Example.org/x" }]),
+        |store, outcome| {
+            let building = entity(&outcome.entities, "urn:ngsi-ld:Building:a");
+
+            assert_eq!(building["level"]["type"], "VocabProperty", "{store}: {building:?}");
+            assert_eq!(building["level"]["vocab"], "https://example.org/x", "{store}");
+            assert_eq!(outcome.warnings, 0, "{store}: {:?}", outcome.diagnostics);
+        },
+    );
+}
+
+#[test]
+fn a_property_under_urn_writes_the_normalized_urn() {
+    run_buildings(
+        || json!([{ "id": "a", "reference": "URN:NGSI-LD:Building:B-12" }]),
+        |store, outcome| {
+            let building = entity(&outcome.entities, "urn:ngsi-ld:Building:a");
+
+            assert_eq!(building["reference"]["value"], "urn:ngsi-ld:Building:B-12", "{store}: {building:?}");
+            assert_eq!(outcome.warnings, 0, "{store}: {:?}", outcome.diagnostics);
+        },
+    );
+}
+
+#[test]
+fn an_identifier_that_does_not_parse_is_dropped_with_a_warning_under_its_code() {
+    run_buildings(
+        || json!([{ "id": "a", "level": "not an iri", "reference": "B-12" }]),
+        |store, outcome| {
+            assert_eq!(entity_ids(outcome), ["urn:ngsi-ld:Building:a"], "{store}");
+            let building = entity(&outcome.entities, "urn:ngsi-ld:Building:a");
+
+            assert!(building.get("level").is_none(), "{store}: {building:?}");
+            assert!(building.get("reference").is_none(), "{store}: {building:?}");
+            let iri = outcome.coded(DiagnosticCode::Extractor(ExtractorCode::IriUnreadable));
+            let urn = outcome.coded(DiagnosticCode::Extractor(ExtractorCode::UrnUnreadable));
+            assert_eq!(iri.len(), 1, "{store}: {:?}", outcome.diagnostics);
+            assert_eq!(iri[0].headline, "Attribute `level` dropped: `not an iri` is not an IRI", "{store}");
+            assert_eq!(urn.len(), 1, "{store}: {:?}", outcome.diagnostics);
+            assert_eq!(urn[0].headline, "Attribute `reference` dropped: `B-12` is not a URN", "{store}");
+        },
+    );
+}

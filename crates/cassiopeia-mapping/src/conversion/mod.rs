@@ -14,7 +14,7 @@ use crate::{
         json_conversion::JsonConversion,
         list_conversion::ListConversion,
         property_conversion::PropertyConversion,
-        value_reading::ValueReading,
+        value_reading::{IdentifierReading, ValueReading},
     },
     transformation::Transformation,
 };
@@ -44,8 +44,9 @@ pub enum Conversion {
     LanguageProperty,
     /// One `languageMap` entry: one localized string.
     LanguageText,
-    /// A `VocabProperty`'s `vocab` member (clause 4.5.20), read from text.
-    VocabProperty,
+    /// A `VocabProperty`'s `vocab` member (clause 4.5.20), read from text as the identifier the
+    /// reading names.
+    VocabProperty(IdentifierReading),
     /// A `Relationship` or `ListRelationship`, whose object the expander builds from the `source`
     /// and the `target`, so no conversion applies to it.
     Relationship,
@@ -59,7 +60,7 @@ impl Conversion {
     /// `source` and the object as assembled for one built from nested `mappings`, the geometry as
     /// read for a `GeoProperty` (clause 4.7.1), the source gathered into a list for a
     /// `ListProperty` (clause 4.5.21.2), the value as read for a `JsonProperty` (clause
-    /// 4.5.24.2), an object of tagged text for a `LanguageProperty`, and text for a
+    /// 4.5.24.2), an object of tagged text for a `LanguageProperty`, and an IRI for a
     /// `VocabProperty`. A `languageMap` entry converts text, and the `LanguageProperty` holding the
     /// map takes no transformation of its own.
     ///
@@ -126,7 +127,8 @@ impl Conversion {
                 Some(_) => Err(refused),
             },
             NgsiLdAttributeKind::VocabProperty => match (origin, transformation) {
-                (ValueOrigin::Sourced, None | Some(Transformation::String)) => Ok(Conversion::VocabProperty),
+                (ValueOrigin::Sourced, None | Some(Transformation::Iri)) => Ok(Conversion::VocabProperty(IdentifierReading::Iri)),
+                (ValueOrigin::Sourced, Some(Transformation::Urn)) => Ok(Conversion::VocabProperty(IdentifierReading::Urn)),
                 (ValueOrigin::Sourced, Some(_)) => Err(refused),
                 (ValueOrigin::Assembled, _) => Err(ConversionRefusal::Shape),
             },
@@ -213,7 +215,7 @@ impl Conversion {
             | Conversion::JsonProperty(_)
             | Conversion::LanguageProperty
             | Conversion::LanguageText
-            | Conversion::VocabProperty
+            | Conversion::VocabProperty(_)
             | Conversion::Relationship => None,
         }
     }
@@ -229,7 +231,7 @@ mod tests {
             json_conversion::JsonConversion,
             list_conversion::ListConversion,
             property_conversion::PropertyConversion,
-            value_reading::{TemporalReading, ValueReading},
+            value_reading::{IdentifierReading, TemporalReading, ValueReading},
         },
         transformation::Transformation,
     };
@@ -256,7 +258,7 @@ mod tests {
     fn every_combination_of_type_transformation_and_shape_is_admitted_exactly_as_the_table_states() {
         let table = admission_table![
             (Property, SOURCED, default: true, [
-                Boolean, Integer, Float, String, Array, Object, Json, Geometry, Point, MultiPoint, LineString,
+                Boolean, Integer, Float, String, Iri, Urn, Array, Object, Json, Geometry, Point, MultiPoint, LineString,
                 MultiLineString, Polygon, MultiPolygon, DateTime, Date, Time,
             ]),
             (Property, ASSEMBLED, default: true, [
@@ -267,7 +269,7 @@ mod tests {
             (GeoProperty, ASSEMBLED, default: true, [Geometry, Point, MultiPoint, LineString, MultiLineString, Polygon, MultiPolygon]),
             (GeoProperty, DeclarationShape::LanguageMap, default: false, []),
             (ListProperty, SOURCED, default: true, [
-                Boolean, Integer, Float, String, Array, Object, Json, Geometry, Point, MultiPoint, LineString,
+                Boolean, Integer, Float, String, Iri, Urn, Array, Object, Json, Geometry, Point, MultiPoint, LineString,
                 MultiLineString, Polygon, MultiPolygon, DateTime, Date, Time,
             ]),
             (ListProperty, ASSEMBLED, default: true, [
@@ -280,7 +282,7 @@ mod tests {
             (LanguageProperty, SOURCED, default: true, [Object]),
             (LanguageProperty, ASSEMBLED, default: true, [Object]),
             (LanguageProperty, DeclarationShape::LanguageMap, default: true, []),
-            (VocabProperty, SOURCED, default: true, [String]),
+            (VocabProperty, SOURCED, default: true, [Iri, Urn]),
             (VocabProperty, ASSEMBLED, default: false, []),
             (VocabProperty, DeclarationShape::LanguageMap, default: false, []),
             (Relationship, SOURCED, default: true, []),
@@ -330,7 +332,7 @@ mod tests {
             (NgsiLdAttributeKind::ListProperty, Conversion::ListProperty(ListConversion::AsRead)),
             (NgsiLdAttributeKind::JsonProperty, Conversion::JsonProperty(JsonConversion::Verbatim)),
             (NgsiLdAttributeKind::LanguageProperty, Conversion::LanguageProperty),
-            (NgsiLdAttributeKind::VocabProperty, Conversion::VocabProperty),
+            (NgsiLdAttributeKind::VocabProperty, Conversion::VocabProperty(IdentifierReading::Iri)),
             (NgsiLdAttributeKind::Relationship, Conversion::Relationship),
             (NgsiLdAttributeKind::ListRelationship, Conversion::Relationship),
         ] {
@@ -426,7 +428,21 @@ mod tests {
                 Conversion::JsonProperty(JsonConversion::Array),
             ),
             (NgsiLdAttributeKind::LanguageProperty, Transformation::Object, Conversion::LanguageProperty),
-            (NgsiLdAttributeKind::VocabProperty, Transformation::String, Conversion::VocabProperty),
+            (
+                NgsiLdAttributeKind::VocabProperty,
+                Transformation::Urn,
+                Conversion::VocabProperty(IdentifierReading::Urn),
+            ),
+            (
+                NgsiLdAttributeKind::Property,
+                Transformation::Iri,
+                Conversion::Property(PropertyConversion::One(ValueReading::Identifier(IdentifierReading::Iri))),
+            ),
+            (
+                NgsiLdAttributeKind::ListProperty,
+                Transformation::Urn,
+                Conversion::ListProperty(ListConversion::Each(ValueReading::Identifier(IdentifierReading::Urn))),
+            ),
             (
                 NgsiLdAttributeKind::GeoProperty,
                 Transformation::Point,
@@ -465,7 +481,7 @@ mod tests {
                 SOURCED,
                 vec![Transformation::Array, Transformation::Object, Transformation::Json],
             ),
-            (NgsiLdAttributeKind::VocabProperty, SOURCED, vec![Transformation::String]),
+            (NgsiLdAttributeKind::VocabProperty, SOURCED, vec![Transformation::Iri, Transformation::Urn]),
             (NgsiLdAttributeKind::Relationship, SOURCED, Vec::new()),
             (NgsiLdAttributeKind::LanguageProperty, DeclarationShape::LanguageMap, Vec::new()),
             (NgsiLdAttributeKind::Property, DeclarationShape::LanguageEntry, vec![Transformation::String]),
@@ -513,7 +529,7 @@ mod tests {
             Conversion::JsonProperty(JsonConversion::Verbatim),
             Conversion::LanguageProperty,
             Conversion::LanguageText,
-            Conversion::VocabProperty,
+            Conversion::VocabProperty(IdentifierReading::Iri),
             Conversion::Relationship,
         ] {
             assert_eq!(conversion.geometry_target(), None, "{conversion:?}");

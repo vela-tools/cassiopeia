@@ -12,6 +12,15 @@ pub enum TemporalReading {
     Time,
 }
 
+/// Which identifier an identifier reading parses and normalizes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum IdentifierReading {
+    /// An absolute IRI (RFC 3987 clause 2.2).
+    Iri,
+    /// A URN (RFC 8141 clause 2).
+    Urn,
+}
+
 /// How one value read from a source, or assembled from nested `mappings`, becomes a single NGSI-LD
 /// value: every transformation but `array`, which gathers several values into one list instead.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -26,6 +35,8 @@ pub enum ValueReading {
     Text,
     /// A date, a time, or both.
     Temporal(TemporalReading),
+    /// An identifier, parsed from text and written in its normal form.
+    Identifier(IdentifierReading),
     /// A JSON object, or the object its JSON text spells.
     Object,
     /// The JSON value text spells, and any value that is not text as it is.
@@ -44,6 +55,8 @@ impl ValueReading {
             Transformation::Integer => Some(ValueReading::Integer),
             Transformation::Float => Some(ValueReading::Float),
             Transformation::String => Some(ValueReading::Text),
+            Transformation::Iri => Some(ValueReading::Identifier(IdentifierReading::Iri)),
+            Transformation::Urn => Some(ValueReading::Identifier(IdentifierReading::Urn)),
             Transformation::Object => Some(ValueReading::Object),
             Transformation::Json => Some(ValueReading::Json),
             Transformation::DateTime => Some(ValueReading::Temporal(TemporalReading::DateTime)),
@@ -67,14 +80,14 @@ impl ValueReading {
     ///
     /// An object keeps itself under `object` and `json`, becomes its compact JSON text under
     /// `string`, and is read as the geometry it spells under a geometry reading. No object is a
-    /// boolean, a number, or a date-time, so those readings never apply to one, and an attribute
+    /// boolean, a number, a date-time, or an identifier, so those readings never apply to one, and an attribute
     /// assembling its value from nested `mappings`, whose value is always an object, cannot declare
     /// them.
     #[must_use]
     pub const fn applies_to_object(self) -> bool {
         match self {
             ValueReading::Text | ValueReading::Object | ValueReading::Json | ValueReading::Geometry(_) => true,
-            ValueReading::Boolean | ValueReading::Integer | ValueReading::Float | ValueReading::Temporal(_) => false,
+            ValueReading::Boolean | ValueReading::Integer | ValueReading::Float | ValueReading::Temporal(_) | ValueReading::Identifier(_) => false,
         }
     }
 
@@ -88,6 +101,7 @@ impl ValueReading {
             | ValueReading::Float
             | ValueReading::Text
             | ValueReading::Temporal(_)
+            | ValueReading::Identifier(_)
             | ValueReading::Object
             | ValueReading::Json => None,
         }
@@ -97,7 +111,7 @@ impl ValueReading {
 #[cfg(test)]
 mod tests {
     use crate::{
-        conversion::value_reading::{TemporalReading, ValueReading},
+        conversion::value_reading::{IdentifierReading, TemporalReading, ValueReading},
         transformation::Transformation,
     };
     use cassiopeia_geometry::{geometry::GeometryKind, target::GeometryTarget};
@@ -116,6 +130,8 @@ mod tests {
             ValueReading::of(Transformation::Polygon),
             Some(ValueReading::Geometry(GeometryTarget::Coerce(GeometryKind::Polygon)))
         );
+        assert_eq!(ValueReading::of(Transformation::Iri), Some(ValueReading::Identifier(IdentifierReading::Iri)));
+        assert_eq!(ValueReading::of(Transformation::Urn), Some(ValueReading::Identifier(IdentifierReading::Urn)));
         assert_eq!(ValueReading::of(Transformation::Array), None);
     }
 
@@ -142,6 +158,8 @@ mod tests {
             (Transformation::Float, false),
             (Transformation::DateTime, false),
             (Transformation::Time, false),
+            (Transformation::Iri, false),
+            (Transformation::Urn, false),
         ] {
             assert_eq!(
                 ValueReading::of(transformation).map(ValueReading::applies_to_object),

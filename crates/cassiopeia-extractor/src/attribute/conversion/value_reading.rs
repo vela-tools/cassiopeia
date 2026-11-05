@@ -1,6 +1,9 @@
 use crate::{
     attribute::{
-        conversion::readers::{self, SourceParts},
+        conversion::{
+            identifier,
+            readers::{self, SourceParts},
+        },
         refusal::AttributeRefusal,
     },
     required_value::RequiredValue,
@@ -71,7 +74,7 @@ pub(crate) fn read(
     let merged = match reading {
         ValueReading::Geometry(target) => return Ok(read_geometry(parts, target, policy, GeometryHolder::Value, omitted)?.map(ReadValue::Value)),
         ValueReading::Boolean | ValueReading::Integer | ValueReading::Float => readers::merge_first(parts),
-        ValueReading::Text | ValueReading::Object | ValueReading::Json | ValueReading::Temporal(_) => readers::merge_text(parts),
+        ValueReading::Text | ValueReading::Object | ValueReading::Json | ValueReading::Temporal(_) | ValueReading::Identifier(_) => readers::merge_text(parts),
     };
 
     merged.map_or(Ok(None), |value| read_value(value, reading, policy, omitted))
@@ -99,6 +102,9 @@ pub(crate) fn read_value(
         ValueReading::Float => typed(value, omitted, |value| coerce_scalar(&value, RequiredValue::Float, coerce_float)),
         ValueReading::Text => typed(value, omitted, |value| Ok(Some(coerce_string(value)))),
         ValueReading::Temporal(temporal) => typed(value, omitted, |value| coerce_temporal(&value, temporal)),
+        ValueReading::Identifier(identifier) => typed(value, omitted, |value| {
+            Ok(identifier::read_identifier(&value, identifier)?.map(|iri| Value::String(CompactString::from(iri.as_str()))))
+        }),
         ValueReading::Geometry(target) => typed(value, omitted, |value| coerce_geometry(&value, target, policy, GeometryHolder::Value).map(Some)),
     }
 }

@@ -75,6 +75,8 @@ impl AttributeEditorState {
         ("Integer", Transformation::Integer),
         ("Float", Transformation::Float),
         ("String", Transformation::String),
+        ("Iri", Transformation::Iri),
+        ("Urn", Transformation::Urn),
         ("Array", Transformation::Array),
         ("Object", Transformation::Object),
         ("Json", Transformation::Json),
@@ -256,6 +258,7 @@ mod tests {
     fn the_editor_offers_only_the_transformations_the_selected_type_admits() {
         assert_eq!(offered_labels(NgsiLdAttributeKind::JsonProperty), ["Array", "Object", "Json"]);
         assert_eq!(offered_labels(NgsiLdAttributeKind::Relationship), Vec::<String>::new());
+        assert_eq!(offered_labels(NgsiLdAttributeKind::VocabProperty), ["Iri", "Urn"]);
         let every_transformation = AttributeEditorState::TRANSFORMS
             .iter()
             .map(|(label, _)| (*label).to_owned())

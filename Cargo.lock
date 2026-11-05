@@ -3400,9 +3400,9 @@ checksum = "791930b43c0d5973160d90a8f3894509f2b273430f5c5c73b668636d0287c5c0"
 
 [[package]]
 name = "iri-rs"
-version = "3.4.1"
+version = "3.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "985225699f5d8884fa703faa4929ea8016e14aa99b47e62a13f7b68565751b87"
+checksum = "9bb908742113310f5bbe8f1251229c36eaa336fc4771dec3b9dc7fd473997526"
 dependencies = [
  "iri-rs-core",
  "iri-rs-static",
@@ -3410,9 +3410,9 @@ dependencies = [
 
 [[package]]
 name = "iri-rs-core"
-version = "3.4.1"
+version = "3.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b8a467dd49f85db9ea900c3e7b7222858ead9252c75049d7325520de5581b1fd"
+checksum = "8f8c8c53a92b8b91b28ca47e3689d791bdbf1f8372461443c135d8dea0a82a99"
 dependencies = [
  "memchr",
  "pct",
@@ -3423,9 +3423,9 @@ dependencies = [
 
 [[package]]
 name = "iri-rs-static"
-version = "3.4.1"
+version = "3.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6eb4cedd0d19dd53e1571542344b435f4b95015b35e2a38051a27ab7472f4c46"
+checksum = "dbf2fc1142d8f30bf07023eb7643bf41cbee5b00ea8555f9dd133d11de93a861"
 dependencies = [
  "iri-rs-core",
  "proc-macro-crate",
@@ -4459,9 +4459,9 @@ dependencies = [
 
 [[package]]
 name = "pct"
-version = "4.0.1"
+version = "4.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "83fce46fa7e05d05ec672d34b763ced1074c3c769a040cd568fd63f42bbfb88f"
+checksum = "bec985d6723152dd39fdc91beed3b4087881f2f7f39c77f5347e2ebbc0688e70"
 dependencies = [
  "memchr",
  "utf8-decode",

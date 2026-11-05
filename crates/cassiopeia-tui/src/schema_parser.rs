@@ -169,6 +169,7 @@ fn schema_to_attribute(schema: &Value) -> EditorAttribute {
             Some("date-time") => Some(Transformation::DateTime),
             Some("date") => Some(Transformation::Date),
             Some("time") => Some(Transformation::Time),
+            Some("uri" | "iri") => Some(Transformation::Iri),
             // `format` is an open string vocabulary; any other value is a plain string.
             _ => Some(Transformation::String),
         },
@@ -323,6 +324,21 @@ mod tests {
             derived(&json!({"type": "string", "description": "LanguageProperty. A name."})),
             (NgsiLdAttributeKind::LanguageProperty, None)
         );
+        assert_eq!(
+            derived(&json!({"type": "string", "description": "VocabProperty. A level."})),
+            (NgsiLdAttributeKind::VocabProperty, None)
+        );
+    }
+
+    #[test]
+    fn a_uri_formatted_string_reads_as_an_iri() {
+        for format in ["uri", "iri"] {
+            assert_eq!(
+                derived(&json!({"type": "string", "format": format})),
+                (NgsiLdAttributeKind::Property, Some(Transformation::Iri)),
+                "{format}"
+            );
+        }
     }
 
     #[test]
@@ -332,8 +348,8 @@ mod tests {
             (NgsiLdAttributeKind::JsonProperty, Some(Transformation::Object))
         );
         assert_eq!(
-            derived(&json!({"type": "string", "description": "VocabProperty. A term."})),
-            (NgsiLdAttributeKind::VocabProperty, Some(Transformation::String))
+            derived(&json!({"type": "string", "format": "uri", "description": "VocabProperty. A term."})),
+            (NgsiLdAttributeKind::VocabProperty, Some(Transformation::Iri))
         );
         assert_eq!(
             derived(&json!({"type": "array", "description": "ListProperty. Codes."})),

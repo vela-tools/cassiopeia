@@ -1,4 +1,5 @@
 pub(crate) mod geo_property;
+pub(crate) mod identifier;
 pub(crate) mod json_property;
 pub(crate) mod language_property;
 pub(crate) mod list_property;
@@ -50,7 +51,7 @@ pub(crate) fn apply(
         Conversion::GeoProperty(target) => geo_property::apply(parts, target, policy, omitted)?.map(AttributeContent::Value),
         Conversion::LanguageProperty => language_property::apply(parts)?.map(AttributeContent::Language),
         Conversion::LanguageText => value_reading::read_text(parts, omitted).map(AttributeContent::Value),
-        Conversion::VocabProperty => vocab_property::apply(parts, omitted)?.map(AttributeContent::Vocab),
+        Conversion::VocabProperty(reading) => vocab_property::apply(parts, reading, omitted)?.map(AttributeContent::Vocab),
         // A relationship's object is built by the expander from its `source` and `target`, so
         // there is no value of its own to read here.
         Conversion::Relationship => None,
@@ -78,7 +79,7 @@ pub(crate) fn read_member(
         Conversion::Property(conversion) => Ok(property::read(parts, conversion, policy, omitted)?.map(ReadValue::into_json)),
         Conversion::ListProperty(conversion) => list_property::read(parts, conversion, policy, omitted),
         Conversion::JsonProperty(conversion) => json_property::read(parts, conversion),
-        Conversion::GeoProperty(_) | Conversion::LanguageProperty | Conversion::LanguageText | Conversion::VocabProperty | Conversion::Relationship => {
+        Conversion::GeoProperty(_) | Conversion::LanguageProperty | Conversion::LanguageText | Conversion::VocabProperty(_) | Conversion::Relationship => {
             Ok(apply(parts, conversion, policy, omitted)?.map(JsonValue::from))
         }
     }

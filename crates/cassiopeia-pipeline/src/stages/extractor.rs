@@ -476,7 +476,7 @@ mod tests {
             named,
             [
                 (
-                    DiagnosticCode::Extractor(ExtractorCode::VocabNotAnIri),
+                    DiagnosticCode::Extractor(ExtractorCode::IriUnreadable),
                     "Attribute `topVocab` dropped: `not an iri` is not an IRI"
                 ),
                 (
@@ -484,7 +484,7 @@ mod tests {
                     "Attribute `topLang` dropped: `plain text` is not a language map of text keyed by language tag"
                 ),
                 (
-                    DiagnosticCode::Extractor(ExtractorCode::VocabNotAnIri),
+                    DiagnosticCode::Extractor(ExtractorCode::IriUnreadable),
                     "Attribute `temperature.subVocab` dropped: `not an iri` is not an IRI"
                 ),
                 (

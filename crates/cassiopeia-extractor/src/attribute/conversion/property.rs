@@ -500,4 +500,52 @@ mod tests {
 
         assert_eq!(at, Ok(Some(json!("2026-03-01T11:04:35Z"))));
     }
+
+    #[test]
+    fn iri_writes_the_normalized_iri() {
+        assert_eq!(
+            converted(smallvec![json!("  HTTP://Example.org/a ")], property(Transformation::Iri), None),
+            Some(Value::String("http://example.org/a".into()))
+        );
+    }
+
+    #[test]
+    fn iri_refuses_text_that_is_no_absolute_iri() {
+        for text in ["not an iri", "/a/b"] {
+            assert_eq!(
+                apply(smallvec![json!(text)], property(Transformation::Iri), None),
+                Err(AttributeRefusal::unusable(RequiredValue::Iri, text))
+            );
+        }
+        assert_eq!(apply(smallvec![json!("")], property(Transformation::Iri), None), Ok(None));
+    }
+
+    #[test]
+    fn urn_writes_the_normalized_urn() {
+        for (text, normal) in [("URN:NGSI-LD:Building:B-12", "urn:ngsi-ld:Building:B-12"), ("urn:ex:%7e", "urn:ex:%7E")] {
+            assert_eq!(
+                converted(smallvec![json!(text)], property(Transformation::Urn), None),
+                Some(Value::String(normal.into())),
+                "{text}"
+            );
+        }
+    }
+
+    #[test]
+    fn urn_refuses_text_that_is_no_urn() {
+        for text in ["B-12", "http://example.org"] {
+            assert_eq!(
+                apply(smallvec![json!(text)], property(Transformation::Urn), None),
+                Err(AttributeRefusal::unusable(RequiredValue::Urn, text))
+            );
+        }
+    }
+
+    #[test]
+    fn urn_reads_the_text_its_parts_concatenate() {
+        assert_eq!(
+            converted(smallvec![json!("urn:ngsi-ld:Building:"), json!("B-12")], property(Transformation::Urn), None),
+            Some(Value::String("urn:ngsi-ld:Building:B-12".into()))
+        );
+    }
 }

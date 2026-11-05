@@ -17,7 +17,7 @@ derive_more = { version = "2.1.1", features = ["as_ref", "display", "from", "int
 foldhash = "0.2.0"
 geojson = "1.0.0"
 indexmap = { version = "2.14.2", features = ["serde"] }
-iri-rs = { version = "3.4.1", features = ["serde"] }
+iri-rs = { version = "3.5.0", features = ["serde"] }
 jiff = { version = "0.2.39", features = ["tzdb-bundle-always"] }
 langtag = { version = "1.1.0", features = ["serde"] }
 lazy-regex = "3.6.2"

@@ -10,16 +10,17 @@ use cassiopeia_extractor::{required_value::RequiredValue, unusable_value::Unusab
 
 /// The code a value its kind cannot hold, or its transformation cannot read, is published under.
 ///
-/// A value that spells no boolean, one that spells no number, a non-IRI vocabulary value, a value
-/// that is no language map, text that is not JSON, a value that is no JSON object, a value that
-/// spells no geometry, and a value holding nothing but nulls are different mistakes with different
-/// fixes, so each publishes its own code.
-/// An integer and a float share one, since both read a number and differ only in its kind.
+/// A value that spells no boolean, one that spells no number, one that is no IRI, one that is no
+/// URN, a value that is no language map, text that is not JSON, a value that is no JSON object, a
+/// value that spells no geometry, and a value holding nothing but nulls are different mistakes with
+/// different fixes, so each publishes its own code. An integer and a float share one, since both
+/// read a number and differ only in its kind.
 const fn code(required: RequiredValue) -> DiagnosticCode {
     match required {
         RequiredValue::Boolean => DiagnosticCode::Extractor(ExtractorCode::BooleanUnreadable),
         RequiredValue::Integer | RequiredValue::Float => DiagnosticCode::Extractor(ExtractorCode::NumberUnreadable),
-        RequiredValue::Iri => DiagnosticCode::Extractor(ExtractorCode::VocabNotAnIri),
+        RequiredValue::Iri => DiagnosticCode::Extractor(ExtractorCode::IriUnreadable),
+        RequiredValue::Urn => DiagnosticCode::Extractor(ExtractorCode::UrnUnreadable),
         RequiredValue::LanguageMap => DiagnosticCode::Extractor(ExtractorCode::LanguageMapMisshapen),
         RequiredValue::Json => DiagnosticCode::Extractor(ExtractorCode::JsonTextUnreadable),
         RequiredValue::JsonObject => DiagnosticCode::Extractor(ExtractorCode::ObjectMisshapen),
@@ -76,7 +77,7 @@ mod tests {
         assert_eq!(total, 2);
         assert_eq!(reported.len(), 1);
         assert_eq!(reported[0].occurrences, 2);
-        assert_eq!(reported[0].code, DiagnosticCode::Extractor(ExtractorCode::VocabNotAnIri));
+        assert_eq!(reported[0].code, DiagnosticCode::Extractor(ExtractorCode::IriUnreadable));
         assert_eq!(reported[0].headline, "Attribute `category` dropped: `not an iri` is not an IRI");
         assert_eq!(reported[0].defining, [ContextField::Attribute(name("category"))]);
     }
@@ -159,6 +160,8 @@ mod tests {
             (RequiredValue::Boolean, "maybe", ExtractorCode::BooleanUnreadable, "a boolean"),
             (RequiredValue::Integer, "abc", ExtractorCode::NumberUnreadable, "an integer"),
             (RequiredValue::Float, "x", ExtractorCode::NumberUnreadable, "a number"),
+            (RequiredValue::Iri, "not an iri", ExtractorCode::IriUnreadable, "an IRI"),
+            (RequiredValue::Urn, "B-12", ExtractorCode::UrnUnreadable, "a URN"),
             (
                 RequiredValue::NonNull,
                 r#"{"maybe":null}"#,

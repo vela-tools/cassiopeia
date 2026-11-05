@@ -16,10 +16,13 @@ pub enum RequiredValue {
     /// one.
     #[strum(to_string = "a number")]
     Float,
-    /// A `VocabProperty`'s `vocab` member names a vocabulary IRI (ETSI GS CIM 009 v1.9.1 clause
-    /// 4.5.20).
+    /// The `iri` transformation, and a `VocabProperty`'s `vocab` member, which names a vocabulary IRI
+    /// (ETSI GS CIM 009 v1.9.1 clause 4.5.20), read an absolute IRI (RFC 3987 clause 2.2).
     #[strum(to_string = "an IRI")]
     Iri,
+    /// The `urn` transformation reads a URN (RFC 8141 clause 2).
+    #[strum(to_string = "a URN")]
+    Urn,
     /// A `LanguageProperty`'s `languageMap` holds text keyed by BCP-47 language tag (ETSI GS CIM 009
     /// v1.9.1 clause 4.5.18).
     #[strum(to_string = "a language map of text keyed by language tag")]
@@ -51,6 +54,7 @@ mod tests {
         assert_eq!(RequiredValue::Integer.to_string(), "an integer");
         assert_eq!(RequiredValue::Float.to_string(), "a number");
         assert_eq!(RequiredValue::Iri.to_string(), "an IRI");
+        assert_eq!(RequiredValue::Urn.to_string(), "a URN");
         assert_eq!(RequiredValue::LanguageMap.to_string(), "a language map of text keyed by language tag");
         assert_eq!(RequiredValue::Json.to_string(), "JSON");
         assert_eq!(RequiredValue::JsonObject.to_string(), "a JSON object");

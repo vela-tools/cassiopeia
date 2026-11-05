@@ -122,7 +122,7 @@ mod tests {
             json_conversion::JsonConversion,
             list_conversion::ListConversion,
             property_conversion::PropertyConversion,
-            value_reading::{TemporalReading, ValueReading},
+            value_reading::{IdentifierReading, TemporalReading, ValueReading},
         },
         error::MappingError,
         mapping::Mapping,
@@ -579,7 +579,7 @@ mod tests {
 
     #[test]
     fn a_json_property_under_a_scalar_transformation_is_refused_listing_what_it_admits() {
-        for transformation in ["integer", "string", "datetime", "point"] {
+        for transformation in ["integer", "string", "datetime", "iri", "point"] {
             assert_not_admitted(
                 load(&format!(
                     r#"{{ params: {{ type: "JsonProperty", source: "{{{{ params }}}}", transformation: "{transformation}" }} }}"#
@@ -600,6 +600,7 @@ mod tests {
                 texts: { type: "ListProperty", source: "{{ codes }}", transformation: "string" },
                 objects: { type: "ListProperty", source: "{{ codes }}", transformation: "object" },
                 decoded: { type: "ListProperty", source: "{{ codes }}", transformation: "json" },
+                links: { type: "ListProperty", source: "{{ links }}", transformation: "iri" },
                 pins: { type: "ListProperty", source: "{{ pins }}", transformation: "point", geometry: { altitude: "drop" } },
             }"#,
         )
@@ -610,6 +611,7 @@ mod tests {
             ("texts", ValueReading::Text),
             ("objects", ValueReading::Object),
             ("decoded", ValueReading::Json),
+            ("links", ValueReading::Identifier(IdentifierReading::Iri)),
             ("pins", ValueReading::Geometry(GeometryTarget::Coerce(GeometryKind::Point))),
         ] {
             assert_eq!(
@@ -652,14 +654,32 @@ mod tests {
     }
 
     #[test]
-    fn a_vocab_property_under_anything_but_string_is_refused() {
-        assert_not_admitted(
-            load(r#"{ level: { type: "VocabProperty", source: "{{ level }}", transformation: "integer" } }"#),
-            "level",
-            (NgsiLdAttributeKind::VocabProperty, SOURCED),
-            "integer",
-            &["string"],
-        );
+    fn a_vocab_property_under_string_is_refused_listing_iri_and_urn() {
+        for transformation in ["string", "integer"] {
+            assert_not_admitted(
+                load(&format!(
+                    r#"{{ level: {{ type: "VocabProperty", source: "{{{{ level }}}}", transformation: "{transformation}" }} }}"#
+                )),
+                "level",
+                (NgsiLdAttributeKind::VocabProperty, SOURCED),
+                transformation,
+                &["iri", "urn"],
+            );
+        }
+    }
+
+    #[test]
+    fn a_vocab_property_under_iri_or_urn_loads_with_its_identifier_reading() {
+        let mapping = load(
+            r#"{
+                level: { type: "VocabProperty", source: "{{ level }}", transformation: "iri" },
+                kind: { type: "VocabProperty", source: "{{ kind }}", transformation: "urn" },
+            }"#,
+        )
+        .unwrap();
+
+        assert_eq!(attribute(&mapping, "level").conversion(), Conversion::VocabProperty(IdentifierReading::Iri));
+        assert_eq!(attribute(&mapping, "kind").conversion(), Conversion::VocabProperty(IdentifierReading::Urn));
     }
 
     #[test]
@@ -744,7 +764,7 @@ mod tests {
             "level",
             (NgsiLdAttributeKind::VocabProperty, SOURCED),
             "integer",
-            &["string"],
+            &["iri", "urn"],
         );
     }
 
@@ -878,7 +898,7 @@ mod tests {
             ("name", Conversion::Property(PropertyConversion::One(ValueReading::Text))),
             ("location", Conversion::GeoProperty(GeometryTarget::Preserve)),
             ("title", Conversion::LanguageProperty),
-            ("category", Conversion::VocabProperty),
+            ("category", Conversion::VocabProperty(IdentifierReading::Iri)),
             ("owner", Conversion::Relationship),
         ] {
             assert_eq!(attribute(&mapping, name).conversion(), expected, "{name}");

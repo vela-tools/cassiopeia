@@ -25,6 +25,20 @@ pub enum Transformation {
     /// Keep as text.
     String,
 
+    /// Read text as an absolute IRI (RFC 3987 clause 2.2) and write its normal form.
+    ///
+    /// Only the normalizations that keep the IRI equivalent apply: the syntax-based ones of RFC 3986
+    /// clause 6.2.2 and, for `http` and `https`, the scheme-based ones of clause 6.2.3. Text that
+    /// is no absolute IRI, a relative reference included, is refused, so the attribute is dropped
+    /// with a warning.
+    Iri,
+
+    /// Read text as a URN (RFC 8141 clause 2) and write its normal form, with the `urn:` scheme and
+    /// the namespace identifier lowercased.
+    ///
+    /// Text that is no URN is refused, so the attribute is dropped with a warning.
+    Urn,
+
     /// Collect every source part into one JSON array.
     ///
     /// A part that is already an array contributes its elements, and so does text that reads as a
@@ -104,6 +118,8 @@ impl Transformation {
             | Transformation::Integer
             | Transformation::Float
             | Transformation::String
+            | Transformation::Iri
+            | Transformation::Urn
             | Transformation::Array
             | Transformation::Object
             | Transformation::Json
@@ -182,6 +198,21 @@ mod tests {
     #[test]
     fn the_json_transformation_names_no_geometry() {
         assert_eq!(Transformation::Json.geometry_target(), None);
+    }
+
+    #[test]
+    fn iri_and_urn_deserialize_from_their_tokens() {
+        assert_eq!(serde_json::from_str::<Transformation>(r#""iri""#).unwrap(), Transformation::Iri);
+        assert_eq!(serde_json::from_str::<Transformation>(r#""urn""#).unwrap(), Transformation::Urn);
+    }
+
+    #[test]
+    fn iri_and_urn_serialize_and_display_as_their_tokens() {
+        for (transformation, token) in [(Transformation::Iri, "iri"), (Transformation::Urn, "urn")] {
+            assert_eq!(serde_json::to_string(&transformation).unwrap(), format!(r#""{token}""#));
+            assert_eq!(transformation.to_string(), token);
+            assert_eq!(transformation.geometry_target(), None);
+        }
     }
 
     #[test]
