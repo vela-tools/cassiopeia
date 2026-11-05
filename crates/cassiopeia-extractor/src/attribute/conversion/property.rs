@@ -1,8 +1,9 @@
 use crate::attribute::{
     conversion::{
         attribute_conversion::AttributeConversion,
+        part_merge,
         read_context::ReadContext,
-        readers::{self, SourceParts},
+        source_parts::SourceParts,
         value_admission,
         value_read::ReadValue,
         value_reading,
@@ -26,7 +27,7 @@ impl AttributeConversion for PropertyConversion {
     fn read(self, parts: SourceParts, ctx: &mut ReadContext<'_>) -> Result<Option<ReadValue>, AttributeRefusal> {
         match self {
             PropertyConversion::One(reading) => value_reading::read(parts, reading, ctx),
-            PropertyConversion::Array => Ok(readers::aggregate(parts).map(|items| ReadValue::Json(JsonValue::Array(items)))),
+            PropertyConversion::Array => Ok(part_merge::aggregate(parts).map(|items| ReadValue::Json(JsonValue::Array(items)))),
         }
     }
 

@@ -1,5 +1,5 @@
 use crate::attribute::{
-    conversion::{self, attribute_conversion::ConversionOutput, read_context::ReadContext, readers::SourceParts},
+    conversion::{self, attribute_conversion::ConversionOutput, read_context::ReadContext, source_parts::SourceParts},
     refusal::AttributeRefusal,
 };
 use cassiopeia_geometry::policy::GeometryPolicy;
@@ -85,20 +85,14 @@ pub(crate) fn member(parts: SourceParts, conversion: Conversion) -> (Result<Opti
 
 /// Applies a conversion expected to succeed with an NGSI-LD Value or with no value.
 pub(crate) fn converted(parts: SourceParts, conversion: Conversion, policy: Option<&GeometryPolicy>) -> Option<Value> {
-    match apply(parts, conversion, policy).unwrap() {
-        Some(AttributeContent::Value(value)) => Some(value),
-        Some(other @ (AttributeContent::Json(_) | AttributeContent::Vocab(_) | AttributeContent::Language(_))) => panic!("{other:?}, not a value"),
-        None => None,
-    }
+    apply(parts, conversion, policy).unwrap().map(|content| content.try_unwrap_value().unwrap())
 }
 
 /// Applies a conversion expected to succeed with raw JSON or with no value.
 pub(crate) fn payload(parts: SourceParts, conversion: Conversion) -> Option<JsonValue> {
-    match apply(parts, conversion, None).unwrap() {
-        Some(AttributeContent::Json(payload)) => Some(JsonValue::from(payload)),
-        Some(other @ (AttributeContent::Value(_) | AttributeContent::Vocab(_) | AttributeContent::Language(_))) => panic!("{other:?}, not raw JSON"),
-        None => None,
-    }
+    apply(parts, conversion, None)
+        .unwrap()
+        .map(|content| JsonValue::from(content.try_unwrap_json().unwrap()))
 }
 
 /// Applies a conversion and returns what it produced with the nulls it left out of the value.
@@ -110,10 +104,5 @@ pub(crate) fn applied_counting(parts: SourceParts, conversion: Conversion) -> (R
 /// with the nulls it left out of the value.
 pub(crate) fn omitted(parts: SourceParts, conversion: Conversion) -> (Option<Value>, OmittedNulls) {
     let (content, omitted) = applied_counting(parts, conversion);
-    let value = match content.unwrap() {
-        Some(AttributeContent::Value(value)) => Some(value),
-        Some(other @ (AttributeContent::Json(_) | AttributeContent::Vocab(_) | AttributeContent::Language(_))) => panic!("{other:?}, not a value"),
-        None => None,
-    };
-    (value, omitted)
+    (content.unwrap().map(|content| content.try_unwrap_value().unwrap()), omitted)
 }

@@ -2,8 +2,10 @@ use crate::{
     attribute::{
         conversion::{
             attribute_conversion::AttributeConversion,
+            json_text,
+            part_merge::PartMerge,
             read_context::ReadContext,
-            readers::{self, SourceParts},
+            source_parts::SourceParts,
             value_reading,
         },
         refusal::AttributeRefusal,
@@ -41,8 +43,9 @@ impl AttributeConversion for LanguageMapConversion {
     type Reading = LanguageMap;
 
     fn read(self, parts: SourceParts, _ctx: &mut ReadContext<'_>) -> Result<Option<LanguageMap>, AttributeRefusal> {
-        readers::merge_text(parts)
-            .map_or(Ok(None), |value| readers::read_object(value, RequiredValue::LanguageMap))?
+        PartMerge::Text
+            .merge(parts)
+            .map_or(Ok(None), |value| json_text::read_object(value, RequiredValue::LanguageMap))?
             .map(language_map)
             .transpose()
     }
@@ -98,13 +101,16 @@ fn language_map(entries: JsonObject) -> Result<LanguageMap, AttributeRefusal> {
 mod tests {
     use crate::{
         attribute::{
-            conversion::fixtures::{apply, converted, default_of},
+            conversion::fixtures::{apply, converted, declared, default_of},
             refusal::AttributeRefusal,
         },
         required_value::RequiredValue,
     };
     use cassiopeia_ir::attribute_content::AttributeContent;
-    use cassiopeia_mapping::conversion::{Conversion, declaration_shape::DeclarationShape};
+    use cassiopeia_mapping::{
+        conversion::{Conversion, declaration_shape::DeclarationShape},
+        transformation::Transformation,
+    };
     use cassiopeia_ngsi_ld::{
         entity::attribute::{NgsiLdAttributeKind, language_property::LanguageMap},
         value::types::Value,
@@ -123,6 +129,18 @@ mod tests {
             .iter()
             .map(|(tag, text)| (LangTagBuf::new((*tag).to_owned()).unwrap(), (*text).to_owned()))
             .collect()
+    }
+
+    #[test]
+    fn an_object_of_tagged_text_under_the_object_transformation_becomes_its_language_map() {
+        assert_eq!(
+            apply(
+                smallvec![json!({"fr": "Musée", "nl": "Museum"})],
+                declared(NgsiLdAttributeKind::LanguageProperty, Transformation::Object),
+                None
+            ),
+            Ok(Some(AttributeContent::Language(language_map(&[("fr", "Musée"), ("nl", "Museum")]))))
+        );
     }
 
     #[test]

@@ -75,8 +75,11 @@ impl AttributeRefusal {
 mod tests {
     use crate::{attribute::refusal::AttributeRefusal, required_value::RequiredValue};
     use cassiopeia_geometry::{error::GeometryError, target::GeometryTarget};
-    use cassiopeia_mapping::conversion::value_reading::{IdentifierReading, TemporalReading, ValueReading};
-    use cassiopeia_ngsi_ld::value::json_payload_error::{JsonPayloadError, JsonShape};
+    use cassiopeia_mapping::conversion::value_reading::{IdentifierReading, ValueReading};
+    use cassiopeia_ngsi_ld::value::{
+        json_payload_error::{JsonPayloadError, JsonShape},
+        types::TemporalValueType,
+    };
     use pretty_assertions::assert_eq;
 
     #[test]
@@ -129,7 +132,7 @@ mod tests {
     #[test]
     fn a_temporal_reading_refuses_as_an_unreadable_timestamp() {
         assert_eq!(
-            AttributeRefusal::unreadable(ValueReading::Temporal(TemporalReading::Date), "nope"),
+            AttributeRefusal::unreadable(ValueReading::Temporal(TemporalValueType::Date), "nope"),
             AttributeRefusal::UnreadableTimestamp { text: Box::from("nope") }
         );
     }

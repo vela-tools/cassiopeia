@@ -2,11 +2,13 @@ pub(crate) mod attribute_conversion;
 pub(crate) mod geo_property;
 pub(crate) mod identifier;
 pub(crate) mod json_property;
+pub(crate) mod json_text;
 pub(crate) mod language_property;
 pub(crate) mod list_property;
+pub(crate) mod part_merge;
 pub(crate) mod property;
 pub(crate) mod read_context;
-pub(crate) mod readers;
+pub(crate) mod source_parts;
 pub(crate) mod value_admission;
 pub(crate) mod value_read;
 pub(crate) mod value_reading;
@@ -20,7 +22,7 @@ use crate::attribute::{
         attribute_conversion::ConversionOutput,
         language_property::{LanguageMapConversion, LanguageTextConversion},
         read_context::ReadContext,
-        readers::SourceParts,
+        source_parts::SourceParts,
     },
     refusal::AttributeRefusal,
 };

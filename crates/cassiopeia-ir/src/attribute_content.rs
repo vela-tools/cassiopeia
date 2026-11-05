@@ -2,7 +2,7 @@ use cassiopeia_ngsi_ld::{
     entity::attribute::language_property::LanguageMap,
     value::{json_payload::JsonPayload, types::Value},
 };
-use derive_more::From;
+use derive_more::{From, TryUnwrap};
 use iri_rs::IriBuf;
 use serde::{Deserialize, Serialize};
 use serde_json::Value as JsonValue;
@@ -16,7 +16,7 @@ use serde_json::Value as JsonValue;
 /// reach the transformer as something it would have to drop. Every other kind carries an NGSI-LD
 /// Value, in which no null can sit (clause 4.5.0). Each travels apart so none can stand in for
 /// another.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, From)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, From, TryUnwrap)]
 pub enum AttributeContent {
     /// The NGSI-LD Value of a Property, one of its subclasses not listed below, or a Relationship's
     /// object.
@@ -79,6 +79,15 @@ mod tests {
     #[test]
     fn a_value_content_exposes_its_value() {
         assert_eq!(AttributeContent::Value(Value::Boolean(true)).as_value(), Some(&Value::Boolean(true)));
+    }
+
+    #[test]
+    fn content_unwraps_into_what_it_holds_and_refuses_another_kind() {
+        assert_eq!(
+            AttributeContent::Value(Value::Boolean(true)).try_unwrap_value().ok(),
+            Some(Value::Boolean(true))
+        );
+        assert!(AttributeContent::Value(Value::Boolean(true)).try_unwrap_json().is_err());
     }
 
     #[test]

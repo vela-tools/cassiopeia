@@ -1,5 +1,5 @@
 use crate::attribute::{
-    conversion::{self, attribute_conversion::ConversionOutput, read_context::ReadContext, readers::SourceParts},
+    conversion::{self, attribute_conversion::ConversionOutput, read_context::ReadContext, source_parts::SourceParts},
     declaration_output::DeclarationOutput,
     declaration_trail::{DeclarationTrail, Nesting},
     metadata::MetadataExtractor,

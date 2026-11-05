@@ -1,6 +1,6 @@
 use crate::value::{
     parsing::parse_float,
-    types::{Number, TemporalValue},
+    types::{Number, TemporalValue, TemporalValueType},
 };
 use chrono::{DateTime, NaiveDate, NaiveDateTime, TimeZone, Utc};
 use jiff::{Timestamp, Zoned};
@@ -91,6 +91,17 @@ fn space_separated_candidates(s: &str) -> &'static [SpaceSeparated] {
 }
 
 impl TemporalValue {
+    /// The time value of the data type `kind` names at `instant` (ETSI GS CIM 009 v1.9.1 clause
+    /// 4.6.3).
+    #[must_use]
+    pub const fn new(kind: TemporalValueType, instant: DateTime<Utc>) -> TemporalValue {
+        match kind {
+            TemporalValueType::DateTime => TemporalValue::DateTime(instant),
+            TemporalValueType::Date => TemporalValue::Date(instant),
+            TemporalValueType::Time => TemporalValue::Time(instant),
+        }
+    }
+
     /// Attempts to parse a string into a `TemporalValue` using heuristics.
     ///
     /// A byte-shape pre-dispatch inspects the separators the input actually carries and tries only

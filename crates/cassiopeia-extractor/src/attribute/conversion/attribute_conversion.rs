@@ -1,5 +1,5 @@
 use crate::attribute::{
-    conversion::{read_context::ReadContext, readers::SourceParts},
+    conversion::{read_context::ReadContext, source_parts::SourceParts},
     refusal::AttributeRefusal,
 };
 use cassiopeia_ir::attribute_content::AttributeContent;

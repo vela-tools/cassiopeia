@@ -122,14 +122,17 @@ mod tests {
             json_conversion::JsonConversion,
             list_conversion::ListConversion,
             property_conversion::PropertyConversion,
-            value_reading::{IdentifierReading, TemporalReading, ValueReading},
+            value_reading::{IdentifierReading, ValueReading},
         },
         error::MappingError,
         mapping::Mapping,
         template::runner::TemplateRunner,
     };
     use cassiopeia_geometry::{geometry::GeometryKind, target::GeometryTarget};
-    use cassiopeia_ngsi_ld::entity::{attribute::NgsiLdAttributeKind, name::NameBuf};
+    use cassiopeia_ngsi_ld::{
+        entity::{attribute::NgsiLdAttributeKind, name::NameBuf},
+        value::types::TemporalValueType,
+    };
     use pretty_assertions::assert_eq;
     use std::path::Path;
 
@@ -857,7 +860,9 @@ mod tests {
             .and_then(|properties| properties.get(&NameBuf::new("observedAt").unwrap()));
         assert_eq!(
             observed_at.map(Attribute::conversion),
-            Some(Conversion::Property(PropertyConversion::One(ValueReading::Temporal(TemporalReading::DateTime))))
+            Some(Conversion::Property(PropertyConversion::One(ValueReading::Temporal(
+                TemporalValueType::DateTime
+            ))))
         );
         let label = attribute(&mapping, "label");
         assert_eq!(label.conversion(), Conversion::LanguageProperty);

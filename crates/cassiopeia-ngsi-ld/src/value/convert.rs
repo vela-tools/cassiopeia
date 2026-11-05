@@ -3,7 +3,7 @@ use crate::value::{
     non_finite_float::NonFiniteFloat,
     null_in_json::NullInJson,
     omitted_nulls::OmittedNulls,
-    types::{Number, TemporalValue, Value, ValueObject},
+    types::{Number, TemporalValue, TemporalValueType, Value, ValueObject},
 };
 use chrono::{DateTime, Utc};
 use compact_str::CompactString;
@@ -26,6 +26,25 @@ impl Value {
         parsed.map(|t| match t {
             TemporalValue::DateTime(dt) | TemporalValue::Date(dt) | TemporalValue::Time(dt) => dt,
         })
+    }
+
+    /// Reads the value as a time value of the data type `kind` names (ETSI GS CIM 009 v1.9.1 clause
+    /// 4.6.3): the instant it parses to (see [`Value::try_parse_datetime`]), or `None` when it
+    /// carries none.
+    #[must_use]
+    pub fn to_temporal(&self, kind: TemporalValueType) -> Option<TemporalValue> {
+        self.try_parse_datetime().map(|instant| TemporalValue::new(kind, instant))
+    }
+
+    /// Writes the value as text: text as it is, and any other value as its compact JSON text.
+    #[must_use]
+    pub fn into_text(self) -> CompactString {
+        match self {
+            Value::String(text) => text,
+            other @ (Value::Boolean(_) | Value::Number(_) | Value::Temporal(_) | Value::Geospatial(_) | Value::Array(_) | Value::Object(_)) => {
+                CompactString::from(other.to_string())
+            }
+        }
     }
 }
 
@@ -159,7 +178,7 @@ mod tests {
         non_finite_float::NonFiniteFloat,
         null_in_json::NullInJson,
         omitted_nulls::OmittedNulls,
-        types::{Number, TemporalValue, Value},
+        types::{Number, TemporalValue, TemporalValueType, Value},
     };
     use cassiopeia_geometry::geometry::NgsiLdGeometry;
     use chrono::{TimeZone, Utc};
@@ -190,6 +209,23 @@ mod tests {
             Value::try_from(json!(1_775_253_620.5)).unwrap().try_parse_datetime(),
             Value::try_from(json!("1775253620.5")).unwrap().try_parse_datetime()
         );
+    }
+
+    #[test]
+    fn a_value_reads_as_a_time_value_of_the_named_data_type() {
+        let instant = Utc.with_ymd_and_hms(2026, 4, 3, 22, 0, 20).unwrap();
+        let text = Value::try_from(json!("2026-04-03T22:00:20Z")).unwrap();
+
+        assert_eq!(text.to_temporal(TemporalValueType::Date), Some(TemporalValue::Date(instant)));
+        assert_eq!(text.to_temporal(TemporalValueType::Time), Some(TemporalValue::Time(instant)));
+        assert_eq!(Value::Boolean(true).to_temporal(TemporalValueType::DateTime), None);
+    }
+
+    #[test]
+    fn a_value_is_written_as_its_text_or_its_compact_json_text() {
+        assert_eq!(Value::String(CompactString::from(" a ")).into_text(), " a ");
+        assert_eq!(Value::Boolean(true).into_text(), "true");
+        assert_eq!(Value::try_from(json!({"a": [1, 2]})).unwrap().into_text(), r#"{"a":[1,2]}"#);
     }
 
     #[test]

@@ -1,6 +1,6 @@
 use crate::{
     attribute::{
-        conversion::{attribute_conversion::AttributeConversion, identifier::Identifier, read_context::ReadContext, readers::SourceParts, value_reading},
+        conversion::{attribute_conversion::AttributeConversion, identifier::Identifier, read_context::ReadContext, source_parts::SourceParts, value_reading},
         refusal::AttributeRefusal,
     },
     required_value::RequiredValue,

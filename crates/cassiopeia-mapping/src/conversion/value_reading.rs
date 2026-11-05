@@ -1,16 +1,6 @@
 use crate::transformation::Transformation;
 use cassiopeia_geometry::target::GeometryTarget;
-
-/// Which temporal NGSI-LD value a reading produces (ETSI GS CIM 009 v1.9.1 clause 4.6.3).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum TemporalReading {
-    /// A date and time.
-    DateTime,
-    /// A date without a time.
-    Date,
-    /// A time without a date.
-    Time,
-}
+use cassiopeia_ngsi_ld::value::types::TemporalValueType;
 
 /// Which identifier an identifier reading parses and normalizes.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -33,8 +23,8 @@ pub enum ValueReading {
     Float,
     /// Text: text as it is, and any other value as its compact JSON text.
     Text,
-    /// A date, a time, or both.
-    Temporal(TemporalReading),
+    /// A time value of the data type it names (ETSI GS CIM 009 v1.9.1 clause 4.6.3).
+    Temporal(TemporalValueType),
     /// An identifier, parsed from text and written in its normal form.
     Identifier(IdentifierReading),
     /// A JSON object, or the object its JSON text spells.
@@ -59,9 +49,9 @@ impl ValueReading {
             Transformation::Urn => Some(ValueReading::Identifier(IdentifierReading::Urn)),
             Transformation::Object => Some(ValueReading::Object),
             Transformation::Json => Some(ValueReading::Json),
-            Transformation::DateTime => Some(ValueReading::Temporal(TemporalReading::DateTime)),
-            Transformation::Date => Some(ValueReading::Temporal(TemporalReading::Date)),
-            Transformation::Time => Some(ValueReading::Temporal(TemporalReading::Time)),
+            Transformation::DateTime => Some(ValueReading::Temporal(TemporalValueType::DateTime)),
+            Transformation::Date => Some(ValueReading::Temporal(TemporalValueType::Date)),
+            Transformation::Time => Some(ValueReading::Temporal(TemporalValueType::Time)),
             Transformation::Array => None,
             Transformation::Geometry
             | Transformation::Point
@@ -111,17 +101,18 @@ impl ValueReading {
 #[cfg(test)]
 mod tests {
     use crate::{
-        conversion::value_reading::{IdentifierReading, TemporalReading, ValueReading},
+        conversion::value_reading::{IdentifierReading, ValueReading},
         transformation::Transformation,
     };
     use cassiopeia_geometry::{geometry::GeometryKind, target::GeometryTarget};
+    use cassiopeia_ngsi_ld::value::types::TemporalValueType;
     use pretty_assertions::assert_eq;
     use strum::IntoEnumIterator;
 
     #[test]
     fn each_transformation_but_array_names_its_reading() {
         assert_eq!(ValueReading::of(Transformation::String), Some(ValueReading::Text));
-        assert_eq!(ValueReading::of(Transformation::Date), Some(ValueReading::Temporal(TemporalReading::Date)));
+        assert_eq!(ValueReading::of(Transformation::Date), Some(ValueReading::Temporal(TemporalValueType::Date)));
         assert_eq!(
             ValueReading::of(Transformation::Geometry),
             Some(ValueReading::Geometry(GeometryTarget::Preserve))

@@ -234,12 +234,12 @@ mod tests {
             json_conversion::JsonConversion,
             list_conversion::ListConversion,
             property_conversion::PropertyConversion,
-            value_reading::{IdentifierReading, TemporalReading, ValueReading},
+            value_reading::{IdentifierReading, ValueReading},
         },
         transformation::Transformation,
     };
     use cassiopeia_geometry::{geometry::GeometryKind, target::GeometryTarget};
-    use cassiopeia_ngsi_ld::entity::attribute::NgsiLdAttributeKind;
+    use cassiopeia_ngsi_ld::{entity::attribute::NgsiLdAttributeKind, value::types::TemporalValueType};
     use pretty_assertions::assert_eq;
     use std::collections::HashSet;
     use strum::IntoEnumIterator;
@@ -393,7 +393,7 @@ mod tests {
             (
                 NgsiLdAttributeKind::Property,
                 Transformation::DateTime,
-                Conversion::Property(PropertyConversion::One(ValueReading::Temporal(TemporalReading::DateTime))),
+                Conversion::Property(PropertyConversion::One(ValueReading::Temporal(TemporalValueType::DateTime))),
             ),
             (
                 NgsiLdAttributeKind::Property,

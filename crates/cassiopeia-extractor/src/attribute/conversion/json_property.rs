@@ -2,8 +2,10 @@ use crate::{
     attribute::{
         conversion::{
             attribute_conversion::AttributeConversion,
+            json_text,
+            part_merge::{self, PartMerge},
             read_context::ReadContext,
-            readers::{self, SourceParts},
+            source_parts::SourceParts,
         },
         refusal::AttributeRefusal,
     },
@@ -16,7 +18,7 @@ use serde_json::Value as JsonValue;
 /// A `JsonProperty`'s `json` member, raw JSON that NGSI-LD never interprets (ETSI GS CIM 009 v1.9.1
 /// clause 4.5.24.2), so every null nested in it is kept as the source has it.
 ///
-/// Naming no transformation keeps the parts as the source held them (see [`readers::keep_as_read`]);
+/// Naming no transformation keeps the parts as the source held them (see [`part_merge::keep_as_read`]);
 /// `json` does so after reading each text part as the JSON it is written as; `object` keeps an
 /// object, or reads one from its text, and keeps it even when empty; and `array` gathers every part
 /// into one list. Reading refuses text that is not the JSON the conversion asks for, or, under
@@ -28,12 +30,13 @@ impl AttributeConversion for JsonConversion {
 
     fn read(self, parts: SourceParts, _ctx: &mut ReadContext<'_>) -> Result<Option<JsonValue>, AttributeRefusal> {
         match self {
-            JsonConversion::Verbatim => Ok(readers::keep_as_read(parts)),
-            JsonConversion::Json => Ok(readers::keep_as_read(readers::decode_parts(parts)?)),
-            JsonConversion::Object => Ok(readers::merge_text(parts)
-                .map_or(Ok(None), |value| readers::read_object(value, RequiredValue::JsonObject))?
+            JsonConversion::Verbatim => Ok(part_merge::keep_as_read(parts)),
+            JsonConversion::Json => Ok(part_merge::keep_as_read(json_text::decode_parts(parts)?)),
+            JsonConversion::Object => Ok(PartMerge::Text
+                .merge(parts)
+                .map_or(Ok(None), |value| json_text::read_object(value, RequiredValue::JsonObject))?
                 .map(JsonValue::Object)),
-            JsonConversion::Array => Ok(readers::aggregate(parts).map(JsonValue::Array)),
+            JsonConversion::Array => Ok(part_merge::aggregate(parts).map(JsonValue::Array)),
         }
     }
 

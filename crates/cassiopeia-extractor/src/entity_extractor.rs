@@ -144,19 +144,14 @@ mod tests {
         template_site::TemplateSite,
     };
     use cassiopeia_ngsi_ld::{
-        entity::{
-            attribute::{NgsiLdAttributeKind, language_property::LanguageMap},
-            name::NameBuf,
-        },
+        entity::{attribute::NgsiLdAttributeKind, name::NameBuf},
         value::{
             json_payload_error::{JsonPayloadError, JsonShape},
-            types::{Number, TemporalValue, Value},
+            types::{Number, Value},
         },
     };
     use cassiopeia_unreadable_timestamps::{attribute_loss::AttributeLoss, timestamp_loss::TimestampLoss};
-    use chrono::{TimeZone, Utc};
     use iri_rs::IriBuf;
-    use langtag::LangTagBuf;
     use pretty_assertions::assert_eq;
     use serde_json::{Value as JsonValue, json};
     use std::{path::Path, sync::Arc};
@@ -243,25 +238,6 @@ mod tests {
     }
 
     #[test]
-    fn a_float_attribute_is_resolved_and_typed() {
-        let (resolver, mapping) = prepare(
-            r#"{
-                version: "v4",
-                dataModel: "Sensor",
-                identity: { entityName: "Sensor-{{ id }}" },
-                attributes: { temperature: { source: "{{ temperature }}", transformation: "float" } },
-            }"#,
-        );
-        let extractor = EntityExtractor::new(resolver);
-        let mapped = AssembledEntity::from_single(entity("urn:ngsi-ld:Sensor:001", json!({"id": "001", "temperature": 25.5})), mapping);
-
-        let (result, _) = extractor.extract(mapped, &DroppedAttributes::new()).unwrap().into_parts();
-        let values = result.values().as_ref().expect("values set");
-
-        assert_eq!(values.get(&name("temperature")), Some(&single(Value::try_from(25.5).unwrap())));
-    }
-
-    #[test]
     fn a_refused_geometry_drops_its_attribute_keeps_the_entity_and_records_the_refusal() {
         let (resolver, mapping) = prepare(
             r#"{
@@ -302,45 +278,6 @@ mod tests {
     }
 
     #[test]
-    fn every_supported_timestamp_spelling_resolves_to_the_same_instant() {
-        let (resolver, mapping) = prepare(
-            r#"{
-                version: "v4",
-                dataModel: "Sensor",
-                identity: { entityName: "Sensor-{{ id }}" },
-                attributes: { reading: { source: "{{ ts }}", transformation: "datetime" } },
-            }"#,
-        );
-        let extractor = EntityExtractor::new(resolver);
-        let dropped = DroppedAttributes::new();
-
-        // Spellings a source may use for the same instant, including two with a UTC offset on a
-        // space-separated (non-`T`) timestamp.
-        for spelling in [
-            "2026-03-01 11:04:35+00:00",
-            "2026-03-01 11:04:35+0000",
-            "2026-03-01T11:04:35+00:00",
-            "2026-03-01T11:04:35Z",
-            "2026-03-01 11:04:35",
-            "2026-03-01 13:04:35+02:00",
-        ] {
-            let record = json!({"id": "001", "ts": spelling});
-            let mapped = AssembledEntity::from_single(entity("urn:ngsi-ld:Sensor:001", record), Arc::clone(&mapping));
-            let (result, _) = extractor.extract(mapped, &dropped).unwrap().into_parts();
-            let values = result.values().as_ref().expect("values set").clone();
-
-            let expected = TemporalValue::DateTime(Utc.with_ymd_and_hms(2026, 3, 1, 11, 4, 35).unwrap());
-            assert_eq!(
-                values.get(&name("reading")),
-                Some(&single(Value::Temporal(expected))),
-                "mismatch for {spelling:?}"
-            );
-        }
-
-        assert!(dropped.timestamps.is_empty());
-    }
-
-    #[test]
     fn an_unreadable_timestamp_drops_its_attribute_keeps_the_entity_and_records_the_text() {
         let (resolver, mapping) = prepare(
             r#"{
@@ -376,26 +313,6 @@ mod tests {
         );
         assert_eq!(entries[0].1.example.as_ref(), "the third of March");
         assert_eq!(entries[0].1.occurrences.get(), 1);
-    }
-
-    #[test]
-    fn a_blank_timestamp_is_an_absent_value_rather_than_an_unreadable_one() {
-        let (resolver, mapping) = prepare(
-            r#"{
-                version: "v4",
-                dataModel: "Sensor",
-                identity: { entityName: "Sensor-{{ id }}" },
-                attributes: { reading: { source: "{{ ts }}", transformation: "datetime" } },
-            }"#,
-        );
-        let extractor = EntityExtractor::new(resolver);
-        let dropped = DroppedAttributes::new();
-
-        let mapped = AssembledEntity::from_single(entity("urn:ngsi-ld:Sensor:001", json!({"id": "001", "ts": ""})), mapping);
-        let (result, _) = extractor.extract(mapped, &dropped).unwrap().into_parts();
-
-        assert!(!result.values().as_ref().expect("values set").contains_key(&name("reading")));
-        assert!(dropped.timestamps.is_empty());
     }
 
     #[test]
@@ -740,39 +657,6 @@ mod tests {
         (result.values().as_ref().and_then(|values| values.get("name")).cloned(), dropped)
     }
 
-    /// A `languageMap` holding `entries`, each a language tag and its text.
-    fn language_map(entries: &[(&str, &str)]) -> LanguageMap {
-        entries
-            .iter()
-            .map(|(tag, text)| (LangTagBuf::new((*tag).to_owned()).unwrap(), (*text).to_owned()))
-            .collect()
-    }
-
-    #[test]
-    fn a_language_property_reads_an_object_of_tagged_text_by_default() {
-        let (resolved, dropped) = resolve_language_source(&json!({"en": "Hello", "de": "Hallo"}));
-
-        assert_eq!(
-            resolved,
-            Some(ResolvedAttribute::Single(AttributeContent::Language(language_map(&[
-                ("en", "Hello"),
-                ("de", "Hallo")
-            ]))))
-        );
-        assert!(dropped.unusable_values.is_empty());
-    }
-
-    #[test]
-    fn a_language_property_reads_the_json_text_of_its_map_by_default() {
-        let (resolved, dropped) = resolve_language_source(&json!(r#"{"en":"Hello"}"#));
-
-        assert_eq!(
-            resolved,
-            Some(ResolvedAttribute::Single(AttributeContent::Language(language_map(&[("en", "Hello")]))))
-        );
-        assert!(dropped.unusable_values.is_empty());
-    }
-
     #[test]
     fn plain_text_on_a_language_property_is_refused_as_no_language_map() {
         let (resolved, dropped) = resolve_language_source(&json!("Hello"));
@@ -783,43 +667,6 @@ mod tests {
             .map(|(unusable, record)| (unusable.attribute.to_string(), unusable.required, record.example.to_string()))
             .collect::<Vec<_>>();
         assert_eq!(recorded, [("name".to_owned(), RequiredValue::LanguageMap, "Hello".to_owned())]);
-    }
-
-    #[test]
-    fn a_blank_language_property_source_is_absent_rather_than_refused() {
-        let (resolved, dropped) = resolve_language_source(&json!("  "));
-
-        assert_eq!(resolved, None);
-        assert!(dropped.unusable_values.is_empty());
-    }
-
-    #[test]
-    fn a_language_property_read_whole_under_an_object_transformation_becomes_its_language_map() {
-        let (resolver, mapping) = prepare(
-            r#"{
-                version: "v4",
-                dataModel: "Museum",
-                identity: { entityName: "M-{{ id }}" },
-                attributes: {
-                    name: { type: "LanguageProperty", transformation: "object", source: "{{ names }}" },
-                },
-            }"#,
-        );
-        let extractor = EntityExtractor::new(resolver);
-        let mapped = AssembledEntity::from_single(
-            entity("urn:ngsi-ld:Museum:1", json!({"id": "1", "names": {"fr": "Musée", "nl": "Museum"}})),
-            mapping,
-        );
-        let dropped = DroppedAttributes::new();
-
-        let (result, _) = extractor.extract(mapped, &dropped).unwrap().into_parts();
-
-        let ResolvedAttribute::Single(AttributeContent::Language(map)) = result.values().as_ref().and_then(|values| values.get("name")).expect("name resolved")
-        else {
-            panic!("expected a language map");
-        };
-        assert_eq!(map.len(), 2);
-        assert!(dropped.unusable_values.is_empty());
     }
 
     #[test]
@@ -1621,27 +1468,6 @@ mod tests {
     }
 
     #[test]
-    fn an_array_text_column_becomes_the_array_it_encodes_without_decoding_in_the_template() {
-        let (value, _) = extract_dafif_code("{{ this[2] }}", "array", &json!(r#"["BS","IN"]"#));
-
-        assert_eq!(value, Some(Value::try_from(json!(["BS", "IN"])).unwrap()));
-    }
-
-    #[test]
-    fn an_object_text_column_becomes_the_object_it_encodes_without_decoding_in_the_template() {
-        let (value, _) = extract_dafif_code("{{ this[2] }}", "object", &json!(r#"{"a":1}"#));
-
-        assert_eq!(value, Some(Value::try_from(json!({"a": 1})).unwrap()));
-    }
-
-    #[test]
-    fn a_json_text_column_becomes_the_number_it_encodes() {
-        let (value, _) = extract_dafif_code("{{ this[2] }}", "json", &json!("12.5"));
-
-        assert_eq!(value, Some(Value::try_from(12.5).unwrap()));
-    }
-
-    #[test]
     fn a_column_that_is_not_json_under_the_json_transformation_drops_the_attribute_and_is_recorded() {
         let (value, dropped) = extract_dafif_code("{{ this[2] }}", "json", &json!("BS IN"));
 
@@ -1651,43 +1477,6 @@ mod tests {
             .map(|(unusable, record)| (unusable.attribute.to_string(), unusable.required, record.example.to_string()))
             .collect::<Vec<_>>();
         assert_eq!(recorded, [("dafifCode".to_owned(), RequiredValue::Json, "BS IN".to_owned())]);
-    }
-
-    #[test]
-    fn json_and_list_properties_read_csv_text_as_the_json_it_encodes() {
-        let (resolver, mapping) = prepare(
-            r#"{
-                version: "v4",
-                dataModel: "Stop",
-                identity: { entityName: "{{ id }}" },
-                attributes: {
-                    pollutantIndex: { type: "JsonProperty", source: "{{ indices }}", transformation: "json" },
-                    nextCountdowns: { type: "ListProperty", source: "{{ countdowns }}" },
-                },
-            }"#,
-        );
-        let extractor = EntityExtractor::new(resolver);
-        let mapped = AssembledEntity::from_single(
-            entity(
-                "urn:ngsi-ld:Stop:A",
-                json!({"id": "A", "indices": r#"{"no2":3,"pm10":null}"#, "countdowns": "[1,7,15]"}),
-            ),
-            mapping,
-        );
-        let dropped = DroppedAttributes::new();
-
-        let (result, _) = extractor.extract(mapped, &dropped).unwrap().into_parts();
-
-        let values = result.values().as_ref().expect("values set");
-        let Some(ResolvedAttribute::Single(AttributeContent::Json(payload))) = values.get(&name("pollutantIndex")).cloned() else {
-            panic!("raw JSON");
-        };
-        assert_eq!(JsonValue::from(payload), json!({"no2": 3, "pm10": null}));
-        assert_eq!(
-            single_value(values.get(&name("nextCountdowns")).cloned()),
-            Some(Value::try_from(json!([1, 7, 15])).unwrap())
-        );
-        assert!(dropped.nulls.is_empty());
     }
 
     /// Extracts the `label` attribute that the JSON5 attribute `declaration` builds over one record.
@@ -1806,72 +1595,6 @@ mod tests {
         assert_eq!(BatchSink::from(dropped.templates).into_entries().collect::<Vec<_>>()[0].0, name("owner"));
     }
 
-    #[test]
-    fn a_field_array_source_is_kept_as_it_is_under_an_array_transformation() {
-        let (resolver, mapping) = prepare(
-            r#"{
-                version: "v4",
-                dataModel: "Product",
-                identity: { entityName: "Product-{{ id }}" },
-                attributes: { labels: { source: "{{ labels_tags }}", transformation: "array" } },
-            }"#,
-        );
-        let extractor = EntityExtractor::new(resolver);
-        let record = json!({"id": "1", "labels_tags": ["en:organic", "", "en:vegan"]});
-
-        let mapped = AssembledEntity::from_single(entity("urn:ngsi-ld:Product:1", record), mapping);
-        let (result, _) = extractor.extract(mapped, &DroppedAttributes::new()).unwrap().into_parts();
-
-        assert_eq!(
-            result.values().as_ref().expect("values set").get(&name("labels")),
-            Some(&single(Value::try_from(json!(["en:organic", "", "en:vegan"])).unwrap()))
-        );
-    }
-
-    #[test]
-    fn a_multi_part_source_collects_one_element_per_part_under_an_array_transformation() {
-        let (resolver, mapping) = prepare(
-            r#"{
-                version: "v4",
-                dataModel: "Product",
-                identity: { entityName: "Product-{{ id }}" },
-                attributes: { codes: { source: ["{{ a }}", "{{ b }}"], transformation: "array" } },
-            }"#,
-        );
-        let extractor = EntityExtractor::new(resolver);
-
-        let mapped = AssembledEntity::from_single(entity("urn:ngsi-ld:Product:1", json!({"id": "1", "a": "X", "b": 2})), mapping);
-        let (result, _) = extractor.extract(mapped, &DroppedAttributes::new()).unwrap().into_parts();
-
-        assert_eq!(
-            result.values().as_ref().expect("values set").get(&name("codes")),
-            Some(&single(Value::try_from(json!(["X", 2])).unwrap()))
-        );
-    }
-
-    #[test]
-    fn a_list_property_without_a_transformation_takes_a_field_array_as_its_list() {
-        let value = extract_label(r#"{ type: "ListProperty", source: "{{ codes }}" }"#, json!({"codes": ["BS", "IN"]}));
-
-        assert_eq!(value, Some(Value::try_from(json!(["BS", "IN"])).unwrap()));
-    }
-
-    #[test]
-    fn a_list_property_without_a_transformation_wraps_a_scalar_field_as_a_one_element_list() {
-        let value = extract_label(r#"{ type: "ListProperty", source: "{{ codes }}" }"#, json!({"codes": "BS"}));
-
-        assert_eq!(value, Some(Value::try_from(json!(["BS"])).unwrap()));
-    }
-
-    #[test]
-    fn a_list_property_without_a_transformation_over_a_blank_or_null_field_is_absent() {
-        for codes in [json!(""), JsonValue::Null] {
-            let value = extract_label(r#"{ type: "ListProperty", source: "{{ codes }}" }"#, json!({"codes": codes}));
-
-            assert_eq!(value, None);
-        }
-    }
-
     /// The raw JSON a `JsonProperty` declaration resolves to over one record, with the losses
     /// recorded.
     fn resolve_json_label(declaration: &str, record: JsonValue) -> (Option<JsonValue>, DroppedAttributes) {
@@ -1890,28 +1613,6 @@ mod tests {
     }
 
     #[test]
-    fn a_json_property_without_a_transformation_keeps_a_field_object_as_it_is() {
-        let (payload, _) = resolve_json_label(r#"{ type: "JsonProperty", source: "{{ payload }}" }"#, json!({"payload": {"a": 1, "b": ["x"]}}));
-
-        assert_eq!(payload, Some(json!({"a": 1, "b": ["x"]})));
-    }
-
-    #[test]
-    fn a_json_property_without_a_transformation_keeps_a_field_array_as_it_is() {
-        let (payload, _) = resolve_json_label(r#"{ type: "JsonProperty", source: "{{ payload }}" }"#, json!({"payload": [{"a": 1}, {"b": 2}]}));
-
-        assert_eq!(payload, Some(json!([{"a": 1}, {"b": 2}])));
-    }
-
-    #[test]
-    fn a_json_property_keeps_a_null_nested_in_its_source_and_records_no_loss() {
-        let (payload, dropped) = resolve_json_label(r#"{ type: "JsonProperty", source: "{{ payload }}" }"#, json!({"payload": {"maybe": null}}));
-
-        assert_eq!(payload, Some(json!({"maybe": null})));
-        assert!(dropped.nulls.is_empty());
-    }
-
-    #[test]
     fn a_json_property_over_a_scalar_field_is_dropped_and_its_refusal_recorded() {
         let (payload, dropped) = resolve_json_label(r#"{ type: "JsonProperty", source: "{{ payload }}" }"#, json!({"payload": 3.5}));
 
@@ -1920,17 +1621,6 @@ mod tests {
         assert_eq!(entries.len(), 1);
         assert_eq!(entries[0].0.attribute, name("label"));
         assert_eq!(entries[0].0.refusal, JsonPayloadError::NotAnObject { found: JsonShape::Number });
-    }
-
-    #[test]
-    fn a_json_property_under_an_object_transformation_carries_the_object_with_its_nulls_and_records_no_loss() {
-        let (payload, dropped) = resolve_json_label(
-            r#"{ type: "JsonProperty", source: "{{ payload }}", transformation: "object" }"#,
-            json!({"payload": {"a": 1, "b": null}}),
-        );
-
-        assert_eq!(payload, Some(json!({"a": 1, "b": null})));
-        assert!(dropped.nulls.is_empty());
     }
 
     #[test]
@@ -2060,48 +1750,11 @@ mod tests {
         );
     }
 
-    #[test]
-    fn a_property_over_an_empty_string_field_keeps_the_empty_string() {
-        let value = extract_label(r#"{ source: "{{ label }}" }"#, json!({"label": ""}));
-
-        assert_eq!(value, Some(Value::String("".into())));
-    }
-
-    #[test]
-    fn a_property_without_a_transformation_still_turns_a_field_array_into_compact_json_text() {
-        let value = extract_label(r#"{ source: "{{ codes }}" }"#, json!({"codes": ["BS", "IN"]}));
-
-        assert_eq!(value, Some(Value::String(r#"["BS","IN"]"#.into())));
-    }
-
     /// The `Point` geometry at `coordinates`, as the extraction stage types it.
     fn point(coordinates: [f64; 2]) -> Value {
         Value::Geospatial(Box::new(NgsiLdGeometry::Point {
             coordinates: coordinates.into(),
         }))
-    }
-
-    #[test]
-    fn a_geo_property_without_a_transformation_keeps_a_geojson_point_field_as_its_geometry() {
-        let dropped = DroppedAttributes::new();
-        let value = extract_label_recording(
-            r#"{ type: "GeoProperty", source: "{{ geometry }}" }"#,
-            json!({"geometry": {"type": "Point", "coordinates": [14.5, 46.05]}}),
-            &dropped,
-        );
-
-        assert_eq!(value, Some(point([14.5, 46.05])));
-        assert!(dropped.geometries.is_empty());
-    }
-
-    #[test]
-    fn a_geo_property_without_a_transformation_reads_a_geojson_geometry_written_as_text() {
-        let value = extract_label(
-            r#"{ type: "GeoProperty", source: "{{ geometry }}" }"#,
-            json!({"geometry": r#"{"type":"Point","coordinates":[14.5,46.05]}"#}),
-        );
-
-        assert_eq!(value, Some(point([14.5, 46.05])));
     }
 
     #[test]
@@ -2319,16 +1972,6 @@ mod tests {
     }
 
     #[test]
-    fn an_object_assembled_from_nested_mappings_under_a_conversion_reading_no_geometry_is_kept_as_assembled() {
-        let value = extract_label(
-            r#"{ transformation: "object", mappings: { street: { source: "{{ street }}" } } }"#,
-            json!({"street": "Trubarjeva"}),
-        );
-
-        assert_eq!(value, Some(Value::try_from(json!({"street": "Trubarjeva"})).unwrap()));
-    }
-
-    #[test]
     fn an_object_assembled_from_nested_mappings_without_a_transformation_is_kept_as_assembled() {
         let value = extract_label(
             r#"{ mappings: { street: { source: "{{ street }}" }, city: { source: "{{ city }}" } } }"#,
@@ -2336,50 +1979,6 @@ mod tests {
         );
 
         assert_eq!(value, Some(Value::try_from(json!({"street": "Ring", "city": "Wien"})).unwrap()));
-    }
-
-    #[test]
-    fn an_object_assembled_from_nested_mappings_under_a_string_transformation_becomes_its_compact_json_text() {
-        let value = extract_label(
-            r#"{ transformation: "string", mappings: { street: { source: "{{ street }}" }, city: { source: "{{ city }}" } } }"#,
-            json!({"street": "Ring", "city": "Wien"}),
-        );
-
-        assert_eq!(value, Some(Value::String(r#"{"street":"Ring","city":"Wien"}"#.into())));
-    }
-
-    #[test]
-    fn an_object_assembled_from_nested_mappings_under_an_array_transformation_becomes_a_list_of_the_object() {
-        let value = extract_label(
-            r#"{ transformation: "array", mappings: { street: { source: "{{ street }}" } } }"#,
-            json!({"street": "Ring"}),
-        );
-
-        assert_eq!(value, Some(Value::try_from(json!([{"street": "Ring"}])).unwrap()));
-    }
-
-    #[test]
-    fn an_object_assembled_from_nested_mappings_under_the_json_transformation_is_kept_as_assembled() {
-        let value = extract_label(
-            r#"{ transformation: "json", mappings: { street: { source: "{{ street }}" } } }"#,
-            json!({"street": "Ring"}),
-        );
-
-        assert_eq!(value, Some(Value::try_from(json!({"street": "Ring"})).unwrap()));
-    }
-
-    #[test]
-    fn a_point_assembled_from_nested_mappings_under_a_multipoint_transformation_becomes_a_multipoint() {
-        let value = extract_label(
-            r#"{
-                transformation: "multipoint",
-                mappings: { type: { source: "Point" }, coordinates: { source: ["{{ lon }}", "{{ lat }}"], transformation: "array" } },
-            }"#,
-            json!({"lon": 16.37, "lat": 48.2}),
-        );
-
-        let expected: NgsiLdGeometry = serde_json::from_value(json!({"type": "MultiPoint", "coordinates": [[16.37, 48.2]]})).unwrap();
-        assert_eq!(value, Some(Value::Geospatial(Box::new(expected))));
     }
 
     /// Extracts `label` over one record and returns it with every unusable value the extraction

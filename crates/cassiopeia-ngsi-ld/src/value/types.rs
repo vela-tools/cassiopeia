@@ -77,7 +77,7 @@ pub enum Number {
 /// Its variant names the data type, which [`TemporalValueType`] carries into a Property's
 /// `valueType` member so a broker reads the value as a time rather than as a string.
 #[derive(Debug, Clone, Deserialize, PartialEq, EnumDiscriminants)]
-#[strum_discriminants(name(TemporalValueType), derive(Serialize))]
+#[strum_discriminants(name(TemporalValueType), derive(Serialize, Hash))]
 #[strum_discriminants(
     doc = "The data type of a [`TemporalValue`], serialized as the term clause 4.6.3 names it by (`DateTime`, `Date` or `Time`), which the NGSI-LD core context maps to its datatype URI."
 )]

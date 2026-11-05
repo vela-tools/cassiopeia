@@ -1,8 +1,9 @@
 use crate::attribute::{
     conversion::{
         attribute_conversion::AttributeConversion,
+        part_merge,
         read_context::ReadContext,
-        readers::{self, SourceParts},
+        source_parts::SourceParts,
         value_admission,
         value_read::{Absence, ReadValue, ValueRead},
         value_reading,
@@ -20,7 +21,7 @@ use serde_json::Value as JsonValue;
 /// included, so the list is admitted as it is read: what a member contributes is the `valueList`
 /// itself, whatever type holds the object.
 ///
-/// The parts are gathered as the `array` transformation gathers them (see [`readers::aggregate`]),
+/// The parts are gathered as the `array` transformation gathers them (see [`part_merge::aggregate`]),
 /// so a source that is no list is its one item. Kept as read, the list is admitted as any value is,
 /// without its null items (see [`value_admission::admit`]). Read one way, each item that is not null
 /// is read as that reading reads one value, and an item the reading refuses, or reads as nothing,
@@ -31,7 +32,7 @@ impl AttributeConversion for ListConversion {
     type Reading = Value;
 
     fn read(self, parts: SourceParts, ctx: &mut ReadContext<'_>) -> Result<Option<Value>, AttributeRefusal> {
-        let Some(items) = readers::aggregate(parts) else {
+        let Some(items) = part_merge::aggregate(parts) else {
             return Ok(None);
         };
 
@@ -53,8 +54,8 @@ impl AttributeConversion for ListConversion {
     }
 }
 
-/// Reads one item the way `reading` names (see [`value_reading::read_value`]), keeping a null item
-/// for [`admit_each`] to leave out and refusing an item that is there but reads as nothing.
+/// Reads one item the way `reading` names (see [`value_reading::read_value`]), or `None` for a null
+/// item, which [`admit_each`] leaves out, refusing an item that is there but reads as nothing.
 ///
 /// Blank text is a value the record carries in a list, since the list was there, so every reading
 /// that reads it as nothing refuses it, quoting it as written; so does the `json` reading text
@@ -63,10 +64,10 @@ impl AttributeConversion for ListConversion {
 /// # Errors
 /// Returns the refusal of the reading, or of an item that reads as nothing (see
 /// [`AttributeRefusal::unreadable`]).
-fn read_item(item: JsonValue, reading: ValueReading, ctx: &mut ReadContext<'_>) -> Result<ReadValue, AttributeRefusal> {
+fn read_item(item: JsonValue, reading: ValueReading, ctx: &mut ReadContext<'_>) -> Result<Option<ReadValue>, AttributeRefusal> {
     match value_reading::read_value(item, reading, ctx)? {
-        ValueRead::Read(read) => Ok(read),
-        ValueRead::Absent(Absence::Null) => Ok(ReadValue::Json(JsonValue::Null)),
+        ValueRead::Read(read) => Ok(Some(read)),
+        ValueRead::Absent(Absence::Null) => Ok(None),
         ValueRead::Absent(Absence::Blank(text)) => Err(AttributeRefusal::unreadable(reading, &text)),
         ValueRead::Absent(Absence::SpelledNull) => Err(AttributeRefusal::unreadable(reading, "null")),
     }
@@ -80,21 +81,23 @@ fn read_item(item: JsonValue, reading: ValueReading, ctx: &mut ReadContext<'_>) 
 /// # Errors
 /// Returns [`AttributeRefusal::UnusableValue`] quoting a list of only nulls, or an item that admits
 /// nothing, as not [`RequiredValue::NonNull`](crate::required_value::RequiredValue::NonNull).
-fn admit_each(items: Vec<ReadValue>, omitted: &mut OmittedNulls) -> Result<Value, AttributeRefusal> {
-    if value_admission::only_nulls(items.iter(), |item| matches!(item, ReadValue::Json(JsonValue::Null))) {
+fn admit_each(items: Vec<Option<ReadValue>>, omitted: &mut OmittedNulls) -> Result<Value, AttributeRefusal> {
+    if value_admission::only_nulls(items.iter(), Option::is_none) {
         return Err(value_admission::only_nulls_refusal(&JsonValue::from(items)));
     }
 
-    let mut list = Vec::with_capacity(items.len());
-    for item in items {
-        match item {
-            ReadValue::Json(JsonValue::Null) => omitted.array_items += 1,
-            ReadValue::Value(value) => list.push(value),
-            ReadValue::Json(json) => list.push(value_admission::admit(json, omitted).into_item()?),
-        }
-    }
-
-    Ok(Value::Array(list))
+    items
+        .into_iter()
+        .filter_map(|item| match item {
+            None => {
+                omitted.array_items += 1;
+                None
+            }
+            Some(ReadValue::Value(value)) => Some(Ok(value)),
+            Some(ReadValue::Json(json)) => Some(value_admission::admit(json, omitted).into_item()),
+        })
+        .collect::<Result<Vec<Value>, AttributeRefusal>>()
+        .map(Value::Array)
 }
 
 #[cfg(test)]
@@ -116,7 +119,7 @@ mod tests {
         },
     };
     use pretty_assertions::assert_eq;
-    use serde_json::json;
+    use serde_json::{Value as JsonValue, json};
     use smallvec::smallvec;
 
     #[test]
@@ -351,8 +354,8 @@ mod tests {
         let collection = json!({"type": "GeometryCollection", "geometries": [{"type": "Point", "coordinates": [1.0, 2.0]}]});
 
         assert_eq!(
-            converted(smallvec![json!([collection])], list(Transformation::Geometry), None),
-            Some(Value::Array(vec![Value::try_from(collection).unwrap()]))
+            converted(smallvec![json!([collection])], list(Transformation::Geometry), None).map(JsonValue::from),
+            Some(json!([collection]))
         );
     }
 

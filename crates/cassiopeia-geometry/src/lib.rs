@@ -11,6 +11,7 @@
 //! and which must be named in the mapping before any coordinate is discarded.
 
 pub mod area_derivation;
+pub mod collection;
 pub mod convert;
 pub mod coordinates;
 pub mod error;

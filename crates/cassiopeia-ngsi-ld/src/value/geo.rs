@@ -1,5 +1,6 @@
-use crate::value::{omitted_nulls::OmittedNulls, types::Value};
+use crate::value::types::{Value, ValueObject};
 use cassiopeia_geometry::{
+    collection::{CollectionMember, GeometryCollection},
     convert::{convert, from_coordinates, from_geojson},
     coordinates::CoordinateShape,
     error::GeometryError,
@@ -7,8 +8,8 @@ use cassiopeia_geometry::{
     policy::GeometryPolicy,
     target::GeometryTarget,
 };
+use compact_str::CompactString;
 use geojson::{Geometry, GeometryValue, Position};
-use serde_json::Value as JsonValue;
 
 impl Value {
     /// Reads the value as the geometry an NGSI-LD `GeoProperty` is to carry.
@@ -57,7 +58,8 @@ impl Value {
     /// `GeometryCollection` (RFC 7946 clause 3.1.8) can reach a broker only as a Property's value.
     /// Kept as the source spells it, with no `geometry` conversion declared and no target type
     /// named, the collection is written as its `GeoJSON` object: each member is read as a geometry
-    /// of its own under `policy`, so it is validated and normalised as any geometry is. Every other
+    /// of its own under `policy` (see [`GeometryCollection::from_geojson`]), so it is validated and
+    /// normalised as any geometry is. Every other
     /// value is read as [`Value::to_geometry`] reads it, and becomes the typed geometry it spells.
     ///
     /// # Errors
@@ -73,13 +75,7 @@ impl Value {
             Some(Geometry {
                 value: GeometryValue::GeometryCollection { geometries },
                 ..
-            }) => {
-                let collection = GeometryValue::GeometryCollection {
-                    geometries: read_members(geometries, *policy)?,
-                };
-                // A geometry `geojson` writes holds no null, so nothing is left out here.
-                Ok(Value::from_json(JsonValue::from(&collection), &mut OmittedNulls::default()))
-            }
+            }) => Ok(Some(Value::from(GeometryCollection::from_geojson(geometries, policy)?))),
             Some(geometry) => from_geojson(geometry, target, policy).map(|geometry| Some(Value::Geospatial(Box::new(geometry)))),
             // A bare coordinate array carries no geometry type of its own, so with no target named
             // there is nothing to preserve.
@@ -136,30 +132,28 @@ impl Value {
     }
 }
 
-/// Reads every member of a `GeometryCollection` as a geometry of its own under `policy`, keeping a
-/// nested collection, which RFC 7946 clause 3.1.8 discourages but admits, as a collection of its
-/// members.
-///
-/// # Errors
-/// Returns the [`GeometryError`] of the first member that is no valid geometry.
-fn read_members(members: Vec<Geometry>, policy: GeometryPolicy) -> Result<Vec<Geometry>, GeometryError> {
-    members
+/// Writes a collection as the `GeoJSON` object it is (RFC 7946 clause 3.1.8): its `type` and its
+/// `geometries`, each member the geometry it holds, and a nested collection the object it is.
+// Manual because the collection becomes an object of two members built from its parts, which no
+// derive expresses.
+impl From<GeometryCollection> for Value {
+    fn from(collection: GeometryCollection) -> Value {
+        let geometries = Vec::from(collection)
+            .into_iter()
+            .map(|member| match member {
+                CollectionMember::Geometry(geometry) => Value::Geospatial(Box::new(geometry)),
+                CollectionMember::Collection(nested) => Value::from(nested),
+            })
+            .collect();
+        let object = [
+            (CompactString::const_new("type"), Value::String(CompactString::const_new("GeometryCollection"))),
+            (CompactString::const_new("geometries"), Value::Array(geometries)),
+        ]
         .into_iter()
-        .map(|member| match member.value {
-            GeometryValue::GeometryCollection { geometries } => Ok(Geometry::new(GeometryValue::GeometryCollection {
-                geometries: read_members(geometries, policy)?,
-            })),
-            value @ (GeometryValue::Point { .. }
-            | GeometryValue::MultiPoint { .. }
-            | GeometryValue::LineString { .. }
-            | GeometryValue::MultiLineString { .. }
-            | GeometryValue::Polygon { .. }
-            | GeometryValue::MultiPolygon { .. }) => {
-                let geometry = from_geojson(Geometry::new(value), GeometryTarget::Preserve, &policy)?;
-                Ok(Geometry::new(GeometryValue::from(&geometry)))
-            }
-        })
-        .collect()
+        .collect::<ValueObject>();
+
+        Value::Object(Box::new(object))
+    }
 }
 
 /// Reads a flat array of numbers as one position (RFC 7946 clause 3.1.1).
@@ -188,7 +182,7 @@ mod tests {
     };
     use geojson::Position;
     use pretty_assertions::assert_eq;
-    use serde_json::json;
+    use serde_json::{Value as JsonValue, json};
 
     fn preserve(value: &Value) -> Result<Option<NgsiLdGeometry>, GeometryError> {
         value.to_geometry(GeometryTarget::Preserve, &GeometryPolicy::default())
@@ -347,15 +341,50 @@ mod tests {
         value.to_any_geometry(GeometryTarget::Preserve, &policy)
     }
 
+    /// The JSON the geometry `value` reads as writes, under the default policy.
+    fn any_json(value: &Value) -> Result<Option<JsonValue>, GeometryError> {
+        any(value, GeometryPolicy::default()).map(|read| read.map(JsonValue::from))
+    }
+
     #[test]
     fn a_geometry_collection_reads_as_a_geojson_object() {
         let collection = json!({"type": "GeometryCollection", "geometries": [{"type": "Point", "coordinates": [1.0, 2.0]}]});
 
-        // The JSON is consumed by the conversion into a value and still needed to build the expected one.
+        // The JSON is consumed by the conversion into a value and still needed as the expected one.
+        assert_eq!(any_json(&Value::try_from(collection.clone()).unwrap()), Ok(Some(collection)));
+    }
+
+    #[test]
+    fn a_geometry_collection_holds_each_member_as_the_geometry_it_spells() {
+        let collection = Value::try_from(json!({"type": "GeometryCollection", "geometries": [{"type": "Point", "coordinates": [1.0, 2.0]}]})).unwrap();
+
         assert_eq!(
-            any(&Value::try_from(collection.clone()).unwrap(), GeometryPolicy::default()),
-            Ok(Some(Value::try_from(collection).unwrap()))
+            any(&collection, GeometryPolicy::default()),
+            Ok(Some(Value::Object(Box::new(
+                [
+                    ("type".into(), Value::String("GeometryCollection".into())),
+                    (
+                        "geometries".into(),
+                        Value::Array(vec![Value::Geospatial(Box::new(NgsiLdGeometry::Point {
+                            coordinates: [1.0, 2.0].into(),
+                        }))])
+                    ),
+                ]
+                .into_iter()
+                .collect()
+            ))))
         );
+    }
+
+    #[test]
+    fn a_nested_geometry_collection_reads_as_the_geojson_object_it_is() {
+        let collection = json!({
+            "type": "GeometryCollection",
+            "geometries": [{"type": "GeometryCollection", "geometries": [{"type": "Point", "coordinates": [1.0, 2.0]}]}],
+        });
+
+        // The JSON is consumed by the conversion into a value and still needed as the expected one.
+        assert_eq!(any_json(&Value::try_from(collection.clone()).unwrap()), Ok(Some(collection)));
     }
 
     #[test]
@@ -363,9 +392,9 @@ mod tests {
         let text = Value::String(r#"{"type":"GeometryCollection","geometries":[{"type":"Point","coordinates":[1.0,2.0]}]}"#.into());
 
         assert_eq!(
-            any(&text, GeometryPolicy::default()),
+            any_json(&text),
             Ok(Some(
-                Value::try_from(json!({"type": "GeometryCollection", "geometries": [{"type": "Point", "coordinates": [1.0, 2.0]}]})).unwrap()
+                json!({"type": "GeometryCollection", "geometries": [{"type": "Point", "coordinates": [1.0, 2.0]}]})
             ))
         );
     }
@@ -375,23 +404,6 @@ mod tests {
         let collection = Value::try_from(json!({"type": "GeometryCollection", "geometries": [{"type": "Point"}]})).unwrap();
 
         assert_eq!(any(&collection, GeometryPolicy::default()), Ok(None));
-    }
-
-    #[test]
-    fn a_geometry_collection_member_is_normalised_under_the_policy() {
-        let collection = Value::try_from(json!({
-            "type": "GeometryCollection",
-            "geometries": [{"type": "Point", "coordinates": [1.0, 2.0, 300.0]}],
-        }))
-        .unwrap();
-        let policy: GeometryPolicy = serde_json::from_value(json!({"altitude": "drop"})).unwrap();
-
-        assert_eq!(
-            any(&collection, policy),
-            Ok(Some(
-                Value::try_from(json!({"type": "GeometryCollection", "geometries": [{"type": "Point", "coordinates": [1.0, 2.0]}]})).unwrap()
-            ))
-        );
     }
 
     #[test]

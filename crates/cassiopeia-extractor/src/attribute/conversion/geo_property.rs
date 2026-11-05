@@ -1,5 +1,5 @@
 use crate::attribute::{
-    conversion::{attribute_conversion::AttributeConversion, read_context::ReadContext, readers::SourceParts, value_reading},
+    conversion::{attribute_conversion::AttributeConversion, part_merge::PartMerge, read_context::ReadContext, source_parts::SourceParts},
     refusal::AttributeRefusal,
 };
 use cassiopeia_geometry::target::GeometryTarget;
@@ -17,7 +17,7 @@ impl AttributeConversion for GeometryTarget {
     type Reading = Value;
 
     fn read(self, parts: SourceParts, ctx: &mut ReadContext<'_>) -> Result<Option<Value>, AttributeRefusal> {
-        let Some(value) = value_reading::geometry_source(parts, ctx.omitted) else {
+        let Some(value) = PartMerge::Structured.merge(parts).and_then(|merged| Value::from_json(merged, ctx.omitted)) else {
             return Ok(None);
         };
 
