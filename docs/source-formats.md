@@ -279,7 +279,7 @@ Each item of a listed collection becomes one record. A collection that is not li
 }
 ~~~
 
-A record keeps its own fields whole, nested collections included. It also carries every item that encloses it in an outer collection, under the name of the member that holds the outer array. An enclosing item comes without its own nested collections, because those are records of their own. The departure record above is:
+A record keeps its own fields whole, nested collections included. It also carries every object that encloses it on the path from the root, whether an array item or a plain object, under the name of the member that holds it. An enclosing object comes without its collections and without the members on the listed path, because those are records or enclosing objects of their own. An enclosing object left with no fields is not added, which is why the record below has no `data` and no `departures`. The departure record above is:
 
 ~~~json
 {
@@ -288,8 +288,7 @@ A record keeps its own fields whole, nested collections included. It also carrie
     },
     "lines": {
         "name": "U1",
-        "towards": "Oberlaa",
-        "departures": {}
+        "towards": "Oberlaa"
     },
     "monitors": {
         "locationStop": {
@@ -305,6 +304,52 @@ A record keeps its own fields whole, nested collections included. It also carrie
 ~~~
 
 Its mapping can read `{{ departureTime.countdown }}`, `{{ lines.name }}`, and `{{ monitors.locationStop.properties.attributes.rbl }}`. When a name clashes, the record's own field wins, and then the nearest enclosing item. The items of a root array enclose nothing, because the root array has no name to file them under.
+
+A lone object on a listed path counts as a collection of one item. JSON converted from XML writes an element that occurs once as an object and the same element occurring twice as an array, so the shape of a collection changes with the number of its items. In this document, Barking has two sites and Hackney has one, and `Index.Authority.Site.Species` still yields one record per reading, each carrying its `Site` and its `Authority`:
+
+~~~json
+{
+    "Index": {
+        "Authority": [
+            {
+                "@Name": "Barking",
+                "Site": [
+                    {
+                        "@Code": "BG1",
+                        "Species": [
+                            {
+                                "@Code": "NO2",
+                                "@Index": "1"
+                            }
+                        ]
+                    },
+                    {
+                        "@Code": "BG2",
+                        "Species": {
+                            "@Code": "NO2",
+                            "@Index": "3"
+                        }
+                    }
+                ]
+            },
+            {
+                "@Name": "Hackney",
+                "Site": {
+                    "@Code": "HK6",
+                    "Species": [
+                        {
+                            "@Code": "NO2",
+                            "@Index": "4"
+                        }
+                    ]
+                }
+            }
+        ]
+    }
+}
+~~~
+
+An object that is not on a listed path stays an ordinary field of the object that holds it.
 
 Listing both a collection and one nested in it yields records from both, in document order. A label that matches no collection yields no records. A top-level scalar is refused as it is under a single `mapping`.
 

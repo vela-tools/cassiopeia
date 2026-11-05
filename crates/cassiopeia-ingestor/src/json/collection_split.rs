@@ -11,11 +11,17 @@ use serde_json::{Map, Value};
 /// members of its items are walked. An array that holds anything other than objects is a plain
 /// value and is not walked.
 ///
+/// A lone object on a listed path counts as a collection of one item. JSON converted from XML writes
+/// an element that occurs once as an object and the same element occurring twice as an array, so a
+/// collection's shape changes with the number of its items, and both shapes have to yield the same
+/// records.
+///
 /// Each item of a listed collection is handed to `emit` as one record tagged with its label. The
-/// record also carries every item that encloses it in an outer collection, under the name of the
-/// member holding that outer array, so a `departure` item inside a `lines` item can read
-/// `lines.name`. The enclosing item comes without its own nested collections, which are records of
-/// their own. On a name clash the record's own field wins, then the nearest enclosing item.
+/// record also carries every item that encloses it on the path from the root, under the name of the
+/// member that holds that item, so a `departure` item inside a `lines` item can read `lines.name`.
+/// An enclosing item comes without its collections and without the members on the listed path,
+/// which are records or enclosing items of their own, and an enclosing item left with no fields is
+/// not added. On a name clash the record's own field wins, then the nearest enclosing item.
 ///
 /// Only the branches that lead to a listed label are walked; the rest of the document is dropped.
 ///
@@ -44,11 +50,11 @@ where
     }
 }
 
-/// An item of an outer collection that encloses the items currently being walked.
+/// An item on the path from the root that encloses the items currently being walked.
 struct EnclosingItem {
-    /// The member that holds the outer array, under which the item is added to each inner record.
+    /// The member that holds the item, under which the item is added to each inner record.
     name: String,
-    /// The item's fields, without its nested collections.
+    /// The item's fields, without its collections and without the members on the listed path.
     fields: Map<String, Value>,
 }
 
@@ -69,7 +75,7 @@ struct CollectionWalk<'a, F> {
     labels: &'a [CollectionName],
     /// The member path of the value being walked, joined with `.`.
     path: String,
-    /// The items of the outer collections around the current position, outermost first.
+    /// The items around the current position, outermost first.
     enclosing: Vec<EnclosingItem>,
     emit: F,
 }
@@ -87,15 +93,12 @@ where
     /// Walks one member, extending the path with its name while it is walked.
     fn member(&mut self, key: &str, value: Value) -> Result<(), E> {
         let parent_length = self.path.len();
-        if !self.path.is_empty() {
-            self.path.push('.');
-        }
-        self.path.push_str(key);
+        extend_path(&mut self.path, key);
 
-        let walked = match self.reach() {
+        let walked = match reach(self.labels, &self.path) {
             PathReach::Off => Ok(()),
             reach @ (PathReach::Through | PathReach::Label(_) | PathReach::LabelAndThrough(_)) => match value {
-                Value::Object(map) => self.object(map),
+                Value::Object(map) => self.item(key, map, &reach),
                 Value::Array(items) if is_collection(&items) => self.collection(key, items, &reach),
                 Value::Null | Value::Bool(_) | Value::Number(_) | Value::String(_) | Value::Array(_) => Ok(()),
             },
@@ -114,8 +117,8 @@ where
         })
     }
 
-    /// Emits one collection item as a record when its collection is listed, and walks into it when a
-    /// listed collection lies below.
+    /// Emits one item as a record when its path is listed, and walks into it when a listed path lies
+    /// below.
     fn item(&mut self, name: &str, item: Map<String, Value>, reach: &PathReach<'a>) -> Result<(), E> {
         match *reach {
             PathReach::Off => Ok(()),
@@ -136,10 +139,11 @@ where
 
     /// Walks into an item with the item added to the enclosing items of everything below it.
     fn enclosed(&mut self, name: &str, item: Map<String, Value>) -> Result<(), E> {
+        let fields = without_walked(self.labels, &self.path, &item);
         self.enclosing.push(EnclosingItem {
             // The enclosing item outlives the borrowed member name it is filed under.
             name: name.to_owned(),
-            fields: without_collections(&item),
+            fields,
         });
         let walked = self.object(item);
         self.enclosing.pop();
@@ -149,7 +153,7 @@ where
     /// Builds the record for one item of the labelled collection, adding its enclosing items.
     fn record(&self, label: &CollectionName, mut data: Map<String, Value>) -> Record {
         for enclosing in self.enclosing.iter().rev() {
-            if !data.contains_key(&enclosing.name) {
+            if !enclosing.fields.is_empty() && !data.contains_key(&enclosing.name) {
                 // Every record owns its data, so each one takes its own copy of the enclosing item.
                 data.insert(enclosing.name.clone(), Value::Object(enclosing.fields.clone()));
             }
@@ -157,21 +161,28 @@ where
         // Every record owns its collection label.
         Record::new(Some(label.clone()), data)
     }
+}
 
-    /// Places the current path relative to the listed labels.
-    fn reach(&self) -> PathReach<'a> {
-        let label = self.labels.iter().find(|label| label.as_str() == self.path);
-        let through = self
-            .labels
-            .iter()
-            .any(|label| label.as_str().strip_prefix(self.path.as_str()).is_some_and(|rest| rest.starts_with('.')));
+/// Appends a member name to a member path.
+fn extend_path(path: &mut String, key: &str) {
+    if !path.is_empty() {
+        path.push('.');
+    }
+    path.push_str(key);
+}
 
-        match (label, through) {
-            (None, false) => PathReach::Off,
-            (None, true) => PathReach::Through,
-            (Some(label), false) => PathReach::Label(label),
-            (Some(label), true) => PathReach::LabelAndThrough(label),
-        }
+/// Places a member path relative to the listed labels.
+fn reach<'a>(labels: &'a [CollectionName], path: &str) -> PathReach<'a> {
+    let label = labels.iter().find(|label| label.as_str() == path);
+    let through = labels
+        .iter()
+        .any(|label| label.as_str().strip_prefix(path).is_some_and(|rest| rest.starts_with('.')));
+
+    match (label, through) {
+        (None, false) => PathReach::Off,
+        (None, true) => PathReach::Through,
+        (Some(label), false) => PathReach::Label(label),
+        (Some(label), true) => PathReach::LabelAndThrough(label),
     }
 }
 
@@ -180,12 +191,20 @@ fn is_collection(items: &[Value]) -> bool {
     !items.is_empty() && items.iter().all(Value::is_object)
 }
 
-/// Copies an object without the collections nested in it at any depth.
-fn without_collections(map: &Map<String, Value>) -> Map<String, Value> {
+/// Copies the object at `path` without the collections nested in it at any depth, and without the
+/// objects on a listed path, since the walk turns each of those into a record or an enclosing item.
+fn without_walked(labels: &[CollectionName], path: &str, map: &Map<String, Value>) -> Map<String, Value> {
     map.iter()
         .filter_map(|(key, value)| match value {
             Value::Array(items) if is_collection(items) => None,
-            Value::Object(inner) => Some((key.clone(), Value::Object(without_collections(inner)))),
+            Value::Object(inner) => {
+                let mut inner_path = path.to_owned();
+                extend_path(&mut inner_path, key);
+                match reach(labels, &inner_path) {
+                    PathReach::Through | PathReach::Label(_) | PathReach::LabelAndThrough(_) => None,
+                    PathReach::Off => Some((key.clone(), Value::Object(without_walked(labels, &inner_path, inner)))),
+                }
+            }
             Value::Null | Value::Bool(_) | Value::Number(_) | Value::String(_) | Value::Array(_) => Some((key.clone(), value.clone())),
         })
         .collect()
@@ -263,7 +282,7 @@ mod tests {
             data(&records[0]),
             json!({
                 "departureTime": { "countdown": 5 },
-                "lines": { "name": "U1", "towards": "Oberlaa", "departures": {} },
+                "lines": { "name": "U1", "towards": "Oberlaa" },
                 "monitors": { "locationStop": { "properties": { "title": "Schwedenplatz", "attributes": { "rbl": 4116 } } } }
             })
         );
@@ -369,6 +388,88 @@ mod tests {
     #[test]
     fn a_label_is_matched_on_whole_member_names_only() {
         assert!(records(monitor(), &["data.monitors.line"]).unwrap().is_empty());
+    }
+
+    /// Air-quality readings shaped like JSON converted from XML: an element that occurs once is an
+    /// object, and one that occurs more often is an array.
+    fn readings() -> Value {
+        json!({
+            "Index": {
+                "@Group": "London",
+                "Authority": [
+                    {
+                        "@Name": "Barking",
+                        "Site": [
+                            { "@Code": "BG1", "Species": [{ "@Code": "NO2", "@Index": "1" }, { "@Code": "PM10", "@Index": "2" }] },
+                            { "@Code": "BG2", "Species": { "@Code": "NO2", "@Index": "3" } }
+                        ]
+                    },
+                    {
+                        "@Name": "Hackney",
+                        "Site": { "@Code": "HK6", "Species": [{ "@Code": "NO2", "@Index": "4" }] }
+                    }
+                ]
+            }
+        })
+    }
+
+    #[test]
+    fn a_lone_object_at_a_listed_path_is_a_collection_of_one_item() {
+        let records = records(readings(), &["Index.Authority.Site.Species"]).unwrap();
+        let indices: Vec<&Value> = records.iter().filter_map(|record| record.data().get("@Index")).collect();
+
+        assert_eq!(indices, vec![&json!("1"), &json!("2"), &json!("3"), &json!("4")]);
+    }
+
+    #[test]
+    fn a_lone_object_on_a_listed_path_encloses_the_records_below_it() {
+        let records = records(readings(), &["Index.Authority.Site.Species"]).unwrap();
+
+        assert_eq!(
+            data(&records[3]),
+            json!({
+                "@Code": "NO2",
+                "@Index": "4",
+                "Site": { "@Code": "HK6" },
+                "Authority": { "@Name": "Hackney" },
+                "Index": { "@Group": "London" }
+            })
+        );
+    }
+
+    #[test]
+    fn a_lone_site_and_an_array_of_sites_yield_the_same_record_shape() {
+        let records = records(readings(), &["Index.Authority.Site"]).unwrap();
+
+        assert_eq!(
+            records.iter().map(|record| record.data().get("@Code")).collect::<Vec<_>>(),
+            vec![Some(&json!("BG1")), Some(&json!("BG2")), Some(&json!("HK6"))]
+        );
+        assert_eq!(records[2].data().get("Authority"), Some(&json!({ "@Name": "Hackney" })));
+    }
+
+    #[test]
+    fn an_object_on_a_listed_path_encloses_its_fields_without_the_members_on_the_path() {
+        let document = json!({ "data": { "updated": 7, "lines": [{ "name": "U1", "stops": [{ "n": 1 }] }] } });
+        let records = records(document, &["data.lines.stops"]).unwrap();
+
+        assert_eq!(data(&records[0]), json!({ "n": 1, "lines": { "name": "U1" }, "data": { "updated": 7 } }));
+    }
+
+    #[test]
+    fn an_enclosing_object_left_with_no_fields_is_not_added() {
+        let document = json!({ "data": { "lines": [{ "stops": [{ "n": 1 }] }] } });
+        let records = records(document, &["data.lines.stops"]).unwrap();
+
+        assert_eq!(data(&records[0]), json!({ "n": 1 }));
+    }
+
+    #[test]
+    fn a_lone_object_that_is_no_listed_path_stays_a_field_of_its_enclosing_item() {
+        let document = json!({ "lines": [{ "name": "U1", "operator": { "id": "WL" }, "stops": [{ "n": 1 }] }] });
+        let records = records(document, &["lines.stops"]).unwrap();
+
+        assert_eq!(records[0].data().get("lines"), Some(&json!({ "name": "U1", "operator": { "id": "WL" } })));
     }
 
     #[test]
