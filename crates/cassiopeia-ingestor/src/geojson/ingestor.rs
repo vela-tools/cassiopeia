@@ -1,5 +1,5 @@
 use crate::{error::IngestorError, geojson::error::GeoJsonIngestError, ingestor::Ingestor, record_batches::RecordBatches};
-use ::geojson::{Feature, GeoJson};
+use ::geojson::{Bbox, Feature, FeatureCollection, GeoJson, JsonObject};
 use cassiopeia_common::{channel::ChannelSender, signal::Signal};
 use cassiopeia_ir::{
     payload::{CollectedPayload, ProfiledPayload},
@@ -7,6 +7,10 @@ use cassiopeia_ir::{
 };
 use serde_json::{Map, Value};
 use std::{fs::File, io::BufReader};
+
+/// The record key under which every feature of a `FeatureCollection` carries the collection's own
+/// members, named after the `GeoJSON` object type it holds (RFC 7946 section 3.3).
+const FEATURE_COLLECTION: &str = "featureCollection";
 
 /// Ingestor for `GeoJSON` data.
 ///
@@ -36,33 +40,54 @@ impl GeoJsonIngestor {
         })
     }
 
-    /// Converts a `GeoJSON` feature into a record with `id`, `properties`,
-    /// `geometry`, and `bbox` keys mirroring the source structure.
-    fn feature_to_record(feature: Feature) -> Result<Record, GeoJsonIngestError> {
+    /// Converts a `GeoJSON` feature into a record with `id`, `properties`, `geometry`, and `bbox`
+    /// keys mirroring the source structure.
+    ///
+    /// When the feature belongs to a `FeatureCollection`, the record also carries that collection's
+    /// members under `featureCollection`, so a value the source states once for the whole collection
+    /// reaches every feature, the way a KML placemark carries the folder that encloses it.
+    fn feature_to_record(feature: Feature, collection: Option<&Map<String, Value>>) -> Result<Record, GeoJsonIngestError> {
         let mut data = Map::new();
 
         if let Some(id) = &feature.id {
-            let encoded = serde_json::to_value(id).map_err(GeoJsonIngestError::Encode)?;
-            data.insert("id".to_string(), encoded);
+            data.insert("id".to_string(), Self::encode(id)?);
         }
 
         if let Some(props) = feature.properties {
             data.insert("properties".to_string(), Value::Object(props));
         }
 
-        if let Some(geometry) = feature.geometry
-            && let Ok(geo_value) = serde_json::to_value(&geometry)
-        {
-            data.insert("geometry".to_string(), geo_value);
+        if let Some(geometry) = &feature.geometry {
+            data.insert("geometry".to_string(), Self::encode(geometry)?);
         }
 
-        if let Some(bbox) = feature.bbox
-            && let Ok(bbox_value) = serde_json::to_value(&bbox)
-        {
-            data.insert("bbox".to_string(), bbox_value);
+        if let Some(bbox) = &feature.bbox {
+            data.insert("bbox".to_string(), Self::encode(bbox)?);
+        }
+
+        if let Some(members) = collection {
+            // Every record owns its data, so each feature takes its own copy of the members its
+            // collection shares among all of them.
+            data.insert(FEATURE_COLLECTION.to_string(), Value::Object(members.clone()));
         }
 
         Ok(Record::new(None, data))
+    }
+
+    /// The members a `FeatureCollection` states once for all of its features: its `bbox` when present,
+    /// and every foreign member (RFC 7946 section 6.1), such as a timestamp shared by every reading.
+    /// Its `type` is always `FeatureCollection`, so it is left out.
+    fn collection_members(bbox: Option<Bbox>, foreign_members: Option<JsonObject>) -> Result<Map<String, Value>, GeoJsonIngestError> {
+        let mut members = foreign_members.unwrap_or_default();
+        if let Some(bbox) = bbox {
+            members.insert("bbox".to_string(), Self::encode(&bbox)?);
+        }
+        Ok(members)
+    }
+
+    /// Re-encodes a parsed `GeoJSON` member as the JSON value a record holds.
+    fn encode(member: &impl serde::Serialize) -> Result<Value, GeoJsonIngestError> {
+        serde_json::to_value(member).map_err(GeoJsonIngestError::Encode)
     }
 }
 
@@ -73,14 +98,19 @@ impl Ingestor for GeoJsonIngestor {
 
         let parsed: Result<GeoJson, _> = serde_json::from_reader(reader);
         match parsed {
-            Ok(GeoJson::FeatureCollection(collection)) => {
-                for feature in collection.features {
-                    batches.push(Self::feature_to_record(feature)?)?;
+            Ok(GeoJson::FeatureCollection(FeatureCollection {
+                bbox,
+                features,
+                foreign_members,
+            })) => {
+                let members = Self::collection_members(bbox, foreign_members)?;
+                for feature in features {
+                    batches.push(Self::feature_to_record(feature, Some(&members))?)?;
                 }
                 batches.finish()
             }
             Ok(GeoJson::Feature(feature)) => {
-                batches.push(Self::feature_to_record(feature)?)?;
+                batches.push(Self::feature_to_record(feature, None)?)?;
                 batches.finish()
             }
             Ok(GeoJson::Geometry(_)) => Err(GeoJsonIngestError::UnsupportedInput.into()),
@@ -101,6 +131,7 @@ mod tests {
     };
     use mediatype::media_type;
     use pretty_assertions::assert_eq;
+    use serde_json::json;
     use std::{fs::File, io::Write, sync::mpsc::sync_channel, thread};
     use temp_dir::TempDir;
 
@@ -161,5 +192,53 @@ mod tests {
         let contents = r#"{"type": "Feature", "properties": {"name": "A"}, "geometry": {"type": "Point", "coordinates": [1.0, 2.0]}}"#;
         let records = ingest_all(profiled_geojson(contents).1);
         assert_eq!(records.len(), 1);
+    }
+
+    #[test]
+    fn every_feature_of_a_collection_carries_the_collection_s_foreign_members() {
+        let contents = r#"{
+            "type": "FeatureCollection",
+            "timestamps": ["2026-10-25T07:50+00:00"],
+            "features": [
+                {"type": "Feature", "properties": {"station": "11034"}, "geometry": {"type": "Point", "coordinates": [16.37, 48.2]}},
+                {"type": "Feature", "properties": {"station": "11035"}, "geometry": {"type": "Point", "coordinates": [16.36, 48.25]}}
+            ]
+        }"#;
+        let records = ingest_all(profiled_geojson(contents).1);
+        assert_eq!(records.len(), 2);
+        for record in &records {
+            assert_eq!(record.data()["featureCollection"], json!({ "timestamps": ["2026-10-25T07:50+00:00"] }));
+        }
+    }
+
+    #[test]
+    fn a_collection_s_bounding_box_reaches_its_features_beside_their_own() {
+        let contents = r#"{
+            "type": "FeatureCollection",
+            "bbox": [0.0, 0.0, 10.0, 10.0],
+            "features": [
+                {"type": "Feature", "bbox": [1.0, 2.0, 1.0, 2.0], "properties": {}, "geometry": {"type": "Point", "coordinates": [1.0, 2.0]}}
+            ]
+        }"#;
+        let records = ingest_all(profiled_geojson(contents).1);
+        assert_eq!(records[0].data()["bbox"], json!([1.0, 2.0, 1.0, 2.0]));
+        assert_eq!(records[0].data()["featureCollection"], json!({ "bbox": [0.0, 0.0, 10.0, 10.0] }));
+    }
+
+    #[test]
+    fn a_collection_without_members_of_its_own_gives_its_features_an_empty_feature_collection() {
+        let contents = r#"{
+            "type": "FeatureCollection",
+            "features": [{"type": "Feature", "properties": {"name": "A"}, "geometry": null}]
+        }"#;
+        let records = ingest_all(profiled_geojson(contents).1);
+        assert_eq!(records[0].data()["featureCollection"], json!({}));
+    }
+
+    #[test]
+    fn a_single_feature_has_no_feature_collection() {
+        let contents = r#"{"type": "Feature", "properties": {"name": "A"}, "geometry": {"type": "Point", "coordinates": [1.0, 2.0]}}"#;
+        let records = ingest_all(profiled_geojson(contents).1);
+        assert!(!records[0].data().contains_key("featureCollection"));
     }
 }

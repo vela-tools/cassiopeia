@@ -26,7 +26,8 @@ pub(crate) enum RunBinding {
     Collections(&'static [(&'static str, &'static str)]),
 }
 
-/// One input of an end-to-end run: how it binds mappings and the JSON document it reads.
+/// One input of an end-to-end run: how it binds mappings and the document it reads, whose format
+/// detection decides, so a `GeoJSON` document reaches the `GeoJSON` ingestor and any other the JSON one.
 pub(crate) struct RunInput {
     pub(crate) binding: RunBinding,
     pub(crate) records: Value,
@@ -77,7 +78,7 @@ pub(crate) fn run_end_to_end(store: StoreKind, inputs: &[RunInput], entity_types
             let data = root.join(format!("data-{index}.json"));
             fs::write(&data, input.records.to_string()).unwrap();
             let binding = declare_binding(root, index, &input.binding);
-            format!(r#"{{ source: "{}", {binding}, format: "json" }}"#, data.display())
+            format!(r#"{{ source: "{}", {binding} }}"#, data.display())
         })
         .collect();
     let document = format!(

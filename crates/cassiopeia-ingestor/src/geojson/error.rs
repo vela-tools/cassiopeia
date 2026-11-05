@@ -13,8 +13,8 @@ pub enum GeoJsonIngestError {
     #[error(transparent)]
     Parse(#[from] ::geojson::Error),
 
-    /// A feature id could not be re-encoded as JSON.
-    #[error("failed to encode a feature id")]
+    /// A parsed `GeoJSON` member, such as a feature id or geometry, could not be re-encoded as JSON.
+    #[error("failed to encode a GeoJSON member as JSON")]
     Encode(#[source] serde_json::Error),
 }
 

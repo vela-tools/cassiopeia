@@ -1,4 +1,5 @@
 mod geo_properties;
+mod geojson_collections;
 mod harness;
 mod json_collections;
 mod record_merges;

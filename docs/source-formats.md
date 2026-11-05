@@ -12,7 +12,7 @@ The format can be set on a manifest input with `format`, or through the equivale
 | --- | --- | --- | --- |
 | CSV | One record per data row | Column names become fields | No |
 | JSON | One record per object in a top-level array, or per item of a listed nested array | The object is used as-is | Nested arrays of objects become collections |
-| GeoJSON | One record per feature | `id`, `properties`, `geometry`, and `bbox` | No |
+| GeoJSON | One record per feature | `id`, `properties`, `geometry`, `bbox`, and `featureCollection` | No |
 | KML or KMZ | One record per placemark | `properties` and `geometry` | Folders become collections |
 | XML | Determined by the repeated-child convention | Folded element tree with `@` and `#` keys | No |
 | ESRI Shapefile | One record per feature | `properties` and WGS84 `geometry` | Multiple layers become collections |
@@ -379,7 +379,7 @@ Cassiopeia supports GeoJSON `FeatureCollection` documents and single GeoJSON `Fe
 }
 ~~~
 
-Cassiopeia copies the feature ID to `id`, copies `properties` as an object, and copies `geometry` as a GeoJSON geometry. It also copies `bbox` when present. A geometry-only GeoJSON document is not accepted as a source collection.
+Cassiopeia copies the feature ID to `id`, copies `properties` as an object, and copies `geometry` as a GeoJSON geometry. It also copies `bbox` when present. A feature of a `FeatureCollection` also carries its collection's members under `featureCollection` (see [Collection members](#collection-members)). A geometry-only GeoJSON document is not accepted as a source collection.
 
 RFC 7946 lets a feature's geometry be a `GeometryCollection`, which NGSI-LD does not admit as a GeoProperty value. Such a feature produces no GeoProperty: the attribute is dropped and the run counts a warning, unless the mapping sets `geometry.convert` to `flatten` to fold the collection into one geometry.
 
@@ -393,6 +393,43 @@ location: {
 ~~~
 
 Properties remain under `properties`, so a source field called `name` is addressed as `{{ properties.name }}`. Cassiopeia does not automatically use the feature ID as the NGSI-LD entity ID. Use it explicitly in `identity.entityName` when you want that identity.
+
+### Collection members
+
+Some sources state a value once for the whole `FeatureCollection` instead of repeating it on every feature, such as an observation time shared by every reading. RFC 7946 section 6.1 calls such members foreign members. Cassiopeia gives every feature's record its collection's foreign members and its `bbox`, when present, under `featureCollection`, much as a KML placemark carries the folder that encloses it. The collection's `type` is always `FeatureCollection` and its `features` are the records themselves, so neither is copied. A feature's own `bbox` stays at the top level of its record, beside the collection's.
+
+This collection states its observation time once, in `timestamps`:
+
+~~~json
+{
+    "type": "FeatureCollection",
+    "timestamps": ["2026-10-25T07:50+00:00"],
+    "features": [
+        {
+            "type": "Feature",
+            "geometry": {"type": "Point", "coordinates": [16.37, 48.2]},
+            "properties": {"station": "11034", "parameters": {"TL": {"data": [6.9]}}}
+        }
+    ]
+}
+~~~
+
+Each reading then takes its observation time from the collection:
+
+~~~json5
+temperature: {
+    source: "{{ properties.parameters.TL.data | first }}",
+    transformation: "float",
+    properties: {
+        observedAt: {
+            source: "{{ featureCollection.timestamps | first }}",
+            transformation: "datetime",
+        },
+    },
+}
+~~~
+
+A collection with no foreign members and no `bbox` gives its features an empty `featureCollection`. A single `Feature` document has no collection, so its record has no `featureCollection`, and a template that reads it resolves to nothing, like any missing field.
 
 ## KML and KMZ
 
