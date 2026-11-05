@@ -3,15 +3,15 @@ pub mod iterator;
 
 use crate::{
     attribute::{instance::AttributeInstance, iterator::AttributeIterator},
+    conversion::{Conversion, property_conversion::PropertyConversion, value_reading::ValueReading},
     mapping::Mapping,
     target::Target,
     template::{CompiledTemplate, TemplateSource},
     transformation::Transformation,
-    value_conversion::ValueConversion,
 };
 use cassiopeia_geometry::policy::GeometryPolicy;
 use cassiopeia_ngsi_ld::entity::{attribute::NgsiLdAttributeKind, name::NameBuf};
-use getset::{Getters, MutGetters, Setters};
+use getset::{CopyGetters, Getters, MutGetters, Setters};
 use indexmap::IndexMap;
 use langtag::LangTagBuf;
 use serde::{Deserialize, Deserializer, Serialize, de::Error as DeserializeError};
@@ -36,9 +36,18 @@ const fn default_kind() -> NgsiLdAttributeKind {
     NgsiLdAttributeKind::Property
 }
 
+/// The conversion a declaration holds until its mapping resolves it: the one a declaration of the
+/// default type, read from a `source` and naming no transformation, resolves to.
+///
+/// Loading a mapping replaces it on every declaration (see [`Conversion::resolve`]), so no
+/// declaration of a loaded mapping holds it unless it resolved to it.
+const fn unresolved_conversion() -> Conversion {
+    Conversion::Property(PropertyConversion::One(ValueReading::Text))
+}
+
 /// One attribute declaration: either a leaf that reads source values, or a node holding nested
 /// attribute declarations, or both.
-#[derive(Debug, Clone, Serialize, Deserialize, Getters, MutGetters, Setters, TypedBuilder)]
+#[derive(Debug, Clone, Serialize, Deserialize, CopyGetters, Getters, MutGetters, Setters, TypedBuilder)]
 pub struct Attribute {
     /// Which NGSI-LD attribute type to build.
     #[serde(rename = "type", default = "default_kind")]
@@ -48,7 +57,8 @@ pub struct Attribute {
 
     /// The conversion applied to the extracted value, when the mapping names one.
     ///
-    /// Absent means the default for `kind`; [`Attribute::conversion`] resolves the two together.
+    /// Absent means the default for `kind`; loading the mapping resolves the two together into
+    /// [`Attribute::conversion`].
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[builder(default = Default::default())]
     #[getset(get = "pub")]
@@ -146,6 +156,17 @@ pub struct Attribute {
     #[builder(default = Default::default())]
     #[getset(get = "pub", set = "pub")]
     compiled_source: Option<Vec<CompiledTemplate>>,
+
+    /// How this declaration's source values, or the object its nested `mappings` assemble, become
+    /// its value, resolved from its `type`, `transformation`, and shape when the mapping loads.
+    ///
+    /// Every path that converts a value reads it here: the attribute itself, each of its
+    /// `instances` (which share its `type` and `transformation`), and each `languageMap` entry,
+    /// nested mapping, and sub-attribute through its own declaration.
+    #[serde(skip, default = "unresolved_conversion")]
+    #[builder(default = unresolved_conversion())]
+    #[getset(get_copy = "pub", set = "pub(crate)")]
+    conversion: Conversion,
 }
 
 /// Deserializes a `syntheticEntity` declaration into a [`Mapping`].
@@ -177,23 +198,6 @@ impl Attribute {
     #[must_use]
     pub fn iter_recursive(&self) -> AttributeIterator<'_> {
         AttributeIterator::new(self)
-    }
-
-    /// How this attribute's source values, or the object its nested `mappings` assemble, become its
-    /// value: the declared `transformation`, or, when none is declared, the default of its NGSI-LD
-    /// kind, as [`ValueConversion::resolve`] decides for source values and
-    /// [`ValueConversion::resolve_assembled`] for an assembled object.
-    ///
-    /// Every path that converts a value resolves its conversion here: the attribute itself, each of
-    /// its `instances` (which share its `type` and `transformation`), and each `languageMap` entry,
-    /// nested mapping, and sub-attribute through its own declaration.
-    #[must_use]
-    pub fn conversion(&self) -> ValueConversion {
-        if self.mappings.is_empty() {
-            ValueConversion::resolve(self.kind, self.transformation)
-        } else {
-            ValueConversion::resolve_assembled(self.kind, self.transformation)
-        }
     }
 
     /// The raw `observedAt` template declared directly on this attribute, if any.
@@ -235,7 +239,7 @@ impl Attribute {
 
 #[cfg(test)]
 mod tests {
-    use crate::{attribute::Attribute, template::TemplateSource, transformation::Transformation, value_conversion::ValueConversion, version::Version};
+    use crate::{attribute::Attribute, template::TemplateSource, transformation::Transformation, version::Version};
     use cassiopeia_ngsi_ld::entity::attribute::NgsiLdAttributeKind;
     use langtag::LangTagBuf;
     use pretty_assertions::assert_eq;
@@ -257,66 +261,6 @@ mod tests {
 
         assert_eq!(attribute.kind(), &NgsiLdAttributeKind::GeoProperty);
         assert_eq!(attribute.transformation(), &Some(Transformation::Point));
-    }
-
-    #[test]
-    fn a_list_property_without_a_transformation_converts_through_the_array_transformation() {
-        let attribute = parse(r#"{"type": "ListProperty", "source": "{{ codes }}"}"#);
-
-        assert_eq!(attribute.conversion(), ValueConversion::Transform(Transformation::Array));
-    }
-
-    #[test]
-    fn a_json_property_without_a_transformation_keeps_its_value_as_read() {
-        let attribute = parse(r#"{"type": "JsonProperty", "source": "{{ payload }}"}"#);
-
-        assert_eq!(attribute.conversion(), ValueConversion::Verbatim);
-    }
-
-    #[test]
-    fn a_property_without_a_transformation_converts_through_the_string_transformation() {
-        let attribute = parse(r#"{"source": "{{ codes }}"}"#);
-
-        assert_eq!(attribute.conversion(), ValueConversion::Transform(Transformation::String));
-    }
-
-    #[test]
-    fn a_geo_property_without_a_transformation_converts_through_the_geometry_transformation() {
-        let attribute = parse(r#"{"type": "GeoProperty", "source": "{{ geometry }}"}"#);
-
-        assert_eq!(attribute.conversion(), ValueConversion::Transform(Transformation::Geometry));
-    }
-
-    #[test]
-    fn an_explicit_transformation_wins_over_the_kind_default() {
-        let list = parse(r#"{"type": "ListProperty", "source": "{{ codes }}", "transformation": "string"}"#);
-        let json = parse(r#"{"type": "JsonProperty", "source": "{{ payload }}", "transformation": "object"}"#);
-        let geo = parse(r#"{"type": "GeoProperty", "source": "{{ geometry }}", "transformation": "point"}"#);
-
-        assert_eq!(list.conversion(), ValueConversion::Transform(Transformation::String));
-        assert_eq!(json.conversion(), ValueConversion::Transform(Transformation::Object));
-        assert_eq!(geo.conversion(), ValueConversion::Transform(Transformation::Point));
-    }
-
-    #[test]
-    fn a_json_property_naming_the_json_transformation_decodes_its_text_into_raw_json() {
-        let attribute = parse(r#"{"type": "JsonProperty", "source": "{{ payload }}", "transformation": "json"}"#);
-
-        assert_eq!(attribute.conversion(), ValueConversion::Decoded);
-    }
-
-    #[test]
-    fn a_property_assembled_from_nested_mappings_without_a_transformation_keeps_the_object() {
-        let attribute = parse(r#"{"mappings": {"city": {"source": "{{ city }}"}}}"#);
-
-        assert_eq!(attribute.conversion(), ValueConversion::Verbatim);
-    }
-
-    #[test]
-    fn a_property_assembled_from_nested_mappings_converts_through_its_declared_transformation() {
-        let attribute = parse(r#"{"transformation": "string", "mappings": {"city": {"source": "{{ city }}"}}}"#);
-
-        assert_eq!(attribute.conversion(), ValueConversion::Transform(Transformation::String));
     }
 
     #[test]

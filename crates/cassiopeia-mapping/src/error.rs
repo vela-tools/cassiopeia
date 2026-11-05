@@ -1,7 +1,12 @@
-use crate::{template::compile_error::TemplateCompileError, template_location::TemplateLocation, transformation::Transformation};
+use crate::{
+    conversion::{admitted_transformations::AdmittedTransformations, declaration_shape::DeclarationShape},
+    template::compile_error::TemplateCompileError,
+    template_location::TemplateLocation,
+    transformation::Transformation,
+};
 use cassiopeia_common::error::io::IoError;
 use cassiopeia_geometry::error::GeometryError;
-use cassiopeia_ngsi_ld::entity::name::NameBuf;
+use cassiopeia_ngsi_ld::entity::{attribute::NgsiLdAttributeKind, name::NameBuf};
 use std::{path::PathBuf, result};
 use thiserror::Error;
 
@@ -59,35 +64,43 @@ pub enum MappingError {
         attribute: NameBuf,
     },
 
-    /// A `GeoProperty` declares a `transformation` that produces no geometry.
+    /// A declaration names a `transformation` its type can never take from what its shape reads.
     ///
-    /// A `GeoProperty`'s value shall be a `GeoJSON` geometry (ETSI GS CIM 009 v1.9.1 clause 4.7.1),
-    /// so a conversion that yields text, a number, an object, or any other non-geometry value could
-    /// never produce one, on a top-level attribute, a sub-attribute, or a synthetic entity's
-    /// attribute alike.
-    #[error(
-        "Attribute `{attribute}` is a `GeoProperty`, but `transformation: \"{transformation}\"` does not produce a geometry; remove the transformation or name a geometry type"
-    )]
-    GeoPropertyWithoutGeometry {
-        /// The `GeoProperty` whose transformation produces no geometry.
+    /// The value of each NGSI-LD attribute type is defined by ETSI GS CIM 009 v1.9.1 clause 4.5: a
+    /// `GeoProperty` holds a `GeoJSON` geometry (clause 4.7.1), a `JsonProperty` a JSON object or
+    /// array of objects (clause 4.5.24.2), and so on, and an object built from nested `mappings` is
+    /// no boolean, number, or date-time. A transformation that can never produce that value would
+    /// fail or vanish on every record, so the mapping is refused naming the transformations the
+    /// declaration does admit.
+    #[error("Attribute `{attribute}` ({kind}, {shape}) cannot take `transformation: \"{transformation}\"`; {admitted}")]
+    TransformationNotAdmitted {
+        /// The declaration whose transformation cannot apply.
         attribute: NameBuf,
+        /// Its NGSI-LD attribute type.
+        kind: NgsiLdAttributeKind,
+        /// What it is built from.
+        shape: DeclarationShape,
         /// The transformation it declared.
         transformation: Transformation,
+        /// The transformations it admits instead.
+        admitted: AdmittedTransformations,
     },
 
-    /// An attribute assembles its value from nested `mappings`, but declares a `transformation`
-    /// that can never apply to the object they assemble.
+    /// A declaration's type can never be built from what its shape reads, whatever its
+    /// transformation.
     ///
-    /// The value nested `mappings` assemble is always an object, and no object is a boolean, a
-    /// number, or a date-time, so the declaration could never produce a value for a single record.
-    #[error(
-        "Attribute `{attribute}` builds its value from nested `mappings`, but `transformation: \"{transformation}\"` cannot apply to the object they build; remove the transformation or name one that reads an object: `object`, `json`, `string`, `array`, or a geometry type"
-    )]
-    TransformationOnAssembledObject {
-        /// The attribute whose transformation cannot apply to its assembled object.
+    /// No object is an IRI, so a `VocabProperty` cannot be assembled from nested `mappings`; a
+    /// relationship's object is built from its `source` and `target`, not from nested `mappings`;
+    /// and only a `LanguageProperty` reads a `languageMap` (clause 4.5.18), so any other type
+    /// declaring one would ignore it.
+    #[error("Attribute `{attribute}` is a {kind}, which cannot be {shape}")]
+    ShapeNotAdmitted {
+        /// The declaration whose shape its type cannot take.
         attribute: NameBuf,
-        /// The transformation it declared.
-        transformation: Transformation,
+        /// Its NGSI-LD attribute type.
+        kind: NgsiLdAttributeKind,
+        /// What it is built from.
+        shape: DeclarationShape,
     },
 }
 

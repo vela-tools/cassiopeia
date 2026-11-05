@@ -69,7 +69,7 @@ impl SerializeRepr for NgsiLdAttributeWrapper {
 /// `NgsiLdAttributeKind` is derived from `NgsiLdAttribute` rather than declared separately so
 /// the tag used to select an attribute type can never drift from the attributes that exist.
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, EnumDiscriminants)]
-#[strum_discriminants(name(NgsiLdAttributeKind), derive(Deserialize, Serialize, Hash))]
+#[strum_discriminants(name(NgsiLdAttributeKind), derive(Deserialize, Serialize, Hash, strum::Display, strum::EnumIter))]
 #[serde(tag = "type", rename_all = "PascalCase")]
 pub enum NgsiLdAttribute {
     Property(NgsiLdProperty),

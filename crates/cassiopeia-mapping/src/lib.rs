@@ -1,5 +1,6 @@
 pub mod attribute;
-pub mod conversion_validation;
+pub mod conversion;
+pub mod conversion_resolution;
 pub mod entity_members;
 pub mod error;
 pub mod identity;
@@ -13,7 +14,6 @@ pub mod template;
 pub mod template_location;
 pub mod template_site;
 pub mod transformation;
-pub mod value_conversion;
 pub mod version;
 
 #[cfg(test)]

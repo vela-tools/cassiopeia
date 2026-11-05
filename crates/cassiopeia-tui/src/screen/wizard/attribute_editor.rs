@@ -1,5 +1,11 @@
 use crate::{editor::EditorAttribute, screen::wizard::editor_key::EditorKey};
-use cassiopeia_mapping::transformation::Transformation;
+use cassiopeia_mapping::{
+    conversion::{
+        Conversion,
+        declaration_shape::{DeclarationShape, ValueOrigin},
+    },
+    transformation::Transformation,
+};
 use cassiopeia_ngsi_ld::entity::attribute::NgsiLdAttributeKind;
 use serde_json::Value;
 
@@ -72,6 +78,7 @@ impl AttributeEditorState {
         ("Array", Transformation::Array),
         ("Object", Transformation::Object),
         ("Json", Transformation::Json),
+        ("Geometry", Transformation::Geometry),
         ("Point", Transformation::Point),
         ("MultiPoint", Transformation::MultiPoint),
         ("LineString", Transformation::LineString),
@@ -134,6 +141,52 @@ impl AttributeEditorState {
         }
     }
 
+    /// What the attribute being edited is built from: the object its nested `mappings` assemble in
+    /// container mode, its `source` otherwise.
+    const fn shape(&self) -> DeclarationShape {
+        if self.is_container_mode {
+            DeclarationShape::Value(ValueOrigin::Assembled)
+        } else {
+            DeclarationShape::Value(ValueOrigin::Sourced)
+        }
+    }
+
+    /// Whether the conversion at `transform_idx` (offset by one, so `0` is "no conversion") loads
+    /// under the selected type and the attribute's shape.
+    fn admits(&self, transform_idx: usize) -> bool {
+        let kind = Self::TYPES[self.attr_type_idx];
+        let transformation = transform_idx
+            .checked_sub(1)
+            .and_then(|index| Self::TRANSFORMS.get(index))
+            .map(|(_, transform)| *transform);
+
+        Conversion::resolve(kind, transformation, self.shape()).is_ok()
+    }
+
+    /// The next conversion in `direction` that the selected type admits, wrapping through "no
+    /// conversion", so the editor never offers a combination the mapping would refuse to load.
+    #[must_use]
+    pub fn next_admitted_transformation(&self, direction: CycleDirection) -> usize {
+        let count = Self::TRANSFORMS.len() + 1;
+        let mut candidate = direction.step(self.transform_idx, count);
+        for _ in 0..count {
+            if candidate == 0 || self.admits(candidate) {
+                return candidate;
+            }
+            candidate = direction.step(candidate, count);
+        }
+
+        0
+    }
+
+    /// Clears the selected conversion when the selected type does not admit it, as after the type
+    /// changes.
+    pub fn drop_inadmissible_transformation(&mut self) {
+        if !self.admits(self.transform_idx) {
+            self.transform_idx = 0;
+        }
+    }
+
     /// The next numeric conversion when the transform field is locked to numeric options.
     ///
     /// A schema-derived numeric property may only be an integer or a float; this cycles between
@@ -163,7 +216,10 @@ impl AttributeEditorState {
 mod tests {
     use crate::{
         editor::EditorAttribute,
-        screen::wizard::{attribute_editor::AttributeEditorState, editor_key::EditorKey},
+        screen::wizard::{
+            attribute_editor::{AttributeEditorState, CycleDirection},
+            editor_key::EditorKey,
+        },
     };
     use cassiopeia_mapping::transformation::Transformation;
     use cassiopeia_ngsi_ld::entity::attribute::NgsiLdAttributeKind;
@@ -179,6 +235,85 @@ mod tests {
 
         assert_eq!(editor.source_parts, vec!["{{ a }}", "{{ b }}"]);
         assert_eq!(editor.source_input, "");
+    }
+
+    /// The labels the editor offers, in order, cycling forward from "no conversion" until it returns
+    /// to it, for an attribute of `kind`.
+    fn offered_labels(kind: NgsiLdAttributeKind) -> Vec<String> {
+        let mut editor = AttributeEditorState::new();
+        editor.attr_type_idx = AttributeEditorState::TYPES.iter().position(|candidate| *candidate == kind).unwrap();
+        let mut labels = Vec::new();
+        loop {
+            editor.transform_idx = editor.next_admitted_transformation(CycleDirection::Next);
+            if editor.transform_idx == 0 {
+                return labels;
+            }
+            labels.push(editor.transform_label());
+        }
+    }
+
+    #[test]
+    fn the_editor_offers_only_the_transformations_the_selected_type_admits() {
+        assert_eq!(offered_labels(NgsiLdAttributeKind::JsonProperty), ["Array", "Object", "Json"]);
+        assert_eq!(offered_labels(NgsiLdAttributeKind::Relationship), Vec::<String>::new());
+        assert_eq!(offered_labels(NgsiLdAttributeKind::ListProperty), ["Array"]);
+        assert_eq!(
+            offered_labels(NgsiLdAttributeKind::Property),
+            AttributeEditorState::TRANSFORMS
+                .iter()
+                .map(|(label, _)| (*label).to_owned())
+                .collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn cycling_backwards_offers_the_same_transformations_in_reverse() {
+        let mut editor = AttributeEditorState::new();
+        editor.attr_type_idx = AttributeEditorState::TYPES
+            .iter()
+            .position(|kind| *kind == NgsiLdAttributeKind::JsonProperty)
+            .unwrap();
+
+        editor.transform_idx = editor.next_admitted_transformation(CycleDirection::Previous);
+
+        assert_eq!(editor.transform_label(), "Json");
+    }
+
+    #[test]
+    fn changing_to_a_type_that_does_not_admit_the_conversion_clears_it() {
+        let mut editor = AttributeEditorState::new();
+        editor.transform_idx = AttributeEditorState::TRANSFORMS
+            .iter()
+            .position(|(_, transform)| *transform == Transformation::Integer)
+            .unwrap()
+            + 1;
+        editor.attr_type_idx = AttributeEditorState::TYPES
+            .iter()
+            .position(|kind| *kind == NgsiLdAttributeKind::Relationship)
+            .unwrap();
+
+        editor.drop_inadmissible_transformation();
+
+        assert_eq!(editor.transform_idx, 0);
+    }
+
+    #[test]
+    fn changing_to_a_type_that_admits_the_conversion_keeps_it() {
+        let mut editor = AttributeEditorState::new();
+        let object = AttributeEditorState::TRANSFORMS
+            .iter()
+            .position(|(_, transform)| *transform == Transformation::Object)
+            .unwrap()
+            + 1;
+        editor.transform_idx = object;
+        editor.attr_type_idx = AttributeEditorState::TYPES
+            .iter()
+            .position(|kind| *kind == NgsiLdAttributeKind::JsonProperty)
+            .unwrap();
+
+        editor.drop_inadmissible_transformation();
+
+        assert_eq!(editor.transform_idx, object);
     }
 
     #[test]

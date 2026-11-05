@@ -1,13 +1,13 @@
 use cassiopeia_geometry::{geometry::GeometryKind, target::GeometryTarget};
 use serde::{Deserialize, Serialize};
-use strum::Display;
+use strum::{Display, EnumIter};
 
 /// The conversion applied to an extracted source value before it becomes an NGSI-LD value.
 ///
 /// The geometry variants name `GeoJSON` geometry types (RFC 7946 clause 3.1) and produce values
 /// consumed by the corresponding NGSI-LD `GeoProperty` constructors. A transformation displays as
 /// the canonical token a mapping writes for it, so a load error can quote it back.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Display)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Display, EnumIter)]
 #[serde(rename_all = "lowercase")]
 #[strum(serialize_all = "lowercase")]
 pub enum Transformation {
@@ -52,7 +52,7 @@ pub enum Transformation {
     /// type from raw coordinates, this keeps the geometry the source already carries (a `GeoJSON`
     /// geometry object, RFC 7946 clause 3.1). NGSI-LD restrictions are enforced separately. This is
     /// the conversion a `GeoProperty` declaring no transformation uses (see
-    /// [`ValueConversion::default_for`](crate::value_conversion::ValueConversion::default_for)).
+    /// [`Conversion::resolve`](crate::conversion::Conversion::resolve)).
     Geometry,
 
     /// Build a `GeoJSON` `Point`.
@@ -110,36 +110,6 @@ impl Transformation {
             | Transformation::DateTime
             | Transformation::Date
             | Transformation::Time => None,
-        }
-    }
-
-    /// Whether this transformation can turn a JSON object into a value.
-    ///
-    /// An object keeps itself under `object` and `json`, becomes its compact JSON text under
-    /// `string` and the one element of a list under `array`, and is read as the geometry it spells
-    /// under a geometry transformation. No object is a boolean, a number, or a date-time, so those
-    /// transformations can never apply to one. The load-time check of an attribute assembling its
-    /// value from nested `mappings` reads this, since that value is always an object.
-    #[must_use]
-    pub const fn applies_to_object(self) -> bool {
-        match self {
-            Transformation::String
-            | Transformation::Array
-            | Transformation::Object
-            | Transformation::Json
-            | Transformation::Geometry
-            | Transformation::Point
-            | Transformation::MultiPoint
-            | Transformation::LineString
-            | Transformation::MultiLineString
-            | Transformation::Polygon
-            | Transformation::MultiPolygon => true,
-            Transformation::Boolean
-            | Transformation::Integer
-            | Transformation::Float
-            | Transformation::DateTime
-            | Transformation::Date
-            | Transformation::Time => false,
         }
     }
 }
@@ -212,35 +182,6 @@ mod tests {
     #[test]
     fn the_json_transformation_names_no_geometry() {
         assert_eq!(Transformation::Json.geometry_target(), None);
-    }
-
-    #[test]
-    fn the_container_text_and_geometry_transformations_apply_to_an_object() {
-        for transformation in [
-            Transformation::String,
-            Transformation::Array,
-            Transformation::Object,
-            Transformation::Json,
-            Transformation::Geometry,
-            Transformation::Point,
-            Transformation::MultiPolygon,
-        ] {
-            assert!(transformation.applies_to_object(), "{transformation}");
-        }
-    }
-
-    #[test]
-    fn the_scalar_and_temporal_transformations_never_apply_to_an_object() {
-        for transformation in [
-            Transformation::Boolean,
-            Transformation::Integer,
-            Transformation::Float,
-            Transformation::DateTime,
-            Transformation::Date,
-            Transformation::Time,
-        ] {
-            assert!(!transformation.applies_to_object(), "{transformation}");
-        }
     }
 
     #[test]

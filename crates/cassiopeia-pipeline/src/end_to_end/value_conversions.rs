@@ -51,3 +51,43 @@ fn an_unreadable_integer_is_dropped_with_a_warning_naming_the_attribute_and_the_
         assert_eq!(outcome.warnings, 1, "{store:?}");
     }
 }
+
+/// A museum whose name is one object of text keyed by language tag, read with no transformation.
+const MUSEUM: &str = r#"{
+    version: "v4",
+    dataModel: "Museum",
+    identity: { entityName: "{{ id }}" },
+    attributes: {
+        name: { type: "LanguageProperty", source: "{{ name }}" },
+    },
+}"#;
+
+#[test]
+fn a_language_property_with_one_source_reads_its_map_by_default() {
+    for store in STORES {
+        let outcome = run_end_to_end(
+            store,
+            &[RunInput {
+                binding: RunBinding::Mapping(MUSEUM),
+                records: json!([
+                    { "id": "louvre", "name": { "fr": "Musée du Louvre", "en": "Louvre Museum" } },
+                    { "id": "rijks", "name": r#"{"nl":"Rijksmuseum"}"# },
+                ]),
+            }],
+            &["Museum"],
+            "",
+        );
+
+        assert_eq!(entity_ids(&outcome), ["urn:ngsi-ld:Museum:louvre", "urn:ngsi-ld:Museum:rijks"], "{store:?}");
+        let louvre = entity(&outcome.entities, "urn:ngsi-ld:Museum:louvre");
+        let rijks = entity(&outcome.entities, "urn:ngsi-ld:Museum:rijks");
+        assert_eq!(louvre["name"]["type"], "LanguageProperty", "{store:?}: {louvre:?}");
+        assert_eq!(
+            louvre["name"]["languageMap"],
+            json!({ "fr": "Musée du Louvre", "en": "Louvre Museum" }),
+            "{store:?}"
+        );
+        assert_eq!(rijks["name"]["languageMap"], json!({ "nl": "Rijksmuseum" }), "{store:?}");
+        assert_eq!(outcome.warnings, 0, "{store:?}: {:?}", outcome.diagnostics);
+    }
+}

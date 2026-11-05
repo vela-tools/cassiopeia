@@ -1,6 +1,6 @@
 use crate::{
     attribute::{Attribute, Attributes},
-    conversion_validation::validate,
+    conversion_resolution::resolve,
     entity_members::EntityMembers,
     error::{MappingError, Result},
     identity::Identity,
@@ -109,21 +109,23 @@ pub struct Mapping {
 }
 
 impl Mapping {
-    /// Declares a mapping and resolves its temporal fields. `origin` names the document in error
-    /// messages.
+    /// Declares a mapping, resolving each attribute's conversion and its temporal fields. `origin`
+    /// names the document in error messages.
     ///
     /// # Errors
-    /// Returns [`MappingError::UncompilableTemplate`] when the `observedAt` template cannot be
-    /// compiled.
+    /// Returns a [`MappingError`] when an attribute declares a conversion that cannot run (see
+    /// [`resolve`]), or [`MappingError::UncompilableTemplate`] when the `observedAt` template cannot
+    /// be compiled.
     pub fn new(
         version: Version,
         data_model: DataModel,
         identity: Identity,
         members: EntityMembers,
-        attributes: Attributes,
+        mut attributes: Attributes,
         origin: &Path,
         runner: &mut TemplateRunner,
     ) -> Result<Mapping> {
+        resolve(&mut attributes)?;
         let EntityMembers { scope, expires_at } = members;
         let mut mapping = Mapping {
             version,
@@ -174,7 +176,7 @@ impl Mapping {
             path: origin.to_path_buf(),
             source,
         })?;
-        validate(&mapping)?;
+        resolve(mapping.attributes_mut())?;
         mapping.compile_temporal_fields(origin, runner)?;
         mapping.has_nested_relationships = mapping.detect_nested_relationships();
 

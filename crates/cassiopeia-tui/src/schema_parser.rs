@@ -5,7 +5,13 @@ use crate::{
     schema_node_details::SchemaNodeDetails,
     screen::wizard::{editor_key::EditorKey, node_path::NodePath},
 };
-use cassiopeia_mapping::transformation::Transformation;
+use cassiopeia_mapping::{
+    conversion::{
+        Conversion,
+        declaration_shape::{DeclarationShape, ValueOrigin},
+    },
+    transformation::Transformation,
+};
 use cassiopeia_ngsi_ld::entity::{attribute::NgsiLdAttributeKind, reserved_member::is_reserved_member};
 use indexmap::IndexMap;
 use serde_json::Value;
@@ -109,6 +115,7 @@ fn parse_node_recursive(
                             }
                         }
                     }
+                    attr.transformation = admitted(attr.attribute_type, attr.transformation);
 
                     let new_path = parent_path.child(option_key.clone());
 
@@ -187,7 +194,7 @@ fn schema_to_attribute(schema: &Value) -> EditorAttribute {
             _ => transformation,
         };
 
-        return EditorAttribute::new(attribute_type, geometry);
+        return EditorAttribute::new(attribute_type, admitted(attribute_type, geometry));
     }
 
     let final_transform = if attribute_type == NgsiLdAttributeKind::GeoProperty {
@@ -196,7 +203,15 @@ fn schema_to_attribute(schema: &Value) -> EditorAttribute {
         transformation
     };
 
-    EditorAttribute::new(attribute_type, final_transform)
+    EditorAttribute::new(attribute_type, admitted(attribute_type, final_transform))
+}
+
+/// The conversion derived from a schema node, kept only when an attribute of `kind` read from a
+/// `source` admits it, so the wizard never writes a mapping that would be refused when it loads: a
+/// relationship's object is built from its `source` and `target`, and a `JsonProperty` holds no
+/// text, say. A dropped conversion leaves the attribute on its type's default.
+fn admitted(kind: NgsiLdAttributeKind, transformation: Option<Transformation>) -> Option<Transformation> {
+    transformation.filter(|transformation| Conversion::resolve(kind, Some(*transformation), DeclarationShape::Value(ValueOrigin::Sourced)).is_ok())
 }
 
 /// The default geometry conversion for a `GeoProperty` whose specific geometry is not stated by a
@@ -208,6 +223,7 @@ const fn geojson_default_transformation() -> Transformation {
 #[cfg(test)]
 mod tests {
     use crate::{schema_parser::parse_schema, screen::wizard::editor_key::EditorKey};
+    use cassiopeia_mapping::transformation::Transformation;
     use cassiopeia_ngsi_ld::entity::attribute::NgsiLdAttributeKind;
     use pretty_assertions::assert_eq;
     use serde_json::json;
@@ -271,5 +287,72 @@ mod tests {
         assert_eq!(container.mappings.len(), 2);
         assert!(container.mappings.keys().all(EditorKey::is_one_of_option));
         assert_eq!(container.mappings.keys().next().unwrap().to_string(), "Option 1 - GeoJSON Point");
+    }
+
+    /// The type and conversion the wizard derives for the one schema property `node`.
+    fn derived(node: &serde_json::Value) -> (NgsiLdAttributeKind, Option<Transformation>) {
+        let parsed = parse_schema(&json!({"properties": {"field": node}}));
+        let attribute = parsed.attributes.get(&field("field")).unwrap();
+
+        (attribute.attribute_type, attribute.transformation)
+    }
+
+    #[test]
+    fn a_relationship_schema_node_carries_no_transformation() {
+        assert_eq!(
+            derived(&json!({"type": "string", "description": "Relationship. Points at a road."})),
+            (NgsiLdAttributeKind::Relationship, None)
+        );
+    }
+
+    #[test]
+    fn a_list_relationship_schema_node_carries_no_transformation() {
+        assert_eq!(
+            derived(&json!({"type": "array", "items": {"anyOf": [{"type": "string", "format": "uri"}]}})),
+            (NgsiLdAttributeKind::ListRelationship, None)
+        );
+    }
+
+    #[test]
+    fn a_derived_transformation_the_type_does_not_admit_is_dropped() {
+        assert_eq!(
+            derived(&json!({"type": "string", "description": "JsonProperty. A payload."})),
+            (NgsiLdAttributeKind::JsonProperty, None)
+        );
+        assert_eq!(
+            derived(&json!({"type": "string", "description": "LanguageProperty. A name."})),
+            (NgsiLdAttributeKind::LanguageProperty, None)
+        );
+    }
+
+    #[test]
+    fn a_derived_transformation_the_type_admits_is_kept() {
+        assert_eq!(
+            derived(&json!({"type": "object", "description": "JsonProperty. A payload."})),
+            (NgsiLdAttributeKind::JsonProperty, Some(Transformation::Object))
+        );
+        assert_eq!(
+            derived(&json!({"type": "string", "description": "VocabProperty. A term."})),
+            (NgsiLdAttributeKind::VocabProperty, Some(Transformation::String))
+        );
+        assert_eq!(
+            derived(&json!({"type": "array", "description": "ListProperty. Codes."})),
+            (NgsiLdAttributeKind::ListProperty, Some(Transformation::Array))
+        );
+    }
+
+    #[test]
+    fn a_oneof_choice_retyped_as_a_relationship_carries_no_transformation() {
+        let parsed = parse_schema(&json!({
+            "properties": {
+                "owner": {
+                    "oneOf": [{"title": "Reference", "type": "string", "description": "Relationship. The owner."}],
+                },
+            },
+        }));
+        let container = parsed.attributes.get(&field("owner")).unwrap();
+        let choice = container.mappings.values().next().unwrap();
+
+        assert_eq!((choice.attribute_type, choice.transformation), (NgsiLdAttributeKind::Relationship, None));
     }
 }

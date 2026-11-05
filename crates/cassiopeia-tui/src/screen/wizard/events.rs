@@ -370,13 +370,14 @@ impl WizardReducer {
     fn cycle_field(editor: &mut AttributeEditorState, idx: usize, direction: CycleDirection) {
         if idx == 1 && !editor.is_schema_derived {
             editor.attr_type_idx = direction.step(editor.attr_type_idx, AttributeEditorState::TYPES.len());
+            editor.drop_inadmissible_transformation();
         }
 
         if idx == 2 && Self::transform_is_cycleable(editor) {
             if Self::transform_is_numeric_locked(editor) {
                 editor.transform_idx = editor.get_next_number_transformation(direction);
             } else {
-                editor.transform_idx = direction.step(editor.transform_idx, AttributeEditorState::TRANSFORMS.len() + 1);
+                editor.transform_idx = editor.next_admitted_transformation(direction);
             }
         }
     }

@@ -144,7 +144,10 @@ mod tests {
         template_site::TemplateSite,
     };
     use cassiopeia_ngsi_ld::{
-        entity::{attribute::NgsiLdAttributeKind, name::NameBuf},
+        entity::{
+            attribute::{NgsiLdAttributeKind, language_property::LanguageMap},
+            name::NameBuf,
+        },
         value::{
             json_payload_error::{JsonPayloadError, JsonShape},
             types::{Number, TemporalValue, Value},
@@ -153,6 +156,7 @@ mod tests {
     use cassiopeia_unreadable_timestamps::{attribute_loss::AttributeLoss, timestamp_loss::TimestampLoss};
     use chrono::{TimeZone, Utc};
     use iri_rs::IriBuf;
+    use langtag::LangTagBuf;
     use pretty_assertions::assert_eq;
     use serde_json::{Value as JsonValue, json};
     use std::{path::Path, sync::Arc};
@@ -711,6 +715,81 @@ mod tests {
             map.iter().map(|(tag, text)| (tag.as_str(), text.as_str())).collect::<Vec<_>>(),
             [("fr", "Musée"), ("nl", "Museum")]
         );
+        assert!(dropped.unusable_values.is_empty());
+    }
+
+    /// What a `LanguageProperty` named `name`, read from `names` with no transformation, resolves to
+    /// over one record carrying `names`, with the losses recorded.
+    fn resolve_language_source(names: &JsonValue) -> (Option<ResolvedAttribute>, DroppedAttributes) {
+        let (resolver, mapping) = prepare(
+            r#"{
+                version: "v4",
+                dataModel: "Museum",
+                identity: { entityName: "M-{{ id }}" },
+                attributes: {
+                    name: { type: "LanguageProperty", source: "{{ names }}" },
+                },
+            }"#,
+        );
+        let extractor = EntityExtractor::new(resolver);
+        let mapped = AssembledEntity::from_single(entity("urn:ngsi-ld:Museum:1", json!({"id": "1", "names": names})), mapping);
+        let dropped = DroppedAttributes::new();
+
+        let (result, _) = extractor.extract(mapped, &dropped).unwrap().into_parts();
+
+        (result.values().as_ref().and_then(|values| values.get("name")).cloned(), dropped)
+    }
+
+    /// A `languageMap` holding `entries`, each a language tag and its text.
+    fn language_map(entries: &[(&str, &str)]) -> LanguageMap {
+        entries
+            .iter()
+            .map(|(tag, text)| (LangTagBuf::new((*tag).to_owned()).unwrap(), (*text).to_owned()))
+            .collect()
+    }
+
+    #[test]
+    fn a_language_property_reads_an_object_of_tagged_text_by_default() {
+        let (resolved, dropped) = resolve_language_source(&json!({"en": "Hello", "de": "Hallo"}));
+
+        assert_eq!(
+            resolved,
+            Some(ResolvedAttribute::Single(AttributeContent::Language(language_map(&[
+                ("en", "Hello"),
+                ("de", "Hallo")
+            ]))))
+        );
+        assert!(dropped.unusable_values.is_empty());
+    }
+
+    #[test]
+    fn a_language_property_reads_the_json_text_of_its_map_by_default() {
+        let (resolved, dropped) = resolve_language_source(&json!(r#"{"en":"Hello"}"#));
+
+        assert_eq!(
+            resolved,
+            Some(ResolvedAttribute::Single(AttributeContent::Language(language_map(&[("en", "Hello")]))))
+        );
+        assert!(dropped.unusable_values.is_empty());
+    }
+
+    #[test]
+    fn plain_text_on_a_language_property_is_refused_as_no_language_map() {
+        let (resolved, dropped) = resolve_language_source(&json!("Hello"));
+
+        assert_eq!(resolved, None);
+        let recorded = BatchSink::from(dropped.unusable_values)
+            .into_entries()
+            .map(|(unusable, record)| (unusable.attribute.to_string(), unusable.required, record.example.to_string()))
+            .collect::<Vec<_>>();
+        assert_eq!(recorded, [("name".to_owned(), RequiredValue::LanguageMap, "Hello".to_owned())]);
+    }
+
+    #[test]
+    fn a_blank_language_property_source_is_absent_rather_than_refused() {
+        let (resolved, dropped) = resolve_language_source(&json!("  "));
+
+        assert_eq!(resolved, None);
         assert!(dropped.unusable_values.is_empty());
     }
 
@@ -1791,16 +1870,6 @@ mod tests {
 
             assert_eq!(value, None);
         }
-    }
-
-    #[test]
-    fn a_list_property_under_an_explicit_string_transformation_still_becomes_compact_json_text() {
-        let value = extract_label(
-            r#"{ type: "ListProperty", source: "{{ codes }}", transformation: "string" }"#,
-            json!({"codes": ["BS", "IN"]}),
-        );
-
-        assert_eq!(value, Some(Value::String(r#"["BS","IN"]"#.into())));
     }
 
     /// The raw JSON a `JsonProperty` declaration resolves to over one record, with the losses

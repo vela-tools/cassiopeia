@@ -260,6 +260,40 @@ mod tests {
         assert!(compiled.is_empty());
     }
 
+    #[test]
+    fn a_mapping_declaring_a_transformation_its_type_does_not_admit_fails_to_load_naming_the_attribute() {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("building.json5");
+        fs::write(
+            &path,
+            r#"{
+                version: "v4",
+                dataModel: "Building",
+                identity: { entityName: "B-{{ id }}" },
+                attributes: { owner: { type: "Relationship", source: "{{ owner }}", target: { entity: "Organization" }, transformation: "string" } },
+            }"#,
+        )
+        .unwrap();
+        let binding = MappingBinding::Single { mapping: path };
+
+        let mut compiled = HashMap::new();
+        let Err(error) = build_router(&binding, &mut compiled, &mut TemplateRunner::new()) else {
+            panic!("a mapping declaring a transformation its type does not admit must not build a router");
+        };
+        let diagnostic = from_error(Severity::Error, DiagnosticCode::from(&error), &error).build();
+
+        assert!(matches!(
+            &error,
+            PipelineError::Mapping(MappingError::TransformationNotAdmitted { attribute, .. }) if attribute.as_str() == "owner"
+        ));
+        assert_eq!(DiagnosticCode::from(&error), DiagnosticCode::Run(RunCode::MappingUnusable));
+        assert_eq!(
+            diagnostic.headline(),
+            r#"Attribute `owner` (Relationship, read from a `source`) cannot take `transformation: "string"`; remove the transformation: this declaration takes none"#
+        );
+        assert!(compiled.is_empty());
+    }
+
     /// The headline and cause chain a mapping whose `temperature` attribute has `source` fails to
     /// load with, the temporary directory written as `<dir>`: what the CLI prints, the concise form
     /// showing the headline and the first cause, the verbose form every cause.
