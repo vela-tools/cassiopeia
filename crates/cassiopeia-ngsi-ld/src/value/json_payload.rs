@@ -1,8 +1,4 @@
-use crate::value::{
-    json_payload_error::{JsonPayloadError, JsonShape},
-    types::{Number, Value},
-};
-use geojson::GeometryValue;
+use crate::value::json_payload_error::{JsonPayloadError, JsonShape};
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value as JsonValue};
 
@@ -65,43 +61,11 @@ impl From<JsonPayload> for JsonValue {
     }
 }
 
-/// Builds a payload from a value a declared transformation produced, as the raw JSON it serializes
-/// to.
-///
-/// A `JsonProperty` that names a transformation (such as `object`) converts its source the way any
-/// attribute does, and the result is then carried as raw JSON. It holds no null, because a
-/// [`Value`] never does.
-impl TryFrom<Value> for JsonPayload {
-    type Error = JsonPayloadError;
-
-    fn try_from(value: Value) -> Result<JsonPayload, JsonPayloadError> {
-        JsonPayload::try_from(raw_json(value))
-    }
-}
-
-/// The raw JSON a value serializes to, built without an intermediate encoding.
-///
-/// Every value has a JSON form: a float is always finite, so it is always a JSON number (RFC 8259
-/// clause 6).
-fn raw_json(value: Value) -> JsonValue {
-    match value {
-        Value::Boolean(b) => JsonValue::Bool(b),
-        Value::Number(Number::Integer(i)) => JsonValue::Number(i.into()),
-        Value::Number(Number::Float(f)) => JsonValue::from(f.get()),
-        Value::String(text) => JsonValue::String(text.into()),
-        Value::Temporal(temporal) => JsonValue::String(temporal.text().to_string()),
-        Value::Geospatial(geometry) => JsonValue::from(&GeometryValue::from(geometry.as_ref())),
-        Value::Array(items) => JsonValue::Array(items.into_iter().map(raw_json).collect()),
-        Value::Object(members) => JsonValue::Object(members.into_iter().map(|(key, member)| (key.into(), raw_json(member))).collect()),
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use crate::value::{
         json_payload::JsonPayload,
         json_payload_error::{JsonPayloadError, JsonShape},
-        types::Value,
     };
     use pretty_assertions::assert_eq;
     use serde_json::{Value as JsonValue, json};
@@ -150,24 +114,6 @@ mod tests {
         assert_eq!(
             JsonPayload::try_from(json!([null])),
             Err(JsonPayloadError::ItemNotAnObject { found: JsonShape::Null })
-        );
-    }
-
-    #[test]
-    fn a_transformed_object_value_becomes_the_payload_it_serializes_to() {
-        let value = Value::try_from(json!({"value": 21.5, "tags": ["a", 1, true]})).unwrap();
-
-        assert_eq!(
-            serde_json::to_value(JsonPayload::try_from(value).unwrap()).unwrap(),
-            json!({"value": 21.5, "tags": ["a", 1, true]})
-        );
-    }
-
-    #[test]
-    fn a_transformed_scalar_value_is_refused() {
-        assert_eq!(
-            JsonPayload::try_from(Value::Boolean(true)),
-            Err(JsonPayloadError::NotAnObject { found: JsonShape::Boolean })
         );
     }
 

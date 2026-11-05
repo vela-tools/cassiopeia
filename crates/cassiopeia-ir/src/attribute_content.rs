@@ -4,6 +4,7 @@ use cassiopeia_ngsi_ld::{
 };
 use iri_rs::IriBuf;
 use serde::{Deserialize, Serialize};
+use serde_json::Value as JsonValue;
 
 /// What one attribute instance resolved to, before it is built into an NGSI-LD attribute.
 ///
@@ -38,6 +39,30 @@ impl AttributeContent {
     }
 }
 
+/// Writes content as the raw JSON it stands for inside a structured value, such as a member of an
+/// object nested `mappings` assemble.
+///
+/// A Value is the JSON it serializes to, raw JSON is kept as it is, nulls included (ETSI GS CIM 009
+/// v1.9.1 clause 4.5.24.2), a vocabulary IRI is its text, and a `languageMap` is the object of text
+/// keyed by language tag it is (clause 4.5.18). The structured value that holds the result is
+/// admitted by its own attribute's type, which decides whether a null in it survives.
+// Manual because the content unwraps into the JSON of what it holds rather than the tagged form its
+// `Serialize` writes, which no derive expresses.
+impl From<AttributeContent> for JsonValue {
+    fn from(content: AttributeContent) -> JsonValue {
+        match content {
+            AttributeContent::Value(value) => JsonValue::from(value),
+            AttributeContent::Json(payload) => JsonValue::from(payload),
+            AttributeContent::Vocab(iri) => JsonValue::String(iri.into_inner()),
+            AttributeContent::Language(map) => JsonValue::Object(
+                map.into_iter()
+                    .map(|(language, text)| (language.into_string(), JsonValue::String(text)))
+                    .collect(),
+            ),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use crate::attribute_content::AttributeContent;
@@ -48,7 +73,7 @@ mod tests {
     use iri_rs::IriBuf;
     use langtag::LangTagBuf;
     use pretty_assertions::assert_eq;
-    use serde_json::json;
+    use serde_json::{Value as JsonValue, json};
 
     #[test]
     fn a_value_content_exposes_its_value() {
@@ -92,5 +117,22 @@ mod tests {
 
             assert_eq!(decoded, content);
         }
+    }
+
+    #[test]
+    fn each_content_writes_as_the_raw_json_it_stands_for() {
+        let mut map = LanguageMap::default();
+        map.insert(LangTagBuf::new("en".to_owned()).unwrap(), "hello".to_owned());
+
+        assert_eq!(JsonValue::from(AttributeContent::Value(Value::Boolean(true))), json!(true));
+        assert_eq!(
+            JsonValue::from(AttributeContent::Json(JsonPayload::try_from(json!({"maybe": null})).unwrap())),
+            json!({"maybe": null})
+        );
+        assert_eq!(
+            JsonValue::from(AttributeContent::Vocab(IriBuf::new("https://example.org/level/high".to_owned()).unwrap())),
+            json!("https://example.org/level/high")
+        );
+        assert_eq!(JsonValue::from(AttributeContent::Language(map)), json!({"en": "hello"}));
     }
 }

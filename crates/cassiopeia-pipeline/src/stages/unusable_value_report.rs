@@ -11,8 +11,9 @@ use cassiopeia_extractor::{required_value::RequiredValue, unusable_value::Unusab
 /// The code a value its kind cannot hold, or its transformation cannot read, is published under.
 ///
 /// A value that spells no boolean, one that spells no number, a non-IRI vocabulary value, a value
-/// that is no language map, text that is not JSON, a value that is no JSON object, and a value that
-/// spells no geometry are different mistakes with different fixes, so each publishes its own code.
+/// that is no language map, text that is not JSON, a value that is no JSON object, a value that
+/// spells no geometry, and a value holding nothing but nulls are different mistakes with different
+/// fixes, so each publishes its own code.
 /// An integer and a float share one, since both read a number and differ only in its kind.
 const fn code(required: RequiredValue) -> DiagnosticCode {
     match required {
@@ -23,6 +24,7 @@ const fn code(required: RequiredValue) -> DiagnosticCode {
         RequiredValue::Json => DiagnosticCode::Extractor(ExtractorCode::JsonTextUnreadable),
         RequiredValue::JsonObject => DiagnosticCode::Extractor(ExtractorCode::ObjectMisshapen),
         RequiredValue::Geometry => DiagnosticCode::Extractor(ExtractorCode::GeometryUnreadable),
+        RequiredValue::NonNull => DiagnosticCode::Extractor(ExtractorCode::ValueOnlyNull),
     }
 }
 
@@ -152,11 +154,17 @@ mod tests {
     }
 
     #[test]
-    fn each_scalar_requirement_is_reported_under_its_code_naming_the_value_and_the_requirement() {
+    fn each_scalar_and_only_null_requirement_is_reported_under_its_code_naming_the_value_and_the_requirement() {
         for (required, value, code, requirement) in [
             (RequiredValue::Boolean, "maybe", ExtractorCode::BooleanUnreadable, "a boolean"),
             (RequiredValue::Integer, "abc", ExtractorCode::NumberUnreadable, "an integer"),
             (RequiredValue::Float, "x", ExtractorCode::NumberUnreadable, "a number"),
+            (
+                RequiredValue::NonNull,
+                r#"{"maybe":null}"#,
+                ExtractorCode::ValueOnlyNull,
+                "a value holding something other than null",
+            ),
         ] {
             let unusable = UnusableValues::new();
             let sink = RecordingReporter::new();

@@ -34,6 +34,10 @@ pub enum RequiredValue {
     /// geometry it spells (RFC 7946 clause 3.1), or as the coordinates of the type it names.
     #[strum(to_string = "a GeoJSON geometry")]
     Geometry,
+    /// A `Property` and a `ListProperty` hold a value with no null in it (ETSI GS CIM 009 v1.9.1
+    /// clause 4.5.0), so an object or an array holding nothing but nulls leaves nothing to write.
+    #[strum(to_string = "a value holding something other than null")]
+    NonNull,
 }
 
 #[cfg(test)]
@@ -51,5 +55,6 @@ mod tests {
         assert_eq!(RequiredValue::Json.to_string(), "JSON");
         assert_eq!(RequiredValue::JsonObject.to_string(), "a JSON object");
         assert_eq!(RequiredValue::Geometry.to_string(), "a GeoJSON geometry");
+        assert_eq!(RequiredValue::NonNull.to_string(), "a value holding something other than null");
     }
 }

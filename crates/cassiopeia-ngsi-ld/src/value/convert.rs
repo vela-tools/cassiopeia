@@ -7,6 +7,7 @@ use crate::value::{
 };
 use chrono::{DateTime, Utc};
 use compact_str::CompactString;
+use geojson::GeometryValue;
 use serde_json::Value as JsonValue;
 
 impl Value {
@@ -128,6 +129,29 @@ impl TryFrom<JsonValue> for Value {
     }
 }
 
+/// Writes a value as the raw JSON it serializes to, built without an intermediate encoding.
+///
+/// Every value has a JSON form: a float is always finite, so it is always a JSON number (RFC 8259
+/// clause 6), a time value is its clause 4.6.3 text, and a geometry is its `GeoJSON` object (RFC
+/// 7946 clause 3.1). The JSON holds no null, because a value never does (ETSI GS CIM 009 v1.9.1
+/// clause 4.5.0).
+// Manual because each variant maps to a distinct JSON shape, as the value's `Serialize` does, which
+// no derive expresses.
+impl From<Value> for JsonValue {
+    fn from(value: Value) -> JsonValue {
+        match value {
+            Value::Boolean(b) => JsonValue::Bool(b),
+            Value::Number(Number::Integer(i)) => JsonValue::Number(i.into()),
+            Value::Number(Number::Float(f)) => JsonValue::from(f.get()),
+            Value::String(text) => JsonValue::String(text.into()),
+            Value::Temporal(temporal) => JsonValue::String(temporal.text().to_string()),
+            Value::Geospatial(geometry) => JsonValue::from(&GeometryValue::from(geometry.as_ref())),
+            Value::Array(items) => JsonValue::Array(items.into_iter().map(JsonValue::from).collect()),
+            Value::Object(members) => JsonValue::Object(members.into_iter().map(|(key, member)| (key.into(), JsonValue::from(member))).collect()),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use crate::value::{
@@ -135,11 +159,13 @@ mod tests {
         non_finite_float::NonFiniteFloat,
         null_in_json::NullInJson,
         omitted_nulls::OmittedNulls,
-        types::{Number, Value},
+        types::{Number, TemporalValue, Value},
     };
+    use cassiopeia_geometry::geometry::NgsiLdGeometry;
+    use chrono::{TimeZone, Utc};
     use compact_str::CompactString;
     use pretty_assertions::assert_eq;
-    use serde_json::json;
+    use serde_json::{Value as JsonValue, json};
 
     fn read(json: serde_json::Value) -> (Option<Value>, OmittedNulls) {
         let mut omitted = OmittedNulls::default();
@@ -270,6 +296,36 @@ mod tests {
         assert_eq!(
             Value::try_from(json!([1, "two", true])).unwrap(),
             Value::Array(vec![Value::from(1_i64), Value::String(CompactString::from("two")), Value::Boolean(true)])
+        );
+    }
+
+    #[test]
+    fn a_value_converts_into_the_raw_json_it_serializes_to() {
+        let instant = Utc.with_ymd_and_hms(2026, 3, 1, 11, 4, 35).unwrap();
+        let point = Value::Geospatial(Box::new(NgsiLdGeometry::Point {
+            coordinates: [16.37, 48.2].into(),
+        }));
+        let values = [
+            Value::Number(Number::Float(FiniteFloat::try_from(2.5).unwrap())),
+            Value::Temporal(TemporalValue::DateTime(instant)),
+            point,
+            Value::try_from(json!({"a": [1, "two", true], "b": {"c": 3.0}})).unwrap(),
+        ];
+
+        for value in values {
+            let expected = serde_json::to_value(&value).unwrap();
+
+            assert_eq!(JsonValue::from(value), expected);
+        }
+        assert_eq!(
+            JsonValue::from(Value::Temporal(TemporalValue::DateTime(instant))),
+            json!("2026-03-01T11:04:35Z")
+        );
+        assert_eq!(
+            JsonValue::from(Value::Geospatial(Box::new(NgsiLdGeometry::Point {
+                coordinates: [16.37, 48.2].into(),
+            }))),
+            json!({"type": "Point", "coordinates": [16.37, 48.2]})
         );
     }
 }

@@ -1923,14 +1923,93 @@ mod tests {
     }
 
     #[test]
-    fn a_json_property_under_an_object_transformation_carries_the_object_without_its_nulls() {
+    fn a_json_property_under_an_object_transformation_carries_the_object_with_its_nulls_and_records_no_loss() {
         let (payload, dropped) = resolve_json_label(
             r#"{ type: "JsonProperty", source: "{{ payload }}", transformation: "object" }"#,
             json!({"payload": {"a": 1, "b": null}}),
         );
 
-        assert_eq!(payload, Some(json!({"a": 1})));
-        assert!(!dropped.nulls.is_empty());
+        assert_eq!(payload, Some(json!({"a": 1, "b": null})));
+        assert!(dropped.nulls.is_empty());
+    }
+
+    #[test]
+    fn an_object_of_only_nulls_on_a_property_is_dropped_and_recorded_without_a_dropped_null() {
+        let dropped = DroppedAttributes::new();
+        let value = extract_label_recording(
+            r#"{ source: "{{ reading }}", transformation: "object" }"#,
+            json!({"reading": {"maybe": null}}),
+            &dropped,
+        );
+
+        assert_eq!(value, None);
+        assert!(dropped.nulls.is_empty());
+        let recorded = BatchSink::from(dropped.unusable_values)
+            .into_entries()
+            .map(|(unusable, record)| (unusable.attribute.to_string(), unusable.required, record.example.to_string()))
+            .collect::<Vec<_>>();
+        assert_eq!(recorded, [("label".to_owned(), RequiredValue::NonNull, r#"{"maybe":null}"#.to_owned())]);
+    }
+
+    #[test]
+    fn a_property_assembled_from_mappings_leaves_out_a_member_s_nulls_under_the_attribute() {
+        let dropped = DroppedAttributes::new();
+        let value = extract_label_recording(
+            r#"{ mappings: { info: { source: "{{ info }}", transformation: "object" } } }"#,
+            json!({"info": {"a": null, "b": 1}}),
+            &dropped,
+        );
+
+        assert_eq!(value, Some(Value::try_from(json!({"info": {"b": 1}})).unwrap()));
+        let entries = BatchSink::from(dropped.nulls)
+            .into_entries()
+            .map(|(dropped, record)| (dropped, record.occurrences().get()))
+            .collect::<Vec<_>>();
+        assert_eq!(
+            entries,
+            [(
+                DroppedNull {
+                    attribute: name("label"),
+                    site: NullSite::ObjectMember,
+                },
+                1
+            )]
+        );
+    }
+
+    #[test]
+    fn a_json_property_assembled_from_mappings_keeps_a_member_s_nulls() {
+        let (payload, dropped) = resolve_json_label(
+            r#"{ type: "JsonProperty", mappings: { info: { source: "{{ info }}", transformation: "object" } } }"#,
+            json!({"info": {"a": null}}),
+        );
+
+        assert_eq!(payload, Some(json!({"info": {"a": null}})));
+        assert!(dropped.nulls.is_empty());
+        assert!(dropped.unusable_values.is_empty());
+    }
+
+    #[test]
+    fn a_datetime_member_of_an_assembled_object_is_written_as_its_text() {
+        let value = extract_label(
+            r#"{ mappings: { at: { source: "{{ at }}", transformation: "datetime" } } }"#,
+            json!({"at": "2026-03-01 11:04:35"}),
+        );
+
+        assert_eq!(serde_json::to_value(value).unwrap(), json!({"at": "2026-03-01T11:04:35Z"}));
+    }
+
+    #[test]
+    fn a_geometry_member_of_an_assembled_object_is_written_as_its_geojson() {
+        let value = extract_label(
+            r#"{ mappings: { pin: { type: "GeoProperty", source: ["{{ lon }}", "{{ lat }}"], transformation: "point" } } }"#,
+            json!({"lon": 16.37, "lat": 48.2}),
+        );
+
+        assert_eq!(
+            serde_json::to_value(value).unwrap(),
+            json!({"pin": {"type": "Point", "coordinates": [16.37, 48.2]}})
+        );
     }
 
     #[test]

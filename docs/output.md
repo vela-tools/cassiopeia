@@ -99,7 +99,7 @@ Cassiopeia never writes JSON `null` in an entity (ETSI GS CIM 009 v1.9.1 clause 
 
 Empty text is a value, not an absence: a JSON field holding `""`, read by a plain reference such as `{{ label }}`, is written as `"value": ""`. A blank CSV field or empty XML element is read as missing when the record is read, so it gives no attribute (see [Source formats](source-formats.md)).
 
-A `null` nested inside a source value is left out of it, because NGSI-LD admits none anywhere in a Property's value: a source array `["a", null, "b"]` is written as `["a", "b"]`, and an object `{"value": 21.5, "unit": null}` as `{"value": 21.5}`. The attribute is kept, and the run warns under `extractor-null-dropped`. A `JsonProperty` keeps such a `null`, because its `json` member is raw JSON that NGSI-LD never interprets (clause 4.5.24.2). See [Convert values](mapping.md#convert-values).
+A `null` nested inside a source value is left out of it, because NGSI-LD admits none anywhere in a Property's value: a source array `["a", null, "b"]` is written as `["a", "b"]`, and an object `{"value": 21.5, "unit": null}` as `{"value": 21.5}`. The attribute is kept, and the run warns under `extractor-null-dropped`. A value holding nothing but `null`, such as `{"maybe": null}`, is not written at all, and the run warns under `extractor-value-only-null`. A `JsonProperty` keeps such a `null`, because its `json` member is raw JSON that NGSI-LD never interprets (clause 4.5.24.2). See [Convert values](mapping.md#convert-values).
 
 ## Temporal output
 

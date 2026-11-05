@@ -37,6 +37,10 @@ pub enum ExtractorCode {
     /// An attribute declared the `integer` or `float` transformation and its source carried a value
     /// that spells no number of that kind, so the attribute was dropped.
     NumberUnreadable,
+    /// An attribute's source value was an object or an array holding nothing but nulls, which
+    /// NGSI-LD admits nowhere in a Property's value, so nothing was left to write and the attribute
+    /// was dropped.
+    ValueOnlyNull,
 }
 
 #[cfg(test)]
@@ -57,5 +61,6 @@ mod tests {
         assert_eq!(ExtractorCode::GeometryUnreadable.to_string(), "geometry-unreadable");
         assert_eq!(ExtractorCode::BooleanUnreadable.to_string(), "boolean-unreadable");
         assert_eq!(ExtractorCode::NumberUnreadable.to_string(), "number-unreadable");
+        assert_eq!(ExtractorCode::ValueOnlyNull.to_string(), "value-only-null");
     }
 }
