@@ -1,5 +1,8 @@
 use crate::attribute::{
-    conversion::{readers::SourceParts, value_reading},
+    conversion::{
+        readers::SourceParts,
+        value_reading::{self, GeometryHolder},
+    },
     refusal::AttributeRefusal,
 };
 use cassiopeia_geometry::{policy::GeometryPolicy, target::GeometryTarget};
@@ -17,7 +20,7 @@ pub(crate) fn apply(
     policy: Option<&GeometryPolicy>,
     omitted: &mut OmittedNulls,
 ) -> Result<Option<Value>, AttributeRefusal> {
-    value_reading::read_geometry(parts, target, policy, omitted)
+    value_reading::read_geometry(parts, target, policy, GeometryHolder::GeoProperty, omitted)
 }
 
 #[cfg(test)]

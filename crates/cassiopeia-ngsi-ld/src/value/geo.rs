@@ -1,4 +1,4 @@
-use crate::value::types::Value;
+use crate::value::{omitted_nulls::OmittedNulls, types::Value};
 use cassiopeia_geometry::{
     convert::{convert, from_coordinates, from_geojson},
     coordinates::CoordinateShape,
@@ -7,7 +7,8 @@ use cassiopeia_geometry::{
     policy::GeometryPolicy,
     target::GeometryTarget,
 };
-use geojson::{Geometry, Position};
+use geojson::{Geometry, GeometryValue, Position};
+use serde_json::Value as JsonValue;
 
 impl Value {
     /// Reads the value as the geometry an NGSI-LD `GeoProperty` is to carry.
@@ -46,6 +47,43 @@ impl Value {
                 Some(shape) => from_coordinates(shape, kind, policy).map(Some),
                 None => Ok(None),
             },
+        }
+    }
+
+    /// Reads the value as any `GeoJSON` geometry (RFC 7946 clause 3.1), for a Property, whose value
+    /// may be any JSON object.
+    ///
+    /// A `GeoProperty` admits only six geometry types (ETSI GS CIM 009 v1.9.1 clause 4.7.1), so a
+    /// `GeometryCollection` (RFC 7946 clause 3.1.8) can reach a broker only as a Property's value.
+    /// Kept as the source spells it, with no `geometry` conversion declared and no target type
+    /// named, the collection is written as its `GeoJSON` object: each member is read as a geometry
+    /// of its own under `policy`, so it is validated and normalised as any geometry is. Every other
+    /// value is read as [`Value::to_geometry`] reads it, and becomes the typed geometry it spells.
+    ///
+    /// # Errors
+    /// Returns the [`GeometryError`] naming why the value, or a member of the collection it spells,
+    /// is no geometry the attribute can hold.
+    pub fn to_any_geometry(&self, target: GeometryTarget, policy: &GeometryPolicy) -> Result<Option<Value>, GeometryError> {
+        let keeps_collection = matches!(target, GeometryTarget::Preserve) && policy.convert().is_none();
+        if !keeps_collection || matches!(self, Value::Geospatial(_)) {
+            return Ok(self.to_geometry(target, policy)?.map(|geometry| Value::Geospatial(Box::new(geometry))));
+        }
+
+        match self.as_source_geometry() {
+            Some(Geometry {
+                value: GeometryValue::GeometryCollection { geometries },
+                ..
+            }) => {
+                let collection = GeometryValue::GeometryCollection {
+                    geometries: read_members(geometries, *policy)?,
+                };
+                // A geometry `geojson` writes holds no null, so nothing is left out here.
+                Ok(Value::from_json(JsonValue::from(&collection), &mut OmittedNulls::default()))
+            }
+            Some(geometry) => from_geojson(geometry, target, policy).map(|geometry| Some(Value::Geospatial(Box::new(geometry)))),
+            // A bare coordinate array carries no geometry type of its own, so with no target named
+            // there is nothing to preserve.
+            None => Ok(None),
         }
     }
 
@@ -96,6 +134,32 @@ impl Value {
 
         Some(CoordinateShape::Group(members))
     }
+}
+
+/// Reads every member of a `GeometryCollection` as a geometry of its own under `policy`, keeping a
+/// nested collection, which RFC 7946 clause 3.1.8 discourages but admits, as a collection of its
+/// members.
+///
+/// # Errors
+/// Returns the [`GeometryError`] of the first member that is no valid geometry.
+fn read_members(members: Vec<Geometry>, policy: GeometryPolicy) -> Result<Vec<Geometry>, GeometryError> {
+    members
+        .into_iter()
+        .map(|member| match member.value {
+            GeometryValue::GeometryCollection { geometries } => Ok(Geometry::new(GeometryValue::GeometryCollection {
+                geometries: read_members(geometries, policy)?,
+            })),
+            value @ (GeometryValue::Point { .. }
+            | GeometryValue::MultiPoint { .. }
+            | GeometryValue::LineString { .. }
+            | GeometryValue::MultiLineString { .. }
+            | GeometryValue::Polygon { .. }
+            | GeometryValue::MultiPolygon { .. }) => {
+                let geometry = from_geojson(Geometry::new(value), GeometryTarget::Preserve, &policy)?;
+                Ok(Geometry::new(GeometryValue::from(&geometry)))
+            }
+        })
+        .collect()
 }
 
 /// Reads a flat array of numbers as one position (RFC 7946 clause 3.1.1).
@@ -276,6 +340,100 @@ mod tests {
                 origin: GeometryKind::MultiPolygon,
                 members: 2,
             })
+        );
+    }
+
+    fn any(value: &Value, policy: GeometryPolicy) -> Result<Option<Value>, GeometryError> {
+        value.to_any_geometry(GeometryTarget::Preserve, &policy)
+    }
+
+    #[test]
+    fn a_geometry_collection_reads_as_a_geojson_object() {
+        let collection = json!({"type": "GeometryCollection", "geometries": [{"type": "Point", "coordinates": [1.0, 2.0]}]});
+
+        // The JSON is consumed by the conversion into a value and still needed to build the expected one.
+        assert_eq!(
+            any(&Value::try_from(collection.clone()).unwrap(), GeometryPolicy::default()),
+            Ok(Some(Value::try_from(collection).unwrap()))
+        );
+    }
+
+    #[test]
+    fn a_geometry_collection_as_text_reads_as_a_geojson_object() {
+        let text = Value::String(r#"{"type":"GeometryCollection","geometries":[{"type":"Point","coordinates":[1.0,2.0]}]}"#.into());
+
+        assert_eq!(
+            any(&text, GeometryPolicy::default()),
+            Ok(Some(
+                Value::try_from(json!({"type": "GeometryCollection", "geometries": [{"type": "Point", "coordinates": [1.0, 2.0]}]})).unwrap()
+            ))
+        );
+    }
+
+    #[test]
+    fn a_geometry_collection_with_a_misshapen_member_is_no_geometry() {
+        let collection = Value::try_from(json!({"type": "GeometryCollection", "geometries": [{"type": "Point"}]})).unwrap();
+
+        assert_eq!(any(&collection, GeometryPolicy::default()), Ok(None));
+    }
+
+    #[test]
+    fn a_geometry_collection_member_is_normalised_under_the_policy() {
+        let collection = Value::try_from(json!({
+            "type": "GeometryCollection",
+            "geometries": [{"type": "Point", "coordinates": [1.0, 2.0, 300.0]}],
+        }))
+        .unwrap();
+        let policy: GeometryPolicy = serde_json::from_value(json!({"altitude": "drop"})).unwrap();
+
+        assert_eq!(
+            any(&collection, policy),
+            Ok(Some(
+                Value::try_from(json!({"type": "GeometryCollection", "geometries": [{"type": "Point", "coordinates": [1.0, 2.0]}]})).unwrap()
+            ))
+        );
+    }
+
+    #[test]
+    fn a_geometry_collection_with_a_member_that_is_no_valid_geometry_is_refused() {
+        let collection = Value::try_from(json!({
+            "type": "GeometryCollection",
+            "geometries": [{"type": "LineString", "coordinates": [[0.0, 0.0]]}],
+        }))
+        .unwrap();
+
+        assert_eq!(
+            any(&collection, GeometryPolicy::default()),
+            Err(GeometryError::ShortLineString { positions: 1 })
+        );
+    }
+
+    #[test]
+    fn a_geometry_collection_under_a_declared_conversion_is_read_as_a_geo_property_reads_it() {
+        let collection = Value::try_from(json!({"type": "GeometryCollection", "geometries": [{"type": "Point", "coordinates": [1.0, 2.0]}]})).unwrap();
+        let flatten = GeometryPolicy::builder().convert(Some(ConversionStrategy::Flatten)).build();
+
+        assert_eq!(
+            any(&collection, flatten),
+            Ok(Some(Value::Geospatial(Box::new(NgsiLdGeometry::Point {
+                coordinates: [1.0, 2.0].into(),
+            }))))
+        );
+        assert_eq!(
+            collection.to_any_geometry(GeometryTarget::Coerce(GeometryKind::Point), &GeometryPolicy::default()),
+            Err(GeometryError::GeometryCollection)
+        );
+    }
+
+    #[test]
+    fn any_geometry_reads_one_of_the_six_types_as_its_typed_geometry() {
+        let point = Value::try_from(json!({"type": "Point", "coordinates": [16.37, 48.2]})).unwrap();
+
+        assert_eq!(
+            any(&point, GeometryPolicy::default()),
+            Ok(Some(Value::Geospatial(Box::new(NgsiLdGeometry::Point {
+                coordinates: [16.37, 48.2].into(),
+            }))))
         );
     }
 }

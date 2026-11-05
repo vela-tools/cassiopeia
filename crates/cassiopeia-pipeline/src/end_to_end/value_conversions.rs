@@ -229,3 +229,35 @@ fn a_list_property_with_an_unreadable_item_is_dropped_with_a_warning() {
         assert_eq!(outcome.warnings, 1, "{store:?}");
     }
 }
+
+/// A site whose shape is any `GeoJSON` geometry, held by a Property so a `GeometryCollection` can be
+/// written.
+const SITE: &str = r#"{
+    version: "v4",
+    dataModel: "Site",
+    identity: { entityName: "{{ id }}" },
+    attributes: {
+        shape: { source: "{{ shape }}", transformation: "geometry" },
+    },
+}"#;
+
+#[test]
+fn a_property_under_geometry_keeps_a_geometry_collection() {
+    let collection = json!({ "type": "GeometryCollection", "geometries": [{ "type": "Point", "coordinates": [16.37, 48.2] }] });
+    for store in STORES {
+        let outcome = run_end_to_end(
+            store,
+            &[RunInput {
+                binding: RunBinding::Mapping(SITE),
+                records: json!([{ "id": "a", "shape": collection }]),
+            }],
+            &["Site"],
+            "",
+        );
+
+        let site = entity(&outcome.entities, "urn:ngsi-ld:Site:a");
+        assert_eq!(site["shape"]["type"], "Property", "{store:?}: {site:?}");
+        assert_eq!(site["shape"]["value"], collection, "{store:?}");
+        assert_eq!(outcome.warnings, 0, "{store:?}: {:?}", outcome.diagnostics);
+    }
+}

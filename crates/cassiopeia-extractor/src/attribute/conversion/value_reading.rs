@@ -15,6 +15,18 @@ use cassiopeia_ngsi_ld::value::{
 use compact_str::CompactString;
 use serde_json::Value as JsonValue;
 
+/// What holds the geometry a reading builds, which decides whether a `GeometryCollection` (RFC 7946
+/// clause 3.1.8) is admissible.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum GeometryHolder {
+    /// A `GeoProperty`, which admits only the six geometry types of ETSI GS CIM 009 v1.9.1 clause
+    /// 4.7.1.
+    GeoProperty,
+    /// A `Property`'s value, or one item of a `ListProperty`'s `valueList`, which may be any JSON
+    /// object (clause 4.5.2), so a `GeometryCollection` is kept as its `GeoJSON` object.
+    Value,
+}
+
 /// What one reading of a declaration's source produced, before the declaration's type admits it.
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) enum ReadValue {
@@ -57,7 +69,7 @@ pub(crate) fn read(
     omitted: &mut OmittedNulls,
 ) -> Result<Option<ReadValue>, AttributeRefusal> {
     let merged = match reading {
-        ValueReading::Geometry(target) => return Ok(read_geometry(parts, target, policy, omitted)?.map(ReadValue::Value)),
+        ValueReading::Geometry(target) => return Ok(read_geometry(parts, target, policy, GeometryHolder::Value, omitted)?.map(ReadValue::Value)),
         ValueReading::Boolean | ValueReading::Integer | ValueReading::Float => readers::merge_first(parts),
         ValueReading::Text | ValueReading::Object | ValueReading::Json | ValueReading::Temporal(_) => readers::merge_text(parts),
     };
@@ -87,7 +99,7 @@ pub(crate) fn read_value(
         ValueReading::Float => typed(value, omitted, |value| coerce_scalar(&value, RequiredValue::Float, coerce_float)),
         ValueReading::Text => typed(value, omitted, |value| Ok(Some(coerce_string(value)))),
         ValueReading::Temporal(temporal) => typed(value, omitted, |value| coerce_temporal(&value, temporal)),
-        ValueReading::Geometry(target) => typed(value, omitted, |value| coerce_geometry(&value, target, policy).map(Some)),
+        ValueReading::Geometry(target) => typed(value, omitted, |value| coerce_geometry(&value, target, policy, GeometryHolder::Value).map(Some)),
     }
 }
 
@@ -109,7 +121,8 @@ pub(crate) fn read_text(parts: SourceParts, omitted: &mut OmittedNulls) -> Optio
     readers::merge_text(parts).and_then(|value| Value::from_json(value, omitted)).map(coerce_string)
 }
 
-/// Reads the source parts as the geometry `target` names, under the mapping's policy.
+/// Reads the source parts as the geometry `target` names, under the mapping's policy, as `holder`
+/// admits it.
 ///
 /// The parts carry no value when every one of them is null or blank text: CSV and spreadsheet
 /// sources spell an empty field as an empty string, so an empty cell, or a pair of empty coordinate
@@ -123,6 +136,7 @@ pub(crate) fn read_geometry(
     parts: SourceParts,
     target: GeometryTarget,
     policy: Option<&GeometryPolicy>,
+    holder: GeometryHolder,
     omitted: &mut OmittedNulls,
 ) -> Result<Option<Value>, AttributeRefusal> {
     if parts.iter().all(readers::is_absent) {
@@ -131,7 +145,7 @@ pub(crate) fn read_geometry(
 
     readers::merge_structured(parts)
         .and_then(|merged| Value::from_json(merged, omitted))
-        .map_or(Ok(None), |merged| coerce_geometry(&merged, target, policy).map(Some))
+        .map_or(Ok(None), |merged| coerce_geometry(&merged, target, policy, holder).map(Some))
 }
 
 /// Reads a value as the scalar a transformation names, through `read`.
@@ -205,21 +219,22 @@ fn coerce_string(value: Value) -> Value {
 /// The value is there, so one that spells no geometry at all is refused rather than left out, the
 /// way unreadable text under `datetime` is: a `GeoProperty` that vanishes unannounced is what leaves
 /// a published entity without its location. A geometry assembled from nested `mappings` is read
-/// here too, as the one part the assembled object is.
+/// here too, as the one part the assembled object is. A `GeoProperty` refuses a
+/// `GeometryCollection`, and any other holder keeps it as its `GeoJSON` object when no conversion
+/// or target type was declared (see [`Value::to_any_geometry`]).
 ///
 /// # Errors
 /// Returns [`AttributeRefusal::UnusableValue`] quoting a value that spells no geometry, text as
 /// written and any other value as its rendering, or [`AttributeRefusal::Geometry`] naming why the
 /// geometry it spells cannot become the declared type.
-fn coerce_geometry(value: &Value, target: GeometryTarget, policy: Option<&GeometryPolicy>) -> Result<Value, AttributeRefusal> {
+fn coerce_geometry(value: &Value, target: GeometryTarget, policy: Option<&GeometryPolicy>, holder: GeometryHolder) -> Result<Value, AttributeRefusal> {
     let policy = policy.copied().unwrap_or_default();
-    match value.to_geometry(target, &policy)? {
-        Some(geometry) => Ok(Value::Geospatial(Box::new(geometry))),
-        None => Err(AttributeRefusal::unusable(
-            RequiredValue::Geometry,
-            &value.as_str().map_or_else(|| value.to_string(), str::to_owned),
-        )),
-    }
+    let geometry = match holder {
+        GeometryHolder::GeoProperty => value.to_geometry(target, &policy)?.map(|geometry| Value::Geospatial(Box::new(geometry))),
+        GeometryHolder::Value => value.to_any_geometry(target, &policy)?,
+    };
+
+    geometry.ok_or_else(|| AttributeRefusal::unusable(RequiredValue::Geometry, &value.as_str().map_or_else(|| value.to_string(), str::to_owned)))
 }
 
 /// Reads a value as a temporal value of the given kind.
@@ -552,12 +567,77 @@ mod tests {
         assert_eq!(geometry.kind(), GeometryKind::Polygon);
     }
 
+    /// A `GeometryCollection` of the points at `points`.
+    fn collection_of(points: &[[f64; 2]]) -> JsonValue {
+        json!({
+            "type": "GeometryCollection",
+            "geometries": points.iter().map(|point| json!({"type": "Point", "coordinates": point})).collect::<Vec<_>>(),
+        })
+    }
+
     #[test]
-    fn a_source_geometry_collection_is_refused() {
-        let source = json!({"type": "GeometryCollection", "geometries": []});
+    fn geometry_on_a_property_keeps_a_geometry_collection() {
+        let collection = collection_of(&[[1.0, 2.0]]);
 
         assert_eq!(
-            apply(smallvec![source], property(Transformation::Geometry), None),
+            // The collection is consumed by the conversion and still needed to build the expected value.
+            converted(smallvec![collection.clone()], property(Transformation::Geometry), None),
+            Some(Value::try_from(collection).unwrap())
+        );
+    }
+
+    #[test]
+    fn geometry_on_a_property_reads_one_of_the_six_types_as_a_geo_property_does() {
+        assert_eq!(
+            converted(
+                smallvec![json!({"type": "Point", "coordinates": [16.37, 48.2]})],
+                property(Transformation::Geometry),
+                None
+            ),
+            Some(Value::Geospatial(Box::new(NgsiLdGeometry::Point {
+                coordinates: [16.37, 48.2].into(),
+            })))
+        );
+    }
+
+    #[test]
+    fn geometry_on_a_property_refuses_a_value_that_spells_no_geometry() {
+        assert_eq!(
+            apply(smallvec![json!("abc")], property(Transformation::Geometry), None),
+            Err(AttributeRefusal::unusable(RequiredValue::Geometry, "abc"))
+        );
+    }
+
+    #[test]
+    fn geometry_on_a_property_folds_a_collection_its_policy_flattens() {
+        let policy = GeometryPolicy::builder().convert(Some(ConversionStrategy::Flatten)).build();
+
+        assert_eq!(
+            converted(
+                smallvec![collection_of(&[[1.0, 2.0], [3.0, 4.0]])],
+                property(Transformation::Geometry),
+                Some(&policy)
+            ),
+            Some(Value::Geospatial(Box::new(NgsiLdGeometry::MultiPoint {
+                coordinates: vec![[1.0, 2.0].into(), [3.0, 4.0].into()],
+            })))
+        );
+    }
+
+    #[test]
+    fn point_on_a_property_builds_a_point_from_coordinate_parts() {
+        assert_eq!(
+            converted(smallvec![json!("16.37"), json!("48.2")], property(Transformation::Point), None),
+            Some(Value::Geospatial(Box::new(NgsiLdGeometry::Point {
+                coordinates: [16.37, 48.2].into(),
+            })))
+        );
+    }
+
+    #[test]
+    fn a_geometry_collection_under_a_named_geometry_type_is_refused() {
+        assert_eq!(
+            apply(smallvec![collection_of(&[[1.0, 2.0]])], property(Transformation::Point), None),
             Err(AttributeRefusal::Geometry(GeometryError::GeometryCollection))
         );
     }

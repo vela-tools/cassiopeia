@@ -381,7 +381,7 @@ Cassiopeia supports GeoJSON `FeatureCollection` documents and single GeoJSON `Fe
 
 Cassiopeia copies the feature ID to `id`, copies `properties` as an object, and copies `geometry` as a GeoJSON geometry. It also copies `bbox` when present. A feature of a `FeatureCollection` also carries its collection's members under `featureCollection` (see [Collection members](#collection-members)). A geometry-only GeoJSON document is not accepted as a source collection.
 
-RFC 7946 lets a feature's geometry be a `GeometryCollection`, which NGSI-LD does not admit as a GeoProperty value. Such a feature produces no GeoProperty: the attribute is dropped and the run counts a warning, unless the mapping sets `geometry.convert` to `flatten` to fold the collection into one geometry.
+RFC 7946 lets a feature's geometry be a `GeometryCollection`, which NGSI-LD does not admit as a GeoProperty value. Such a feature produces no GeoProperty: the attribute is dropped and the run counts a warning, unless the mapping sets `geometry.convert` to `flatten` to fold the collection into one geometry. A plain `Property` with `transformation: "geometry"` keeps the collection as its GeoJSON object instead (see [GeoProperty](mapping.md#geoproperty)).
 
 The source geometry is ready to use as an NGSI-LD `GeoProperty`, which keeps the geometry as read without a transformation:
 

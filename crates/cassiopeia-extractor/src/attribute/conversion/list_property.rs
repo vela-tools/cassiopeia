@@ -381,4 +381,14 @@ mod tests {
             Err(AttributeRefusal::unusable(RequiredValue::Json, "null"))
         );
     }
+
+    #[test]
+    fn geometry_on_a_list_keeps_a_geometry_collection_item() {
+        let collection = json!({"type": "GeometryCollection", "geometries": [{"type": "Point", "coordinates": [1.0, 2.0]}]});
+
+        assert_eq!(
+            converted(smallvec![json!([collection])], list(Transformation::Geometry), None),
+            Some(Value::Array(vec![Value::try_from(collection).unwrap()]))
+        );
+    }
 }
