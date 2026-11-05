@@ -5,4 +5,5 @@ mod json_collections;
 mod record_merges;
 mod relationships;
 mod station_mappings;
+mod unreadable_geometries;
 mod value_conversions;
