@@ -4,12 +4,13 @@ use crate::attribute::{
         read_context::ReadContext,
         readers::{self, SourceParts},
         value_admission,
-        value_reading::{self, ReadValue},
+        value_read::{Absence, ReadValue, ValueRead},
+        value_reading,
     },
     refusal::AttributeRefusal,
 };
 use cassiopeia_mapping::conversion::{list_conversion::ListConversion, value_reading::ValueReading};
-use cassiopeia_ngsi_ld::value::{omitted_nulls::OmittedNulls, reported_text::is_blank, types::Value};
+use cassiopeia_ngsi_ld::value::{omitted_nulls::OmittedNulls, types::Value};
 use serde_json::Value as JsonValue;
 
 /// A `ListProperty`'s `valueList`, an ordered array of NGSI-LD Values (ETSI GS CIM 009 v1.9.1 clause
@@ -52,28 +53,23 @@ impl AttributeConversion for ListConversion {
     }
 }
 
-/// Reads one item the way `reading` names, keeping a null item for [`admit_each`] to leave out and
-/// refusing an item that is there but reads as nothing.
+/// Reads one item the way `reading` names (see [`value_reading::read_value`]), keeping a null item
+/// for [`admit_each`] to leave out and refusing an item that is there but reads as nothing.
 ///
 /// Blank text is a value the record carries in a list, since the list was there, so every reading
-/// but text, which keeps blank text as it is, refuses it.
+/// that reads it as nothing refuses it, quoting it as written; so does the `json` reading text
+/// spelling `null`.
 ///
 /// # Errors
 /// Returns the refusal of the reading, or of an item that reads as nothing (see
 /// [`AttributeRefusal::unreadable`]).
 fn read_item(item: JsonValue, reading: ValueReading, ctx: &mut ReadContext<'_>) -> Result<ReadValue, AttributeRefusal> {
-    if item.is_null() {
-        return Ok(ReadValue::Json(item));
+    match value_reading::read_value(item, reading, ctx)? {
+        ValueRead::Read(read) => Ok(read),
+        ValueRead::Absent(Absence::Null) => Ok(ReadValue::Json(JsonValue::Null)),
+        ValueRead::Absent(Absence::Blank(text)) => Err(AttributeRefusal::unreadable(reading, &text)),
+        ValueRead::Absent(Absence::SpelledNull) => Err(AttributeRefusal::unreadable(reading, "null")),
     }
-    if !matches!(reading, ValueReading::Text)
-        && let JsonValue::String(text) = &item
-        && is_blank(text)
-    {
-        return Err(AttributeRefusal::unreadable(reading, text));
-    }
-
-    // Past the blank check, only JSON text spelling `null` reads as nothing.
-    value_reading::read_value(item, reading, ctx)?.ok_or_else(|| AttributeRefusal::unreadable(reading, "null"))
 }
 
 /// Admits the items read one way as the list, leaving out and counting each null item.

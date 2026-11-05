@@ -1,34 +1,45 @@
-use crate::attribute::{
-    conversion::{attribute_conversion::AttributeConversion, identifier, read_context::ReadContext, readers::SourceParts, value_reading},
-    refusal::AttributeRefusal,
+use crate::{
+    attribute::{
+        conversion::{attribute_conversion::AttributeConversion, identifier::Identifier, read_context::ReadContext, readers::SourceParts, value_reading},
+        refusal::AttributeRefusal,
+    },
+    required_value::RequiredValue,
 };
-use cassiopeia_ir::attribute_content::AttributeContent;
 use cassiopeia_mapping::conversion::value_reading::IdentifierReading;
 use cassiopeia_ngsi_ld::value::omitted_nulls::OmittedNulls;
 use iri_rs::IriBuf;
 use serde_json::Value as JsonValue;
 
 /// The IRI a `VocabProperty`'s `vocab` member names (ETSI GS CIM 009 v1.9.1 clause 4.5.20), read
-/// from the parts' text as the identifier the reading names and written in its normal form (see
-/// [`identifier::read_identifier`]).
+/// from the parts as a `Property` reads the identifier the reading names, and written in its normal
+/// form (see [`value_reading::read_identifier`]).
 ///
-/// A blank value is one the record does not carry, so it yields no IRI rather than a refusal; text
-/// that is not the identifier is refused quoting it, and any other value as its rendering. Reading
-/// builds the IRI the type holds, so admitting keeps it as it is.
+/// A null or blank value is one the record does not carry, so it yields no IRI rather than a
+/// refusal; text that is not the identifier is refused quoting it, and any other value as its
+/// rendering. A URN is an absolute IRI (RFC 8141 clause 2 and RFC 3987 clause 2.2), so admitting
+/// writes it as the IRI the type holds.
 impl AttributeConversion for IdentifierReading {
     type Content = IriBuf;
-    type Reading = IriBuf;
+    type Reading = Identifier;
 
-    fn read(self, parts: SourceParts, ctx: &mut ReadContext<'_>) -> Result<Option<IriBuf>, AttributeRefusal> {
-        value_reading::read_text(parts, ctx.omitted).map_or(Ok(None), |value| identifier::read_identifier(&value, self))
+    fn read(self, parts: SourceParts, ctx: &mut ReadContext<'_>) -> Result<Option<Identifier>, AttributeRefusal> {
+        value_reading::read_identifier(parts, self, ctx.omitted)
     }
 
-    fn admit(self, reading: IriBuf, _omitted: &mut OmittedNulls) -> Result<Option<IriBuf>, AttributeRefusal> {
-        Ok(Some(reading))
+    /// # Errors
+    /// Returns [`AttributeRefusal::UnusableValue`] quoting a URN that `iri-rs`, which parses IRIs
+    /// apart from the URN parser, does not read as an IRI, as not [`RequiredValue::Iri`].
+    fn admit(self, reading: Identifier, _omitted: &mut OmittedNulls) -> Result<Option<IriBuf>, AttributeRefusal> {
+        match reading {
+            Identifier::Iri(iri) => Ok(Some(iri)),
+            Identifier::Urn(urn) => IriBuf::new(urn.to_string())
+                .map(Some)
+                .map_err(|_| AttributeRefusal::unusable(RequiredValue::Iri, urn.as_str())),
+        }
     }
 
-    fn into_json(reading: IriBuf) -> JsonValue {
-        JsonValue::from(AttributeContent::Vocab(reading))
+    fn into_json(reading: Identifier) -> JsonValue {
+        JsonValue::from(reading)
     }
 }
 

@@ -1,122 +1,143 @@
 use crate::{
     attribute::{
         conversion::{
-            identifier,
+            identifier::{self, Identifier},
             read_context::ReadContext,
             readers::{self, SourceParts},
+            value_read::{Absence, ReadValue, ValueRead},
         },
         refusal::AttributeRefusal,
     },
     required_value::RequiredValue,
 };
 use cassiopeia_geometry::{policy::GeometryPolicy, target::GeometryTarget};
-use cassiopeia_mapping::conversion::value_reading::{TemporalReading, ValueReading};
+use cassiopeia_mapping::conversion::value_reading::{IdentifierReading, TemporalReading, ValueReading};
 use cassiopeia_ngsi_ld::value::{
     omitted_nulls::OmittedNulls,
+    reported_text::is_blank,
     types::{TemporalValue, Value},
 };
 use compact_str::CompactString;
 use serde_json::Value as JsonValue;
 
-/// What one reading of a declaration's source produced, before the declaration's type admits it.
-#[derive(Debug, Clone, PartialEq)]
-pub(crate) enum ReadValue {
-    /// Raw JSON the `object` or `json` reading kept as the source held it, every null included.
-    Json(JsonValue),
-    /// A value a scalar, text, temporal, or geometry reading built.
-    Value(Value),
-}
-
-/// Writes a reading as the JSON it stands for inside a structured value, such as a member of an
-/// object nested `mappings` assemble: raw JSON as it was kept, nulls included, and a value as the
-/// JSON it serializes to.
-// Manual because each variant unwraps into the JSON it holds or stands for, which no derive
-// expresses.
-impl From<ReadValue> for JsonValue {
-    fn from(reading: ReadValue) -> JsonValue {
-        match reading {
-            ReadValue::Json(json) => json,
-            ReadValue::Value(value) => JsonValue::from(value),
-        }
-    }
-}
-
-/// Reads the source parts as one value, the way `reading` names.
+/// Reads the source parts as one value, the way `reading` names, or `Ok(None)` when the source
+/// carried no value.
 ///
 /// A geometry reading keeps the parts' array structure so their order, the coordinate order,
 /// survives (see [`geometry_source`]). A scalar reading takes the first part present, and every other
-/// reading merges the parts into text; the merged value is then read on its own.
-///
-/// `Ok(None)` means the source carried no value. A temporal reading refuses text that reads as no
-/// supported spelling of a date-time; a boolean, integer, or float reading refuses a value that
-/// spells no such scalar; the object and JSON readings refuse text that does not read as the JSON
-/// they ask for, and the object reading any other value that is no object; and a geometry reading
-/// refuses a value that spells no geometry, a geometry the declared type cannot hold, or one this
-/// mapping did not authorise converting. The text reading uses any value and never refuses one.
+/// reading merges the parts into text; the merged value is then read on its own (see
+/// [`read_value`]), and reads as no value whichever way it carried nothing.
 ///
 /// # Errors
 /// Returns the [`AttributeRefusal`] naming what the reading could not use.
 pub(crate) fn read(parts: SourceParts, reading: ValueReading, ctx: &mut ReadContext<'_>) -> Result<Option<ReadValue>, AttributeRefusal> {
     let merged = match reading {
         ValueReading::Geometry(target) => {
-            let Some(value) = geometry_source(parts, ctx.omitted) else {
-                return Ok(None);
-            };
-            return Ok(any_geometry(&value, target, ctx.policy)?.map(ReadValue::Value));
+            return geometry_source(parts, ctx.omitted)
+                .map(|value| any_geometry(&value, target, ctx.policy).map(ReadValue::Value))
+                .transpose();
         }
         ValueReading::Boolean | ValueReading::Integer | ValueReading::Float => readers::merge_first(parts),
         ValueReading::Text | ValueReading::Object | ValueReading::Json | ValueReading::Temporal(_) | ValueReading::Identifier(_) => readers::merge_text(parts),
     };
 
-    merged.map_or(Ok(None), |value| read_value(value, reading, ctx))
+    merged.map_or(Ok(None), |value| Ok(read_value(value, reading, ctx)?.into_read()))
 }
 
 /// Reads one value, already merged from the parts or taken as one item of a list, the way
-/// `reading` names.
+/// `reading` names, saying why when it carried nothing to read.
 ///
-/// The object and JSON readings keep raw JSON with every null in it. Every other reading builds a
-/// value, which holds no null (ETSI GS CIM 009 v1.9.1 clause 4.5.0): a null nested in what it reads
-/// is left out and counted in the context. A value that is there and will not read is refused, and a
-/// blank one is no value (see [`AttributeRefusal::unless_blank`]).
-pub(crate) fn read_value(value: JsonValue, reading: ValueReading, ctx: &mut ReadContext<'_>) -> Result<Option<ReadValue>, AttributeRefusal> {
+/// A null value carries nothing, and so does blank text under every reading but text, which keeps
+/// it as it is; the `json` reading reads text spelling `null` as the null it spells. The object and
+/// JSON readings keep raw JSON with every null in it. Every other reading builds a value, which
+/// holds no null (ETSI GS CIM 009 v1.9.1 clause 4.5.0): a null nested in what it reads is left out
+/// and counted in the context.
+///
+/// A temporal reading refuses text that reads as no supported spelling of a date-time; a boolean,
+/// integer, or float reading refuses a value that spells no such scalar; the object and JSON
+/// readings refuse text that does not read as the JSON they ask for, and the object reading any
+/// other value that is no object; an identifier reading refuses a value that is not the identifier;
+/// and a geometry reading refuses a value that spells no geometry, a geometry the declared type
+/// cannot hold, or one this mapping did not authorise converting. The text reading never refuses a
+/// value.
+///
+/// # Errors
+/// Returns the [`AttributeRefusal`] naming what the reading could not use.
+pub(crate) fn read_value(value: JsonValue, reading: ValueReading, ctx: &mut ReadContext<'_>) -> Result<ValueRead, AttributeRefusal> {
+    let value = match value {
+        JsonValue::Null => return Ok(ValueRead::Absent(Absence::Null)),
+        JsonValue::String(text) if is_blank(&text) && !matches!(reading, ValueReading::Text) => return Ok(ValueRead::Absent(Absence::Blank(text))),
+        present @ (JsonValue::Bool(_) | JsonValue::Number(_) | JsonValue::String(_) | JsonValue::Array(_) | JsonValue::Object(_)) => present,
+    };
+
     match reading {
-        ValueReading::Object => Ok(readers::read_object(value, RequiredValue::JsonObject)?.map(|object| ReadValue::Json(JsonValue::Object(object)))),
-        ValueReading::Json => Ok(readers::decode(value)?.map(ReadValue::Json)),
-        ValueReading::Boolean => typed(value, ctx.omitted, |value| coerce(&value, reading, |value| value.to_boolean().map(Value::from))),
-        ValueReading::Integer => typed(value, ctx.omitted, |value| coerce(&value, reading, |value| value.to_integer().map(Value::from))),
-        ValueReading::Float => typed(value, ctx.omitted, |value| {
-            coerce(&value, reading, |value| value.to_float().and_then(|float| Value::try_from(float).ok()))
+        ValueReading::Object => Ok(ValueRead::Read(ReadValue::Json(JsonValue::Object(readers::object_of(
+            value,
+            RequiredValue::JsonObject,
+        )?)))),
+        ValueReading::Json => Ok(match readers::json_of(value)? {
+            JsonValue::Null => ValueRead::Absent(Absence::SpelledNull),
+            json @ (JsonValue::Bool(_) | JsonValue::Number(_) | JsonValue::String(_) | JsonValue::Array(_) | JsonValue::Object(_)) => {
+                ValueRead::Read(ReadValue::Json(json))
+            }
         }),
-        ValueReading::Text => typed(value, ctx.omitted, |value| Ok(Some(coerce_string(value)))),
-        ValueReading::Temporal(temporal) => typed(value, ctx.omitted, |value| {
-            coerce(&value, reading, |value| {
-                value.try_parse_datetime().map(|datetime| {
-                    Value::Temporal(match temporal {
-                        TemporalReading::DateTime => TemporalValue::DateTime(datetime),
-                        TemporalReading::Date => TemporalValue::Date(datetime),
-                        TemporalReading::Time => TemporalValue::Time(datetime),
-                    })
-                })
-            })
+        ValueReading::Text => built(value, ctx.omitted, |value| Ok(text_of(value))),
+        ValueReading::Boolean => built(value, ctx.omitted, |value| found(value.to_boolean().map(Value::from), reading, &value)),
+        ValueReading::Integer => built(value, ctx.omitted, |value| found(value.to_integer().map(Value::from), reading, &value)),
+        ValueReading::Float => built(value, ctx.omitted, |value| {
+            found(value.to_float().and_then(|float| Value::try_from(float).ok()), reading, &value)
         }),
-        ValueReading::Identifier(identifier) => typed(value, ctx.omitted, |value| {
-            Ok(identifier::read_identifier(&value, identifier)?.map(|iri| Value::String(CompactString::from(iri.as_str()))))
+        ValueReading::Temporal(temporal) => built(value, ctx.omitted, |value| {
+            let datetime = value.try_parse_datetime().map(|datetime| match temporal {
+                TemporalReading::DateTime => TemporalValue::DateTime(datetime),
+                TemporalReading::Date => TemporalValue::Date(datetime),
+                TemporalReading::Time => TemporalValue::Time(datetime),
+            });
+            found(datetime.map(Value::Temporal), reading, &value)
         }),
+        ValueReading::Identifier(identifier) => built(value, ctx.omitted, |value| identifier::read_identifier(&value, identifier).map(Value::from)),
         ValueReading::Geometry(target) => {
             let policy = ctx.policy;
-            typed(value, ctx.omitted, |value| any_geometry(&value, target, policy))
+            built(value, ctx.omitted, |value| any_geometry(&value, target, policy))
         }
     }
 }
 
-/// Builds a value from raw JSON, leaving out and counting every null nested in it, and reads it
-/// through `coerce`.
-fn typed(
-    value: JsonValue,
-    omitted: &mut OmittedNulls,
-    coerce: impl FnOnce(Value) -> Result<Option<Value>, AttributeRefusal>,
-) -> Result<Option<ReadValue>, AttributeRefusal> {
-    Ok(Value::from_json(value, omitted).map_or(Ok(None), coerce)?.map(ReadValue::Value))
+/// Builds a value from raw JSON the record carries, leaving out and counting every null nested in
+/// it, and reads it through `read`.
+///
+/// # Errors
+/// Returns the refusal `read` names.
+fn built(value: JsonValue, omitted: &mut OmittedNulls, read: impl FnOnce(Value) -> Result<Value, AttributeRefusal>) -> Result<ValueRead, AttributeRefusal> {
+    match Value::from_json(value, omitted) {
+        Some(value) => Ok(ValueRead::Read(ReadValue::Value(read(value)?))),
+        None => Ok(ValueRead::Absent(Absence::Null)),
+    }
+}
+
+/// What `reading` found in `value`, or the refusal of the value when it found nothing (see
+/// [`AttributeRefusal::unreadable`]).
+///
+/// # Errors
+/// Returns the refusal of the value under the reading, quoting it (see [`Value::quoted`]).
+fn found(found: Option<Value>, reading: ValueReading, value: &Value) -> Result<Value, AttributeRefusal> {
+    found.ok_or_else(|| AttributeRefusal::unreadable(reading, &value.quoted()))
+}
+
+/// Reads the source parts as the identifier `reading` names, merged into text as a text reading
+/// merges them, or `Ok(None)` when the source carried no value: null, or blank text.
+///
+/// A `Property` reads an identifier the same way, through [`read_value`]; this keeps the identifier
+/// as the type it was parsed as, for the type that holds one.
+///
+/// # Errors
+/// Returns the refusal of a value that is not the identifier (see [`identifier::read_identifier`]).
+pub(crate) fn read_identifier(parts: SourceParts, reading: IdentifierReading, omitted: &mut OmittedNulls) -> Result<Option<Identifier>, AttributeRefusal> {
+    readers::merge_text(parts)
+        .filter(|value| !readers::is_absent(value))
+        .and_then(|value| Value::from_json(value, omitted))
+        .map(|value| identifier::read_identifier(&value, reading))
+        .transpose()
 }
 
 /// Reads the source parts as text: text as it is, and any other value as its compact JSON text.
@@ -124,7 +145,7 @@ fn typed(
 /// The text reading never refuses a value. A null nested in a value written as text is left out of
 /// the text and counted in `omitted`.
 pub(crate) fn read_text(parts: SourceParts, omitted: &mut OmittedNulls) -> Option<Value> {
-    readers::merge_text(parts).and_then(|value| Value::from_json(value, omitted)).map(coerce_string)
+    readers::merge_text(parts).and_then(|value| Value::from_json(value, omitted)).map(text_of)
 }
 
 /// Merges the source parts into the one value a geometry is read from, or `None` when the parts
@@ -143,20 +164,8 @@ pub(crate) fn geometry_source(parts: SourceParts, omitted: &mut OmittedNulls) ->
     readers::merge_structured(parts).and_then(|merged| Value::from_json(merged, omitted))
 }
 
-/// Reads a value as `reading` reads it through `read`, refusing a value that is there and that
-/// `read` finds nothing in (see [`AttributeRefusal::unless_blank`]).
-///
-/// # Errors
-/// Returns the refusal of the value under the reading.
-fn coerce(value: &Value, reading: ValueReading, read: impl FnOnce(&Value) -> Option<Value>) -> Result<Option<Value>, AttributeRefusal> {
-    match read(value) {
-        Some(read) => Ok(Some(read)),
-        None => AttributeRefusal::unless_blank(reading, value),
-    }
-}
-
 /// Writes a value as text: text as it is, and any other value as its compact JSON text.
-fn coerce_string(value: Value) -> Value {
+fn text_of(value: Value) -> Value {
     match &value {
         Value::String(_) => value,
         Value::Boolean(_) | Value::Number(_) | Value::Temporal(_) | Value::Geospatial(_) | Value::Array(_) | Value::Object(_) => {
@@ -165,28 +174,29 @@ fn coerce_string(value: Value) -> Value {
     }
 }
 
-/// Reads a value as the geometry `target` names, under `policy`, as a Value, which may be any JSON
-/// object (ETSI GS CIM 009 v1.9.1 clause 4.5.2): a `GeometryCollection` (RFC 7946 clause 3.1.8) is
-/// kept as its `GeoJSON` object when no conversion or target type was declared (see
-/// [`Value::to_any_geometry`]). A geometry assembled from nested `mappings` is read here too, as the
-/// one part the assembled object is.
+/// Reads a value the record carries as the geometry `target` names, under `policy`, as a Value,
+/// which may be any JSON object (ETSI GS CIM 009 v1.9.1 clause 4.5.2): a `GeometryCollection` (RFC
+/// 7946 clause 3.1.8) is kept as its `GeoJSON` object when no conversion or target type was declared
+/// (see [`Value::to_any_geometry`]). A geometry assembled from nested `mappings` is read here too, as
+/// the one part the assembled object is.
 ///
 /// # Errors
-/// Returns the refusal of a value that spells no geometry (see [`AttributeRefusal::unless_blank`]),
-/// or [`AttributeRefusal::Geometry`] naming why the geometry it spells cannot become the declared
-/// type.
-fn any_geometry(value: &Value, target: GeometryTarget, policy: GeometryPolicy) -> Result<Option<Value>, AttributeRefusal> {
-    match value.to_any_geometry(target, &policy)? {
-        Some(geometry) => Ok(Some(geometry)),
-        None => AttributeRefusal::unless_blank(ValueReading::Geometry(target), value),
-    }
+/// Returns the refusal of a value that spells no geometry (see [`AttributeRefusal::unreadable`]), or
+/// [`AttributeRefusal::Geometry`] naming why the geometry it spells cannot become the declared type.
+fn any_geometry(value: &Value, target: GeometryTarget, policy: GeometryPolicy) -> Result<Value, AttributeRefusal> {
+    found(value.to_any_geometry(target, &policy)?, ValueReading::Geometry(target), value)
 }
 
 #[cfg(test)]
 mod tests {
     use crate::{
         attribute::{
-            conversion::fixtures::{apply, converted, property},
+            conversion::{
+                fixtures::{apply, converted, property},
+                read_context::ReadContext,
+                value_read::{Absence, ReadValue, ValueRead},
+                value_reading::read_value,
+            },
             refusal::AttributeRefusal,
         },
         required_value::RequiredValue,
@@ -197,8 +207,14 @@ mod tests {
         policy::GeometryPolicy,
         strategy::ConversionStrategy,
     };
-    use cassiopeia_mapping::transformation::Transformation;
-    use cassiopeia_ngsi_ld::value::types::{Number, Value};
+    use cassiopeia_mapping::{
+        conversion::value_reading::{IdentifierReading, ValueReading},
+        transformation::Transformation,
+    };
+    use cassiopeia_ngsi_ld::value::{
+        omitted_nulls::OmittedNulls,
+        types::{Number, Value},
+    };
     use pretty_assertions::assert_eq;
     use serde_json::{Value as JsonValue, json};
     use smallvec::smallvec;
@@ -331,7 +347,16 @@ mod tests {
 
     #[test]
     fn blank_text_under_a_scalar_transformation_is_absent_rather_than_refused() {
-        for transformation in [Transformation::Boolean, Transformation::Integer, Transformation::Float] {
+        for transformation in [
+            Transformation::Boolean,
+            Transformation::Integer,
+            Transformation::Float,
+            Transformation::Iri,
+            Transformation::Urn,
+            Transformation::DateTime,
+            Transformation::Object,
+            Transformation::Json,
+        ] {
             assert_scalar_absent(json!(""), transformation);
             assert_scalar_absent(json!("   "), transformation);
         }
@@ -609,6 +634,53 @@ mod tests {
         assert_eq!(
             apply(smallvec![json!(r#""abc""#)], property(Transformation::Integer), None),
             Err(AttributeRefusal::unusable(RequiredValue::Integer, r#""abc""#))
+        );
+    }
+
+    /// What reading `value` the way `reading` names found.
+    fn read_one(value: JsonValue, reading: ValueReading) -> Result<ValueRead, AttributeRefusal> {
+        let mut omitted = OmittedNulls::default();
+        read_value(
+            value,
+            reading,
+            &mut ReadContext {
+                policy: GeometryPolicy::default(),
+                omitted: &mut omitted,
+            },
+        )
+    }
+
+    #[test]
+    fn reading_one_value_says_why_it_carried_nothing() {
+        assert_eq!(read_one(JsonValue::Null, ValueReading::Integer), Ok(ValueRead::Absent(Absence::Null)));
+        assert_eq!(
+            read_one(json!(" "), ValueReading::Identifier(IdentifierReading::Iri)),
+            Ok(ValueRead::Absent(Absence::Blank(" ".to_owned())))
+        );
+        assert_eq!(read_one(json!("null"), ValueReading::Json), Ok(ValueRead::Absent(Absence::SpelledNull)));
+    }
+
+    #[test]
+    fn the_text_reading_keeps_blank_text_as_it_is() {
+        assert_eq!(
+            read_one(json!(" "), ValueReading::Text),
+            Ok(ValueRead::Read(ReadValue::Value(Value::try_from(json!(" ")).unwrap())))
+        );
+    }
+
+    #[test]
+    fn the_object_reading_refuses_text_spelling_null() {
+        assert_eq!(
+            read_one(json!("null"), ValueReading::Object),
+            Err(AttributeRefusal::unusable(RequiredValue::JsonObject, "null"))
+        );
+    }
+
+    #[test]
+    fn an_identifier_on_a_property_is_its_normalized_text() {
+        assert_eq!(
+            converted(smallvec![json!(" URN:Ex:a ")], property(Transformation::Urn), None),
+            Some(Value::try_from(json!("urn:ex:a")).unwrap())
         );
     }
 }

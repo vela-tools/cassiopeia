@@ -4,7 +4,8 @@ use crate::attribute::{
         read_context::ReadContext,
         readers::{self, SourceParts},
         value_admission,
-        value_reading::{self, ReadValue},
+        value_read::ReadValue,
+        value_reading,
     },
     refusal::AttributeRefusal,
 };

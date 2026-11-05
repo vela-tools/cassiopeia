@@ -86,7 +86,7 @@ pub(crate) fn keep_as_read(parts: SourceParts) -> Option<JsonValue> {
     }
 }
 
-/// Reads text as the JSON it is written as (RFC 8259 clause 2), or as nothing when it is blank.
+/// Reads text the record carries as the JSON it is written as (RFC 8259 clause 2).
 ///
 /// Text spelling `null` reads as the null it spells; a reading that needs something else refuses it
 /// as it refuses any other JSON of the wrong shape.
@@ -94,60 +94,70 @@ pub(crate) fn keep_as_read(parts: SourceParts) -> Option<JsonValue> {
 /// # Errors
 /// Returns [`AttributeRefusal::UnusableValue`] quoting the text, as not the `required` value, when
 /// it is not JSON.
-pub(crate) fn read_json(text: &str, required: RequiredValue) -> Result<Option<JsonValue>, AttributeRefusal> {
-    if is_blank(text) {
-        return Ok(None);
-    }
-    serde_json::from_str(text).map(Some).map_err(|_| AttributeRefusal::unusable(required, text))
+fn parse_json(text: &str, required: RequiredValue) -> Result<JsonValue, AttributeRefusal> {
+    serde_json::from_str(text).map_err(|_| AttributeRefusal::unusable(required, text))
 }
 
-/// Reads a value as the JSON it stands for: text as the JSON value it is written as, and any other
-/// value as it is, every nested null kept.
-///
-/// Blank text, text spelling `null`, and a null value carry no value.
+/// Reads a value the record carries as the JSON it stands for: text as the JSON value it is written
+/// as, which may be the null `null` spells, and any other value as it is, every nested null kept.
 ///
 /// # Errors
 /// Returns [`AttributeRefusal::UnusableValue`] quoting text that is not JSON as not
 /// [`RequiredValue::Json`].
-pub(crate) fn decode(value: JsonValue) -> Result<Option<JsonValue>, AttributeRefusal> {
+pub(crate) fn json_of(value: JsonValue) -> Result<JsonValue, AttributeRefusal> {
     match value {
-        JsonValue::String(text) => Ok(read_json(&text, RequiredValue::Json)?.filter(|json| !json.is_null())),
-        JsonValue::Null => Ok(None),
-        other @ (JsonValue::Bool(_) | JsonValue::Number(_) | JsonValue::Array(_) | JsonValue::Object(_)) => Ok(Some(other)),
+        JsonValue::String(text) => parse_json(&text, RequiredValue::Json),
+        other @ (JsonValue::Null | JsonValue::Bool(_) | JsonValue::Number(_) | JsonValue::Array(_) | JsonValue::Object(_)) => Ok(other),
     }
 }
 
-/// Decodes every part (see [`decode`]), turning a part that carries no value into a null, so the
-/// parts keep their positions and an absent one is left out as any null part is.
+/// Reads every part as the JSON it stands for (see [`json_of`]), turning a part that is absent (see
+/// [`is_absent`]) into a null, so the parts keep their positions and an absent one is left out as
+/// any null part is.
 ///
 /// # Errors
 /// Returns [`AttributeRefusal::UnusableValue`] quoting the first text part that is not JSON.
 pub(crate) fn decode_parts(parts: SourceParts) -> Result<SourceParts, AttributeRefusal> {
-    parts.into_iter().map(|part| Ok(decode(part)?.unwrap_or(JsonValue::Null))).collect()
+    parts
+        .into_iter()
+        .map(|part| if is_absent(&part) { Ok(JsonValue::Null) } else { json_of(part) })
+        .collect()
 }
 
 /// Reads a value as a JSON object, or the object its JSON text spells, keeping every null member,
-/// for a declaration that requires `required` of it.
+/// for a declaration that requires `required` of it, or `Ok(None)` when the value is absent (see
+/// [`is_absent`]).
 ///
-/// Blank text and a null value carry no value. An empty object is kept: whether it is a value at all
-/// is the declaration's type to decide.
+/// # Errors
+/// Returns the refusal of a value that is no object (see [`object_of`]).
+pub(crate) fn read_object(value: JsonValue, required: RequiredValue) -> Result<Option<JsonObject>, AttributeRefusal> {
+    if is_absent(&value) {
+        return Ok(None);
+    }
+    object_of(value, required).map(Some)
+}
+
+/// Reads a value the record carries as a JSON object, or the object its JSON text spells, keeping
+/// every null member, for a declaration that requires `required` of it.
+///
+/// An empty object is kept: whether it is a value at all is the declaration's type to decide.
 ///
 /// # Errors
 /// Returns [`AttributeRefusal::UnusableValue`] quoting a value that is no object as not the
 /// `required` value: text as written when it is not JSON or is JSON but no object, and any other
 /// value as its compact JSON text.
-pub(crate) fn read_object(value: JsonValue, required: RequiredValue) -> Result<Option<JsonObject>, AttributeRefusal> {
+pub(crate) fn object_of(value: JsonValue, required: RequiredValue) -> Result<JsonObject, AttributeRefusal> {
     match value {
-        JsonValue::Object(object) => Ok(Some(object)),
-        JsonValue::String(text) => match read_json(&text, required)? {
-            Some(JsonValue::Object(object)) => Ok(Some(object)),
-            Some(JsonValue::Null | JsonValue::Bool(_) | JsonValue::Number(_) | JsonValue::String(_) | JsonValue::Array(_)) => {
+        JsonValue::Object(object) => Ok(object),
+        JsonValue::String(text) => match parse_json(&text, required)? {
+            JsonValue::Object(object) => Ok(object),
+            JsonValue::Null | JsonValue::Bool(_) | JsonValue::Number(_) | JsonValue::String(_) | JsonValue::Array(_) => {
                 Err(AttributeRefusal::unusable(required, &text))
             }
-            None => Ok(None),
         },
-        JsonValue::Null => Ok(None),
-        other @ (JsonValue::Bool(_) | JsonValue::Number(_) | JsonValue::Array(_)) => Err(AttributeRefusal::unusable(required, &other.to_string())),
+        other @ (JsonValue::Null | JsonValue::Bool(_) | JsonValue::Number(_) | JsonValue::Array(_)) => {
+            Err(AttributeRefusal::unusable(required, &other.to_string()))
+        }
     }
 }
 
@@ -183,7 +193,7 @@ pub(crate) fn aggregate(parts: SourceParts) -> Option<Vec<JsonValue>> {
 mod tests {
     use crate::{
         attribute::{
-            conversion::readers::{aggregate, decode, read_object},
+            conversion::readers::{aggregate, decode_parts, json_of, read_object},
             refusal::AttributeRefusal,
         },
         required_value::RequiredValue,
@@ -237,11 +247,29 @@ mod tests {
     }
 
     #[test]
-    fn decoding_reads_json_text_and_keeps_its_nulls() {
-        assert_eq!(decode(json!(r#"{"x":null}"#)), Ok(Some(json!({"x": null}))));
-        assert_eq!(decode(json!("12.5")), Ok(Some(json!(12.5))));
-        assert_eq!(decode(json!("nope")), Err(AttributeRefusal::unusable(RequiredValue::Json, "nope")));
-        assert_eq!(decode(json!("")), Ok(None));
-        assert_eq!(decode(json!("null")), Ok(None));
+    fn reading_json_reads_text_as_the_json_it_spells_and_keeps_its_nulls() {
+        assert_eq!(json_of(json!(r#"{"x":null}"#)), Ok(json!({"x": null})));
+        assert_eq!(json_of(json!("12.5")), Ok(json!(12.5)));
+        assert_eq!(json_of(json!("null")), Ok(JsonValue::Null));
+        assert_eq!(json_of(json!([1, null])), Ok(json!([1, null])));
+        assert_eq!(json_of(json!("nope")), Err(AttributeRefusal::unusable(RequiredValue::Json, "nope")));
+    }
+
+    #[test]
+    fn decoding_parts_turns_an_absent_part_into_a_null_in_its_position() {
+        assert_eq!(
+            decode_parts(smallvec![json!(""), json!("[1]"), JsonValue::Null, json!("null")]),
+            Ok(smallvec![JsonValue::Null, json!([1]), JsonValue::Null, JsonValue::Null])
+        );
+    }
+
+    #[test]
+    fn reading_a_null_object_reads_nothing() {
+        assert_eq!(object(JsonValue::Null), Ok(None));
+    }
+
+    #[test]
+    fn reading_an_object_refuses_text_spelling_null() {
+        assert_eq!(object(json!("null")), Err(AttributeRefusal::unusable(RequiredValue::JsonObject, "null")));
     }
 }

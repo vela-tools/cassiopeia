@@ -1,7 +1,7 @@
 use crate::required_value::RequiredValue;
 use cassiopeia_geometry::error::GeometryError;
 use cassiopeia_mapping::conversion::value_reading::{IdentifierReading, ValueReading};
-use cassiopeia_ngsi_ld::value::{json_payload_error::JsonPayloadError, types::Value};
+use cassiopeia_ngsi_ld::value::json_payload_error::JsonPayloadError;
 use derive_more::From;
 
 /// Why an attribute could not take the value its source carried.
@@ -69,20 +69,6 @@ impl AttributeRefusal {
 
         AttributeRefusal::unusable(required, text)
     }
-
-    /// Refuses a value that `reading` could not read, quoting it as [`Value::reported_text`] does,
-    /// or reads it as no value when it is blank, since the record does not carry it.
-    ///
-    /// Any value that is there and will not read is refused, text and non-text alike (text such as
-    /// `abc` under `integer`, an array, an object), because a reading that vanishes unannounced is a
-    /// value the published entity silently lacks.
-    ///
-    /// # Errors
-    /// Returns the refusal of the value under the reading (see [`AttributeRefusal::unreadable`])
-    /// unless it is blank.
-    pub(crate) fn unless_blank<T>(reading: ValueReading, value: &Value) -> Result<Option<T>, AttributeRefusal> {
-        value.reported_text().map_or(Ok(None), |text| Err(AttributeRefusal::unreadable(reading, &text)))
-    }
 }
 
 #[cfg(test)]
@@ -90,12 +76,8 @@ mod tests {
     use crate::{attribute::refusal::AttributeRefusal, required_value::RequiredValue};
     use cassiopeia_geometry::{error::GeometryError, target::GeometryTarget};
     use cassiopeia_mapping::conversion::value_reading::{IdentifierReading, TemporalReading, ValueReading};
-    use cassiopeia_ngsi_ld::value::{
-        json_payload_error::{JsonPayloadError, JsonShape},
-        types::Value,
-    };
+    use cassiopeia_ngsi_ld::value::json_payload_error::{JsonPayloadError, JsonShape};
     use pretty_assertions::assert_eq;
-    use serde_json::json;
 
     #[test]
     fn a_geometry_error_converts_into_a_refusal() {
@@ -150,14 +132,5 @@ mod tests {
             AttributeRefusal::unreadable(ValueReading::Temporal(TemporalReading::Date), "nope"),
             AttributeRefusal::UnreadableTimestamp { text: Box::from("nope") }
         );
-    }
-
-    #[test]
-    fn an_unreadable_value_is_refused_quoting_its_reported_text_unless_it_is_blank() {
-        let refused = |source| AttributeRefusal::unless_blank::<Value>(ValueReading::Integer, &Value::try_from(source).unwrap());
-
-        assert_eq!(refused(json!("  abc ")), Err(AttributeRefusal::unusable(RequiredValue::Integer, "abc")));
-        assert_eq!(refused(json!([1])), Err(AttributeRefusal::unusable(RequiredValue::Integer, "[1]")));
-        assert_eq!(refused(json!("  ")), Ok(None));
     }
 }

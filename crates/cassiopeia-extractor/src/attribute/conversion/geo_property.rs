@@ -23,7 +23,7 @@ impl AttributeConversion for GeometryTarget {
 
         match value.to_geometry(self, &ctx.policy)? {
             Some(geometry) => Ok(Some(Value::Geospatial(Box::new(geometry)))),
-            None => AttributeRefusal::unless_blank(ValueReading::Geometry(self), &value),
+            None => Err(AttributeRefusal::unreadable(ValueReading::Geometry(self), &value.quoted())),
         }
     }
 

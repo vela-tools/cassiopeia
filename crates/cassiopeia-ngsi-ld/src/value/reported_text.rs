@@ -15,22 +15,34 @@ impl Value {
     /// The text this value is quoted as when a stage reports it could not use it, or `None` when
     /// the record does not carry it.
     ///
-    /// A blank value is one the record does not carry (see [`is_blank`]) and is not reported. Text is quoted as
-    /// written, without the whitespace around it, and any other value (a number, a boolean, an object) as its rendering, so a mapping
-    /// mistake is named rather than lost. Text is borrowed from the value: a sink copies it only when
-    /// it opens a record, so a repeat of a known failure allocates nothing.
+    /// A blank value is one the record does not carry (see [`is_blank`]) and is not reported; any
+    /// other value is quoted (see [`Value::quoted`]).
     #[must_use]
     pub fn reported_text(&self) -> Option<Cow<'_, str>> {
         match self {
-            Value::String(text) => {
-                if is_blank(text) {
-                    None
-                } else {
-                    Some(Cow::Borrowed(text.trim()))
-                }
-            }
+            Value::String(text) if is_blank(text) => None,
+            present @ (Value::String(_)
+            | Value::Boolean(_)
+            | Value::Number(_)
+            | Value::Temporal(_)
+            | Value::Geospatial(_)
+            | Value::Array(_)
+            | Value::Object(_)) => Some(present.quoted()),
+        }
+    }
+
+    /// The text a refusal of this value quotes: text as written, without the whitespace around it,
+    /// and any other value (a number, a boolean, an object) as its rendering, so a mapping mistake
+    /// is named rather than lost.
+    ///
+    /// Text is borrowed from the value: a sink copies it only when it opens a record, so a repeat of
+    /// a known failure allocates nothing.
+    #[must_use]
+    pub fn quoted(&self) -> Cow<'_, str> {
+        match self {
+            Value::String(text) => Cow::Borrowed(text.trim()),
             Value::Boolean(_) | Value::Number(_) | Value::Temporal(_) | Value::Geospatial(_) | Value::Array(_) | Value::Object(_) => {
-                Some(Cow::Owned(self.to_string()))
+                Cow::Owned(self.to_string())
             }
         }
     }
@@ -54,6 +66,13 @@ mod tests {
         assert_eq!(Value::try_from(json!(2026)).unwrap().reported_text(), Some("2026".into()));
         assert_eq!(Value::try_from(json!(true)).unwrap().reported_text(), Some("true".into()));
         assert_eq!(Value::try_from(json!({"en": "hi"})).unwrap().reported_text(), Some(r#"{"en":"hi"}"#.into()));
+    }
+
+    #[test]
+    fn a_value_is_quoted_as_its_trimmed_text_or_its_rendering_blank_text_included() {
+        assert_eq!(Value::try_from(json!("  12 ")).unwrap().quoted(), "12");
+        assert_eq!(Value::try_from(json!("   ")).unwrap().quoted(), "");
+        assert_eq!(Value::try_from(json!([1, "a"])).unwrap().quoted(), r#"[1,"a"]"#);
     }
 
     #[test]

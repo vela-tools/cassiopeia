@@ -8,6 +8,7 @@ pub(crate) mod property;
 pub(crate) mod read_context;
 pub(crate) mod readers;
 pub(crate) mod value_admission;
+pub(crate) mod value_read;
 pub(crate) mod value_reading;
 pub(crate) mod vocab_property;
 
