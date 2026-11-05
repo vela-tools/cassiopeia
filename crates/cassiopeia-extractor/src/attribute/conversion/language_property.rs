@@ -1,39 +1,88 @@
 use crate::{
     attribute::{
-        conversion::readers::{self, SourceParts},
+        conversion::{
+            attribute_conversion::AttributeConversion,
+            read_context::ReadContext,
+            readers::{self, SourceParts},
+            value_reading,
+        },
         refusal::AttributeRefusal,
     },
     required_value::RequiredValue,
 };
-use cassiopeia_ngsi_ld::{entity::attribute::language_property::LanguageMap, value::json_payload::JsonObject};
+use cassiopeia_ir::attribute_content::AttributeContent;
+use cassiopeia_ngsi_ld::{
+    entity::attribute::language_property::LanguageMap,
+    value::{json_payload::JsonObject, omitted_nulls::OmittedNulls, types::Value},
+};
 use langtag::LangTagBuf;
 use serde_json::Value as JsonValue;
 
-/// Converts the parts into a `LanguageProperty`'s `languageMap` (ETSI GS CIM 009 v1.9.1 clause
-/// 4.5.18), read from one object of text keyed by language tag, or from its JSON text.
+/// The conversion of a `LanguageProperty` read from one source into its `languageMap` (ETSI GS CIM
+/// 009 v1.9.1 clause 4.5.18).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct LanguageMapConversion;
+
+/// The conversion of one `languageMap` entry into the localized string it holds (ETSI GS CIM 009
+/// v1.9.1 clause 4.5.18).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct LanguageTextConversion;
+
+/// Reads one object of text keyed by language tag, or its JSON text, as the `languageMap`.
 ///
 /// Only an entry keyed by a well-formed BCP-47 tag and holding text enters the map; any other entry,
 /// a null one included, is no localized string and is left out. Blank text and a null value are
-/// values the record does not carry and yield no map.
-///
-/// # Errors
-/// Returns [`AttributeRefusal::UnusableValue`] quoting a value that is no object, or an object with
-/// no entry that can enter the map, as not [`RequiredValue::LanguageMap`]: an empty `languageMap`
-/// carries no value at all.
-pub(crate) fn apply(parts: SourceParts) -> Result<Option<LanguageMap>, AttributeRefusal> {
-    match readers::merge_text(parts) {
-        Some(JsonValue::Object(entries)) => language_map(entries).map(Some),
-        Some(JsonValue::String(text)) => match readers::read_json(&text, RequiredValue::LanguageMap)? {
+/// values the record does not carry and yield no map. A value that is no object, or an object with
+/// no entry that can enter the map, is refused as not [`RequiredValue::LanguageMap`]: an empty
+/// `languageMap` carries no value at all. Reading builds the map the type holds, so admitting keeps
+/// it as it is.
+impl AttributeConversion for LanguageMapConversion {
+    type Content = LanguageMap;
+    type Reading = LanguageMap;
+
+    fn read(self, parts: SourceParts, _ctx: &mut ReadContext<'_>) -> Result<Option<LanguageMap>, AttributeRefusal> {
+        match readers::merge_text(parts) {
             Some(JsonValue::Object(entries)) => language_map(entries).map(Some),
-            Some(JsonValue::Null | JsonValue::Bool(_) | JsonValue::Number(_) | JsonValue::String(_) | JsonValue::Array(_)) => {
-                Err(AttributeRefusal::unusable(RequiredValue::LanguageMap, &text))
+            Some(JsonValue::String(text)) => match readers::read_json(&text, RequiredValue::LanguageMap)? {
+                Some(JsonValue::Object(entries)) => language_map(entries).map(Some),
+                Some(JsonValue::Null | JsonValue::Bool(_) | JsonValue::Number(_) | JsonValue::String(_) | JsonValue::Array(_)) => {
+                    Err(AttributeRefusal::unusable(RequiredValue::LanguageMap, &text))
+                }
+                None => Ok(None),
+            },
+            Some(other @ (JsonValue::Bool(_) | JsonValue::Number(_) | JsonValue::Array(_))) => {
+                Err(AttributeRefusal::unusable(RequiredValue::LanguageMap, &other.to_string()))
             }
-            None => Ok(None),
-        },
-        Some(other @ (JsonValue::Bool(_) | JsonValue::Number(_) | JsonValue::Array(_))) => {
-            Err(AttributeRefusal::unusable(RequiredValue::LanguageMap, &other.to_string()))
+            Some(JsonValue::Null) | None => Ok(None),
         }
-        Some(JsonValue::Null) | None => Ok(None),
+    }
+
+    fn admit(self, reading: LanguageMap, _omitted: &mut OmittedNulls) -> Result<Option<LanguageMap>, AttributeRefusal> {
+        Ok(Some(reading))
+    }
+
+    fn into_json(reading: LanguageMap) -> JsonValue {
+        JsonValue::from(AttributeContent::Language(reading))
+    }
+}
+
+/// Reads an entry's value as text: text as it is, and any other value as its compact JSON text (see
+/// [`value_reading::read_text`]). Reading never refuses an entry, and admitting keeps the text as it
+/// is.
+impl AttributeConversion for LanguageTextConversion {
+    type Content = Value;
+    type Reading = Value;
+
+    fn read(self, parts: SourceParts, ctx: &mut ReadContext<'_>) -> Result<Option<Value>, AttributeRefusal> {
+        Ok(value_reading::read_text(parts, ctx.omitted))
+    }
+
+    fn admit(self, reading: Value, _omitted: &mut OmittedNulls) -> Result<Option<Value>, AttributeRefusal> {
+        Ok(Some(reading))
+    }
+
+    fn into_json(reading: Value) -> JsonValue {
+        JsonValue::from(reading)
     }
 }
 

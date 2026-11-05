@@ -1,50 +1,51 @@
 use crate::attribute::{
-    conversion::readers::{self, SourceParts},
+    conversion::{
+        attribute_conversion::AttributeConversion,
+        read_context::ReadContext,
+        readers::{self, SourceParts},
+    },
     refusal::AttributeRefusal,
 };
 use cassiopeia_mapping::conversion::json_conversion::JsonConversion;
-use cassiopeia_ngsi_ld::value::json_payload::JsonPayload;
+use cassiopeia_ngsi_ld::value::{json_payload::JsonPayload, omitted_nulls::OmittedNulls};
 use serde_json::Value as JsonValue;
 
-/// Reads the parts as a `JsonProperty`'s conversion names, keeping every null, before the payload is
-/// admitted.
+/// A `JsonProperty`'s `json` member, raw JSON that NGSI-LD never interprets (ETSI GS CIM 009 v1.9.1
+/// clause 4.5.24.2), so every null nested in it is kept as the source has it.
 ///
 /// Naming no transformation keeps the parts as the source held them (see [`readers::keep_as_read`]);
 /// `json` does so after reading each text part as the JSON it is written as; `object` keeps an
 /// object, or reads one from its text, and keeps it even when empty; and `array` gathers every part
-/// into one list.
-///
-/// # Errors
-/// Returns [`AttributeRefusal::UnusableValue`] for text that is not the JSON the conversion asks
-/// for, or, under `object`, a value that is no object.
-pub(crate) fn read(parts: SourceParts, conversion: JsonConversion) -> Result<Option<JsonValue>, AttributeRefusal> {
-    match conversion {
-        JsonConversion::Verbatim => Ok(readers::keep_as_read(parts)),
-        JsonConversion::Json => Ok(readers::keep_as_read(readers::decode_parts(parts)?)),
-        JsonConversion::Object => Ok(readers::merge_text(parts).map_or(Ok(None), readers::read_object)?.map(JsonValue::Object)),
-        JsonConversion::Array => Ok(readers::aggregate(parts).map(JsonValue::Array)),
-    }
-}
+/// into one list. Reading refuses text that is not the JSON the conversion asks for, or, under
+/// `object`, a value that is no object; admitting refuses what is not "a raw JSON object (or array of
+/// objects)" (clause 4.5.24.2), such as an array holding a null item.
+impl AttributeConversion for JsonConversion {
+    type Content = JsonPayload;
+    type Reading = JsonValue;
 
-/// Converts the parts into a `JsonProperty`'s `json` member, raw JSON that NGSI-LD never interprets
-/// (ETSI GS CIM 009 v1.9.1 clause 4.5.24.2), so every null nested in it is kept as the source has
-/// it.
-///
-/// # Errors
-/// Returns what [`read`] refuses, or [`AttributeRefusal::JsonPayload`] when what was read is not "a
-/// raw JSON object (or array of objects)" (clause 4.5.24.2), such as an array holding a null item.
-pub(crate) fn apply(parts: SourceParts, conversion: JsonConversion) -> Result<Option<JsonPayload>, AttributeRefusal> {
-    Ok(read(parts, conversion)?.map(JsonPayload::try_from).transpose()?)
+    fn read(self, parts: SourceParts, _ctx: &mut ReadContext<'_>) -> Result<Option<JsonValue>, AttributeRefusal> {
+        match self {
+            JsonConversion::Verbatim => Ok(readers::keep_as_read(parts)),
+            JsonConversion::Json => Ok(readers::keep_as_read(readers::decode_parts(parts)?)),
+            JsonConversion::Object => Ok(readers::merge_text(parts).map_or(Ok(None), readers::read_object)?.map(JsonValue::Object)),
+            JsonConversion::Array => Ok(readers::aggregate(parts).map(JsonValue::Array)),
+        }
+    }
+
+    fn admit(self, reading: JsonValue, _omitted: &mut OmittedNulls) -> Result<Option<JsonPayload>, AttributeRefusal> {
+        Ok(Some(JsonPayload::try_from(reading)?))
+    }
+
+    fn into_json(reading: JsonValue) -> JsonValue {
+        reading
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use crate::{
         attribute::{
-            conversion::{
-                self,
-                fixtures::{applied_counting, apply, assembled, declared, default_of, payload, street},
-            },
+            conversion::fixtures::{applied_counting, apply, assembled, declared, default_of, member, payload, street},
             refusal::AttributeRefusal,
         },
         required_value::RequiredValue,
@@ -52,10 +53,7 @@ mod tests {
     use cassiopeia_mapping::{conversion::Conversion, transformation::Transformation};
     use cassiopeia_ngsi_ld::{
         entity::attribute::NgsiLdAttributeKind,
-        value::{
-            json_payload_error::{JsonPayloadError, JsonShape},
-            omitted_nulls::OmittedNulls,
-        },
+        value::json_payload_error::{JsonPayloadError, JsonShape},
     };
     use pretty_assertions::assert_eq;
     use serde_json::json;
@@ -285,12 +283,7 @@ mod tests {
     #[test]
     fn the_member_read_of_a_json_property_is_its_raw_json_even_when_no_payload() {
         assert_eq!(
-            conversion::read_member(
-                smallvec![json!(3.5)],
-                default_of(NgsiLdAttributeKind::JsonProperty),
-                None,
-                &mut OmittedNulls::default()
-            ),
+            member(smallvec![json!(3.5)], default_of(NgsiLdAttributeKind::JsonProperty)).0,
             Ok(Some(json!(3.5)))
         );
     }

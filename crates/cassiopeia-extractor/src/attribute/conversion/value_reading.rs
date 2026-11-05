@@ -2,6 +2,7 @@ use crate::{
     attribute::{
         conversion::{
             identifier,
+            read_context::ReadContext,
             readers::{self, SourceParts},
         },
         refusal::AttributeRefusal,
@@ -18,18 +19,6 @@ use cassiopeia_ngsi_ld::value::{
 use compact_str::CompactString;
 use serde_json::Value as JsonValue;
 
-/// What holds the geometry a reading builds, which decides whether a `GeometryCollection` (RFC 7946
-/// clause 3.1.8) is admissible.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum GeometryHolder {
-    /// A `GeoProperty`, which admits only the six geometry types of ETSI GS CIM 009 v1.9.1 clause
-    /// 4.7.1.
-    GeoProperty,
-    /// A `Property`'s value, or one item of a `ListProperty`'s `valueList`, which may be any JSON
-    /// object (clause 4.5.2), so a `GeometryCollection` is kept as its `GeoJSON` object.
-    Value,
-}
-
 /// What one reading of a declaration's source produced, before the declaration's type admits it.
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) enum ReadValue {
@@ -39,11 +28,14 @@ pub(crate) enum ReadValue {
     Value(Value),
 }
 
-impl ReadValue {
-    /// The JSON this reading stands for inside a structured value, such as a member of an object
-    /// nested `mappings` assemble.
-    pub(crate) fn into_json(self) -> JsonValue {
-        match self {
+/// Writes a reading as the JSON it stands for inside a structured value, such as a member of an
+/// object nested `mappings` assemble: raw JSON as it was kept, nulls included, and a value as the
+/// JSON it serializes to.
+// Manual because each variant unwraps into the JSON it holds or stands for, which no derive
+// expresses.
+impl From<ReadValue> for JsonValue {
+    fn from(reading: ReadValue) -> JsonValue {
+        match reading {
             ReadValue::Json(json) => json,
             ReadValue::Value(value) => JsonValue::from(value),
         }
@@ -53,7 +45,7 @@ impl ReadValue {
 /// Reads the source parts as one value, the way `reading` names.
 ///
 /// A geometry reading keeps the parts' array structure so their order, the coordinate order,
-/// survives (see [`read_geometry`]). A scalar reading takes the first part present, and every other
+/// survives (see [`geometry_source`]). A scalar reading takes the first part present, and every other
 /// reading merges the parts into text; the merged value is then read on its own.
 ///
 /// `Ok(None)` means the source carried no value. A temporal reading refuses text that reads as no
@@ -65,19 +57,19 @@ impl ReadValue {
 ///
 /// # Errors
 /// Returns the [`AttributeRefusal`] naming what the reading could not use.
-pub(crate) fn read(
-    parts: SourceParts,
-    reading: ValueReading,
-    policy: Option<&GeometryPolicy>,
-    omitted: &mut OmittedNulls,
-) -> Result<Option<ReadValue>, AttributeRefusal> {
+pub(crate) fn read(parts: SourceParts, reading: ValueReading, ctx: &mut ReadContext<'_>) -> Result<Option<ReadValue>, AttributeRefusal> {
     let merged = match reading {
-        ValueReading::Geometry(target) => return Ok(read_geometry(parts, target, policy, GeometryHolder::Value, omitted)?.map(ReadValue::Value)),
+        ValueReading::Geometry(target) => {
+            let Some(value) = geometry_source(parts, ctx.omitted) else {
+                return Ok(None);
+            };
+            return Ok(Some(ReadValue::Value(any_geometry(&value, target, ctx.policy)?)));
+        }
         ValueReading::Boolean | ValueReading::Integer | ValueReading::Float => readers::merge_first(parts),
         ValueReading::Text | ValueReading::Object | ValueReading::Json | ValueReading::Temporal(_) | ValueReading::Identifier(_) => readers::merge_text(parts),
     };
 
-    merged.map_or(Ok(None), |value| read_value(value, reading, policy, omitted))
+    merged.map_or(Ok(None), |value| read_value(value, reading, ctx))
 }
 
 /// Reads one value, already merged from the parts or taken as one item of a list, the way
@@ -85,27 +77,25 @@ pub(crate) fn read(
 ///
 /// The object and JSON readings keep raw JSON with every null in it. Every other reading builds a
 /// value, which holds no null (ETSI GS CIM 009 v1.9.1 clause 4.5.0): a null nested in what it reads
-/// is left out and counted in `omitted`.
-pub(crate) fn read_value(
-    value: JsonValue,
-    reading: ValueReading,
-    policy: Option<&GeometryPolicy>,
-    omitted: &mut OmittedNulls,
-) -> Result<Option<ReadValue>, AttributeRefusal> {
+/// is left out and counted in the context.
+pub(crate) fn read_value(value: JsonValue, reading: ValueReading, ctx: &mut ReadContext<'_>) -> Result<Option<ReadValue>, AttributeRefusal> {
     match reading {
         ValueReading::Object => Ok(readers::read_object(value)?.map(|object| ReadValue::Json(JsonValue::Object(object)))),
         ValueReading::Json => Ok(readers::decode(value)?.map(ReadValue::Json)),
-        ValueReading::Boolean => typed(value, omitted, |value| {
+        ValueReading::Boolean => typed(value, ctx.omitted, |value| {
             coerce_scalar(&value, RequiredValue::Boolean, |value| value.to_boolean().map(Value::from))
         }),
-        ValueReading::Integer => typed(value, omitted, |value| coerce_scalar(&value, RequiredValue::Integer, coerce_integer)),
-        ValueReading::Float => typed(value, omitted, |value| coerce_scalar(&value, RequiredValue::Float, coerce_float)),
-        ValueReading::Text => typed(value, omitted, |value| Ok(Some(coerce_string(value)))),
-        ValueReading::Temporal(temporal) => typed(value, omitted, |value| coerce_temporal(&value, temporal)),
-        ValueReading::Identifier(identifier) => typed(value, omitted, |value| {
+        ValueReading::Integer => typed(value, ctx.omitted, |value| coerce_scalar(&value, RequiredValue::Integer, coerce_integer)),
+        ValueReading::Float => typed(value, ctx.omitted, |value| coerce_scalar(&value, RequiredValue::Float, coerce_float)),
+        ValueReading::Text => typed(value, ctx.omitted, |value| Ok(Some(coerce_string(value)))),
+        ValueReading::Temporal(temporal) => typed(value, ctx.omitted, |value| coerce_temporal(&value, temporal)),
+        ValueReading::Identifier(identifier) => typed(value, ctx.omitted, |value| {
             Ok(identifier::read_identifier(&value, identifier)?.map(|iri| Value::String(CompactString::from(iri.as_str()))))
         }),
-        ValueReading::Geometry(target) => typed(value, omitted, |value| coerce_geometry(&value, target, policy, GeometryHolder::Value).map(Some)),
+        ValueReading::Geometry(target) => {
+            let policy = ctx.policy;
+            typed(value, ctx.omitted, |value| any_geometry(&value, target, policy).map(Some))
+        }
     }
 }
 
@@ -127,31 +117,31 @@ pub(crate) fn read_text(parts: SourceParts, omitted: &mut OmittedNulls) -> Optio
     readers::merge_text(parts).and_then(|value| Value::from_json(value, omitted)).map(coerce_string)
 }
 
-/// Reads the source parts as the geometry `target` names, under the mapping's policy, as `holder`
-/// admits it.
+/// Merges the source parts into the one value a geometry is read from, or `None` when the parts
+/// carry no value.
 ///
 /// The parts carry no value when every one of them is null or blank text: CSV and spreadsheet
 /// sources spell an empty field as an empty string, so an empty cell, or a pair of empty coordinate
 /// cells, is a value the record does not carry, and naming every one would drown the run. Any other
-/// parts are merged (see [`readers::merge_structured`]) and read.
-///
-/// # Errors
-/// Returns the [`AttributeRefusal`] naming why the merged value is no geometry the attribute can
-/// hold (see [`coerce_geometry`]).
-pub(crate) fn read_geometry(
-    parts: SourceParts,
-    target: GeometryTarget,
-    policy: Option<&GeometryPolicy>,
-    holder: GeometryHolder,
-    omitted: &mut OmittedNulls,
-) -> Result<Option<Value>, AttributeRefusal> {
+/// parts are merged keeping their array structure, so their order, the coordinate order, survives
+/// (see [`readers::merge_structured`]). A null nested in the merged value is left out and counted in
+/// `omitted`.
+pub(crate) fn geometry_source(parts: SourceParts, omitted: &mut OmittedNulls) -> Option<Value> {
     if parts.iter().all(readers::is_absent) {
-        return Ok(None);
+        return None;
     }
 
-    readers::merge_structured(parts)
-        .and_then(|merged| Value::from_json(merged, omitted))
-        .map_or(Ok(None), |merged| coerce_geometry(&merged, target, policy, holder).map(Some))
+    readers::merge_structured(parts).and_then(|merged| Value::from_json(merged, omitted))
+}
+
+/// The refusal of a value that is there but spells no geometry at all, quoting it: text as written,
+/// any other value as its rendering.
+///
+/// The value is there, so it is refused rather than left out, the way unreadable text under
+/// `datetime` is: a geometry that vanishes unannounced is what leaves a published entity without its
+/// location.
+pub(crate) fn no_geometry(value: &Value) -> AttributeRefusal {
+    AttributeRefusal::unusable(RequiredValue::Geometry, &value.as_str().map_or_else(|| value.to_string(), str::to_owned))
 }
 
 /// Reads a value as the scalar a transformation names, through `read`.
@@ -220,27 +210,17 @@ fn coerce_string(value: Value) -> Value {
     }
 }
 
-/// Reads a value that is there as the geometry `target` names, under the mapping's policy.
-///
-/// The value is there, so one that spells no geometry at all is refused rather than left out, the
-/// way unreadable text under `datetime` is: a `GeoProperty` that vanishes unannounced is what leaves
-/// a published entity without its location. A geometry assembled from nested `mappings` is read
-/// here too, as the one part the assembled object is. A `GeoProperty` refuses a
-/// `GeometryCollection`, and any other holder keeps it as its `GeoJSON` object when no conversion
-/// or target type was declared (see [`Value::to_any_geometry`]).
+/// Reads a value that is there as the geometry `target` names, under `policy`, as a Value, which
+/// may be any JSON object (ETSI GS CIM 009 v1.9.1 clause 4.5.2): a `GeometryCollection` (RFC 7946
+/// clause 3.1.8) is kept as its `GeoJSON` object when no conversion or target type was declared (see
+/// [`Value::to_any_geometry`]). A geometry assembled from nested `mappings` is read here too, as the
+/// one part the assembled object is.
 ///
 /// # Errors
-/// Returns [`AttributeRefusal::UnusableValue`] quoting a value that spells no geometry, text as
-/// written and any other value as its rendering, or [`AttributeRefusal::Geometry`] naming why the
-/// geometry it spells cannot become the declared type.
-fn coerce_geometry(value: &Value, target: GeometryTarget, policy: Option<&GeometryPolicy>, holder: GeometryHolder) -> Result<Value, AttributeRefusal> {
-    let policy = policy.copied().unwrap_or_default();
-    let geometry = match holder {
-        GeometryHolder::GeoProperty => value.to_geometry(target, &policy)?.map(|geometry| Value::Geospatial(Box::new(geometry))),
-        GeometryHolder::Value => value.to_any_geometry(target, &policy)?,
-    };
-
-    geometry.ok_or_else(|| AttributeRefusal::unusable(RequiredValue::Geometry, &value.as_str().map_or_else(|| value.to_string(), str::to_owned)))
+/// Returns the refusal of a value that spells no geometry (see [`no_geometry`]), or
+/// [`AttributeRefusal::Geometry`] naming why the geometry it spells cannot become the declared type.
+fn any_geometry(value: &Value, target: GeometryTarget, policy: GeometryPolicy) -> Result<Value, AttributeRefusal> {
+    value.to_any_geometry(target, &policy)?.ok_or_else(|| no_geometry(value))
 }
 
 /// Reads a value as a temporal value of the given kind.

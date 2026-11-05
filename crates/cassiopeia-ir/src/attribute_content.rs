@@ -2,6 +2,7 @@ use cassiopeia_ngsi_ld::{
     entity::attribute::language_property::LanguageMap,
     value::{json_payload::JsonPayload, types::Value},
 };
+use derive_more::From;
 use iri_rs::IriBuf;
 use serde::{Deserialize, Serialize};
 use serde_json::Value as JsonValue;
@@ -15,7 +16,7 @@ use serde_json::Value as JsonValue;
 /// reach the transformer as something it would have to drop. Every other kind carries an NGSI-LD
 /// Value, in which no null can sit (clause 4.5.0). Each travels apart so none can stand in for
 /// another.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, From)]
 pub enum AttributeContent {
     /// The NGSI-LD Value of a Property, one of its subclasses not listed below, or a Relationship's
     /// object.

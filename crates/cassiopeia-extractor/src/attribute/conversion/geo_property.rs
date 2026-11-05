@@ -1,26 +1,39 @@
 use crate::attribute::{
-    conversion::{
-        readers::SourceParts,
-        value_reading::{self, GeometryHolder},
-    },
+    conversion::{attribute_conversion::AttributeConversion, read_context::ReadContext, readers::SourceParts, value_reading},
     refusal::AttributeRefusal,
 };
-use cassiopeia_geometry::{policy::GeometryPolicy, target::GeometryTarget};
+use cassiopeia_geometry::target::GeometryTarget;
 use cassiopeia_ngsi_ld::value::{omitted_nulls::OmittedNulls, types::Value};
+use serde_json::Value as JsonValue;
 
-/// Converts the parts into a `GeoProperty`'s value, a `GeoJSON` geometry of one of the six types
-/// ETSI GS CIM 009 v1.9.1 clause 4.7.1 admits, built as `target` names under the mapping's policy.
+/// A `GeoProperty`'s value, a `GeoJSON` geometry of one of the six types ETSI GS CIM 009 v1.9.1
+/// clause 4.7.1 admits, built as the target names under the declaration's policy.
 ///
-/// # Errors
-/// Returns the [`AttributeRefusal`] naming why the parts hold no geometry the attribute can hold
-/// (see [`value_reading::read_geometry`]).
-pub(crate) fn apply(
-    parts: SourceParts,
-    target: GeometryTarget,
-    policy: Option<&GeometryPolicy>,
-    omitted: &mut OmittedNulls,
-) -> Result<Option<Value>, AttributeRefusal> {
-    value_reading::read_geometry(parts, target, policy, GeometryHolder::GeoProperty, omitted)
+/// A `GeometryCollection` is none of the six, so it is refused unless the policy folds it into one
+/// of them. Reading builds the geometry the type holds, so admitting keeps it as it is.
+impl AttributeConversion for GeometryTarget {
+    type Content = Value;
+    type Reading = Value;
+
+    fn read(self, parts: SourceParts, ctx: &mut ReadContext<'_>) -> Result<Option<Value>, AttributeRefusal> {
+        let Some(value) = value_reading::geometry_source(parts, ctx.omitted) else {
+            return Ok(None);
+        };
+
+        value
+            .to_geometry(self, &ctx.policy)?
+            .map(|geometry| Value::Geospatial(Box::new(geometry)))
+            .ok_or_else(|| value_reading::no_geometry(&value))
+            .map(Some)
+    }
+
+    fn admit(self, reading: Value, _omitted: &mut OmittedNulls) -> Result<Option<Value>, AttributeRefusal> {
+        Ok(Some(reading))
+    }
+
+    fn into_json(reading: Value) -> JsonValue {
+        JsonValue::from(reading)
+    }
 }
 
 #[cfg(test)]

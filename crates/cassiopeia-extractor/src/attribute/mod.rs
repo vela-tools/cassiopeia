@@ -1,4 +1,5 @@
 pub(crate) mod conversion;
+pub(crate) mod declaration_output;
 pub(crate) mod declaration_trail;
 pub(crate) mod metadata;
 pub(crate) mod refusal;

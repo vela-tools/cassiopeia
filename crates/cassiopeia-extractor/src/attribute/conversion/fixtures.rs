@@ -1,5 +1,5 @@
 use crate::attribute::{
-    conversion::{self, readers::SourceParts},
+    conversion::{self, attribute_conversion::ConversionOutput, read_context::ReadContext, readers::SourceParts},
     refusal::AttributeRefusal,
 };
 use cassiopeia_geometry::policy::GeometryPolicy;
@@ -53,9 +53,34 @@ pub(crate) fn street() -> SourceParts {
     smallvec![json!({"street": "Ring"})]
 }
 
+/// Converts the parts into `O` under `policy`, or the lossless default as the resolver settles it,
+/// and returns what it produced with the nulls it counted.
+fn converting<O: ConversionOutput>(
+    parts: SourceParts,
+    conversion: Conversion,
+    policy: Option<&GeometryPolicy>,
+) -> (Result<Option<O>, AttributeRefusal>, OmittedNulls) {
+    let mut omitted = OmittedNulls::default();
+    let output = conversion::convert(
+        parts,
+        conversion,
+        &mut ReadContext {
+            policy: policy.copied().unwrap_or_default(),
+            omitted: &mut omitted,
+        },
+    );
+    (output, omitted)
+}
+
 /// Applies a conversion with a fresh null count, which the caller does not inspect.
 pub(crate) fn apply(parts: SourceParts, conversion: Conversion, policy: Option<&GeometryPolicy>) -> Result<Option<AttributeContent>, AttributeRefusal> {
-    conversion::apply(parts, conversion, policy, &mut OmittedNulls::default())
+    converting(parts, conversion, policy).0
+}
+
+/// Reads the parts as a member of an object nested `mappings` assemble, and returns the raw JSON it
+/// contributes with the nulls it counted.
+pub(crate) fn member(parts: SourceParts, conversion: Conversion) -> (Result<Option<JsonValue>, AttributeRefusal>, OmittedNulls) {
+    converting(parts, conversion, None)
 }
 
 /// Applies a conversion expected to succeed with an NGSI-LD Value or with no value.
@@ -78,9 +103,7 @@ pub(crate) fn payload(parts: SourceParts, conversion: Conversion) -> Option<Json
 
 /// Applies a conversion and returns what it produced with the nulls it left out of the value.
 pub(crate) fn applied_counting(parts: SourceParts, conversion: Conversion) -> (Result<Option<AttributeContent>, AttributeRefusal>, OmittedNulls) {
-    let mut omitted = OmittedNulls::default();
-    let content = conversion::apply(parts, conversion, None, &mut omitted);
-    (content, omitted)
+    converting(parts, conversion, None)
 }
 
 /// Applies a conversion expected to succeed with an NGSI-LD Value or with no value, and returns it

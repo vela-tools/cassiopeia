@@ -1,29 +1,42 @@
 use crate::attribute::{
-    conversion::{identifier, readers::SourceParts, value_reading},
+    conversion::{attribute_conversion::AttributeConversion, identifier, read_context::ReadContext, readers::SourceParts, value_reading},
     refusal::AttributeRefusal,
 };
+use cassiopeia_ir::attribute_content::AttributeContent;
 use cassiopeia_mapping::conversion::value_reading::IdentifierReading;
 use cassiopeia_ngsi_ld::value::omitted_nulls::OmittedNulls;
 use iri_rs::IriBuf;
+use serde_json::Value as JsonValue;
 
-/// Converts the parts into the IRI a `VocabProperty`'s `vocab` member names (ETSI GS CIM 009 v1.9.1
-/// clause 4.5.20), read from their text as the identifier `reading` names and written in its normal
-/// form (see [`identifier::read_identifier`]).
+/// The IRI a `VocabProperty`'s `vocab` member names (ETSI GS CIM 009 v1.9.1 clause 4.5.20), read
+/// from the parts' text as the identifier the reading names and written in its normal form (see
+/// [`identifier::read_identifier`]).
 ///
-/// A blank value is one the record does not carry, so it yields no IRI rather than a refusal.
-///
-/// # Errors
-/// Returns [`AttributeRefusal::UnusableValue`] quoting text that is not the identifier, and any
-/// other value as its rendering.
-pub(crate) fn apply(parts: SourceParts, reading: IdentifierReading, omitted: &mut OmittedNulls) -> Result<Option<IriBuf>, AttributeRefusal> {
-    value_reading::read_text(parts, omitted).map_or(Ok(None), |value| identifier::read_identifier(&value, reading))
+/// A blank value is one the record does not carry, so it yields no IRI rather than a refusal; text
+/// that is not the identifier is refused quoting it, and any other value as its rendering. Reading
+/// builds the IRI the type holds, so admitting keeps it as it is.
+impl AttributeConversion for IdentifierReading {
+    type Content = IriBuf;
+    type Reading = IriBuf;
+
+    fn read(self, parts: SourceParts, ctx: &mut ReadContext<'_>) -> Result<Option<IriBuf>, AttributeRefusal> {
+        value_reading::read_text(parts, ctx.omitted).map_or(Ok(None), |value| identifier::read_identifier(&value, self))
+    }
+
+    fn admit(self, reading: IriBuf, _omitted: &mut OmittedNulls) -> Result<Option<IriBuf>, AttributeRefusal> {
+        Ok(Some(reading))
+    }
+
+    fn into_json(reading: IriBuf) -> JsonValue {
+        JsonValue::from(AttributeContent::Vocab(reading))
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use crate::{
         attribute::{
-            conversion::fixtures::{apply, declared, default_of},
+            conversion::fixtures::{apply, declared, default_of, member},
             refusal::AttributeRefusal,
         },
         required_value::RequiredValue,
@@ -85,5 +98,17 @@ mod tests {
         for part in [json!(""), json!("   "), JsonValue::Null] {
             assert_eq!(vocab(part), Ok(None));
         }
+    }
+
+    #[test]
+    fn the_member_read_of_a_vocab_property_is_its_normalized_iri_text() {
+        assert_eq!(
+            member(
+                smallvec![json!("HTTPS://Example.org/level/high")],
+                default_of(NgsiLdAttributeKind::VocabProperty)
+            )
+            .0,
+            Ok(Some(json!("https://example.org/level/high")))
+        );
     }
 }

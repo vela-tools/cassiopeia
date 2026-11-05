@@ -1,53 +1,43 @@
 use crate::attribute::{
     conversion::{
+        attribute_conversion::AttributeConversion,
+        read_context::ReadContext,
         readers::{self, SourceParts},
         value_admission,
         value_reading::{self, ReadValue},
     },
     refusal::AttributeRefusal,
 };
-use cassiopeia_geometry::policy::GeometryPolicy;
 use cassiopeia_mapping::conversion::property_conversion::PropertyConversion;
 use cassiopeia_ngsi_ld::value::{omitted_nulls::OmittedNulls, types::Value};
 use serde_json::Value as JsonValue;
 
-/// Reads the parts as a `Property`'s conversion names, before the value is admitted: `array` gathers
-/// every part into one list, and every other conversion reads one value (see
-/// [`value_reading::read`]).
+/// A `Property`'s value, any NGSI-LD Value (ETSI GS CIM 009 v1.9.1 clause 4.5.2).
 ///
-/// # Errors
-/// Returns the [`AttributeRefusal`] naming what the reading could not use.
-pub(crate) fn read(
-    parts: SourceParts,
-    conversion: PropertyConversion,
-    policy: Option<&GeometryPolicy>,
-    omitted: &mut OmittedNulls,
-) -> Result<Option<ReadValue>, AttributeRefusal> {
-    match conversion {
-        PropertyConversion::One(reading) => value_reading::read(parts, reading, policy, omitted),
-        PropertyConversion::Array => Ok(readers::aggregate(parts).map(|items| ReadValue::Json(JsonValue::Array(items)))),
-    }
-}
+/// `array` gathers every part into one list, and every other conversion reads one value (see
+/// [`value_reading::read`]). What the `object`, `json`, and `array` readings keep as raw JSON is
+/// admitted without its nulls (see [`value_admission::admit`]); every other reading already built a
+/// value.
+impl AttributeConversion for PropertyConversion {
+    type Content = Value;
+    type Reading = ReadValue;
 
-/// Converts the parts into a `Property`'s value, any NGSI-LD Value (ETSI GS CIM 009 v1.9.1 clause
-/// 4.5.2).
-///
-/// What the `object`, `json`, and `array` readings keep as raw JSON is admitted without its nulls
-/// (see [`value_admission::admit`]); every other reading already built a value.
-///
-/// # Errors
-/// Returns the [`AttributeRefusal`] naming what the reading could not use, or the value of only
-/// nulls it read.
-pub(crate) fn apply(
-    parts: SourceParts,
-    conversion: PropertyConversion,
-    policy: Option<&GeometryPolicy>,
-    omitted: &mut OmittedNulls,
-) -> Result<Option<Value>, AttributeRefusal> {
-    match read(parts, conversion, policy, omitted)? {
-        Some(ReadValue::Json(json)) => value_admission::admit(json, omitted),
-        Some(ReadValue::Value(value)) => Ok(Some(value)),
-        None => Ok(None),
+    fn read(self, parts: SourceParts, ctx: &mut ReadContext<'_>) -> Result<Option<ReadValue>, AttributeRefusal> {
+        match self {
+            PropertyConversion::One(reading) => value_reading::read(parts, reading, ctx),
+            PropertyConversion::Array => Ok(readers::aggregate(parts).map(|items| ReadValue::Json(JsonValue::Array(items)))),
+        }
+    }
+
+    fn admit(self, reading: ReadValue, omitted: &mut OmittedNulls) -> Result<Option<Value>, AttributeRefusal> {
+        match reading {
+            ReadValue::Json(json) => value_admission::admit(json, omitted),
+            ReadValue::Value(value) => Ok(Some(value)),
+        }
+    }
+
+    fn into_json(reading: ReadValue) -> JsonValue {
+        JsonValue::from(reading)
     }
 }
 
@@ -55,10 +45,7 @@ pub(crate) fn apply(
 mod tests {
     use crate::{
         attribute::{
-            conversion::{
-                self,
-                fixtures::{applied_counting, apply, assembled, assembled_property, converted, default_of, omitted, property, street},
-            },
+            conversion::fixtures::{applied_counting, apply, assembled, assembled_property, converted, default_of, member, omitted, property, street},
             refusal::AttributeRefusal,
         },
         required_value::RequiredValue,
@@ -480,23 +467,15 @@ mod tests {
 
     #[test]
     fn the_member_read_of_an_object_keeps_its_nulls_for_the_holding_attribute_to_admit() {
-        let mut omitted = OmittedNulls::default();
+        let (read, omitted) = member(smallvec![json!({"a": null})], property(Transformation::Object));
 
-        assert_eq!(
-            conversion::read_member(smallvec![json!({"a": null})], property(Transformation::Object), None, &mut omitted),
-            Ok(Some(json!({"a": null})))
-        );
+        assert_eq!(read, Ok(Some(json!({"a": null}))));
         assert!(omitted.is_empty());
     }
 
     #[test]
     fn the_member_read_of_a_typed_value_is_the_json_it_serializes_to() {
-        let at = conversion::read_member(
-            smallvec![json!("2026-03-01 11:04:35")],
-            property(Transformation::DateTime),
-            None,
-            &mut OmittedNulls::default(),
-        );
+        let (at, _) = member(smallvec![json!("2026-03-01 11:04:35")], property(Transformation::DateTime));
 
         assert_eq!(at, Ok(Some(json!("2026-03-01T11:04:35Z"))));
     }
