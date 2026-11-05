@@ -1,6 +1,7 @@
 use crate::required_value::RequiredValue;
 use cassiopeia_geometry::error::GeometryError;
-use cassiopeia_ngsi_ld::value::json_payload_error::JsonPayloadError;
+use cassiopeia_mapping::conversion::value_reading::{IdentifierReading, ValueReading};
+use cassiopeia_ngsi_ld::value::{json_payload_error::JsonPayloadError, types::Value};
 use derive_more::From;
 
 /// Why an attribute could not take the value its source carried.
@@ -46,14 +47,55 @@ impl AttributeRefusal {
             text: Box::from(text),
         }
     }
+
+    /// The refusal of a value that is there but that `reading` could not read, quoting the text it
+    /// was met with, under what the reading requires.
+    ///
+    /// A temporal reading names an unreadable timestamp. The text reading reads every value, so a
+    /// value it found nothing in can only have held nothing but null.
+    pub(crate) fn unreadable(reading: ValueReading, text: &str) -> AttributeRefusal {
+        let required = match reading {
+            ValueReading::Temporal(_) => return AttributeRefusal::UnreadableTimestamp { text: Box::from(text) },
+            ValueReading::Boolean => RequiredValue::Boolean,
+            ValueReading::Integer => RequiredValue::Integer,
+            ValueReading::Float => RequiredValue::Float,
+            ValueReading::Object => RequiredValue::JsonObject,
+            ValueReading::Json => RequiredValue::Json,
+            ValueReading::Geometry(_) => RequiredValue::Geometry,
+            ValueReading::Identifier(IdentifierReading::Iri) => RequiredValue::Iri,
+            ValueReading::Identifier(IdentifierReading::Urn) => RequiredValue::Urn,
+            ValueReading::Text => RequiredValue::NonNull,
+        };
+
+        AttributeRefusal::unusable(required, text)
+    }
+
+    /// Refuses a value that `reading` could not read, quoting it as [`Value::reported_text`] does,
+    /// or reads it as no value when it is blank, since the record does not carry it.
+    ///
+    /// Any value that is there and will not read is refused, text and non-text alike (text such as
+    /// `abc` under `integer`, an array, an object), because a reading that vanishes unannounced is a
+    /// value the published entity silently lacks.
+    ///
+    /// # Errors
+    /// Returns the refusal of the value under the reading (see [`AttributeRefusal::unreadable`])
+    /// unless it is blank.
+    pub(crate) fn unless_blank<T>(reading: ValueReading, value: &Value) -> Result<Option<T>, AttributeRefusal> {
+        value.reported_text().map_or(Ok(None), |text| Err(AttributeRefusal::unreadable(reading, &text)))
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use crate::{attribute::refusal::AttributeRefusal, required_value::RequiredValue};
-    use cassiopeia_geometry::error::GeometryError;
-    use cassiopeia_ngsi_ld::value::json_payload_error::{JsonPayloadError, JsonShape};
+    use cassiopeia_geometry::{error::GeometryError, target::GeometryTarget};
+    use cassiopeia_mapping::conversion::value_reading::{IdentifierReading, TemporalReading, ValueReading};
+    use cassiopeia_ngsi_ld::value::{
+        json_payload_error::{JsonPayloadError, JsonShape},
+        types::Value,
+    };
     use pretty_assertions::assert_eq;
+    use serde_json::json;
 
     #[test]
     fn a_geometry_error_converts_into_a_refusal() {
@@ -79,5 +121,43 @@ mod tests {
         let error = JsonPayloadError::NotAnObject { found: JsonShape::Number };
 
         assert_eq!(AttributeRefusal::from(error), AttributeRefusal::JsonPayload(error));
+    }
+
+    #[test]
+    fn each_reading_refuses_under_what_it_requires() {
+        for (reading, required) in [
+            (ValueReading::Boolean, RequiredValue::Boolean),
+            (ValueReading::Integer, RequiredValue::Integer),
+            (ValueReading::Float, RequiredValue::Float),
+            (ValueReading::Object, RequiredValue::JsonObject),
+            (ValueReading::Json, RequiredValue::Json),
+            (ValueReading::Geometry(GeometryTarget::Preserve), RequiredValue::Geometry),
+            (ValueReading::Identifier(IdentifierReading::Iri), RequiredValue::Iri),
+            (ValueReading::Identifier(IdentifierReading::Urn), RequiredValue::Urn),
+            (ValueReading::Text, RequiredValue::NonNull),
+        ] {
+            assert_eq!(
+                AttributeRefusal::unreadable(reading, "x"),
+                AttributeRefusal::unusable(required, "x"),
+                "{reading:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_temporal_reading_refuses_as_an_unreadable_timestamp() {
+        assert_eq!(
+            AttributeRefusal::unreadable(ValueReading::Temporal(TemporalReading::Date), "nope"),
+            AttributeRefusal::UnreadableTimestamp { text: Box::from("nope") }
+        );
+    }
+
+    #[test]
+    fn an_unreadable_value_is_refused_quoting_its_reported_text_unless_it_is_blank() {
+        let refused = |source| AttributeRefusal::unless_blank::<Value>(ValueReading::Integer, &Value::try_from(source).unwrap());
+
+        assert_eq!(refused(json!("  abc ")), Err(AttributeRefusal::unusable(RequiredValue::Integer, "abc")));
+        assert_eq!(refused(json!([1])), Err(AttributeRefusal::unusable(RequiredValue::Integer, "[1]")));
+        assert_eq!(refused(json!("  ")), Ok(None));
     }
 }

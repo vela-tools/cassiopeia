@@ -31,7 +31,7 @@ impl AttributeConversion for PropertyConversion {
 
     fn admit(self, reading: ReadValue, omitted: &mut OmittedNulls) -> Result<Option<Value>, AttributeRefusal> {
         match reading {
-            ReadValue::Json(json) => value_admission::admit(json, omitted),
+            ReadValue::Json(json) => value_admission::admit(json, omitted).into_value(),
             ReadValue::Value(value) => Ok(Some(value)),
         }
     }

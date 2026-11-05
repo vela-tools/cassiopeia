@@ -1,5 +1,5 @@
-use crate::{attribute::refusal::AttributeRefusal, required_value::RequiredValue};
-use cassiopeia_mapping::conversion::value_reading::IdentifierReading;
+use crate::attribute::refusal::AttributeRefusal;
+use cassiopeia_mapping::conversion::value_reading::{IdentifierReading, ValueReading};
 use cassiopeia_ngsi_ld::value::types::Value;
 use iri_rs::IriBuf;
 use urn_rs::Urn;
@@ -20,23 +20,21 @@ use urn_rs::Urn;
 ///
 /// # Errors
 /// Returns [`AttributeRefusal::UnusableValue`] quoting text that is not the identifier, and any
-/// other value as its rendering, as not [`RequiredValue::Iri`] or [`RequiredValue::Urn`].
+/// other value as its rendering, as not the identifier the reading requires (see
+/// [`AttributeRefusal::unreadable`]).
 pub(crate) fn read_identifier(value: &Value, reading: IdentifierReading) -> Result<Option<IriBuf>, AttributeRefusal> {
     let Some(text) = value.reported_text() else {
         return Ok(None);
     };
 
-    match reading {
-        IdentifierReading::Iri => IriBuf::new(text.to_string())
-            .map(|iri| Some(iri.normalized_for_scheme()))
-            .map_err(|_| AttributeRefusal::unusable(RequiredValue::Iri, &text)),
-        IdentifierReading::Urn => text
-            .parse::<Urn>()
-            .ok()
-            .and_then(|urn| IriBuf::new(urn.as_str().to_owned()).ok())
-            .map(Some)
-            .ok_or_else(|| AttributeRefusal::unusable(RequiredValue::Urn, &text)),
-    }
+    let identifier = match reading {
+        IdentifierReading::Iri => IriBuf::new(text.to_string()).ok().map(|iri| iri.normalized_for_scheme()),
+        IdentifierReading::Urn => text.parse::<Urn>().ok().and_then(|urn| IriBuf::new(urn.as_str().to_owned()).ok()),
+    };
+
+    identifier
+        .map(Some)
+        .ok_or_else(|| AttributeRefusal::unreadable(ValueReading::Identifier(reading), &text))
 }
 
 #[cfg(test)]

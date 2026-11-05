@@ -154,36 +154,39 @@ impl Conversion {
             }));
         };
 
-        match (ValueReading::of(transformation), origin) {
-            (None, ValueOrigin::Sourced | ValueOrigin::Assembled) => Some(PropertyConversion::Array),
-            (Some(reading), ValueOrigin::Sourced) => Some(PropertyConversion::One(reading)),
-            (Some(reading), ValueOrigin::Assembled) => {
-                if reading.applies_to_object() {
-                    Some(PropertyConversion::One(reading))
-                } else {
-                    None
-                }
-            }
-        }
+        Conversion::declared_reading(transformation, origin)
     }
 
     /// A `ListProperty`'s conversion, or `None` when the transformation cannot apply to what the
     /// origin reads.
     ///
     /// Naming no transformation, or `array`, keeps every item as read; any other transformation
-    /// reads each item as it would read one value. The list nested `mappings` assemble holds the one
-    /// object they build, so a reading that never applies to an object cannot read its item.
+    /// reads each item as it would read one value (see [`Conversion::declared_reading`]).
     const fn list(transformation: Option<Transformation>, origin: ValueOrigin) -> Option<ListConversion> {
         let Some(transformation) = transformation else {
             return Some(ListConversion::AsRead);
         };
 
+        match Conversion::declared_reading(transformation, origin) {
+            Some(PropertyConversion::Array) => Some(ListConversion::AsRead),
+            Some(PropertyConversion::One(reading)) => Some(ListConversion::Each(reading)),
+            None => None,
+        }
+    }
+
+    /// How a declared transformation reads what the origin reads, for a `Property` or a
+    /// `ListProperty`: `array` gathers every part into one list, any other transformation reads one
+    /// value, and `None` means the reading cannot apply.
+    ///
+    /// The value nested `mappings` assemble is always one object, so a reading that never applies to
+    /// an object cannot read it.
+    const fn declared_reading(transformation: Transformation, origin: ValueOrigin) -> Option<PropertyConversion> {
         match (ValueReading::of(transformation), origin) {
-            (None, ValueOrigin::Sourced | ValueOrigin::Assembled) => Some(ListConversion::AsRead),
-            (Some(reading), ValueOrigin::Sourced) => Some(ListConversion::Each(reading)),
+            (None, ValueOrigin::Sourced | ValueOrigin::Assembled) => Some(PropertyConversion::Array),
+            (Some(reading), ValueOrigin::Sourced) => Some(PropertyConversion::One(reading)),
             (Some(reading), ValueOrigin::Assembled) => {
                 if reading.applies_to_object() {
-                    Some(ListConversion::Each(reading))
+                    Some(PropertyConversion::One(reading))
                 } else {
                     None
                 }

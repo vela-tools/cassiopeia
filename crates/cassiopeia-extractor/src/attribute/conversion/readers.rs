@@ -1,5 +1,5 @@
 use crate::{attribute::refusal::AttributeRefusal, required_value::RequiredValue};
-use cassiopeia_ngsi_ld::value::json_payload::JsonObject;
+use cassiopeia_ngsi_ld::value::{json_payload::JsonObject, reported_text::is_blank};
 use serde_json::Value as JsonValue;
 use smallvec::SmallVec;
 
@@ -10,14 +10,12 @@ use smallvec::SmallVec;
 /// heap, where a `Vec` would cost one malloc/free pair per resolved declaration.
 pub(crate) type SourceParts = SmallVec<[JsonValue; 1]>;
 
-/// Whether a source part is a field the record does not carry: null, or blank text.
-///
-/// CSV and spreadsheet sources spell an empty field as an empty string, so a blank is a value the
-/// record does not carry rather than one it carries wrongly.
+/// Whether a source part is a field the record does not carry: null, or blank text (see
+/// [`is_blank`]).
 pub(crate) fn is_absent(part: &JsonValue) -> bool {
     match part {
         JsonValue::Null => true,
-        JsonValue::String(text) => text.trim().is_empty(),
+        JsonValue::String(text) => is_blank(text),
         JsonValue::Bool(_) | JsonValue::Number(_) | JsonValue::Array(_) | JsonValue::Object(_) => false,
     }
 }
@@ -97,7 +95,7 @@ pub(crate) fn keep_as_read(parts: SourceParts) -> Option<JsonValue> {
 /// Returns [`AttributeRefusal::UnusableValue`] quoting the text, as not the `required` value, when
 /// it is not JSON.
 pub(crate) fn read_json(text: &str, required: RequiredValue) -> Result<Option<JsonValue>, AttributeRefusal> {
-    if text.trim().is_empty() {
+    if is_blank(text) {
         return Ok(None);
     }
     serde_json::from_str(text).map(Some).map_err(|_| AttributeRefusal::unusable(required, text))
@@ -128,29 +126,28 @@ pub(crate) fn decode_parts(parts: SourceParts) -> Result<SourceParts, AttributeR
     parts.into_iter().map(|part| Ok(decode(part)?.unwrap_or(JsonValue::Null))).collect()
 }
 
-/// Reads a value as a JSON object, or the object its JSON text spells, keeping every null member.
+/// Reads a value as a JSON object, or the object its JSON text spells, keeping every null member,
+/// for a declaration that requires `required` of it.
 ///
 /// Blank text and a null value carry no value. An empty object is kept: whether it is a value at all
 /// is the declaration's type to decide.
 ///
 /// # Errors
-/// Returns [`AttributeRefusal::UnusableValue`] quoting a value that is no object as not
-/// [`RequiredValue::JsonObject`]: text as written when it is not JSON or is JSON but no object, and
-/// any other value as its compact JSON text.
-pub(crate) fn read_object(value: JsonValue) -> Result<Option<JsonObject>, AttributeRefusal> {
+/// Returns [`AttributeRefusal::UnusableValue`] quoting a value that is no object as not the
+/// `required` value: text as written when it is not JSON or is JSON but no object, and any other
+/// value as its compact JSON text.
+pub(crate) fn read_object(value: JsonValue, required: RequiredValue) -> Result<Option<JsonObject>, AttributeRefusal> {
     match value {
         JsonValue::Object(object) => Ok(Some(object)),
-        JsonValue::String(text) => match read_json(&text, RequiredValue::JsonObject)? {
+        JsonValue::String(text) => match read_json(&text, required)? {
             Some(JsonValue::Object(object)) => Ok(Some(object)),
             Some(JsonValue::Null | JsonValue::Bool(_) | JsonValue::Number(_) | JsonValue::String(_) | JsonValue::Array(_)) => {
-                Err(AttributeRefusal::unusable(RequiredValue::JsonObject, &text))
+                Err(AttributeRefusal::unusable(required, &text))
             }
             None => Ok(None),
         },
         JsonValue::Null => Ok(None),
-        other @ (JsonValue::Bool(_) | JsonValue::Number(_) | JsonValue::Array(_)) => {
-            Err(AttributeRefusal::unusable(RequiredValue::JsonObject, &other.to_string()))
-        }
+        other @ (JsonValue::Bool(_) | JsonValue::Number(_) | JsonValue::Array(_)) => Err(AttributeRefusal::unusable(required, &other.to_string())),
     }
 }
 
@@ -168,7 +165,7 @@ pub(crate) fn aggregate(parts: SourceParts) -> Option<Vec<JsonValue>> {
         match part {
             JsonValue::Array(array) => items.extend(array),
             JsonValue::Null => {}
-            JsonValue::String(text) if text.trim().is_empty() => {}
+            JsonValue::String(text) if is_blank(&text) => {}
             JsonValue::String(text) => match serde_json::from_str::<JsonValue>(&text).ok() {
                 Some(JsonValue::Array(array)) => items.extend(array),
                 Some(JsonValue::Null | JsonValue::Bool(_) | JsonValue::Number(_) | JsonValue::String(_) | JsonValue::Object(_)) | None => {
@@ -197,7 +194,7 @@ mod tests {
 
     /// The object a reading kept, as JSON.
     fn object(value: JsonValue) -> Result<Option<JsonValue>, AttributeRefusal> {
-        read_object(value).map(|object| object.map(JsonValue::Object))
+        read_object(value, RequiredValue::JsonObject).map(|object| object.map(JsonValue::Object))
     }
 
     #[test]

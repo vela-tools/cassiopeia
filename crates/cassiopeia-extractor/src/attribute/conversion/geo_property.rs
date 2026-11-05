@@ -3,6 +3,7 @@ use crate::attribute::{
     refusal::AttributeRefusal,
 };
 use cassiopeia_geometry::target::GeometryTarget;
+use cassiopeia_mapping::conversion::value_reading::ValueReading;
 use cassiopeia_ngsi_ld::value::{omitted_nulls::OmittedNulls, types::Value};
 use serde_json::Value as JsonValue;
 
@@ -20,11 +21,10 @@ impl AttributeConversion for GeometryTarget {
             return Ok(None);
         };
 
-        value
-            .to_geometry(self, &ctx.policy)?
-            .map(|geometry| Value::Geospatial(Box::new(geometry)))
-            .ok_or_else(|| value_reading::no_geometry(&value))
-            .map(Some)
+        match value.to_geometry(self, &ctx.policy)? {
+            Some(geometry) => Ok(Some(Value::Geospatial(Box::new(geometry)))),
+            None => AttributeRefusal::unless_blank(ValueReading::Geometry(self), &value),
+        }
     }
 
     fn admit(self, reading: Value, _omitted: &mut OmittedNulls) -> Result<Option<Value>, AttributeRefusal> {

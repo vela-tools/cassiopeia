@@ -1,10 +1,13 @@
-use crate::attribute::{
-    conversion::{
-        attribute_conversion::AttributeConversion,
-        read_context::ReadContext,
-        readers::{self, SourceParts},
+use crate::{
+    attribute::{
+        conversion::{
+            attribute_conversion::AttributeConversion,
+            read_context::ReadContext,
+            readers::{self, SourceParts},
+        },
+        refusal::AttributeRefusal,
     },
-    refusal::AttributeRefusal,
+    required_value::RequiredValue,
 };
 use cassiopeia_mapping::conversion::json_conversion::JsonConversion;
 use cassiopeia_ngsi_ld::value::{json_payload::JsonPayload, omitted_nulls::OmittedNulls};
@@ -27,7 +30,9 @@ impl AttributeConversion for JsonConversion {
         match self {
             JsonConversion::Verbatim => Ok(readers::keep_as_read(parts)),
             JsonConversion::Json => Ok(readers::keep_as_read(readers::decode_parts(parts)?)),
-            JsonConversion::Object => Ok(readers::merge_text(parts).map_or(Ok(None), readers::read_object)?.map(JsonValue::Object)),
+            JsonConversion::Object => Ok(readers::merge_text(parts)
+                .map_or(Ok(None), |value| readers::read_object(value, RequiredValue::JsonObject))?
+                .map(JsonValue::Object)),
             JsonConversion::Array => Ok(readers::aggregate(parts).map(JsonValue::Array)),
         }
     }

@@ -1,21 +1,15 @@
-use crate::{
-    attribute::{
-        conversion::{
-            attribute_conversion::AttributeConversion,
-            read_context::ReadContext,
-            readers::{self, SourceParts},
-            value_admission,
-            value_reading::{self, ReadValue},
-        },
-        refusal::AttributeRefusal,
+use crate::attribute::{
+    conversion::{
+        attribute_conversion::AttributeConversion,
+        read_context::ReadContext,
+        readers::{self, SourceParts},
+        value_admission,
+        value_reading::{self, ReadValue},
     },
-    required_value::RequiredValue,
+    refusal::AttributeRefusal,
 };
-use cassiopeia_mapping::conversion::{
-    list_conversion::ListConversion,
-    value_reading::{IdentifierReading, ValueReading},
-};
-use cassiopeia_ngsi_ld::value::{omitted_nulls::OmittedNulls, types::Value};
+use cassiopeia_mapping::conversion::{list_conversion::ListConversion, value_reading::ValueReading};
+use cassiopeia_ngsi_ld::value::{omitted_nulls::OmittedNulls, reported_text::is_blank, types::Value};
 use serde_json::Value as JsonValue;
 
 /// A `ListProperty`'s `valueList`, an ordered array of NGSI-LD Values (ETSI GS CIM 009 v1.9.1 clause
@@ -41,7 +35,7 @@ impl AttributeConversion for ListConversion {
         };
 
         match self {
-            ListConversion::AsRead => value_admission::admit(JsonValue::Array(items), ctx.omitted),
+            ListConversion::AsRead => value_admission::admit(JsonValue::Array(items), ctx.omitted).into_value(),
             ListConversion::Each(reading) => {
                 let items = items.into_iter().map(|item| read_item(item, reading, ctx)).collect::<Result<Vec<_>, _>>()?;
                 admit_each(items, ctx.omitted).map(Some)
@@ -65,32 +59,34 @@ impl AttributeConversion for ListConversion {
 /// but text, which keeps blank text as it is, refuses it.
 ///
 /// # Errors
-/// Returns the refusal of the reading, or of an item that reads as nothing (see [`absent_item`]).
+/// Returns the refusal of the reading, or of an item that reads as nothing (see
+/// [`AttributeRefusal::unreadable`]).
 fn read_item(item: JsonValue, reading: ValueReading, ctx: &mut ReadContext<'_>) -> Result<ReadValue, AttributeRefusal> {
     if item.is_null() {
         return Ok(ReadValue::Json(item));
     }
     if !matches!(reading, ValueReading::Text)
-        && let Some(blank) = item.as_str().filter(|text| text.trim().is_empty())
+        && let JsonValue::String(text) = &item
+        && is_blank(text)
     {
-        return Err(absent_item(reading, blank));
+        return Err(AttributeRefusal::unreadable(reading, text));
     }
 
     // Past the blank check, only JSON text spelling `null` reads as nothing.
-    value_reading::read_value(item, reading, ctx)?.ok_or_else(|| absent_item(reading, "null"))
+    value_reading::read_value(item, reading, ctx)?.ok_or_else(|| AttributeRefusal::unreadable(reading, "null"))
 }
 
 /// Admits the items read one way as the list, leaving out and counting each null item.
 ///
-/// What the `object` and `json` readings keep as raw JSON is admitted as any value is; an item that
-/// admits nothing, an empty object or array or one of only nulls, is refused.
+/// What the `object` and `json` readings keep as raw JSON is admitted as an item (see
+/// [`value_admission::Admission::into_item`]).
 ///
 /// # Errors
 /// Returns [`AttributeRefusal::UnusableValue`] quoting a list of only nulls, or an item that admits
-/// nothing, as not [`RequiredValue::NonNull`].
+/// nothing, as not [`RequiredValue::NonNull`](crate::required_value::RequiredValue::NonNull).
 fn admit_each(items: Vec<ReadValue>, omitted: &mut OmittedNulls) -> Result<Value, AttributeRefusal> {
-    if items.iter().all(|item| matches!(item, ReadValue::Json(JsonValue::Null))) {
-        return Err(AttributeRefusal::unusable(RequiredValue::NonNull, &JsonValue::from(items).to_string()));
+    if value_admission::only_nulls(items.iter(), |item| matches!(item, ReadValue::Json(JsonValue::Null))) {
+        return Err(value_admission::only_nulls_refusal(&JsonValue::from(items)));
     }
 
     let mut list = Vec::with_capacity(items.len());
@@ -98,40 +94,11 @@ fn admit_each(items: Vec<ReadValue>, omitted: &mut OmittedNulls) -> Result<Value
         match item {
             ReadValue::Json(JsonValue::Null) => omitted.array_items += 1,
             ReadValue::Value(value) => list.push(value),
-            ReadValue::Json(json) => {
-                let emptied = match &json {
-                    JsonValue::Object(members) => members.is_empty().then_some("{}"),
-                    JsonValue::Array(items) => items.is_empty().then_some("[]"),
-                    JsonValue::Null | JsonValue::Bool(_) | JsonValue::Number(_) | JsonValue::String(_) => None,
-                };
-                list.push(value_admission::admit(json, omitted)?.ok_or_else(|| AttributeRefusal::unusable(RequiredValue::NonNull, emptied.unwrap_or("null")))?);
-            }
+            ReadValue::Json(json) => list.push(value_admission::admit(json, omitted).into_item()?),
         }
     }
 
     Ok(Value::Array(list))
-}
-
-/// The refusal of an item that is there but reads as nothing, quoting `text`, under the
-/// requirement of the reading.
-///
-/// The text reading reads every item, so an item it found nothing in can only have held nothing
-/// but null.
-fn absent_item(reading: ValueReading, text: &str) -> AttributeRefusal {
-    let required = match reading {
-        ValueReading::Temporal(_) => return AttributeRefusal::UnreadableTimestamp { text: Box::from(text) },
-        ValueReading::Boolean => RequiredValue::Boolean,
-        ValueReading::Integer => RequiredValue::Integer,
-        ValueReading::Float => RequiredValue::Float,
-        ValueReading::Object => RequiredValue::JsonObject,
-        ValueReading::Json => RequiredValue::Json,
-        ValueReading::Geometry(_) => RequiredValue::Geometry,
-        ValueReading::Identifier(IdentifierReading::Iri) => RequiredValue::Iri,
-        ValueReading::Identifier(IdentifierReading::Urn) => RequiredValue::Urn,
-        ValueReading::Text => RequiredValue::NonNull,
-    };
-
-    AttributeRefusal::unusable(required, text)
 }
 
 #[cfg(test)]

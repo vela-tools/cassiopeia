@@ -13,7 +13,6 @@ use cassiopeia_geometry::{policy::GeometryPolicy, target::GeometryTarget};
 use cassiopeia_mapping::conversion::value_reading::{TemporalReading, ValueReading};
 use cassiopeia_ngsi_ld::value::{
     omitted_nulls::OmittedNulls,
-    parsing::parse_decimal,
     types::{TemporalValue, Value},
 };
 use compact_str::CompactString;
@@ -63,7 +62,7 @@ pub(crate) fn read(parts: SourceParts, reading: ValueReading, ctx: &mut ReadCont
             let Some(value) = geometry_source(parts, ctx.omitted) else {
                 return Ok(None);
             };
-            return Ok(Some(ReadValue::Value(any_geometry(&value, target, ctx.policy)?)));
+            return Ok(any_geometry(&value, target, ctx.policy)?.map(ReadValue::Value));
         }
         ValueReading::Boolean | ValueReading::Integer | ValueReading::Float => readers::merge_first(parts),
         ValueReading::Text | ValueReading::Object | ValueReading::Json | ValueReading::Temporal(_) | ValueReading::Identifier(_) => readers::merge_text(parts),
@@ -77,24 +76,35 @@ pub(crate) fn read(parts: SourceParts, reading: ValueReading, ctx: &mut ReadCont
 ///
 /// The object and JSON readings keep raw JSON with every null in it. Every other reading builds a
 /// value, which holds no null (ETSI GS CIM 009 v1.9.1 clause 4.5.0): a null nested in what it reads
-/// is left out and counted in the context.
+/// is left out and counted in the context. A value that is there and will not read is refused, and a
+/// blank one is no value (see [`AttributeRefusal::unless_blank`]).
 pub(crate) fn read_value(value: JsonValue, reading: ValueReading, ctx: &mut ReadContext<'_>) -> Result<Option<ReadValue>, AttributeRefusal> {
     match reading {
-        ValueReading::Object => Ok(readers::read_object(value)?.map(|object| ReadValue::Json(JsonValue::Object(object)))),
+        ValueReading::Object => Ok(readers::read_object(value, RequiredValue::JsonObject)?.map(|object| ReadValue::Json(JsonValue::Object(object)))),
         ValueReading::Json => Ok(readers::decode(value)?.map(ReadValue::Json)),
-        ValueReading::Boolean => typed(value, ctx.omitted, |value| {
-            coerce_scalar(&value, RequiredValue::Boolean, |value| value.to_boolean().map(Value::from))
+        ValueReading::Boolean => typed(value, ctx.omitted, |value| coerce(&value, reading, |value| value.to_boolean().map(Value::from))),
+        ValueReading::Integer => typed(value, ctx.omitted, |value| coerce(&value, reading, |value| value.to_integer().map(Value::from))),
+        ValueReading::Float => typed(value, ctx.omitted, |value| {
+            coerce(&value, reading, |value| value.to_float().and_then(|float| Value::try_from(float).ok()))
         }),
-        ValueReading::Integer => typed(value, ctx.omitted, |value| coerce_scalar(&value, RequiredValue::Integer, coerce_integer)),
-        ValueReading::Float => typed(value, ctx.omitted, |value| coerce_scalar(&value, RequiredValue::Float, coerce_float)),
         ValueReading::Text => typed(value, ctx.omitted, |value| Ok(Some(coerce_string(value)))),
-        ValueReading::Temporal(temporal) => typed(value, ctx.omitted, |value| coerce_temporal(&value, temporal)),
+        ValueReading::Temporal(temporal) => typed(value, ctx.omitted, |value| {
+            coerce(&value, reading, |value| {
+                value.try_parse_datetime().map(|datetime| {
+                    Value::Temporal(match temporal {
+                        TemporalReading::DateTime => TemporalValue::DateTime(datetime),
+                        TemporalReading::Date => TemporalValue::Date(datetime),
+                        TemporalReading::Time => TemporalValue::Time(datetime),
+                    })
+                })
+            })
+        }),
         ValueReading::Identifier(identifier) => typed(value, ctx.omitted, |value| {
             Ok(identifier::read_identifier(&value, identifier)?.map(|iri| Value::String(CompactString::from(iri.as_str()))))
         }),
         ValueReading::Geometry(target) => {
             let policy = ctx.policy;
-            typed(value, ctx.omitted, |value| any_geometry(&value, target, policy).map(Some))
+            typed(value, ctx.omitted, |value| any_geometry(&value, target, policy))
         }
     }
 }
@@ -120,11 +130,10 @@ pub(crate) fn read_text(parts: SourceParts, omitted: &mut OmittedNulls) -> Optio
 /// Merges the source parts into the one value a geometry is read from, or `None` when the parts
 /// carry no value.
 ///
-/// The parts carry no value when every one of them is null or blank text: CSV and spreadsheet
-/// sources spell an empty field as an empty string, so an empty cell, or a pair of empty coordinate
-/// cells, is a value the record does not carry, and naming every one would drown the run. Any other
-/// parts are merged keeping their array structure, so their order, the coordinate order, survives
-/// (see [`readers::merge_structured`]). A null nested in the merged value is left out and counted in
+/// The parts carry no value when every one of them is absent (see [`readers::is_absent`]), as an
+/// empty cell, or a pair of empty coordinate cells, is. Any other parts are merged keeping their
+/// array structure, so their order, the coordinate order, survives (see
+/// [`readers::merge_structured`]). A null nested in the merged value is left out and counted in
 /// `omitted`.
 pub(crate) fn geometry_source(parts: SourceParts, omitted: &mut OmittedNulls) -> Option<Value> {
     if parts.iter().all(readers::is_absent) {
@@ -134,69 +143,15 @@ pub(crate) fn geometry_source(parts: SourceParts, omitted: &mut OmittedNulls) ->
     readers::merge_structured(parts).and_then(|merged| Value::from_json(merged, omitted))
 }
 
-/// The refusal of a value that is there but spells no geometry at all, quoting it: text as written,
-/// any other value as its rendering.
-///
-/// The value is there, so it is refused rather than left out, the way unreadable text under
-/// `datetime` is: a geometry that vanishes unannounced is what leaves a published entity without its
-/// location.
-pub(crate) fn no_geometry(value: &Value) -> AttributeRefusal {
-    AttributeRefusal::unusable(RequiredValue::Geometry, &value.as_str().map_or_else(|| value.to_string(), str::to_owned))
-}
-
-/// Reads a value as the scalar a transformation names, through `read`.
-///
-/// A blank value resolves to no value, as an absent source does: CSV and spreadsheet sources spell
-/// an empty field as an empty string, so a blank is a value the record does not carry rather than
-/// one it carries wrongly. Any other value that `read` finds no scalar in is refused, text and
-/// non-text alike (text such as `abc` under `integer`, an array, an object), because a reading that
-/// vanishes unannounced is a value the published entity silently lacks.
+/// Reads a value as `reading` reads it through `read`, refusing a value that is there and that
+/// `read` finds nothing in (see [`AttributeRefusal::unless_blank`]).
 ///
 /// # Errors
-/// Returns [`AttributeRefusal::UnusableValue`] quoting the value as not the `required` scalar: text
-/// as written, any other value as its rendering.
-fn coerce_scalar(value: &Value, required: RequiredValue, read: impl FnOnce(&Value) -> Option<Value>) -> Result<Option<Value>, AttributeRefusal> {
-    if let Some(scalar) = read(value) {
-        return Ok(Some(scalar));
-    }
-
-    value.reported_text().map_or(Ok(None), |text| Err(AttributeRefusal::unusable(required, &text)))
-}
-
-/// Reads a value as an integer, parsing numeric text explicitly.
-///
-/// Text is read without the whitespace around it, as a padded CSV cell such as ` 12 ` spells the
-/// number it surrounds. Float-shaped text truncates toward zero through the same conversion the
-/// value model uses, so a value outside the `i64` range is no integer rather than saturating.
-fn coerce_integer(value: &Value) -> Option<Value> {
-    match value {
-        Value::String(text) => {
-            let text = text.trim();
-            text.parse::<i64>()
-                .ok()
-                .or_else(|| {
-                    text.parse::<f64>()
-                        .ok()
-                        .and_then(|float| Value::try_from(float).ok())
-                        .and_then(|parsed| parsed.to_integer())
-                })
-                .map(Value::from)
-        }
-        Value::Boolean(_) | Value::Number(_) | Value::Temporal(_) | Value::Geospatial(_) | Value::Array(_) | Value::Object(_) => {
-            value.to_integer().map(Value::from)
-        }
-    }
-}
-
-/// Reads a value as a float, accepting a comma as a decimal separator.
-///
-/// Text is read without the whitespace around it, as [`coerce_integer`] reads it.
-fn coerce_float(value: &Value) -> Option<Value> {
-    match value {
-        Value::String(text) => parse_decimal(text.trim()).and_then(|float| Value::try_from(float).ok()),
-        Value::Boolean(_) | Value::Number(_) | Value::Temporal(_) | Value::Geospatial(_) | Value::Array(_) | Value::Object(_) => {
-            value.to_float().and_then(|float| Value::try_from(float).ok())
-        }
+/// Returns the refusal of the value under the reading.
+fn coerce(value: &Value, reading: ValueReading, read: impl FnOnce(&Value) -> Option<Value>) -> Result<Option<Value>, AttributeRefusal> {
+    match read(value) {
+        Some(read) => Ok(Some(read)),
+        None => AttributeRefusal::unless_blank(reading, value),
     }
 }
 
@@ -210,47 +165,20 @@ fn coerce_string(value: Value) -> Value {
     }
 }
 
-/// Reads a value that is there as the geometry `target` names, under `policy`, as a Value, which
-/// may be any JSON object (ETSI GS CIM 009 v1.9.1 clause 4.5.2): a `GeometryCollection` (RFC 7946
-/// clause 3.1.8) is kept as its `GeoJSON` object when no conversion or target type was declared (see
+/// Reads a value as the geometry `target` names, under `policy`, as a Value, which may be any JSON
+/// object (ETSI GS CIM 009 v1.9.1 clause 4.5.2): a `GeometryCollection` (RFC 7946 clause 3.1.8) is
+/// kept as its `GeoJSON` object when no conversion or target type was declared (see
 /// [`Value::to_any_geometry`]). A geometry assembled from nested `mappings` is read here too, as the
 /// one part the assembled object is.
 ///
 /// # Errors
-/// Returns the refusal of a value that spells no geometry (see [`no_geometry`]), or
-/// [`AttributeRefusal::Geometry`] naming why the geometry it spells cannot become the declared type.
-fn any_geometry(value: &Value, target: GeometryTarget, policy: GeometryPolicy) -> Result<Value, AttributeRefusal> {
-    value.to_any_geometry(target, &policy)?.ok_or_else(|| no_geometry(value))
-}
-
-/// Reads a value as a temporal value of the given kind.
-///
-/// A blank value resolves to no value, as an absent source does: CSV and spreadsheet sources spell
-/// an empty field as an empty string, so a blank is a value the record does not carry rather than
-/// one it carries wrongly, and naming every empty cell of a column would drown the run. Any other
-/// value that is there and will not read is refused instead, text and non-text alike (a number too
-/// small to be an epoch, a boolean, an array), because a timestamp that vanishes unannounced is what
-/// leaves a published entity with nothing anchoring it in time.
-///
-/// # Errors
-/// Returns [`AttributeRefusal::UnreadableTimestamp`] quoting the value that would not read: text as
-/// written, any other value as its rendering.
-fn coerce_temporal(value: &Value, kind: TemporalReading) -> Result<Option<Value>, AttributeRefusal> {
-    if let Some(datetime) = value.try_parse_datetime() {
-        let temporal = match kind {
-            TemporalReading::DateTime => TemporalValue::DateTime(datetime),
-            TemporalReading::Date => TemporalValue::Date(datetime),
-            TemporalReading::Time => TemporalValue::Time(datetime),
-        };
-        return Ok(Some(Value::Temporal(temporal)));
-    }
-
-    match value.as_str().map(str::trim) {
-        Some("") => Ok(None),
-        Some(text) => Err(AttributeRefusal::UnreadableTimestamp { text: Box::from(text) }),
-        None => Err(AttributeRefusal::UnreadableTimestamp {
-            text: value.to_string().into_boxed_str(),
-        }),
+/// Returns the refusal of a value that spells no geometry (see [`AttributeRefusal::unless_blank`]),
+/// or [`AttributeRefusal::Geometry`] naming why the geometry it spells cannot become the declared
+/// type.
+fn any_geometry(value: &Value, target: GeometryTarget, policy: GeometryPolicy) -> Result<Option<Value>, AttributeRefusal> {
+    match value.to_any_geometry(target, &policy)? {
+        Some(geometry) => Ok(Some(geometry)),
+        None => AttributeRefusal::unless_blank(ValueReading::Geometry(target), value),
     }
 }
 
@@ -650,6 +578,37 @@ mod tests {
                     [0.0, 0.0].into(),
                 ]],
             }
+        );
+    }
+
+    #[test]
+    fn a_quoted_number_reads_as_the_number_it_quotes() {
+        for (text, integer) in [(r#""12""#, 12), ("'12'", 12), (r#"" 12.7 ""#, 12)] {
+            assert_eq!(
+                converted(smallvec![json!(text)], property(Transformation::Integer), None),
+                Some(Value::Number(Number::Integer(integer))),
+                "{text}"
+            );
+        }
+        assert_eq!(
+            converted(smallvec![json!(r#""3,5""#)], property(Transformation::Float), None),
+            Some(Value::try_from(3.5).unwrap())
+        );
+    }
+
+    #[test]
+    fn integer_reads_decimal_comma_text_as_float_does() {
+        assert_eq!(
+            converted(smallvec![json!("12,7")], property(Transformation::Integer), None),
+            Some(Value::Number(Number::Integer(12)))
+        );
+    }
+
+    #[test]
+    fn a_quoted_value_that_is_no_number_is_refused_quoting_it_as_written() {
+        assert_eq!(
+            apply(smallvec![json!(r#""abc""#)], property(Transformation::Integer), None),
+            Err(AttributeRefusal::unusable(RequiredValue::Integer, r#""abc""#))
         );
     }
 }

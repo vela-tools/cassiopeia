@@ -41,20 +41,10 @@ impl AttributeConversion for LanguageMapConversion {
     type Reading = LanguageMap;
 
     fn read(self, parts: SourceParts, _ctx: &mut ReadContext<'_>) -> Result<Option<LanguageMap>, AttributeRefusal> {
-        match readers::merge_text(parts) {
-            Some(JsonValue::Object(entries)) => language_map(entries).map(Some),
-            Some(JsonValue::String(text)) => match readers::read_json(&text, RequiredValue::LanguageMap)? {
-                Some(JsonValue::Object(entries)) => language_map(entries).map(Some),
-                Some(JsonValue::Null | JsonValue::Bool(_) | JsonValue::Number(_) | JsonValue::String(_) | JsonValue::Array(_)) => {
-                    Err(AttributeRefusal::unusable(RequiredValue::LanguageMap, &text))
-                }
-                None => Ok(None),
-            },
-            Some(other @ (JsonValue::Bool(_) | JsonValue::Number(_) | JsonValue::Array(_))) => {
-                Err(AttributeRefusal::unusable(RequiredValue::LanguageMap, &other.to_string()))
-            }
-            Some(JsonValue::Null) | None => Ok(None),
-        }
+        readers::merge_text(parts)
+            .map_or(Ok(None), |value| readers::read_object(value, RequiredValue::LanguageMap))?
+            .map(language_map)
+            .transpose()
     }
 
     fn admit(self, reading: LanguageMap, _omitted: &mut OmittedNulls) -> Result<Option<LanguageMap>, AttributeRefusal> {
