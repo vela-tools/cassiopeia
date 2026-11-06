@@ -3,6 +3,7 @@ use cassiopeia_diagnostic::context_field::minted_id;
 use cassiopeia_ngsi_ld::entity::NgsiLdEntity;
 use getset::{CopyGetters, Getters};
 use iri_rs::IriBuf;
+use urn_rs::Urn;
 
 /// What a 207 Multi-Status body actually accounted for, checked against the batch that was sent.
 #[derive(Debug, CopyGetters, Getters, PartialEq, Eq)]
@@ -21,10 +22,11 @@ pub struct Reconciliation {
 /// Checks a 207 body against the batch it answers, so the writer's totals reflect what was sent.
 ///
 /// The healthy case pays one integer comparison: a body whose two lists cover the batch exactly is
-/// taken as it stands. Only a disagreement costs a diff, and the diff compares identifiers as IRIs,
-/// whose equality is RFC 3986 section 6.2.2 syntax-based normalization, which is what clause 5.5.1
-/// requires of an NGSI-LD identifier comparison, so a broker echoing an equivalent-but-differently
-/// written form still reconciles.
+/// taken as it stands. Only a disagreement costs a diff, and the diff compares identifiers as URNs.
+/// Clause 5.5.1 requires URI comparison to follow RFC 3986 section 6, whose scheme-based rung for
+/// the `urn` scheme is RFC 8141 section 3: the scheme and the NID are case-insensitive and
+/// percent-encoding is normalized. `Urn` equality is that equivalence, so a broker echoing
+/// `URN:NGSI-LD:A:1` for the `urn:ngsi-ld:A:1` Cassiopeia sent still reconciles.
 ///
 /// An entity the broker never mentioned is counted as failed, not as written: its outcome is
 /// unknown, and a data producer that guesses in its own favour reports data it may never have
@@ -40,10 +42,18 @@ pub fn reconcile(result: &BatchOperationResult, entities: &[NgsiLdEntity]) -> Re
         };
     }
 
+    // Every entity Cassiopeia sends is identified by a URN, so an echoed identifier that is not
+    // one names no entity of this batch and can be left out of the comparison.
+    let echoed: Vec<Urn> = result
+        .success
+        .iter()
+        .chain(result.errors.iter().map(|error| &error.entity_id))
+        .filter_map(|id| id.as_str().parse::<Urn>().ok())
+        .collect();
     let unaccounted: Vec<IriBuf> = entities
         .iter()
+        .filter(|entity| !echoed.contains(&entity.id))
         .filter_map(|entity| minted_id(&entity.id))
-        .filter(|id| !result.success.contains(id) && !result.errors.iter().any(|error| error.entity_id == *id))
         .collect();
 
     let failed = result.errors.len().saturating_add(unaccounted.len()).min(total);
@@ -120,5 +130,45 @@ mod tests {
         );
 
         assert_eq!(outcome.unaccounted().iter().map(Iri::as_str).collect::<Vec<_>>(), vec!["urn:ngsi-ld:A:3"]);
+    }
+
+    #[test]
+    fn an_identifier_echoed_with_its_namespace_in_another_case_still_reconciles() {
+        // RFC 8141 section 3 makes the NID case-insensitive, the scheme-based rung of the RFC 3986
+        // section 6 comparison clause 5.5.1 adopts, so `NGSI-LD` names the same namespace as `ngsi-ld`.
+        let outcome = reconcile(
+            &result(r#"{"success":["urn:NGSI-LD:A:1"],"errors":[{"entityId":"URN:Ngsi-Ld:A:2","error":{}}]}"#),
+            &entities(&["urn:ngsi-ld:A:1", "urn:ngsi-ld:A:2", "urn:ngsi-ld:A:3"]),
+        );
+
+        assert_eq!(outcome.unaccounted().iter().map(Iri::as_str).collect::<Vec<_>>(), vec!["urn:ngsi-ld:A:3"]);
+    }
+
+    #[test]
+    fn an_identifier_differing_in_its_specific_string_case_is_another_entity() {
+        // RFC 8141 section 3 leaves the NSS case-sensitive, so `a:2` is not the `A:2` that was sent.
+        let outcome = reconcile(
+            &result(r#"{"success":["urn:ngsi-ld:A:1"],"errors":[{"entityId":"urn:ngsi-ld:a:2","error":{}}]}"#),
+            &entities(&["urn:ngsi-ld:A:1", "urn:ngsi-ld:A:2", "urn:ngsi-ld:A:3"]),
+        );
+
+        assert_eq!(
+            outcome.unaccounted().iter().map(Iri::as_str).collect::<Vec<_>>(),
+            vec!["urn:ngsi-ld:A:2", "urn:ngsi-ld:A:3"]
+        );
+    }
+
+    #[test]
+    fn an_echoed_identifier_that_is_not_a_urn_accounts_for_no_entity() {
+        // Clause 4.5.1 lets an `id` be any URI, but every entity Cassiopeia sends is a URN.
+        let outcome = reconcile(
+            &result(r#"{"success":["urn:ngsi-ld:A:1"],"errors":[{"entityId":"https://example.org/A/2","error":{}}]}"#),
+            &entities(&["urn:ngsi-ld:A:1", "urn:ngsi-ld:A:2", "urn:ngsi-ld:A:3"]),
+        );
+
+        assert_eq!(
+            outcome.unaccounted().iter().map(Iri::as_str).collect::<Vec<_>>(),
+            vec!["urn:ngsi-ld:A:2", "urn:ngsi-ld:A:3"]
+        );
     }
 }
