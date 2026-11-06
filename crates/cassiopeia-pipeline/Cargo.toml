@@ -32,6 +32,7 @@ cassiopeia-transformer.workspace = true
 cassiopeia-unreadable-timestamps.workspace = true
 cassiopeia-unresolved-templates.workspace = true
 cassiopeia-validator.workspace = true
+cassiopeia-value-type-expansion.workspace = true
 cassiopeia-writer.workspace = true
 chrono = "0.4.45"
 execution-time = "0.3.1"

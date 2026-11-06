@@ -1,4 +1,5 @@
 use cassiopeia_geometry::{geometry::GeometryKind, target::GeometryTarget};
+use cassiopeia_ngsi_ld::value::types::TemporalValueType;
 use serde::{Deserialize, Serialize};
 use strum::{Display, EnumIter};
 
@@ -128,12 +129,24 @@ impl Transformation {
             | Transformation::Time => None,
         }
     }
+
+    /// The transformation that reads a value as the time value data type `value_type`, as a load
+    /// error names it.
+    #[must_use]
+    pub const fn reading(value_type: TemporalValueType) -> Transformation {
+        match value_type {
+            TemporalValueType::DateTime => Transformation::DateTime,
+            TemporalValueType::Date => Transformation::Date,
+            TemporalValueType::Time => Transformation::Time,
+        }
+    }
 }
 
 #[cfg(test)]
 mod tests {
-    use crate::transformation::Transformation;
+    use crate::{conversion::value_reading::ValueReading, transformation::Transformation};
     use cassiopeia_geometry::{geometry::GeometryKind, target::GeometryTarget};
+    use cassiopeia_ngsi_ld::value::types::TemporalValueType;
     use pretty_assertions::assert_eq;
 
     #[test]
@@ -218,5 +231,12 @@ mod tests {
     #[test]
     fn an_unrecognised_transformation_is_rejected() {
         assert!(serde_json::from_str::<Transformation>(r#""geohash""#).is_err());
+    }
+
+    #[test]
+    fn the_transformation_reading_a_time_data_type_reads_that_data_type() {
+        for value_type in [TemporalValueType::DateTime, TemporalValueType::Date, TemporalValueType::Time] {
+            assert_eq!(ValueReading::of(Transformation::reading(value_type)), Some(ValueReading::Temporal(value_type)));
+        }
     }
 }

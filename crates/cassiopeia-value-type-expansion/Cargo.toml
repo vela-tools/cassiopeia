@@ -1,0 +1,25 @@
+[package]
+name = "cassiopeia-value-type-expansion"
+description = "Expands the valueType of NGSI-LD attributes to datatype IRIs against the @context their entities are written with"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+cassiopeia-common.workspace = true
+cassiopeia-ngsi-ld.workspace = true
+dashmap = "6.2.1"
+futures-executor = "0.3.34"
+iri-rs = { version = "4.0.0", features = ["static"] }
+jsonld = { version = "0.27.0", features = ["serde-json"] }
+reqwest = { version = "0.13.5", features = ["blocking", "json"] }
+serde_json = "1.0.154"
+thiserror = "2.0.21"
+
+[dev-dependencies]
+pretty_assertions = "1.4.1"
+
+[lints]
+workspace = true

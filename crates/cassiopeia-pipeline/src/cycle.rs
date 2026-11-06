@@ -1,7 +1,7 @@
 use crate::{
     context_resolution::resolve_context_source,
     controller::{AtomicBoolController, RunController},
-    error::Result,
+    error::{PipelineError, Result},
     input_config::InputConfig,
     memory_sampler::MemorySampler,
     observer::{PipelineProgress, PipelineResult},
@@ -9,14 +9,18 @@ use crate::{
     pipeline_stage::PipelineStage,
     schema_resolution::resolve_custom_schemas,
 };
-use cassiopeia_common::{signal::MetaSignal, telemetry::run::RunTelemetry};
+use cassiopeia_common::{signal::MetaSignal, telemetry::run::RunTelemetry, user_agent::UserAgent};
 use cassiopeia_expander::{
     compiler::ExpanderCompiler,
     router::{CollectionRoutes, MappingRouter},
 };
 use cassiopeia_manifest::mapping_binding::MappingBinding;
-use cassiopeia_mapping::{mapping::Mapping, template::runner::TemplateRunner};
-use cassiopeia_ngsi_ld::{data_model::DataModelRepository, entity::name::NameBuf};
+use cassiopeia_mapping::{mapping::Mapping, template::runner::TemplateRunner, value_type_agreement::check_value_types};
+use cassiopeia_ngsi_ld::{
+    data_model::DataModelRepository,
+    entity::{context::ContextSource, name::NameBuf},
+};
+use cassiopeia_value_type_expansion::value_type_expander::ValueTypeExpander;
 use std::{
     collections::HashMap,
     path::{Path, PathBuf},
@@ -50,6 +54,7 @@ impl Pipeline {
         let template_resolver = runner.resolver();
 
         let context = resolve_context_source(&loaded, &self.output.global_context_mode, &self.config.schemas_folder, self.context.reporter)?;
+        check_declared_value_types(compiled.values().map(Arc::as_ref), &context, &self.config.default_user_agent)?;
 
         let fragment_resolver = self.create_resolver(template_resolver.clone())?;
         let writer = self.create_writer(context)?;
@@ -166,10 +171,27 @@ fn compile_mapping(compiled: &mut HashMap<PathBuf, Arc<Mapping>>, runner: &mut T
     Ok(mapping)
 }
 
+/// Refuses the run when a mapping declares a `valueType` that disagrees with its attribute once
+/// expanded against the `@context` its entities are written with.
+///
+/// Expansion needs that `@context`, which only the run knows, so this runs once it is resolved and
+/// before a record is read. A `@context` that cannot be loaded refuses the run as well: a `valueType`
+/// that cannot be expanded cannot be checked.
+fn check_declared_value_types<'a>(mappings: impl IntoIterator<Item = &'a Mapping>, context: &ContextSource, user_agent: &UserAgent) -> Result<()> {
+    let expander = ValueTypeExpander::new(user_agent).map_err(PipelineError::ValueTypeExpander)?;
+
+    mappings.into_iter().try_for_each(|mapping| check_value_types(mapping, &expander, context))?;
+
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
-    use crate::{cycle::build_router, error::PipelineError};
-    use cassiopeia_common::collection::CollectionName;
+    use crate::{
+        cycle::{build_router, check_declared_value_types},
+        error::PipelineError,
+    };
+    use cassiopeia_common::{collection::CollectionName, user_agent::UserAgent};
     use cassiopeia_diagnostic::{
         cause::Cause,
         code::{diagnostic_code::DiagnosticCode, run_code::RunCode},
@@ -178,10 +200,15 @@ mod tests {
     };
     use cassiopeia_expander::router::MappingRouter;
     use cassiopeia_manifest::mapping_binding::{CollectionMapping, MappingBinding};
-    use cassiopeia_mapping::{error::MappingError, template::runner::TemplateRunner, template_site::TemplateSite};
-    use cassiopeia_ngsi_ld::entity::{attribute_path::AttributePath, name::NameBuf};
+    use cassiopeia_mapping::{error::MappingError, mapping::Mapping, template::runner::TemplateRunner, template_site::TemplateSite};
+    use cassiopeia_ngsi_ld::entity::{attribute_path::AttributePath, context::ContextSource, name::NameBuf};
     use pretty_assertions::assert_eq;
-    use std::{collections::HashMap, fs, path::PathBuf, sync::Arc};
+    use std::{
+        collections::HashMap,
+        fs,
+        path::{Path, PathBuf},
+        sync::Arc,
+    };
     use temp_dir::TempDir;
 
     fn write_mapping(dir: &TempDir, name: &str, data_model: &str) -> PathBuf {
@@ -191,6 +218,30 @@ mod tests {
         );
         fs::write(&path, document).unwrap();
         path
+    }
+
+    fn loaded_mapping(attributes: &str) -> Mapping {
+        let document = format!(r#"{{ version: "v4", dataModel: "Alert", identity: {{ entityName: "A-{{{{ id }}}}" }}, attributes: {attributes} }}"#);
+        Mapping::from_json5(&document, Path::new("alert.json5"), &mut TemplateRunner::new()).unwrap()
+    }
+
+    #[test]
+    fn mappings_whose_value_types_agree_with_their_attributes_let_the_run_start() {
+        let mapping = loaded_mapping(r#"{ due: { source: "{{ due }}", transformation: "datetime", valueType: "DateTime" } }"#);
+
+        assert!(check_declared_value_types([&mapping], &ContextSource::None, &UserAgent::from("test".to_owned())).is_ok());
+    }
+
+    #[test]
+    fn a_value_type_contradicting_its_transformation_refuses_the_run_as_an_unusable_mapping() {
+        let agreeing = loaded_mapping(r#"{ due: { source: "{{ due }}", transformation: "date", valueType: "Date" } }"#);
+        let contradicting = loaded_mapping(r#"{ due: { source: "{{ due }}", transformation: "date", valueType: "Time" } }"#);
+
+        let error = check_declared_value_types([&agreeing, &contradicting], &ContextSource::None, &UserAgent::from("test".to_owned()))
+            .expect_err("the second mapping contradicts its transformation");
+
+        assert!(matches!(error, PipelineError::Mapping(MappingError::ValueTypeContradictsTransformation { .. })));
+        assert_eq!(DiagnosticCode::from(&error), DiagnosticCode::Run(RunCode::MappingUnusable));
     }
 
     #[test]

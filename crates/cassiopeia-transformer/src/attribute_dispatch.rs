@@ -1,7 +1,7 @@
 use crate::{
     attribute_builder::{build_geo_property, build_json_property, build_language_property, build_list_property, build_property, build_vocab_property},
     attribute_store::AttributeStore,
-    metadata::transform_metadata,
+    metadata::{MetadataSummary, transform_metadata},
     property_instances::build_multi_instance_attribute,
     qualifier_cache::QualifierCache,
     relationship_assembly::{
@@ -11,7 +11,7 @@ use crate::{
         build_single_relationship,
     },
 };
-use cassiopeia_ir::{attribute_content::AttributeContent, entity::AttributeValues, resolved_attribute::ResolvedAttribute};
+use cassiopeia_ir::{attribute_content::AttributeContent, entity::AttributeValues, metadata::EntityMetadata, resolved_attribute::ResolvedAttribute};
 use cassiopeia_mapping::attribute::Attribute;
 use cassiopeia_ngsi_ld::{
     entity::{
@@ -61,36 +61,50 @@ pub(crate) fn build_attribute(
     match config.kind() {
         NgsiLdAttributeKind::Property => {
             let value = take_value(values, key)?;
-            Some(build_property(value, transform_metadata(metadata, name, None, cache, unreadable)))
+            Some(build_property(value, property_metadata(name, config, metadata, cache, unreadable)))
         }
         NgsiLdAttributeKind::GeoProperty => {
             // Extraction leaves a GeoProperty's value as the geometry it typed under the declaration's
             // own `geometry` policy, or no value at all, so there is nothing to parse here.
             let geometry = take_value(values, key)?.into_geometry()?;
-            Some(build_geo_property(geometry, transform_metadata(metadata, name, None, cache, unreadable)))
+            Some(build_geo_property(geometry, property_metadata(name, config, metadata, cache, unreadable)))
         }
         NgsiLdAttributeKind::VocabProperty => {
             let iri = take_vocab(values, key)?;
-            Some(build_vocab_property(iri, transform_metadata(metadata, name, None, cache, unreadable)))
+            Some(build_vocab_property(iri, property_metadata(name, config, metadata, cache, unreadable)))
         }
         NgsiLdAttributeKind::ListProperty => {
             let value = take_value(values, key)?;
-            Some(build_list_property(value, transform_metadata(metadata, name, None, cache, unreadable)))
+            Some(build_list_property(value, property_metadata(name, config, metadata, cache, unreadable)))
         }
         NgsiLdAttributeKind::JsonProperty => {
             let payload = take_json(values, key)?;
-            Some(build_json_property(payload, transform_metadata(metadata, name, None, cache, unreadable)))
+            Some(build_json_property(payload, property_metadata(name, config, metadata, cache, unreadable)))
         }
         NgsiLdAttributeKind::LanguageProperty => {
             let language_map = take_language_map(values, key)?;
             Some(build_language_property(
                 language_map,
-                transform_metadata(metadata, name, None, cache, unreadable),
+                property_metadata(name, config, metadata, cache, unreadable),
             ))
         }
         NgsiLdAttributeKind::Relationship => build_single_relationship(name, config, relationships, metadata, cache, unreadable),
         NgsiLdAttributeKind::ListRelationship => build_list_relationship_attribute(name, config, relationships, metadata, cache, unreadable),
     }
+}
+
+/// Resolves the metadata of a single-instance Property-family attribute, with the `valueType` its
+/// declaration names.
+fn property_metadata(
+    name: &NameBuf,
+    config: &Attribute,
+    metadata: Option<&EntityMetadata>,
+    cache: &mut QualifierCache<'_>,
+    unreadable: &UnreadableTimestamps,
+) -> MetadataSummary {
+    // The declaration answers for every entity it produces, so each attribute takes its own copy of
+    // the datatype it names.
+    transform_metadata(metadata, name, None, cache, unreadable).with_value_type(config.value_type().clone())
 }
 
 /// Takes the single content a single-instance declaration resolved to.

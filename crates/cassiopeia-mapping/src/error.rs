@@ -6,7 +6,11 @@ use crate::{
 };
 use cassiopeia_common::error::io::IoError;
 use cassiopeia_geometry::error::GeometryError;
-use cassiopeia_ngsi_ld::entity::{attribute::NgsiLdAttributeKind, attribute_path::AttributePath, error::NgsiLdError, name::NameBuf};
+use cassiopeia_ngsi_ld::{
+    entity::{attribute::NgsiLdAttributeKind, attribute_path::AttributePath, error::NgsiLdError, name::NameBuf, value_type::ValueType},
+    value::types::TemporalValueType,
+};
+use cassiopeia_value_type_expansion::error::ExpansionError;
 use langtag::LangTagBuf;
 use std::{path::PathBuf, result};
 use thiserror::Error;
@@ -141,6 +145,113 @@ pub enum MappingError {
         attribute: AttributePath,
         /// The language the entry is keyed by.
         language: LangTagBuf,
+    },
+
+    /// A Relationship or `ListRelationship`, or one of its instances, declares a `valueType`.
+    ///
+    /// Neither kind has a `valueType` member (ETSI GS CIM 009 v1.9.1 tables 5.2.6-1 and 5.2.33-1):
+    /// the type of what a relationship points at is its `objectType`, which Cassiopeia writes from
+    /// `target.entity`.
+    #[error(
+        "Attribute `{attribute}` is a `{kind}`, which has no `valueType`; the type of its target is `objectType`, written from `target.entity`, so remove the `valueType`"
+    )]
+    ValueTypeOnRelationship {
+        /// Where the relationship that declares a `valueType` sits, from its top-level attribute
+        /// down.
+        attribute: AttributePath,
+        /// Its relationship kind.
+        kind: NgsiLdAttributeKind,
+    },
+
+    /// An attribute's `properties` declare a sub-attribute named `valueType`.
+    ///
+    /// `valueType` is a member of the attribute itself (ETSI GS CIM 009 v1.9.1 clause 4.5.2), so a
+    /// sub-attribute of that name would be written as a nested Property, which a broker refuses.
+    #[error("Attribute `{attribute}` declares `valueType` under `properties`, where it would become a sub-attribute; move it up a level, next to `type`")]
+    ValueTypeUnderProperties {
+        /// Where the attribute whose `properties` declare it sits, from its top-level attribute down.
+        attribute: AttributePath,
+    },
+
+    /// A member of an attribute's structured value, an entry of its `mappings` or `languageMap`,
+    /// declares a `valueType`.
+    ///
+    /// Those entries build parts of one value, not attributes, so there is no member to write a
+    /// `valueType` in.
+    #[error(
+        "Attribute `{attribute}` declares a `valueType` on an entry of its `mappings` or `languageMap`, which builds part of its value and has no `valueType`; declare it on the attribute"
+    )]
+    ValueTypeOnValueMember {
+        /// Where the attribute the entry belongs to sits, from its top-level attribute down.
+        attribute: AttributePath,
+    },
+
+    /// A declared `valueType` cannot be expanded to a datatype IRI under the `@context` its entity is
+    /// written with.
+    #[error("Attribute `{attribute}` declares `valueType: \"{value_type}\"`, which cannot be checked")]
+    UnexpandableValueType {
+        /// Where the attribute that declares it sits, from its top-level attribute down.
+        attribute: AttributePath,
+        /// The value type as declared, boxed so this variant, which also carries a path, does not
+        /// enlarge every `Result` carrying the error past the large-error threshold.
+        value_type: Box<ValueType>,
+        /// Why it could not be expanded.
+        #[source]
+        source: Box<ExpansionError>,
+    },
+
+    /// A declared `valueType` names another datatype than the time value its `transformation`
+    /// produces.
+    ///
+    /// A `valueType` types a Property's `value` and each item of a `ListProperty`'s `valueList`
+    /// (ETSI GS CIM 009 v1.9.1 clause 4.5.2, table 5.2.36-1), and a time value already has its data
+    /// type, which a Property writes on its own (Annex C.6).
+    #[error(
+        "Attribute `{attribute}` declares `valueType: \"{value_type}\"`, but `transformation: \"{transformation}\"` produces a `{implied}`; declare `{implied}` or remove the `valueType`"
+    )]
+    ValueTypeContradictsTransformation {
+        /// Where the attribute whose declarations disagree sits, from its top-level attribute down.
+        attribute: AttributePath,
+        /// The value type as declared, boxed so this variant, which also carries a path, does not
+        /// enlarge every `Result` carrying the error past the large-error threshold.
+        value_type: Box<ValueType>,
+        /// The transformation it declared.
+        transformation: Transformation,
+        /// The data type the transformation produces.
+        implied: TemporalValueType,
+    },
+
+    /// A declared `valueType` names a time value data type, but the attribute's value is not read as
+    /// one.
+    ///
+    /// A `DateTime`, `Date` or `Time` value has to be in the form ETSI GS CIM 009 v1.9.1 clause 4.6.3
+    /// gives it, which only the matching transformation guarantees.
+    #[error(
+        "Attribute `{attribute}` declares `valueType: \"{value_type}\"`, which names a `{named}`, but its value is not read as one; add `transformation: \"{needed}\"`"
+    )]
+    TimeValueTypeWithoutTransformation {
+        /// Where the attribute whose value is not read as a time sits, from its top-level attribute
+        /// down.
+        attribute: AttributePath,
+        /// The value type as declared, boxed so this variant, which also carries a path, does not
+        /// enlarge every `Result` carrying the error past the large-error threshold.
+        value_type: Box<ValueType>,
+        /// The time value data type it names.
+        named: TemporalValueType,
+        /// The transformation that reads a value as that data type.
+        needed: Transformation,
+    },
+
+    /// A `LanguageProperty` declares a `valueType` other than `langString`.
+    #[error(
+        "Attribute `{attribute}` is a `LanguageProperty`, whose `valueType` can only be `langString` (ETSI GS CIM 009 v1.9.1 table 5.2.32-1), not `{value_type}`"
+    )]
+    LanguagePropertyValueType {
+        /// Where the `LanguageProperty` that declares it sits, from its top-level attribute down.
+        attribute: AttributePath,
+        /// The value type as declared, boxed so this variant, which also carries a path, does not
+        /// enlarge every `Result` carrying the error past the large-error threshold.
+        value_type: Box<ValueType>,
     },
 }
 

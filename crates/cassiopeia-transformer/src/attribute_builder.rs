@@ -26,6 +26,9 @@ use urn_rs::Urn;
 #[must_use]
 pub fn build_property(value: Value, meta: MetadataSummary) -> NgsiLdAttributeWrapper {
     let mut builder = PropertyBuilder::new(value);
+    if let Some(value_type) = meta.value_type {
+        builder = builder.value_type(value_type);
+    }
     if let Some(observed_at) = meta.observed_at {
         builder = builder.observed_at(observed_at);
     }
@@ -81,6 +84,7 @@ pub fn build_relationship(object: Urn, object_type: Option<NameBuf>, meta: Metad
 #[must_use]
 pub fn build_geo_property(geometry: NgsiLdGeometry, meta: MetadataSummary) -> NgsiLdAttributeWrapper {
     let mut geo = NgsiLdGeoProperty::new(geometry);
+    geo.value_type = meta.value_type;
     geo.observed_at = meta.observed_at;
     geo.expires_at = meta.expires_at;
     geo.dataset_id = meta.dataset_id;
@@ -96,6 +100,7 @@ pub fn build_geo_property(geometry: NgsiLdGeometry, meta: MetadataSummary) -> Ng
 #[must_use]
 pub fn build_language_property(language_map: LanguageMap, meta: MetadataSummary) -> NgsiLdAttributeWrapper {
     let mut property = NgsiLdLanguageProperty::new(language_map);
+    property.value_type = meta.value_type;
     property.observed_at = meta.observed_at;
     property.expires_at = meta.expires_at;
     property.dataset_id = meta.dataset_id;
@@ -111,6 +116,7 @@ pub fn build_language_property(language_map: LanguageMap, meta: MetadataSummary)
 #[must_use]
 pub fn build_vocab_property(has_vocab: IriBuf, meta: MetadataSummary) -> NgsiLdAttributeWrapper {
     let mut property = NgsiLdVocabProperty::new(has_vocab);
+    property.value_type = meta.value_type;
     property.observed_at = meta.observed_at;
     property.expires_at = meta.expires_at;
     property.dataset_id = meta.dataset_id;
@@ -129,6 +135,7 @@ pub fn build_list_property(value: Value, meta: MetadataSummary) -> NgsiLdAttribu
     };
 
     let mut property = NgsiLdListProperty::new(has_value_list);
+    property.value_type = meta.value_type;
     property.observed_at = meta.observed_at;
     property.expires_at = meta.expires_at;
     property.dataset_id = meta.dataset_id;
@@ -141,6 +148,7 @@ pub fn build_list_property(value: Value, meta: MetadataSummary) -> NgsiLdAttribu
 #[must_use]
 pub fn build_json_property(payload: JsonPayload, meta: MetadataSummary) -> NgsiLdAttributeWrapper {
     let mut property = NgsiLdJsonProperty::new(payload);
+    property.value_type = meta.value_type;
     property.observed_at = meta.observed_at;
     property.expires_at = meta.expires_at;
     property.dataset_id = meta.dataset_id;
@@ -233,6 +241,7 @@ mod tests {
         entity::{
             attribute::{NgsiLdAttribute, NgsiLdAttributeKind, NgsiLdAttributeWrapper, language_property::LanguageMap, property::NgsiLdProperty},
             name::NameBuf,
+            value_type::ValueType,
         },
         value::{
             json_payload::JsonPayload,
@@ -254,6 +263,7 @@ mod tests {
             unit_code: None,
             dataset_id: None,
             custom_attributes: IndexMap::default(),
+            value_type: None,
         }
     }
 
@@ -448,6 +458,7 @@ mod tests {
             unit_code: None,
             dataset_id: None,
             custom_attributes: custom,
+            value_type: None,
         };
 
         let wrapper = build_sub_attribute(
@@ -546,5 +557,35 @@ mod tests {
 
         assert!(build_sub_attribute(NgsiLdAttributeKind::Property, AttributeContent::Vocab(iri.clone()), None, empty_meta()).is_none());
         assert!(build_sub_attribute(NgsiLdAttributeKind::LanguageProperty, AttributeContent::Vocab(iri), None, empty_meta()).is_none());
+    }
+
+    #[test]
+    fn every_property_kind_writes_the_value_type_its_metadata_carries() {
+        let declared = ValueType::new("Thing").unwrap();
+        let meta = || empty_meta().with_value_type(Some(declared.clone()));
+
+        let NgsiLdAttributeWrapper::Single(property) = build_property(Value::String("a".into()), meta()) else {
+            panic!("expected a single property");
+        };
+        let NgsiLdAttribute::Property(property) = *property else {
+            panic!("expected a property");
+        };
+        assert_eq!(property.value_type.as_ref(), Some(&declared));
+
+        let NgsiLdAttributeWrapper::Single(list) = build_list_property(Value::String("a".into()), meta()) else {
+            panic!("expected a single list property");
+        };
+        let NgsiLdAttribute::ListProperty(list) = *list else {
+            panic!("expected a list property");
+        };
+        assert_eq!(list.value_type.as_ref(), Some(&declared));
+
+        let NgsiLdAttributeWrapper::Single(vocab) = build_vocab_property(IriBuf::new("https://example.org/x".to_owned()).unwrap(), meta()) else {
+            panic!("expected a single vocab property");
+        };
+        let NgsiLdAttribute::VocabProperty(vocab) = *vocab else {
+            panic!("expected a vocab property");
+        };
+        assert_eq!(vocab.value_type.as_ref(), Some(&declared));
     }
 }

@@ -1,4 +1,5 @@
 use crate::{attribute::Attributes, template::CompiledTemplate};
+use cassiopeia_ngsi_ld::entity::value_type::ValueType;
 use getset::{Getters, MutGetters, Setters};
 use serde::{Deserialize, Serialize};
 use serde_json::Value as JsonValue;
@@ -7,9 +8,9 @@ use typed_builder::TypedBuilder;
 /// One instance of a multi-instance attribute (ETSI GS CIM 009 v1.9.1 clause 4.5.5).
 ///
 /// An attribute name may carry several instances that differ by `datasetId`; each instance reads its
-/// own value `source` and declares its own `properties` (notably `datasetId`). The attribute's
-/// `type`, `transformation`, and attribute-level `properties` are shared across every instance, so an
-/// instance only restates what makes it distinct. An instance without a `datasetId` is the default
+/// own value `source` and declares its own `properties` (notably `datasetId`) and, optionally, its own
+/// `valueType`. The attribute's `type`, `transformation`, and attribute-level `properties` are shared
+/// across every instance, so an instance only restates what makes it distinct. An instance without a `datasetId` is the default
 /// instance, of which the spec permits at most one.
 #[derive(Debug, Clone, Serialize, Deserialize, Getters, MutGetters, Setters, TypedBuilder)]
 pub struct AttributeInstance {
@@ -22,6 +23,16 @@ pub struct AttributeInstance {
     #[builder(default = Default::default())]
     #[getset(get = "pub")]
     source: Option<JsonValue>,
+
+    /// This instance's own `valueType`, in place of the attribute's (ETSI GS CIM 009 v1.9.1 clause
+    /// 4.5.2).
+    ///
+    /// Instances that hold different formats of one attribute are told apart this way, as Annex C.10
+    /// shows for an address held as text in one entity and as a `PostalAddress` in another.
+    #[serde(default, rename = "valueType", skip_serializing_if = "Option::is_none")]
+    #[builder(default = Default::default())]
+    #[getset(get = "pub")]
+    value_type: Option<ValueType>,
 
     /// This instance's own properties, such as its `datasetId`.
     ///

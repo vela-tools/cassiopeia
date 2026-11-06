@@ -11,7 +11,7 @@ use crate::{
     transformation::Transformation,
 };
 use cassiopeia_geometry::policy::GeometryPolicy;
-use cassiopeia_ngsi_ld::entity::{attribute::NgsiLdAttributeKind, name::NameBuf};
+use cassiopeia_ngsi_ld::entity::{attribute::NgsiLdAttributeKind, name::NameBuf, value_type::ValueType};
 use getset::{CopyGetters, Getters, MutGetters, Setters};
 use indexmap::IndexMap;
 use langtag::LangTagBuf;
@@ -64,6 +64,19 @@ pub struct Attribute {
     #[builder(default = Default::default())]
     #[getset(get = "pub")]
     transformation: Option<Transformation>,
+
+    /// The datatype of this attribute's value, written as its `valueType` member exactly as declared
+    /// (ETSI GS CIM 009 v1.9.1 clause 4.5.2).
+    ///
+    /// The `@context` sent with the entity expands it to a datatype IRI, so a term, a compact IRI and
+    /// an absolute IRI all work. Every Property kind admits one; a `LanguageProperty`'s can only be
+    /// `langString` (table 5.2.32-1), and a Relationship or `ListRelationship` has none, its target
+    /// type being `objectType`. A time `transformation` implies its own, which a declared one has to
+    /// agree with. Each of the attribute's `instances` may declare its own in place of this one.
+    #[serde(default, rename = "valueType", skip_serializing_if = "Option::is_none")]
+    #[builder(default = Default::default())]
+    #[getset(get = "pub")]
+    value_type: Option<ValueType>,
 
     /// What may be lost bringing this attribute's geometry to the type its conversion names: the
     /// declared `transformation`, or, for a `GeoProperty` declaring none, the geometry as read.
@@ -201,6 +214,13 @@ impl Attribute {
         AttributeIterator::new(self)
     }
 
+    /// The datatype one of this attribute's `instances` carries: its own `valueType`, or else the
+    /// attribute's.
+    #[must_use]
+    pub fn instance_value_type<'a>(&'a self, instance: &'a AttributeInstance) -> Option<&'a ValueType> {
+        instance.value_type().as_ref().or(self.value_type.as_ref())
+    }
+
     /// The raw `observedAt` template declared directly on this attribute, if any.
     ///
     /// A non-string declaration is stringified rather than rejected: `observedAt` may be written
@@ -241,7 +261,7 @@ impl Attribute {
 #[cfg(test)]
 mod tests {
     use crate::{attribute::Attribute, template::TemplateSource, transformation::Transformation, version::Version};
-    use cassiopeia_ngsi_ld::entity::attribute::NgsiLdAttributeKind;
+    use cassiopeia_ngsi_ld::entity::{attribute::NgsiLdAttributeKind, value_type::ValueType};
     use langtag::LangTagBuf;
     use pretty_assertions::assert_eq;
 
@@ -340,5 +360,35 @@ mod tests {
         let synthetic = attribute.synthetic_entity().as_ref().expect("synthetic entity is present");
         assert_eq!(synthetic.version(), &Version::V4);
         assert_eq!(synthetic.data_model().entity_type().as_str(), "Organization");
+    }
+
+    #[test]
+    fn a_declared_value_type_is_read_next_to_the_type() {
+        let attribute = parse(r#"{"source": "{{ address }}", "valueType": "PostalAddress"}"#);
+
+        assert_eq!(attribute.value_type().as_ref().map(ValueType::as_str), Some("PostalAddress"));
+    }
+
+    #[test]
+    fn a_value_type_that_can_never_expand_to_an_iri_is_rejected() {
+        assert!(serde_json5::from_str::<Attribute>(r#"{"source": "{{ a }}", "valueType": "@id"}"#).is_err());
+        assert!(serde_json5::from_str::<Attribute>(r#"{"source": "{{ a }}", "valueType": ""}"#).is_err());
+    }
+
+    #[test]
+    fn an_instance_carries_its_own_value_type_or_else_the_attribute_one() {
+        let attribute = parse(
+            r#"{
+                "valueType": "String",
+                "instances": [
+                    {"source": "{{ a }}"},
+                    {"source": "{{ b }}", "valueType": "PostalAddress"}
+                ]
+            }"#,
+        );
+
+        let instances = attribute.instances().as_ref().expect("instances are present");
+        assert_eq!(attribute.instance_value_type(&instances[0]).map(ValueType::as_str), Some("String"));
+        assert_eq!(attribute.instance_value_type(&instances[1]).map(ValueType::as_str), Some("PostalAddress"));
     }
 }

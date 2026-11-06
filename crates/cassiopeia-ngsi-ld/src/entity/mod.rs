@@ -12,6 +12,7 @@ pub mod temporal_aggregate;
 #[cfg(test)]
 mod tests;
 pub mod validation;
+pub mod value_type;
 
 use crate::entity::{
     attribute::Attributes,

@@ -37,7 +37,8 @@ impl From<&PipelineError> for DiagnosticCode {
             PipelineError::SchemaFetch { .. } => SchemaCode::FetchFailed.into(),
             PipelineError::SeriesRequiresTemporalOperation => RunCode::Misconfigured.into(),
             PipelineError::LocalContext(error) => local_context_code(error).into(),
-            PipelineError::Mapping(_) => RunCode::MappingUnusable.into(),
+            // A mapping whose `valueType` declarations cannot be checked cannot be used either.
+            PipelineError::Mapping(_) | PipelineError::ValueTypeExpander(_) => RunCode::MappingUnusable.into(),
             PipelineError::StagePanic { .. } => RunCode::StagePanic.into(),
         }
     }

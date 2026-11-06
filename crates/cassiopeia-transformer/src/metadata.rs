@@ -4,7 +4,7 @@ use cassiopeia_ir::{
     sub_attribute::{SubAttribute, SubAttributes},
 };
 use cassiopeia_ngsi_ld::{
-    entity::{attribute::NestedAttributes, name::NameBuf},
+    entity::{attribute::NestedAttributes, name::NameBuf, value_type::ValueType},
     value::types::Value,
 };
 use cassiopeia_unreadable_timestamps::{timestamp_loss::TimestampLoss, unreadable_timestamps::UnreadableTimestamps};
@@ -30,6 +30,18 @@ pub struct MetadataSummary {
     /// Any further declared sub-attributes, each built as the NGSI-LD kind it was declared as (a
     /// Property or one of its subclasses, ETSI GS CIM 009 v1.9.1 clause 4.5.2.2).
     pub custom_attributes: NestedAttributes,
+    /// The `valueType` the declaration named for the value (ETSI GS CIM 009 v1.9.1 clause 4.5.2),
+    /// valid only on a Property or one of its subclasses.
+    pub value_type: Option<ValueType>,
+}
+
+impl MetadataSummary {
+    /// Carries the `valueType` the attribute's declaration named, which lives on the declaration
+    /// rather than among the properties this summary is resolved from.
+    #[must_use]
+    pub fn with_value_type(self, value_type: Option<ValueType>) -> MetadataSummary {
+        MetadataSummary { value_type, ..self }
+    }
 }
 
 /// Resolves the metadata declared for one attribute into typed NGSI-LD qualifiers.
@@ -86,6 +98,7 @@ fn empty_summary() -> MetadataSummary {
         unit_code: None,
         dataset_id: None,
         custom_attributes: NestedAttributes::default(),
+        value_type: None,
     }
 }
 
@@ -127,7 +140,9 @@ fn summary_from(props: &SubAttributes, attribute: &NameBuf, cache: &mut Qualifie
         if matches!(name.as_str(), "observedAt" | "expiresAt" | "unitCode" | "datasetId") {
             continue;
         }
-        let sub_meta = summary_from(sub.metadata(), attribute, cache, unreadable);
+        // Shared metadata answers for every instance, so each sub-attribute takes its own copy of the
+        // datatype its declaration named.
+        let sub_meta = summary_from(sub.metadata(), attribute, cache, unreadable).with_value_type(sub.value_type().clone());
         // The metadata is borrowed rather than consumed because shared metadata answers for every
         // instance of a multi-instance attribute, so each sub-attribute built from it takes a copy.
         if let Some(wrapper) = build_sub_attribute(*sub.kind(), sub.value().clone(), sub.object_type().clone(), sub_meta) {
@@ -153,6 +168,7 @@ mod tests {
         entity::{
             attribute::{NgsiLdAttribute, NgsiLdAttributeKind, NgsiLdAttributeWrapper},
             name::NameBuf,
+            value_type::ValueType,
         },
         value::types::{TemporalValue, Value},
     };
@@ -182,6 +198,32 @@ mod tests {
             panic!("expected a single sub-attribute");
         };
         attr.as_ref().clone()
+    }
+
+    #[test]
+    fn a_sub_attribute_carries_the_value_type_its_declaration_named() {
+        let declared = ValueType::new("PostalAddress").unwrap();
+        let mut shared = IndexMap::default();
+        shared.insert(
+            name("formatted"),
+            sub(NgsiLdAttributeKind::Property, json!("Pariser Platz")).with_value_type(Some(declared.clone())),
+        );
+        let mut metadata = IndexMap::default();
+        metadata.insert(name("address"), MetadataStorage::shared(shared));
+
+        let summary = transform_metadata(
+            Some(&metadata),
+            &name("address"),
+            None,
+            &mut QualifierCache::new(&mut InstantCache::new(), &mut UnitCodeCache::new()),
+            &UnreadableTimestamps::new(),
+        );
+
+        let NgsiLdAttribute::Property(formatted) = attribute(&summary, "formatted") else {
+            panic!("expected a property sub-attribute");
+        };
+        assert_eq!(formatted.value_type, Some(declared));
+        assert_eq!(summary.value_type, None);
     }
 
     #[test]

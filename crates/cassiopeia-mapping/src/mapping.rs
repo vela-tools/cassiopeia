@@ -12,6 +12,7 @@ use crate::{
     template::{CompiledTemplate, TemplateSource, error::TemplateError, resolver::TemplateResolver, runner::TemplateRunner},
     template_location::TemplateLocation,
     template_site::TemplateSite,
+    value_type_placement,
     version::Version,
 };
 use cassiopeia_common::error::io::{IoAction, IoError};
@@ -173,13 +174,15 @@ impl Mapping {
     ///
     /// # Errors
     /// Returns a [`MappingError`] when the document cannot be parsed, declares `instances` below the
-    /// top level, declares an attribute that cannot run, or its `observedAt` template cannot be compiled.
+    /// top level, declares a `valueType` where none can be written, declares an attribute that cannot
+    /// run, or its `observedAt` template cannot be compiled.
     pub fn from_json5(content: &str, origin: &Path, runner: &mut TemplateRunner) -> Result<Mapping> {
         let mut mapping: Mapping = serde_json5::from_str(content).map_err(|source| MappingError::Parse {
             path: origin.to_path_buf(),
             source,
         })?;
         instance_placement::check(mapping.attributes())?;
+        value_type_placement::check(mapping.attributes())?;
         resolve(mapping.attributes_mut())?;
         mapping.compile_temporal_fields(origin, runner)?;
         mapping.has_nested_relationships = mapping.detect_nested_relationships();

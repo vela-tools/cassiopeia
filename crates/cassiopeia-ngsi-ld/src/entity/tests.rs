@@ -18,6 +18,7 @@ use crate::{
         name::NameBuf,
         representation::{JsonLayout, NgsiLdSerializable},
         scope::{NgsiLdScope, ScopeBuf},
+        value_type::ValueType,
     },
     value::{
         json_payload::JsonPayload,
@@ -72,6 +73,7 @@ mod property_tests {
     #[test]
     fn test_simple_property_all_modes() {
         let prop = NgsiLdAttribute::Property(NgsiLdProperty {
+            value_type: None,
             value: Value::try_from(JsonValue::String("John Doe".to_string())).unwrap(),
             observed_at: None,
             expires_at: None,
@@ -99,6 +101,7 @@ mod property_tests {
     fn test_property_with_metadata() {
         let dt = Utc.with_ymd_and_hms(2023, 12, 25, 10, 30, 0).unwrap();
         let prop = NgsiLdAttribute::Property(NgsiLdProperty {
+            value_type: None,
             value: Value::try_from(json!(25)).unwrap(),
             observed_at: Some(dt),
             expires_at: None,
@@ -130,6 +133,7 @@ mod property_tests {
     fn an_expires_at_serializes_as_a_date_time_qualifier_not_a_nested_attribute() {
         let dt = Utc.with_ymd_and_hms(2026, 10, 25, 13, 0, 0).unwrap();
         let prop = NgsiLdAttribute::Property(NgsiLdProperty {
+            value_type: None,
             value: Value::try_from(JsonValue::String("ok".to_string())).unwrap(),
             observed_at: None,
             expires_at: Some(dt),
@@ -201,6 +205,143 @@ mod property_tests {
         assert_eq!(concise["note"], "2026-10-24T20:49:00Z");
     }
 
+    fn value_type(text: &str) -> ValueType {
+        ValueType::new(text).unwrap()
+    }
+
+    #[test]
+    fn a_declared_value_type_tells_apart_two_formats_of_one_property_as_annex_c_10_shows() {
+        let mut text = NgsiLdProperty::new(Value::String(CompactString::from("Pariser Platz, Berlin, Germany")));
+        text.value_type = Some(value_type("String"));
+        let mut structured = NgsiLdProperty::new(Value::try_from(json!({"street": "Straße des 17. Juni", "city": "Berlin"})).unwrap());
+        structured.value_type = Some(value_type("PostalAddress"));
+
+        let text = create_test_entity("27182", "Place", "address", NgsiLdAttribute::Property(text));
+        let structured = create_test_entity("31415", "Place", "address", NgsiLdAttribute::Property(structured));
+
+        assert_eq!(
+            serialize_entity(&text, NgsiLdRepresentation::Normalized)["address"],
+            json!({"type": "Property", "value": "Pariser Platz, Berlin, Germany", "valueType": "String"})
+        );
+        assert_eq!(
+            serialize_entity(&structured, NgsiLdRepresentation::Normalized)["address"],
+            json!({"type": "Property", "value": {"street": "Straße des 17. Juni", "city": "Berlin"}, "valueType": "PostalAddress"})
+        );
+    }
+
+    #[test]
+    fn a_declared_value_type_keeps_the_concise_object_form_and_is_left_out_of_the_simplified_form() {
+        let mut property = NgsiLdProperty::new(Value::String(CompactString::from("PT1H30M")));
+        property.value_type = Some(value_type("http://www.w3.org/2001/XMLSchema#duration"));
+        let entity = create_test_entity("T1", "Trip", "duration", NgsiLdAttribute::Property(property));
+
+        assert_eq!(
+            serialize_entity(&entity, NgsiLdRepresentation::Concise)["duration"],
+            json!({"value": "PT1H30M", "valueType": "http://www.w3.org/2001/XMLSchema#duration"})
+        );
+        assert_eq!(serialize_entity(&entity, NgsiLdRepresentation::Simplified)["duration"], "PT1H30M");
+    }
+
+    #[test]
+    fn a_declared_value_type_is_written_as_given_in_place_of_the_one_a_time_value_implies() {
+        let instant = Utc.with_ymd_and_hms(2026, 10, 24, 20, 49, 0).unwrap();
+        let mut property = NgsiLdProperty::new(Value::Temporal(TemporalValue::DateTime(instant)));
+        property.value_type = Some(value_type("ngsi-ld:DateTime"));
+        let entity = create_test_entity("A1", "Alert", "expectedArrival", NgsiLdAttribute::Property(property));
+
+        assert_eq!(
+            serialize_entity(&entity, NgsiLdRepresentation::Normalized)["expectedArrival"],
+            json!({"type": "Property", "value": "2026-10-24T20:49:00Z", "valueType": "ngsi-ld:DateTime"})
+        );
+    }
+
+    #[test]
+    fn a_geo_property_with_a_declared_value_type_keeps_the_concise_object_form() {
+        let mut geo = NgsiLdGeoProperty::new(NgsiLdGeometry::Point {
+            coordinates: [13.37, 52.51].into(),
+        });
+        geo.value_type = Some(value_type("geojson:Point"));
+        let entity = create_test_entity("P1", "Place", "location", NgsiLdAttribute::GeoProperty(geo));
+        let point = json!({"type": "Point", "coordinates": [13.37, 52.51]});
+
+        assert_eq!(
+            serialize_entity(&entity, NgsiLdRepresentation::Normalized)["location"],
+            json!({"type": "GeoProperty", "value": point, "valueType": "geojson:Point"})
+        );
+        assert_eq!(
+            serialize_entity(&entity, NgsiLdRepresentation::Concise)["location"],
+            json!({"value": point, "valueType": "geojson:Point"})
+        );
+        assert_eq!(serialize_entity(&entity, NgsiLdRepresentation::Simplified)["location"], point);
+    }
+
+    #[test]
+    fn a_list_property_with_a_declared_value_type_keeps_the_concise_object_form() {
+        let mut list = NgsiLdListProperty::new(vec![Value::try_from(json!("a")).unwrap()]);
+        list.value_type = Some(value_type("xsd:string"));
+        let entity = create_test_entity("L1", "Thing", "codes", NgsiLdAttribute::ListProperty(list));
+
+        assert_eq!(
+            serialize_entity(&entity, NgsiLdRepresentation::Normalized)["codes"],
+            json!({"type": "ListProperty", "valueList": ["a"], "valueType": "xsd:string"})
+        );
+        assert_eq!(
+            serialize_entity(&entity, NgsiLdRepresentation::Concise)["codes"],
+            json!({"valueList": ["a"], "valueType": "xsd:string"})
+        );
+        assert_eq!(serialize_entity(&entity, NgsiLdRepresentation::Simplified)["codes"], json!(["a"]));
+    }
+
+    #[test]
+    fn a_vocab_json_and_language_property_carry_a_declared_value_type_except_when_simplified() {
+        let mut vocab = NgsiLdVocabProperty::new(IriBuf::new("https://example.org/level/high".to_owned()).unwrap());
+        vocab.value_type = Some(value_type("Level"));
+        let mut payload = NgsiLdJsonProperty::new(JsonPayload::try_from(json!({"a": 1})).unwrap());
+        payload.value_type = Some(value_type("Report"));
+        let mut language_map = IndexMap::default();
+        language_map.insert(LangTagBuf::new("en".to_owned()).unwrap(), "Main square".to_owned());
+        let mut name = NgsiLdLanguageProperty::new(language_map);
+        name.value_type = Some(value_type("langString"));
+
+        for (attribute, member, kind, value) in [
+            (
+                NgsiLdAttribute::VocabProperty(vocab),
+                "vocab",
+                "VocabProperty",
+                json!("https://example.org/level/high"),
+            ),
+            (NgsiLdAttribute::JsonProperty(payload), "json", "JsonProperty", json!({"a": 1})),
+            (
+                NgsiLdAttribute::LanguageProperty(name),
+                "languageMap",
+                "LanguageProperty",
+                json!({"en": "Main square"}),
+            ),
+        ] {
+            let declared = match &attribute {
+                NgsiLdAttribute::VocabProperty(_) => "Level",
+                NgsiLdAttribute::JsonProperty(_) => "Report",
+                NgsiLdAttribute::LanguageProperty(_)
+                | NgsiLdAttribute::Property(_)
+                | NgsiLdAttribute::Relationship(_)
+                | NgsiLdAttribute::GeoProperty(_)
+                | NgsiLdAttribute::ListRelationship(_)
+                | NgsiLdAttribute::ListProperty(_) => "langString",
+            };
+            let entity = create_test_entity("X1", "Thing", "attribute", attribute);
+
+            assert_eq!(
+                serialize_entity(&entity, NgsiLdRepresentation::Normalized)["attribute"],
+                json!({"type": kind, member: value, "valueType": declared})
+            );
+            assert_eq!(
+                serialize_entity(&entity, NgsiLdRepresentation::Concise)["attribute"],
+                json!({member: value, "valueType": declared})
+            );
+            assert_eq!(serialize_entity(&entity, NgsiLdRepresentation::Simplified)["attribute"], json!({member: value}));
+        }
+    }
+
     #[test]
     fn a_value_and_its_qualifiers_keep_six_fractional_digits_at_most() {
         let instant = Utc.with_ymd_and_hms(2026, 10, 24, 19, 49, 9).unwrap() + Duration::nanoseconds(712_623_245);
@@ -229,6 +370,7 @@ mod property_tests {
     #[test]
     fn test_property_with_nested_properties() {
         let accuracy_prop = NgsiLdAttribute::Property(NgsiLdProperty {
+            value_type: None,
             value: Value::try_from(JsonValue::Number(95.into())).unwrap(),
             observed_at: None,
             expires_at: None,
@@ -242,6 +384,7 @@ mod property_tests {
         nested_props.insert(NameBuf::new("accuracy").unwrap(), Box::new(NgsiLdAttributeWrapper::single(accuracy_prop)));
 
         let main_prop = NgsiLdAttribute::Property(NgsiLdProperty {
+            value_type: None,
             value: Value::try_from(JsonValue::Number(100.into())).unwrap(),
             observed_at: None,
             expires_at: None,
@@ -340,6 +483,7 @@ mod relationship_tests {
         let mut rel_props = IndexMap::default();
 
         let count_prop = NgsiLdAttribute::Property(NgsiLdProperty {
+            value_type: None,
             value: Value::try_from(JsonValue::Number(5.into())).unwrap(),
             observed_at: None,
             expires_at: None,
@@ -390,6 +534,7 @@ mod geoproperty_tests {
         };
 
         let geo = NgsiLdAttribute::GeoProperty(NgsiLdGeoProperty {
+            value_type: None,
             value: geo_value,
             observed_at: None,
             expires_at: None,
@@ -427,6 +572,7 @@ mod geoproperty_tests {
         };
 
         let geo = NgsiLdAttribute::GeoProperty(NgsiLdGeoProperty {
+            value_type: None,
             value: geo_value,
             observed_at: Some(dt),
             expires_at: None,
@@ -621,6 +767,7 @@ mod multi_attribute_tests {
     #[test]
     fn test_multi_property_all_modes() {
         let prop1 = NgsiLdAttribute::Property(NgsiLdProperty {
+            value_type: None,
             value: Value::try_from(JsonValue::Number(20.into())).unwrap(),
             observed_at: None,
             expires_at: None,
@@ -630,6 +777,7 @@ mod multi_attribute_tests {
             attributes: IndexMap::default(),
         });
         let prop2 = NgsiLdAttribute::Property(NgsiLdProperty {
+            value_type: None,
             value: Value::try_from(JsonValue::Number(22.into())).unwrap(),
             observed_at: None,
             expires_at: None,
@@ -829,6 +977,7 @@ mod entity_list_tests {
             "Person",
             "name",
             NgsiLdAttribute::Property(NgsiLdProperty {
+                value_type: None,
                 value: Value::try_from(JsonValue::String("John".to_string())).unwrap(),
                 observed_at: None,
                 expires_at: None,
@@ -844,6 +993,7 @@ mod entity_list_tests {
             "Person",
             "name",
             NgsiLdAttribute::Property(NgsiLdProperty {
+                value_type: None,
                 value: Value::try_from(JsonValue::String("Paul".to_string())).unwrap(),
                 observed_at: None,
                 expires_at: None,
@@ -893,6 +1043,7 @@ mod entity_list_tests {
             "Person",
             "name",
             NgsiLdAttribute::Property(NgsiLdProperty {
+                value_type: None,
                 value: Value::try_from(JsonValue::String("John".to_string())).unwrap(),
                 observed_at: None,
                 expires_at: None,
@@ -942,6 +1093,7 @@ mod edge_case_tests {
         attributes.insert(
             NameBuf::new("name").unwrap(),
             NgsiLdAttributeWrapper::single(NgsiLdAttribute::Property(NgsiLdProperty {
+                value_type: None,
                 value: Value::try_from(JsonValue::String("Test".to_string())).unwrap(),
                 observed_at: None,
                 expires_at: None,
@@ -968,6 +1120,7 @@ mod edge_case_tests {
         attributes.insert(
             NameBuf::new("location").unwrap(),
             NgsiLdAttributeWrapper::single(NgsiLdAttribute::GeoProperty(NgsiLdGeoProperty {
+                value_type: None,
                 value: NgsiLdGeometry::Point {
                     coordinates: [0.0, 0.0].into(),
                 },
@@ -1019,6 +1172,7 @@ mod edge_case_tests {
     #[test]
     fn test_complex_nested_properties() {
         let level3_prop = NgsiLdAttribute::Property(NgsiLdProperty {
+            value_type: None,
             value: Value::try_from(JsonValue::Number(3.into())).unwrap(),
             observed_at: None,
             expires_at: None,
@@ -1032,6 +1186,7 @@ mod edge_case_tests {
         level2_props.insert(NameBuf::new("level3").unwrap(), Box::new(NgsiLdAttributeWrapper::single(level3_prop)));
 
         let level2_prop = NgsiLdAttribute::Property(NgsiLdProperty {
+            value_type: None,
             value: Value::try_from(JsonValue::Number(2.into())).unwrap(),
             observed_at: None,
             expires_at: None,
@@ -1045,6 +1200,7 @@ mod edge_case_tests {
         level1_props.insert(NameBuf::new("level2").unwrap(), Box::new(NgsiLdAttributeWrapper::single(level2_prop)));
 
         let root_prop = NgsiLdAttribute::Property(NgsiLdProperty {
+            value_type: None,
             value: Value::try_from(JsonValue::Number(1.into())).unwrap(),
             observed_at: None,
             expires_at: None,
@@ -1068,6 +1224,7 @@ mod edge_case_tests {
     #[test]
     fn test_unicode_and_special_characters() {
         let prop = NgsiLdAttribute::Property(NgsiLdProperty {
+            value_type: None,
             value: Value::try_from(JsonValue::String("🎵 John Lennon ♪".to_string())).unwrap(),
             observed_at: None,
             expires_at: None,
@@ -1090,6 +1247,7 @@ mod edge_case_tests {
     #[test]
     fn test_large_numbers_and_precision() {
         let prop = NgsiLdAttribute::Property(NgsiLdProperty {
+            value_type: None,
             value: Value::try_from(JsonValue::Number(serde_json::Number::from_f64(123_456_789.987_654_33).unwrap())).unwrap(),
             observed_at: None,
             expires_at: None,
@@ -1130,6 +1288,7 @@ mod edge_case_tests {
         };
 
         let geo = NgsiLdAttribute::GeoProperty(NgsiLdGeoProperty {
+            value_type: None,
             value: multi_polygon,
             observed_at: Some("2023-01-01T00:00:00Z".parse().unwrap()),
             expires_at: None,
@@ -1177,6 +1336,7 @@ mod edge_case_tests {
     #[test]
     fn test_concise_preserves_unitcode_only() {
         let prop = NgsiLdAttribute::Property(NgsiLdProperty {
+            value_type: None,
             value: Value::try_from(json!(100)).unwrap(),
             observed_at: None,
             expires_at: None,
@@ -1227,6 +1387,7 @@ mod edge_case_tests {
     #[test]
     fn test_multi_wrapper_forces_array_even_if_single() {
         let prop = NgsiLdAttribute::Property(NgsiLdProperty {
+            value_type: None,
             value: Value::try_from(json!(42)).unwrap(),
             observed_at: None,
             expires_at: None,
@@ -1386,6 +1547,7 @@ mod edge_case_tests {
             attributes.insert(
                 NameBuf::new("a_attribute").unwrap(),
                 NgsiLdAttributeWrapper::single(NgsiLdAttribute::Property(NgsiLdProperty {
+                    value_type: None,
                     value: Value::try_from(JsonValue::String("first".to_string())).unwrap(),
                     observed_at: None,
                     expires_at: None,
@@ -1399,6 +1561,7 @@ mod edge_case_tests {
             attributes.insert(
                 NameBuf::new("z_attribute").unwrap(),
                 NgsiLdAttributeWrapper::single(NgsiLdAttribute::Property(NgsiLdProperty {
+                    value_type: None,
                     value: Value::try_from(JsonValue::String("last".to_string())).unwrap(),
                     observed_at: None,
                     expires_at: None,
@@ -1412,6 +1575,7 @@ mod edge_case_tests {
             attributes.insert(
                 NameBuf::new("m_attribute").unwrap(),
                 NgsiLdAttributeWrapper::single(NgsiLdAttribute::Property(NgsiLdProperty {
+                    value_type: None,
                     value: Value::try_from(JsonValue::String("middle".to_string())).unwrap(),
                     observed_at: None,
                     expires_at: None,
@@ -1465,6 +1629,7 @@ mod edge_case_tests {
         #[test]
         fn test_vocab_property_all_modes() {
             let vocab = NgsiLdAttribute::VocabProperty(NgsiLdVocabProperty {
+                value_type: None,
                 has_vocab: IriBuf::new("urn:ngsi-ld:vocab:electricMicrobus").unwrap(),
                 observed_at: None,
                 expires_at: None,
@@ -1490,6 +1655,7 @@ mod edge_case_tests {
         fn test_vocab_property_with_metadata() {
             let dt = Utc.with_ymd_and_hms(2023, 12, 25, 10, 30, 0).unwrap();
             let vocab = NgsiLdAttribute::VocabProperty(NgsiLdVocabProperty {
+                value_type: None,
                 has_vocab: IriBuf::new("urn:ngsi-ld:vocab:electricMicrobus").unwrap(),
                 observed_at: Some(dt),
                 expires_at: None,
@@ -1556,6 +1722,7 @@ mod edge_case_tests {
         #[test]
         fn test_list_property_all_modes() {
             let list = NgsiLdAttribute::ListProperty(NgsiLdListProperty {
+                value_type: None,
                 has_value_list: vec![Value::try_from(json!(124)).unwrap(), Value::try_from(json!(156)).unwrap()],
                 observed_at: None,
                 expires_at: None,
@@ -1587,6 +1754,7 @@ mod edge_case_tests {
                 "battery_mv": 3200
             });
             let json_prop = NgsiLdAttribute::JsonProperty(NgsiLdJsonProperty {
+                value_type: None,
                 has_json: JsonPayload::try_from(json_val.clone()).unwrap(),
                 observed_at: None,
                 expires_at: None,

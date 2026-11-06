@@ -128,7 +128,10 @@ impl MetadataExtractor {
                 } else {
                     Self::resolve_property_map(&child, &[], property.properties().as_ref())?
                 };
-                metadata.insert(name.clone(), SubAttribute::new(*property.kind(), content, nested));
+                // The declaration is shared by every record, and each sub-attribute owns its copy of
+                // the datatype it names.
+                let sub = SubAttribute::new(*property.kind(), content, nested).with_value_type(property.value_type().clone());
+                metadata.insert(name.clone(), sub);
             }
         }
 

@@ -1,4 +1,7 @@
-use crate::entity::representation::{SerializeRepr, concise, normalized, simplified};
+use crate::entity::{
+    representation::{SerializeRepr, concise, normalized, simplified},
+    value_type::ValueType,
+};
 use cassiopeia_common::representation::NgsiLdRepresentation;
 use cassiopeia_geometry::geometry::NgsiLdGeometry;
 use chrono::{DateTime, Utc};
@@ -10,6 +13,9 @@ use urn_rs::Urn;
 pub struct NgsiLdGeoProperty {
     /// The geometry, restricted to the six types clause 4.7 admits.
     pub value: NgsiLdGeometry,
+    /// The datatype the mapping declared for the value (ETSI GS CIM 009 v1.9.1 table 5.2.7-1).
+    #[serde(rename = "valueType", default, skip_serializing_if = "Option::is_none")]
+    pub value_type: Option<ValueType>,
     /// When the geometry was observed.
     #[serde(rename = "observedAt", skip_serializing_if = "Option::is_none")]
     pub observed_at: Option<DateTime<Utc>>,
@@ -30,6 +36,7 @@ impl NgsiLdGeoProperty {
     pub const fn new(geometry: NgsiLdGeometry) -> NgsiLdGeoProperty {
         NgsiLdGeoProperty {
             value: geometry,
+            value_type: None,
             observed_at: None,
             expires_at: None,
             dataset_id: None,

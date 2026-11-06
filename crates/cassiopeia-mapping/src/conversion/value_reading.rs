@@ -81,6 +81,22 @@ impl ValueReading {
         }
     }
 
+    /// The time value data type this reading produces, or `None` when it reads no time.
+    #[must_use]
+    pub const fn temporal_type(self) -> Option<TemporalValueType> {
+        match self {
+            ValueReading::Temporal(temporal) => Some(temporal),
+            ValueReading::Boolean
+            | ValueReading::Integer
+            | ValueReading::Float
+            | ValueReading::Text
+            | ValueReading::Identifier(_)
+            | ValueReading::Object
+            | ValueReading::Json
+            | ValueReading::Geometry(_) => None,
+        }
+    }
+
     /// What this reading asks a geometry to become, or `None` when it reads no geometry.
     #[must_use]
     pub const fn geometry_target(self) -> Option<GeometryTarget> {

@@ -1,6 +1,6 @@
 use crate::attribute_content::AttributeContent;
 use cassiopeia_ngsi_ld::{
-    entity::{attribute::NgsiLdAttributeKind, name::NameBuf},
+    entity::{attribute::NgsiLdAttributeKind, name::NameBuf, value_type::ValueType},
     value::types::Value,
 };
 use foldhash::fast::RandomState;
@@ -50,6 +50,9 @@ pub struct SubAttribute {
     /// The target entity type of a Relationship/`ListRelationship` sub-attribute (its `objectType`,
     /// ETSI GS CIM 009 v1.9.1 clause 4.5.3); `None` for the Property family.
     object_type: Option<NameBuf>,
+    /// The datatype the declaration named for a Property-family sub-attribute's value (its
+    /// `valueType`, ETSI GS CIM 009 v1.9.1 clause 4.5.2); `None` for a relationship, which has none.
+    value_type: Option<ValueType>,
     /// This sub-attribute's own sub-attributes, keyed by name and nested to arbitrary depth.
     metadata: SubAttributes,
 }
@@ -63,8 +66,15 @@ impl SubAttribute {
             kind,
             value,
             object_type: None,
+            value_type: None,
             metadata,
         }
+    }
+
+    /// Carries the datatype the sub-attribute's declaration named for its value.
+    #[must_use]
+    pub fn with_value_type(self, value_type: Option<ValueType>) -> SubAttribute {
+        SubAttribute { value_type, ..self }
     }
 
     /// Builds a relationship sub-attribute, carrying the target entity type its `objectType`
@@ -75,6 +85,7 @@ impl SubAttribute {
             kind,
             value: AttributeContent::Value(value),
             object_type,
+            value_type: None,
             metadata,
         }
     }
@@ -85,7 +96,7 @@ mod tests {
     use crate::{attribute_content::AttributeContent, sub_attribute::SubAttribute};
     use cassiopeia_geometry::geometry::NgsiLdGeometry;
     use cassiopeia_ngsi_ld::{
-        entity::{attribute::NgsiLdAttributeKind, name::NameBuf},
+        entity::{attribute::NgsiLdAttributeKind, name::NameBuf, value_type::ValueType},
         value::{json_payload::JsonPayload, types::Value},
     };
     use indexmap::IndexMap;
@@ -215,5 +226,31 @@ mod tests {
         let decoded: SubAttribute = serde_json::from_str(&encoded).expect("deserializes");
 
         assert_eq!(sub, decoded);
+    }
+
+    #[test]
+    fn a_sub_attribute_carries_the_value_type_its_declaration_named_through_a_round_trip() {
+        let value_type = ValueType::new("PostalAddress").unwrap();
+        let sub = SubAttribute::new(
+            NgsiLdAttributeKind::Property,
+            AttributeContent::Value(Value::try_from(json!("Pariser Platz")).unwrap()),
+            IndexMap::default(),
+        )
+        .with_value_type(Some(value_type.clone()));
+        let decoded: SubAttribute = serde_json::from_str(&serde_json::to_string(&sub).unwrap()).unwrap();
+
+        assert_eq!(sub.value_type(), &Some(value_type));
+        assert_eq!(decoded, sub);
+    }
+
+    #[test]
+    fn a_sub_attribute_built_without_a_value_type_names_none() {
+        let sub = SubAttribute::new(
+            NgsiLdAttributeKind::Property,
+            AttributeContent::Value(Value::try_from(json!(1)).unwrap()),
+            IndexMap::default(),
+        );
+
+        assert_eq!(sub.value_type(), &None);
     }
 }

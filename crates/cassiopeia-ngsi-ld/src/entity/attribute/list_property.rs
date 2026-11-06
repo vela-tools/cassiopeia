@@ -2,6 +2,7 @@ use crate::{
     entity::{
         attribute::NestedAttributes,
         representation::{SerializeRepr, concise, normalized, simplified},
+        value_type::ValueType,
     },
     value::types::Value,
 };
@@ -17,6 +18,9 @@ pub struct NgsiLdListProperty {
     /// The ordered list of values.
     #[serde(rename = "valueList")]
     pub has_value_list: Vec<Value>,
+    /// The datatype the mapping declared for the value (ETSI GS CIM 009 v1.9.1 table 5.2.36-1).
+    #[serde(rename = "valueType", default, skip_serializing_if = "Option::is_none")]
+    pub value_type: Option<ValueType>,
     /// When it was observed.
     #[serde(rename = "observedAt", skip_serializing_if = "Option::is_none")]
     pub observed_at: Option<DateTime<Utc>>,
@@ -37,6 +41,7 @@ impl NgsiLdListProperty {
     pub fn new(has_value_list: Vec<Value>) -> Self {
         Self {
             has_value_list,
+            value_type: None,
             observed_at: None,
             expires_at: None,
             dataset_id: None,

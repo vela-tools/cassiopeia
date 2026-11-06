@@ -156,6 +156,7 @@ mod tests {
             },
             name::NameBuf,
             scope::{NgsiLdScope, ScopeBuf},
+            value_type::ValueType,
         },
         value::{
             json_payload::JsonPayload,
@@ -294,6 +295,68 @@ mod tests {
             panic!("expected a property");
         };
         assert_eq!(property.value, Value::try_from(25.5).unwrap());
+    }
+
+    #[test]
+    fn a_declared_value_type_is_carried_onto_the_property() {
+        let mapping = mapping(
+            r#"{ version: "v4", dataModel: "Place", identity: { entityName: "P-{{ id }}" }, attributes: { address: { source: "{{ a }}", valueType: "PostalAddress" } } }"#,
+        );
+        let value_map = values(vec![("address", single(Value::String("Pariser Platz".into())))]);
+        let entity = Entity::new(urn("urn:ngsi-ld:Place:1"), json!({}), None, None, IndexMap::default(), Some(value_map));
+
+        let result = NgsiLdTransformer::new()
+            .transform(Mapped::new(entity, mapping), &UnreadableTimestamps::new())
+            .unwrap();
+
+        let Some(NgsiLdAttributeWrapper::Single(attr)) = result.attributes.get(&name("address")) else {
+            panic!("expected a single property");
+        };
+        let NgsiLdAttribute::Property(property) = attr.as_ref() else {
+            panic!("expected a property");
+        };
+        assert_eq!(property.value_type.as_ref().map(ValueType::as_str), Some("PostalAddress"));
+    }
+
+    #[test]
+    fn each_instance_carries_its_own_value_type_or_else_the_attribute_one() {
+        let mapping = mapping(
+            r#"{ version: "v4", dataModel: "Place", identity: { entityName: "P-{{ id }}" }, attributes: {
+                address: {
+                    valueType: "String",
+                    instances: [
+                        { source: "{{ text }}" },
+                        { source: "{{ structured }}", valueType: "PostalAddress" },
+                    ],
+                },
+            } }"#,
+        );
+        let value_map = values(vec![(
+            "address",
+            instances(vec![
+                Some(Value::String("Pariser Platz".into())),
+                Some(Value::String("Unter den Linden".into())),
+            ]),
+        )]);
+        let entity = Entity::new(urn("urn:ngsi-ld:Place:1"), json!({}), None, None, IndexMap::default(), Some(value_map));
+
+        let result = NgsiLdTransformer::new()
+            .transform(Mapped::new(entity, mapping), &UnreadableTimestamps::new())
+            .unwrap();
+
+        let Some(NgsiLdAttributeWrapper::Multi(instances)) = result.attributes.get(&name("address")) else {
+            panic!("expected a multi-instance attribute");
+        };
+        let value_types: Vec<Option<&str>> = instances
+            .iter()
+            .map(|attr| {
+                let NgsiLdAttribute::Property(property) = attr else {
+                    panic!("expected a property instance, got {attr:?}");
+                };
+                property.value_type.as_ref().map(ValueType::as_str)
+            })
+            .collect();
+        assert_eq!(value_types, [Some("String"), Some("PostalAddress")]);
     }
 
     #[test]

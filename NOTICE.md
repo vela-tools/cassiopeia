@@ -15,3 +15,7 @@ You may not use the names or the logos as the name or branding of your own distr
 Article 5, under Attribution right, is what makes this file travel with the code: the Licensee "shall keep intact all copyright, patent or trademarks notices" and "must include a copy of such notices and a copy of the Licence with every copy of the Work he/she distributes or communicates". So this notice must accompany the work and any derivative of it.
 
 Any other use of the marks needs written permission, which you can request at info@velacontext.com.
+
+## Third-party material
+
+The embedded NGSI-LD v1.9 core `@context`, as ETSI publishes it at `https://uri.etsi.org/ngsi-ld/v1/ngsi-ld-core-context-v1.9.jsonld`. It is copyright ETSI and distributed under the [BSD 3-Clause licence](crates/cassiopeia-value-type-expansion/contexts/LICENSE).

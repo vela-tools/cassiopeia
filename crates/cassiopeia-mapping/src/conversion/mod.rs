@@ -19,7 +19,7 @@ use crate::{
     transformation::Transformation,
 };
 use cassiopeia_geometry::target::GeometryTarget;
-use cassiopeia_ngsi_ld::entity::attribute::NgsiLdAttributeKind;
+use cassiopeia_ngsi_ld::{entity::attribute::NgsiLdAttributeKind, value::types::TemporalValueType};
 use strum::IntoEnumIterator;
 
 /// How one declaration's source values, or the object its nested `mappings` assemble, become the
@@ -215,6 +215,28 @@ impl Conversion {
             Conversion::GeoProperty(target) => Some(target),
             Conversion::Property(PropertyConversion::Array)
             | Conversion::ListProperty(ListConversion::AsRead)
+            | Conversion::JsonProperty(_)
+            | Conversion::LanguageProperty
+            | Conversion::LanguageText
+            | Conversion::VocabProperty(_)
+            | Conversion::Relationship => None,
+        }
+    }
+
+    /// The time value data type this conversion reads a `Property`'s value, or each item of a
+    /// `ListProperty`, as, or `None` when it reads no time.
+    ///
+    /// Only such a reading guarantees the form ETSI GS CIM 009 v1.9.1 clause 4.6.3 gives a
+    /// `DateTime`, `Date` or `Time`. A declared `valueType` describes the same values: it is the
+    /// JSON-LD `@type` of a Property's `value` (clause 4.5.2) and of a `ListProperty`'s `valueList`
+    /// (table 5.2.36-1), which, as an `@list`, types each item.
+    #[must_use]
+    pub const fn temporal_reading(self) -> Option<TemporalValueType> {
+        match self {
+            Conversion::Property(PropertyConversion::One(reading)) | Conversion::ListProperty(ListConversion::Each(reading)) => reading.temporal_type(),
+            Conversion::Property(PropertyConversion::Array)
+            | Conversion::ListProperty(ListConversion::AsRead)
+            | Conversion::GeoProperty(_)
             | Conversion::JsonProperty(_)
             | Conversion::LanguageProperty
             | Conversion::LanguageText

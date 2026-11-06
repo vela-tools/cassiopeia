@@ -9,6 +9,7 @@ use crate::{
             relationship::NgsiLdRelationship,
         },
         name::NameBuf,
+        value_type::ValueType,
     },
     value::types::Value,
 };
@@ -18,6 +19,7 @@ use urn_rs::Urn;
 
 pub struct PropertyBuilder {
     value: Value,
+    value_type: Option<ValueType>,
     observed_at: Option<DateTime<Utc>>,
     expires_at: Option<DateTime<Utc>>,
     unit_code: Option<UnitCode>,
@@ -30,6 +32,7 @@ impl PropertyBuilder {
     pub fn new(value: impl Into<Value>) -> Self {
         Self {
             value: value.into(),
+            value_type: None,
             observed_at: None,
             expires_at: None,
             unit_code: None,
@@ -37,6 +40,12 @@ impl PropertyBuilder {
             instance_id: None,
             attributes: NestedAttributes::default(),
         }
+    }
+
+    #[must_use]
+    pub fn value_type(mut self, value_type: ValueType) -> Self {
+        self.value_type = Some(value_type);
+        self
     }
 
     #[must_use]
@@ -79,6 +88,7 @@ impl PropertyBuilder {
     pub fn build(self) -> NgsiLdProperty {
         NgsiLdProperty {
             value: self.value,
+            value_type: self.value_type,
             observed_at: self.observed_at,
             expires_at: self.expires_at,
             unit_code: self.unit_code,

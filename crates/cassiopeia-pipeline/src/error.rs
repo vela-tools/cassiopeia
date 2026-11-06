@@ -9,6 +9,7 @@ use cassiopeia_profiler::error::ProfilerError;
 use cassiopeia_resolver::{entity_store::error::EntityStoreError, error::ResolverError, relationship_store::error::RelationshipStoreError};
 use cassiopeia_transformer::error::TransformationError;
 use cassiopeia_validator::error::ValidatorError;
+use cassiopeia_value_type_expansion::error::ExpansionError;
 use cassiopeia_writer::error::WriterError;
 use std::result;
 use thiserror::Error;
@@ -102,9 +103,14 @@ pub enum PipelineError {
     #[error(transparent)]
     LocalContext(#[from] LocalContextError),
 
-    /// A mapping file could not be read, parsed, or have its templates compiled.
+    /// A mapping file could not be read, parsed, or have its templates compiled, or declares a
+    /// `valueType` that disagrees with its attribute.
     #[error(transparent)]
     Mapping(#[from] MappingError),
+
+    /// The expander every declared `valueType` is checked through could not be set up.
+    #[error("The valueType declarations cannot be checked")]
+    ValueTypeExpander(#[source] ExpansionError),
 
     /// A stage's worker thread panicked, so the run cannot continue.
     #[error("The {stage} stage panicked")]

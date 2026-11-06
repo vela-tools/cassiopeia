@@ -36,6 +36,18 @@ pub enum NgsiLdError {
         rejected: Box<str>,
     },
 
+    /// A `valueType` could never expand to a datatype IRI.
+    ///
+    /// The rejected text is kept as-is, for the reason [`NgsiLdError::InvalidAttributeName`] keeps
+    /// its own.
+    #[error(
+        "'{rejected}' is not a legal valueType: a valueType is a term, a compact IRI or an absolute IRI that the @context expands to a datatype IRI (ETSI GS CIM 009 v1.9.1 clause 4.5.2), not empty and not a keyword such as '@id'"
+    )]
+    InvalidValueType {
+        /// The value that was rejected.
+        rejected: Box<str>,
+    },
+
     /// A value was not a legal NGSI-LD scope.
     #[error(
         "'{rejected}' is not a legal NGSI-LD scope: a scope is one or more '/'-separated levels, each starting with a Unicode letter and continuing with Unicode letters, numbers or underscores (ETSI GS CIM 009 v1.9.1 clause 4.18)"

@@ -2,6 +2,7 @@ use crate::{
     entity::{
         attribute::NestedAttributes,
         representation::{SerializeRepr, concise, normalized, simplified},
+        value_type::ValueType,
     },
     value::types::Value,
 };
@@ -17,6 +18,11 @@ use urn_rs::Urn;
 pub struct NgsiLdProperty {
     /// The property's value.
     pub value: Value,
+    /// The datatype the mapping declared for the value (ETSI GS CIM 009 v1.9.1 clause 4.5.2).
+    ///
+    /// Absent, a time value still carries the datatype its [`Value::temporal_type`] names.
+    #[serde(rename = "valueType", default, skip_serializing_if = "Option::is_none")]
+    pub value_type: Option<ValueType>,
     /// When the value was observed, if temporal.
     #[serde(rename = "observedAt", skip_serializing_if = "Option::is_none")]
     pub observed_at: Option<DateTime<Utc>>,
@@ -41,6 +47,7 @@ impl NgsiLdProperty {
     pub fn new(value: impl Into<Value>) -> Self {
         Self {
             value: value.into(),
+            value_type: None,
             observed_at: None,
             expires_at: None,
             unit_code: None,

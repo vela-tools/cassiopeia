@@ -2,6 +2,7 @@ use crate::{
     entity::{
         attribute::NestedAttributes,
         representation::{SerializeRepr, concise, normalized, simplified},
+        value_type::ValueType,
     },
     value::json_payload::JsonPayload,
 };
@@ -17,6 +18,9 @@ pub struct NgsiLdJsonProperty {
     /// The raw JSON object, or array of objects, carried verbatim (clause 4.5.24.2).
     #[serde(rename = "json")]
     pub has_json: JsonPayload,
+    /// The datatype the mapping declared for the value (ETSI GS CIM 009 v1.9.1 table 5.2.38-1).
+    #[serde(rename = "valueType", default, skip_serializing_if = "Option::is_none")]
+    pub value_type: Option<ValueType>,
     /// When it was observed.
     #[serde(rename = "observedAt", skip_serializing_if = "Option::is_none")]
     pub observed_at: Option<DateTime<Utc>>,
@@ -37,6 +41,7 @@ impl NgsiLdJsonProperty {
     pub fn new(has_json: JsonPayload) -> NgsiLdJsonProperty {
         NgsiLdJsonProperty {
             has_json,
+            value_type: None,
             observed_at: None,
             expires_at: None,
             dataset_id: None,

@@ -36,9 +36,10 @@ const MODE: NgsiLdRepresentation = NgsiLdRepresentation::Concise;
 /// # Errors
 /// Returns the serializer's error if serialization fails.
 pub fn serialize_property<S: Serializer>(prop: &NgsiLdProperty, serializer: S) -> Result<S::Ok, S::Error> {
-    // A `valueType` has no place in a bare value, so a time value keeps the object form to stay
-    // lossless (clause 4.5.2.3).
-    let has_metadata = prop.value.temporal_type().is_some()
+    // A `valueType` has no place in a bare value, so a value carrying one, declared or implied by a
+    // time value, keeps the object form to stay lossless (clause 4.5.2.3).
+    let has_metadata = prop.value_type.is_some()
+        || prop.value.temporal_type().is_some()
         || prop.observed_at.is_some()
         || prop.expires_at.is_some()
         || prop.unit_code.is_some()
@@ -51,7 +52,7 @@ pub fn serialize_property<S: Serializer>(prop: &NgsiLdProperty, serializer: S) -
 
     let mut map = serializer.serialize_map(None)?;
     map.serialize_entry("value", &prop.value)?;
-    serialize_value_type(&mut map, &prop.value)?;
+    serialize_value_type(&mut map, prop.value_type.as_ref(), prop.value.temporal_type())?;
     serialize_observed_at(&mut map, prop.observed_at.as_ref())?;
     serialize_expires_at(&mut map, prop.expires_at.as_ref())?;
     serialize_unit_code(&mut map, prop.unit_code.as_ref())?;
@@ -93,12 +94,13 @@ pub fn serialize_relationship<S: Serializer>(rel: &NgsiLdRelationship, serialize
 /// # Errors
 /// Returns the serializer's error if serialization fails.
 pub fn serialize_geo_property<S: Serializer>(geo: &NgsiLdGeoProperty, serializer: S) -> Result<S::Ok, S::Error> {
-    if geo.observed_at.is_none() && geo.expires_at.is_none() && geo.dataset_id.is_none() && geo.instance_id.is_none() {
+    if geo.value_type.is_none() && geo.observed_at.is_none() && geo.expires_at.is_none() && geo.dataset_id.is_none() && geo.instance_id.is_none() {
         return geo.value.serialize(serializer);
     }
 
     let mut map = serializer.serialize_map(None)?;
     map.serialize_entry("value", &geo.value)?;
+    serialize_value_type(&mut map, geo.value_type.as_ref(), None)?;
     serialize_observed_at(&mut map, geo.observed_at.as_ref())?;
     serialize_expires_at(&mut map, geo.expires_at.as_ref())?;
     serialize_dataset_id(&mut map, geo.dataset_id.as_ref())?;
@@ -132,6 +134,7 @@ pub fn serialize_list_relationship<S: Serializer>(rel: &NgsiLdListRelationship, 
 pub fn serialize_language_property<S: Serializer>(prop: &NgsiLdLanguageProperty, serializer: S) -> Result<S::Ok, S::Error> {
     let mut map = serializer.serialize_map(None)?;
     map.serialize_entry("languageMap", &prop.language_map)?;
+    serialize_value_type(&mut map, prop.value_type.as_ref(), None)?;
     serialize_observed_at(&mut map, prop.observed_at.as_ref())?;
     serialize_expires_at(&mut map, prop.expires_at.as_ref())?;
     serialize_dataset_id(&mut map, prop.dataset_id.as_ref())?;
@@ -150,6 +153,7 @@ pub fn serialize_language_property<S: Serializer>(prop: &NgsiLdLanguageProperty,
 pub fn serialize_vocab_property<S: Serializer>(prop: &NgsiLdVocabProperty, serializer: S) -> Result<S::Ok, S::Error> {
     let mut map = serializer.serialize_map(None)?;
     map.serialize_entry("vocab", &DisplayStr(&prop.has_vocab))?;
+    serialize_value_type(&mut map, prop.value_type.as_ref(), None)?;
     serialize_observed_at(&mut map, prop.observed_at.as_ref())?;
     serialize_expires_at(&mut map, prop.expires_at.as_ref())?;
     serialize_dataset_id(&mut map, prop.dataset_id.as_ref())?;
@@ -162,12 +166,13 @@ pub fn serialize_vocab_property<S: Serializer>(prop: &NgsiLdVocabProperty, seria
 /// # Errors
 /// Returns the serializer's error if serialization fails.
 pub fn serialize_list_property<S: Serializer>(prop: &NgsiLdListProperty, serializer: S) -> Result<S::Ok, S::Error> {
-    if prop.observed_at.is_none() && prop.expires_at.is_none() && prop.dataset_id.is_none() && prop.attributes.is_empty() {
+    if prop.value_type.is_none() && prop.observed_at.is_none() && prop.expires_at.is_none() && prop.dataset_id.is_none() && prop.attributes.is_empty() {
         return prop.has_value_list.serialize(serializer);
     }
 
     let mut map = serializer.serialize_map(None)?;
     map.serialize_entry("valueList", &prop.has_value_list)?;
+    serialize_value_type(&mut map, prop.value_type.as_ref(), None)?;
     serialize_observed_at(&mut map, prop.observed_at.as_ref())?;
     serialize_expires_at(&mut map, prop.expires_at.as_ref())?;
     serialize_dataset_id(&mut map, prop.dataset_id.as_ref())?;
@@ -187,6 +192,7 @@ pub fn serialize_list_property<S: Serializer>(prop: &NgsiLdListProperty, seriali
 pub fn serialize_json_property<S: Serializer>(prop: &NgsiLdJsonProperty, serializer: S) -> Result<S::Ok, S::Error> {
     let mut map = serializer.serialize_map(None)?;
     map.serialize_entry("json", &prop.has_json)?;
+    serialize_value_type(&mut map, prop.value_type.as_ref(), None)?;
     serialize_observed_at(&mut map, prop.observed_at.as_ref())?;
     serialize_expires_at(&mut map, prop.expires_at.as_ref())?;
     serialize_dataset_id(&mut map, prop.dataset_id.as_ref())?;

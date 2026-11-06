@@ -1,6 +1,7 @@
 use crate::entity::{
     attribute::NestedAttributes,
     representation::{SerializeRepr, concise, normalized, simplified},
+    value_type::ValueType,
 };
 use cassiopeia_common::representation::NgsiLdRepresentation;
 use chrono::{DateTime, Utc};
@@ -15,6 +16,9 @@ pub struct NgsiLdVocabProperty {
     /// The vocabulary IRI this term maps to.
     #[serde(rename = "vocab")]
     pub has_vocab: IriBuf,
+    /// The datatype the mapping declared for the value (ETSI GS CIM 009 v1.9.1 table 5.2.35-1).
+    #[serde(rename = "valueType", default, skip_serializing_if = "Option::is_none")]
+    pub value_type: Option<ValueType>,
     /// When it was observed.
     #[serde(rename = "observedAt", skip_serializing_if = "Option::is_none")]
     pub observed_at: Option<DateTime<Utc>>,
@@ -35,6 +39,7 @@ impl NgsiLdVocabProperty {
     pub fn new(has_vocab: IriBuf) -> NgsiLdVocabProperty {
         NgsiLdVocabProperty {
             has_vocab,
+            value_type: None,
             observed_at: None,
             expires_at: None,
             dataset_id: None,

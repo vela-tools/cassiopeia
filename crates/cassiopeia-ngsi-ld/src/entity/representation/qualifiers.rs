@@ -8,8 +8,9 @@ use crate::{
         attribute::NestedAttributes,
         name::NameBuf,
         representation::{DisplayStr, ReprAdapter},
+        value_type::ValueType,
     },
-    value::{temporal_text, types::Value},
+    value::{temporal_text, types::TemporalValueType},
 };
 use cassiopeia_common::representation::NgsiLdRepresentation;
 use cefact_units::UnitCode;
@@ -17,19 +18,22 @@ use chrono::{DateTime, Utc};
 use serde::ser::SerializeMap;
 use urn_rs::Urn;
 
-/// Writes `valueType` when the Property's value is a time value.
+/// Writes `valueType`: the one the mapping declared, or else the one a time value implies.
 ///
-/// Clause 4.5.2 makes `valueType` the non-reified datatype of a Property's value, and Annex C.6 uses
-/// it to mark a `DateTime`, `Date` or `Time`. Without it the value is a plain string, which a broker
-/// stores as text, so a query with a time operand does not match it.
+/// Clause 4.5.2 makes `valueType` the non-reified datatype of an attribute's value, and Annex C.6 uses
+/// it to mark a `DateTime`, `Date` or `Time`. Without it a time value is a plain string, which a broker
+/// stores as text, so a query with a time operand does not match it. A declared type never contradicts
+/// the implied one: a mapping whose `valueType` names another type than its transformation produces is
+/// refused before a record is read.
 ///
 /// # Errors
 /// Returns the serializer's error if the data type cannot be serialized.
-pub(crate) fn serialize_value_type<M: SerializeMap>(map: &mut M, value: &Value) -> Result<(), M::Error> {
-    if let Some(value_type) = value.temporal_type() {
-        map.serialize_entry("valueType", &value_type)?;
+pub(crate) fn serialize_value_type<M: SerializeMap>(map: &mut M, declared: Option<&ValueType>, implied: Option<TemporalValueType>) -> Result<(), M::Error> {
+    match (declared, implied) {
+        (Some(declared), _) => map.serialize_entry("valueType", declared),
+        (None, Some(implied)) => map.serialize_entry("valueType", &implied),
+        (None, None) => Ok(()),
     }
-    Ok(())
 }
 
 /// Writes `observedAt` when present, as an NGSI-LD `DateTime` (clause 4.8).

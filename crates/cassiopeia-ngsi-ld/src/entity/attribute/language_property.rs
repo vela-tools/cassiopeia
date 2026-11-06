@@ -1,6 +1,7 @@
 use crate::entity::{
     attribute::NestedAttributes,
     representation::{SerializeRepr, concise, normalized, simplified},
+    value_type::ValueType,
 };
 use cassiopeia_common::representation::NgsiLdRepresentation;
 use chrono::{DateTime, Utc};
@@ -23,6 +24,10 @@ pub struct NgsiLdLanguageProperty {
     /// A map of BCP-47 language tag to localized text.
     #[serde(rename = "languageMap")]
     pub language_map: LanguageMap,
+    /// The datatype of the `languageMap`, which can only be `langString` (ETSI GS CIM 009 v1.9.1
+    /// table 5.2.32-1), written as the mapping declared it.
+    #[serde(rename = "valueType", default, skip_serializing_if = "Option::is_none")]
+    pub value_type: Option<ValueType>,
     /// When it was observed.
     #[serde(rename = "observedAt", skip_serializing_if = "Option::is_none")]
     pub observed_at: Option<DateTime<Utc>>,
@@ -43,6 +48,7 @@ impl NgsiLdLanguageProperty {
     pub fn new(language_map: LanguageMap) -> NgsiLdLanguageProperty {
         NgsiLdLanguageProperty {
             language_map,
+            value_type: None,
             observed_at: None,
             expires_at: None,
             dataset_id: None,

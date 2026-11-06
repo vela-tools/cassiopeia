@@ -8,3 +8,4 @@ mod relationships;
 mod station_mappings;
 mod unreadable_geometries;
 mod value_conversions;
+mod value_types;

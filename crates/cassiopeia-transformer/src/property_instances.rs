@@ -15,7 +15,7 @@ use cassiopeia_unreadable_timestamps::unreadable_timestamps::UnreadableTimestamp
 ///
 /// The resolved attribute holds one entry per declared instance; each present entry becomes its own
 /// attribute instance carrying the per-instance metadata at the same index (its `datasetId` and the
-/// shared qualifiers). An absent entry is a missing instance and contributes nothing, so a model that
+/// shared qualifiers) and the `valueType` its declaration, or else the attribute, names. An absent entry is a missing instance and contributes nothing, so a model that
 /// reports no value for this record simply has no instance (ETSI GS CIM 009 v1.9.1 clause 4.5.5).
 /// When no instance survives, the attribute is omitted.
 pub(crate) fn build_multi_instance_attribute(
@@ -31,12 +31,20 @@ pub(crate) fn build_multi_instance_attribute(
         ResolvedAttribute::Single(content) => vec![Some(content)],
     };
 
+    let declared = config.instances().as_ref();
     let instances = items
         .into_iter()
         .enumerate()
         .filter_map(|(index, item)| {
             let content = item?;
-            build_property_instance(*config.kind(), content, transform_metadata(metadata, name, Some(index), cache, unreadable))
+            // Each instance takes its own copy of the datatype its declaration, or its attribute's,
+            // names: the declaration answers for every entity it produces.
+            let value_type = declared
+                .and_then(|instances| instances.get(index))
+                .and_then(|instance| config.instance_value_type(instance))
+                .cloned();
+            let meta = transform_metadata(metadata, name, Some(index), cache, unreadable).with_value_type(value_type);
+            build_property_instance(*config.kind(), content, meta)
         })
         .collect::<Vec<NgsiLdAttribute>>();
 
