@@ -411,6 +411,24 @@ mod tests {
     }
 
     #[test]
+    fn a_literal_illegal_entry_in_a_scope_list_is_rejected_quoting_that_entry_alone() {
+        let document = document("S-{{ id }}", r#"scope: ["/Ljubljana", "/Novo-mesto"],"#, "{}");
+
+        assert!(matches!(unwritable_scope(&document), NgsiLdError::InvalidScope { rejected } if &*rejected == "/Novo-mesto"));
+    }
+
+    #[test]
+    fn a_synthetic_entity_s_literal_illegal_scope_is_rejected() {
+        let document = document(
+            "S-{{ id }}",
+            "",
+            r#"{ owner: { type: "Relationship", source: "{{ id }}", target: { entity: "Organization" }, syntheticEntity: { dataModel: "Organization", identity: { entityName: "O-{{ id }}" }, scope: "/Novo-mesto", attributes: {} } } }"#,
+        );
+
+        assert!(matches!(unwritable_scope(&document), NgsiLdError::InvalidScope { rejected } if &*rejected == "/Novo-mesto"));
+    }
+
+    #[test]
     fn a_synthetic_entity_s_literal_ngsi_ld_null_scope_is_rejected() {
         let document = document(
             "S-{{ id }}",

@@ -171,6 +171,7 @@ mod tests {
     use crate::{cycle::build_router, error::PipelineError};
     use cassiopeia_common::collection::CollectionName;
     use cassiopeia_diagnostic::{
+        cause::Cause,
         code::{diagnostic_code::DiagnosticCode, run_code::RunCode},
         diagnostic_builder::from_error,
         severity::Severity,
@@ -290,6 +291,43 @@ mod tests {
         assert_eq!(
             diagnostic.headline(),
             r#"Attribute `owner` (Relationship, read from a `source`) cannot take `transformation: "string"`; remove the transformation: this declaration takes none"#
+        );
+        assert!(compiled.is_empty());
+    }
+
+    #[test]
+    fn a_mapping_with_an_illegal_literal_scope_fails_to_load_as_an_unusable_mapping_naming_the_scope() {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("m.json5");
+        fs::write(
+            &path,
+            r#"{ version: "v4", dataModel: "Thing", identity: { entityName: "{{ id }}" }, scope: "/Novo-mesto", attributes: { name: { source: "{{ id }}" } } }"#,
+        )
+        .unwrap();
+        let binding = MappingBinding::Single { mapping: path.clone() };
+
+        let mut compiled = HashMap::new();
+        let Err(error) = build_router(&binding, &mut compiled, &mut TemplateRunner::new()) else {
+            panic!("a mapping with an illegal literal scope must not build a router");
+        };
+        let diagnostic = from_error(Severity::Error, DiagnosticCode::from(&error), &error).build();
+        let directory = dir.path().display().to_string();
+
+        assert!(matches!(
+            &error,
+            PipelineError::Mapping(MappingError::UnwritableScope { location, .. })
+                if *location.document == *path && location.site == TemplateSite::Scope
+        ));
+        assert_eq!(DiagnosticCode::from(&error), DiagnosticCode::Run(RunCode::MappingUnusable));
+        assert_eq!(
+            diagnostic.headline().replace(&directory, "<dir>"),
+            "The scope template in the mapping document at '<dir>/m.json5' can never be an entity's scope"
+        );
+        assert_eq!(
+            diagnostic.causes().iter().map(Cause::as_str).collect::<Vec<_>>(),
+            vec![
+                "'/Novo-mesto' is not a legal NGSI-LD scope: a scope is one or more '/'-separated levels, each starting with a Unicode letter and continuing with Unicode letters, numbers or underscores (ETSI GS CIM 009 v1.9.1 clause 4.18)"
+            ]
         );
         assert!(compiled.is_empty());
     }
