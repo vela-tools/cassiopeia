@@ -36,7 +36,7 @@ strum = { version = "0.28.0", features = ["derive"] }
 temp-dir = "0.2.0"
 thiserror = "2.0.21"
 tracing = "0.1.44"
-zip = { version = "9.3.0", default-features = false, features = ["deflate"] }
+zip = { version = "9.4.1", default-features = false, features = ["deflate"] }
 
 [features]
 default = ["grib1", "grib2-full"]
@@ -51,7 +51,7 @@ grib-writer = "0.7.0"
 mediatype = "0.23.0"
 pretty_assertions = "1.4.1"
 temp-dir = "0.2.0"
-zip = { version = "9.3.0", default-features = false, features = ["deflate"] }
+zip = { version = "9.4.1", default-features = false, features = ["deflate"] }
 
 [lints]
 workspace = true
