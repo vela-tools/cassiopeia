@@ -25,8 +25,8 @@ pub enum UrnError {
     #[error(transparent)]
     Template(#[from] TemplateError),
 
-    /// A resolved scope value is not a valid NGSI-LD scope.
-    #[error("The resolved scope '{rejected}' is not a legal NGSI-LD scope")]
+    /// A resolved scope value cannot be the scope of the entity being written.
+    #[error("The resolved scope '{rejected}' cannot be the entity's scope")]
     InvalidScope {
         /// The rejected scope text, kept as-is because it is unvalidated input.
         rejected: Box<str>,

@@ -4,6 +4,10 @@ use lazy_regex::regex_is_match;
 use serde::{Deserialize, Serialize};
 use std::{collections::BTreeSet, str::FromStr};
 
+/// The NGSI-LD Null, the one legal scope outside the `ScopeLevel` grammar (ETSI GS CIM 009 v1.9.1
+/// clause 4.18).
+const NGSI_LD_NULL: &str = "urn:ngsi-ld:null";
+
 /// A validated NGSI-LD scope path (ETSI GS CIM 009 v1.9.1, clause 4.18).
 ///
 /// The wire form is the plain scope string; construction rejects any value that is not a legal scope.
@@ -17,17 +21,33 @@ impl ScopeBuf {
     ///
     /// Each level starts with a Unicode letter and continues with Unicode letters, numbers, or
     /// underscores, matching the `ScopeLevel` grammar of clause 4.18; `urn:ngsi-ld:null` is the one
-    /// other legal value.
+    /// other legal value. This is the check for reading a scope, which a stored entity may carry as
+    /// the NGSI-LD Null; a scope for an entity being written is built with
+    /// [`ScopeBuf::for_written_entity`].
     ///
     /// # Errors
     /// Returns [`NgsiLdError::InvalidScope`] when `s` is not a legal scope.
     pub fn new(s: impl Into<String>) -> Result<ScopeBuf> {
         let s = s.into();
-        if regex_is_match!(r"^(?:/?\p{L}[\p{L}\p{N}_]*(?:/\p{L}[\p{L}\p{N}_]*)*|urn:ngsi-ld:null)$", &s) {
+        if s == NGSI_LD_NULL || regex_is_match!(r"^/?\p{L}[\p{L}\p{N}_]*(?:/\p{L}[\p{L}\p{N}_]*)*$", &s) {
             Ok(ScopeBuf(s))
         } else {
             Err(NgsiLdError::InvalidScope { rejected: s.into() })
         }
+    }
+
+    /// Builds the scope of an entity Cassiopeia writes, rejecting the NGSI-LD Null as well as any
+    /// value that is not a legal scope.
+    ///
+    /// Clause 4.18 admits `urn:ngsi-ld:null` only "in case of deleted scopes", and Cassiopeia never
+    /// deletes a scope, so the value is never the scope of an entity it produces.
+    ///
+    /// # Errors
+    /// Returns [`NgsiLdError::NullScope`] when `s` is the NGSI-LD Null, and
+    /// [`NgsiLdError::InvalidScope`] when `s` is not a legal scope.
+    pub fn for_written_entity(s: impl Into<String>) -> Result<ScopeBuf> {
+        let scope = ScopeBuf::new(s)?;
+        if scope.0 == NGSI_LD_NULL { Err(NgsiLdError::NullScope) } else { Ok(scope) }
     }
 
     /// The scope as a string slice.
@@ -158,7 +178,10 @@ impl TryFrom<ScopeWire> for NgsiLdScope {
 
 #[cfg(test)]
 mod tests {
-    use crate::entity::scope::{NgsiLdScope, ScopeBuf, ScopeMerge};
+    use crate::entity::{
+        error::NgsiLdError,
+        scope::{NgsiLdScope, ScopeBuf, ScopeMerge},
+    };
     use pretty_assertions::assert_eq;
     use serde_json::json;
 
@@ -187,6 +210,38 @@ mod tests {
             "urn:ngsi-ld:null",
         ] {
             assert!(ScopeBuf::new(text).is_ok(), "{text}");
+        }
+    }
+
+    #[test]
+    fn a_stored_entity_s_ngsi_ld_null_scope_is_read() {
+        let read: NgsiLdScope = serde_json::from_value(json!("urn:ngsi-ld:null")).unwrap();
+
+        assert_eq!(serde_json::to_value(read).unwrap(), json!("urn:ngsi-ld:null"));
+    }
+
+    #[test]
+    fn the_ngsi_ld_null_is_rejected_as_the_scope_of_a_written_entity() {
+        assert!(matches!(ScopeBuf::for_written_entity("urn:ngsi-ld:null"), Err(NgsiLdError::NullScope)));
+    }
+
+    #[test]
+    fn a_legal_scope_is_accepted_for_a_written_entity() {
+        assert_eq!(ScopeBuf::for_written_entity("/Madrid/Gardens").unwrap(), scope("/Madrid/Gardens"));
+    }
+
+    #[test]
+    fn a_malformed_scope_is_rejected_for_a_written_entity_as_illegal() {
+        assert!(matches!(
+            ScopeBuf::for_written_entity("/Madrid-Centro"),
+            Err(NgsiLdError::InvalidScope { rejected }) if &*rejected == "/Madrid-Centro"
+        ));
+    }
+
+    #[test]
+    fn text_that_only_contains_the_ngsi_ld_null_is_rejected() {
+        for text in ["urn:ngsi-ld:null/Madrid", "/urn:ngsi-ld:null", "urn:ngsi-ld:nullx"] {
+            assert!(ScopeBuf::new(text).is_err(), "{text}");
         }
     }
 

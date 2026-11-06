@@ -6,7 +6,7 @@ use crate::{
 };
 use cassiopeia_common::error::io::IoError;
 use cassiopeia_geometry::error::GeometryError;
-use cassiopeia_ngsi_ld::entity::{attribute::NgsiLdAttributeKind, attribute_path::AttributePath, name::NameBuf};
+use cassiopeia_ngsi_ld::entity::{attribute::NgsiLdAttributeKind, attribute_path::AttributePath, error::NgsiLdError, name::NameBuf};
 use langtag::LangTagBuf;
 use std::{path::PathBuf, result};
 use thiserror::Error;
@@ -38,6 +38,17 @@ pub enum MappingError {
         /// carrying the error past the large-error threshold.
         #[source]
         source: Box<TemplateCompileError>,
+    },
+
+    /// A `scope` declared as literal text can never be the scope of an entity Cassiopeia writes, so
+    /// every record would be skipped for it.
+    #[error("The {location} can never be an entity's scope")]
+    UnwritableScope {
+        /// Where the literal scope is declared: the document and the `scope` member within it.
+        location: TemplateLocation,
+        /// Why the literal cannot be an entity's scope.
+        #[source]
+        source: NgsiLdError,
     },
 
     /// An attribute declaration is internally inconsistent: its `geometry` conversion cannot
@@ -145,7 +156,7 @@ mod tests {
         template_site::TemplateSite,
     };
     use cassiopeia_common::error::io::{IoAction, IoError};
-    use cassiopeia_ngsi_ld::entity::{attribute_path::AttributePath, name::NameBuf};
+    use cassiopeia_ngsi_ld::entity::{attribute_path::AttributePath, error::NgsiLdError, name::NameBuf};
     use pretty_assertions::assert_eq;
     use std::{
         error::Error,
@@ -197,6 +208,20 @@ mod tests {
             error.source().expect("the hint is chained").to_string(),
             "`station-id` in `{{ station-id }}` is ambiguous: write `this['station-id']` to read the field, or `station - id` to subtract"
         );
+    }
+
+    #[test]
+    fn an_unwritable_scope_names_the_document_and_chains_why_the_literal_is_no_scope() {
+        let error = MappingError::UnwritableScope {
+            location: TemplateLocation::new(Arc::from(Path::new("/maps/thing.json5")), TemplateSite::Scope),
+            source: NgsiLdError::NullScope,
+        };
+
+        assert_eq!(
+            error.to_string(),
+            "The scope template in the mapping document at '/maps/thing.json5' can never be an entity's scope"
+        );
+        assert_eq!(error.source().expect("the reason is chained").to_string(), NgsiLdError::NullScope.to_string());
     }
 
     #[test]

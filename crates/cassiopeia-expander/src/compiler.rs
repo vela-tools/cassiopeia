@@ -12,7 +12,7 @@ use cassiopeia_mapping::{
     template_location::TemplateLocation,
     template_site::TemplateSite,
 };
-use cassiopeia_ngsi_ld::entity::{attribute_path::AttributePath, name::NameBuf};
+use cassiopeia_ngsi_ld::entity::{attribute_path::AttributePath, name::NameBuf, scope::ScopeBuf};
 use serde_json::Value;
 use std::{path::Path, sync::Arc};
 
@@ -49,11 +49,11 @@ impl ExpanderCompiler {
 
         if let Some(scope) = mapping.scope() {
             let compiled_scope = match scope {
-                Scope::Single(source) => CompiledScope::Single(Self::compile_template(source, document, runner, TemplateSite::Scope, &mut reads)?),
+                Scope::Single(source) => CompiledScope::Single(Self::compile_scope(source, document, runner, &mut reads)?),
                 Scope::Multiple(sources) => CompiledScope::Multiple(
                     sources
                         .iter()
-                        .map(|source| Self::compile_template(source, document, runner, TemplateSite::Scope, &mut reads))
+                        .map(|source| Self::compile_scope(source, document, runner, &mut reads))
                         .collect::<Result<_>>()?,
                 ),
             };
@@ -71,6 +71,31 @@ impl ExpanderCompiler {
         mapping.set_source_reads(reads);
 
         Ok(())
+    }
+
+    /// Compiles one `scope` template, rejecting literal text that can never be a written entity's
+    /// scope.
+    ///
+    /// A literal resolves to the same text for every record, so a literal that is no legal scope,
+    /// or is the NGSI-LD Null that clause 4.18 reserves for a deleted scope, would skip every record
+    /// the mapping reads. An empty literal is kept: it contributes no scope.
+    fn compile_scope(source: &TemplateSource, document: &Arc<Path>, runner: &mut TemplateRunner, reads: &mut SourceReads) -> Result<CompiledTemplate> {
+        let compiled = Self::compile_template(source, document, runner, TemplateSite::Scope, reads)?;
+        match &compiled {
+            CompiledTemplate::Static(literal) if !literal.is_empty() => {
+                ScopeBuf::for_written_entity(literal.as_str()).map_err(|source| MappingError::UnwritableScope {
+                    location: TemplateLocation::new(Arc::clone(document), TemplateSite::Scope),
+                    source,
+                })?;
+            }
+            CompiledTemplate::Static(_)
+            | CompiledTemplate::Simple(_)
+            | CompiledTemplate::Composite(_)
+            | CompiledTemplate::Expression(_)
+            | CompiledTemplate::Complex(_) => {}
+        }
+
+        Ok(compiled)
     }
 
     /// Compiles one attribute's source and recurses into everything nested beneath it.
@@ -204,7 +229,7 @@ mod tests {
         template::{CompiledTemplate, TemplateSource, runner::TemplateRunner},
         template_site::TemplateSite,
     };
-    use cassiopeia_ngsi_ld::entity::{attribute_path::AttributePath, name::NameBuf};
+    use cassiopeia_ngsi_ld::entity::{attribute_path::AttributePath, error::NgsiLdError, name::NameBuf};
     use pretty_assertions::assert_eq;
     use std::{error::Error, path::Path};
 
@@ -342,6 +367,65 @@ mod tests {
         let document = document("S-{{ id }}", r#"scope: "/{{ city | lower ","#, "{}");
 
         assert_eq!(rejection(&document), (TemplateSite::Scope, TemplateSource::new("/{{ city | lower ")));
+    }
+
+    /// The reason a mapping with an unwritable literal scope is refused, after checking the refusal
+    /// names the document and the `scope` member.
+    fn unwritable_scope(document: &str) -> NgsiLdError {
+        match compile(document) {
+            Err(MappingError::UnwritableScope { location, source }) => {
+                assert_eq!(*location.document, *Path::new(ORIGIN));
+                assert_eq!(location.site, TemplateSite::Scope);
+                source
+            }
+            other => panic!("expected an unwritable scope, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn a_literal_ngsi_ld_null_scope_is_rejected_naming_the_document_and_the_scope() {
+        let document = document("S-{{ id }}", r#"scope: "urn:ngsi-ld:null","#, "{}");
+
+        assert!(matches!(unwritable_scope(&document), NgsiLdError::NullScope));
+        assert!(compile(&document).unwrap_err().to_string().contains(ORIGIN));
+        assert_eq!(hint(&document), NgsiLdError::NullScope.to_string());
+    }
+
+    #[test]
+    fn a_literal_ngsi_ld_null_in_a_scope_list_is_rejected() {
+        let document = document("S-{{ id }}", r#"scope: ["/Madrid", "urn:ngsi-ld:null"],"#, "{}");
+
+        assert!(matches!(unwritable_scope(&document), NgsiLdError::NullScope));
+    }
+
+    #[test]
+    fn a_literal_malformed_scope_is_rejected_as_illegal() {
+        let document = document("S-{{ id }}", r#"scope: "/Madrid Centro","#, "{}");
+
+        assert!(matches!(unwritable_scope(&document), NgsiLdError::InvalidScope { rejected } if &*rejected == "/Madrid Centro"));
+    }
+
+    #[test]
+    fn a_synthetic_entity_s_literal_ngsi_ld_null_scope_is_rejected() {
+        let document = document(
+            "S-{{ id }}",
+            "",
+            r#"{ owner: { type: "Relationship", source: "{{ id }}", target: { entity: "Organization" }, syntheticEntity: { dataModel: "Organization", identity: { entityName: "O-{{ id }}" }, scope: "urn:ngsi-ld:null", attributes: {} } } }"#,
+        );
+
+        assert!(matches!(unwritable_scope(&document), NgsiLdError::NullScope));
+    }
+
+    #[test]
+    fn a_literal_legal_scope_and_an_empty_literal_scope_compile() {
+        for scope in [r#"scope: "/Madrid/Gardens","#, r#"scope: "","#] {
+            assert!(compile(&document("S-{{ id }}", scope, "{}")).is_ok(), "{scope}");
+        }
+    }
+
+    #[test]
+    fn a_scope_template_that_may_resolve_to_the_ngsi_ld_null_compiles() {
+        assert!(compile(&document("S-{{ id }}", r#"scope: "{{ s }}","#, "{}")).is_ok());
     }
 
     #[test]

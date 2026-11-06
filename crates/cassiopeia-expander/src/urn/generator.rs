@@ -67,8 +67,8 @@ impl UrnGenerator {
     ///
     /// # Errors
     ///
-    /// Returns [`UrnError`] when a scope template fails to resolve or its resolved text is not a
-    /// valid NGSI-LD scope.
+    /// Returns [`UrnError`] when a scope template fails to resolve or its resolved text cannot be
+    /// the scope of a written entity: text that is not a legal NGSI-LD scope, or the NGSI-LD Null.
     pub fn generate_scope(&self, mapping: &Mapping, data: &Value) -> Result<Option<NgsiLdScope>> {
         let Some(compiled_scope) = mapping.compiled_scope() else {
             return Ok(None);
@@ -273,9 +273,9 @@ impl UrnGenerator {
         if text.is_empty() { Ok(None) } else { Ok(Some(text)) }
     }
 
-    /// Validates resolved scope text into an NGSI-LD scope.
+    /// Validates resolved scope text into the scope of the entity being written.
     fn parse_scope(text: String) -> Result<ScopeBuf> {
-        match ScopeBuf::new(&text) {
+        match ScopeBuf::for_written_entity(&text) {
             Ok(scope) => Ok(scope),
             Err(source) => Err(UrnError::InvalidScope {
                 rejected: text.into_boxed_str(),
@@ -292,25 +292,88 @@ mod tests {
         urn::{error::UrnError, generator::UrnGenerator},
     };
     use cassiopeia_mapping::{mapping::Mapping, template::runner::TemplateRunner};
+    use cassiopeia_ngsi_ld::entity::error::NgsiLdError;
     use pretty_assertions::assert_eq;
     use serde_json::{Value, json};
     use std::path::Path;
 
+    /// A generator and the compiled mapping `document` declares.
+    fn generator(document: &str) -> (UrnGenerator, Mapping) {
+        let mut runner = TemplateRunner::new();
+        let mut mapping = Mapping::from_json5(document, Path::new("test.json5"), &mut runner).unwrap();
+        ExpanderCompiler::compile(&mut mapping, Path::new("test.json5"), &mut runner).unwrap();
+
+        (UrnGenerator::new(runner.resolver()), mapping)
+    }
+
     /// A generator and an `AircraftType` mapping whose identity is `identity` and whose `codeIATA`
     /// attribute reads a different value from every record.
     fn aircraft_type_generator(identity: &str) -> (UrnGenerator, Mapping) {
-        let document = r#"{
+        generator(
+            &r#"{
             version: "v4",
             dataModel: "AircraftType",
             identity: { entityName: "IDENTITY" },
             attributes: { codeIATA: { source: "{{ code }}" } },
         }"#
-        .replace("IDENTITY", identity);
-        let mut runner = TemplateRunner::new();
-        let mut mapping = Mapping::from_json5(&document, Path::new("test.json5"), &mut runner).unwrap();
-        ExpanderCompiler::compile(&mut mapping, Path::new("test.json5"), &mut runner).unwrap();
+            .replace("IDENTITY", identity),
+        )
+    }
 
-        (UrnGenerator::new(runner.resolver()), mapping)
+    /// Generates the scope of a `Thing` whose mapping declares `scope` for one record, as its wire
+    /// form.
+    fn generate_thing_scope(scope: &str, data: &Value) -> Result<Option<Value>, UrnError> {
+        let (generator, mapping) = generator(&format!(
+            r#"{{ version: "v4", dataModel: "Thing", identity: {{ entityName: "{{{{ id }}}}" }}, scope: {scope}, attributes: {{}} }}"#
+        ));
+
+        generator
+            .generate_scope(&mapping, data)
+            .map(|scope| scope.map(|scope| serde_json::to_value(scope).unwrap()))
+    }
+
+    fn is_null_scope_rejection(result: &Result<Option<Value>, UrnError>) -> bool {
+        matches!(
+            result,
+            Err(UrnError::InvalidScope { rejected, source: NgsiLdError::NullScope }) if &**rejected == "urn:ngsi-ld:null"
+        )
+    }
+
+    #[test]
+    fn a_scope_resolving_to_the_ngsi_ld_null_is_rejected() {
+        let result = generate_thing_scope(r#""{{ s }}""#, &json!({"id": "B", "s": "urn:ngsi-ld:null"}));
+
+        assert!(is_null_scope_rejection(&result), "{result:?}");
+    }
+
+    #[test]
+    fn one_scope_of_a_list_resolving_to_the_ngsi_ld_null_rejects_the_whole_scope() {
+        let result = generate_thing_scope(r#"["/Madrid", "{{ s }}"]"#, &json!({"id": "B", "s": "urn:ngsi-ld:null"}));
+
+        assert!(is_null_scope_rejection(&result), "{result:?}");
+    }
+
+    #[test]
+    fn a_scope_resolving_to_a_legal_scope_is_generated() {
+        let result = generate_thing_scope(r#""{{ s }}""#, &json!({"id": "A", "s": "/Madrid"}));
+
+        assert_eq!(result.unwrap(), Some(json!("/Madrid")));
+    }
+
+    #[test]
+    fn a_scope_resolving_to_a_malformed_scope_is_rejected_as_illegal() {
+        let result = generate_thing_scope(r#""{{ s }}""#, &json!({"id": "A", "s": "/Madrid Centro"}));
+
+        assert!(
+            matches!(
+                &result,
+                Err(UrnError::InvalidScope {
+                    source: NgsiLdError::InvalidScope { .. },
+                    ..
+                })
+            ),
+            "{result:?}"
+        );
     }
 
     /// Mints the identity of an `AircraftType` named by `identity` for one record.

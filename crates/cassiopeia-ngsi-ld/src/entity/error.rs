@@ -45,6 +45,12 @@ pub enum NgsiLdError {
         rejected: Box<str>,
     },
 
+    /// The scope of an entity being written was the NGSI-LD Null, which only marks a deleted scope.
+    #[error(
+        "'urn:ngsi-ld:null' cannot be the scope of an entity Cassiopeia writes: the NGSI-LD Null only marks a deleted scope (ETSI GS CIM 009 v1.9.1 clause 4.18)"
+    )]
+    NullScope,
+
     /// A `scope` member was an empty array.
     #[error("a scope array must hold at least one scope: an entity with no scope omits the member (ETSI GS CIM 009 v1.9.1 clause 4.18)")]
     EmptyScopeList,
@@ -101,6 +107,14 @@ mod tests {
         assert_eq!(
             invalid.to_string(),
             "'/Novo-mesto' is not a legal NGSI-LD scope: a scope is one or more '/'-separated levels, each starting with a Unicode letter and continuing with Unicode letters, numbers or underscores (ETSI GS CIM 009 v1.9.1 clause 4.18)"
+        );
+    }
+
+    #[test]
+    fn a_null_scope_is_described_as_marking_only_a_deleted_scope_by_clause_4_18() {
+        assert_eq!(
+            NgsiLdError::NullScope.to_string(),
+            "'urn:ngsi-ld:null' cannot be the scope of an entity Cassiopeia writes: the NGSI-LD Null only marks a deleted scope (ETSI GS CIM 009 v1.9.1 clause 4.18)"
         );
     }
 
