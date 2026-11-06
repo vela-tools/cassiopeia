@@ -159,7 +159,7 @@ Cassiopeia rejects `header: false` together with a `headerRows` above 0, and `he
 
 ### Per-input context
 
-`context` sets how this input's entities obtain their `@context`. Cassiopeia reads the value as a plain string: `none` attaches no context, `default` resolves it from the local Smart Data Models catalog, an `http`/`https` URL is used directly, and any other value is treated as a path to a local `.jsonld` file. A per-input `context` overrides the output-level `context` for entities from that input.
+`context` sets how this input's entities obtain their `@context`. Cassiopeia reads the value as a plain string: `none` attaches no context, `default` resolves it from the local Smart Data Models catalog, an `http`/`https` URL is used directly, and any other value is treated as a path to a local `.jsonld` file (see [local context files](output.md#local-context-files) for what it must hold). A per-input `context` overrides the output-level `context` for entities from that input.
 
 ### Per-input schema
 

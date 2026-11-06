@@ -18,6 +18,7 @@ pub mod error;
 mod factories;
 mod failure_code;
 mod input_config;
+pub mod local_context_error;
 mod memory_sampler;
 pub mod observer;
 mod phase1;

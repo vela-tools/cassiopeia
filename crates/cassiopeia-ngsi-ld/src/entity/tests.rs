@@ -1279,8 +1279,7 @@ mod edge_case_tests {
                 NgsiLdContextEntry::Remote(Url::parse("https://uri.etsi.org/ngsi-ld/v1/ngsi-ld-core-context-v1.8.jsonld").unwrap()),
             ]);
 
-            let mut map_context = IndexMap::default();
-            map_context.insert("iot".into(), "https://uri.etsi.org/ngsi-ld/v1/iot-context.jsonld".to_string());
+            let map_context: NgsiLdContext = serde_json::from_value(json!({"iot": "https://uri.etsi.org/ngsi-ld/v1/iot-context.jsonld"})).unwrap();
 
             let entity_with_string = NgsiLdEntity {
                 id: "urn:ngsi-ld:Test:001".parse::<Urn>().unwrap(),
@@ -1303,7 +1302,7 @@ mod edge_case_tests {
             let entity_with_map = NgsiLdEntity {
                 id: "urn:ngsi-ld:Test:003".parse::<Urn>().unwrap(),
                 entity_type: NameBuf::new("Test").unwrap(),
-                context: Some(NgsiLdContext::Single(NgsiLdContextEntry::Inline(map_context))),
+                context: Some(map_context),
                 scope: None,
                 expires_at: None,
                 attributes: IndexMap::default(),
@@ -1353,11 +1352,16 @@ mod edge_case_tests {
                         if url.as_str() == "https://raw.githubusercontent.com/smart-data-models/dataModel.Device/refs/heads/master/context.jsonld"
                     ));
                     match &entries[1] {
-                        NgsiLdContextEntry::Inline(map) => {
-                            assert_eq!(map.get("hasModel").unwrap(), "https://fiwarebox.com/dataModel#hasModel");
-                            assert_eq!(map.get("headingName").unwrap(), "https://fiwarebox.com/dataModel#headingName");
+                        NgsiLdContextEntry::Inline(definition) => {
+                            assert_eq!(
+                                serde_json::to_value(definition).unwrap(),
+                                json!({
+                                    "hasModel": "https://fiwarebox.com/dataModel#hasModel",
+                                    "headingName": "https://fiwarebox.com/dataModel#headingName"
+                                })
+                            );
                         }
-                        NgsiLdContextEntry::Remote(_) => {
+                        NgsiLdContextEntry::Null | NgsiLdContextEntry::Remote(_) => {
                             panic!("expected inline entry in mixed @context array")
                         }
                     }

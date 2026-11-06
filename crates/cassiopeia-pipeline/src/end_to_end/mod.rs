@@ -2,6 +2,7 @@ mod geo_properties;
 mod geojson_collections;
 mod harness;
 mod json_collections;
+mod local_contexts;
 mod record_merges;
 mod relationships;
 mod station_mappings;

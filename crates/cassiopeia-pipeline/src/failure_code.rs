@@ -1,13 +1,15 @@
-use crate::{error::PipelineError, stages::coded_error::CodedError};
+use crate::{error::PipelineError, local_context_error::LocalContextError, stages::coded_error::CodedError};
 use cassiopeia_collector::error::CollectorError;
 use cassiopeia_diagnostic::code::{
     broker_code::BrokerCode,
+    context_code::ContextCode,
     diagnostic_code::DiagnosticCode,
     ingest_code::IngestCode,
     run_code::RunCode,
     schema_code::SchemaCode,
 };
 use cassiopeia_ingestor::error::IngestorError;
+use cassiopeia_ngsi_ld::entity::context_document_error::ContextDocumentError;
 use cassiopeia_profiler::error::ProfilerError;
 use cassiopeia_validator::error::ValidatorError;
 use cassiopeia_writer::error::WriterError;
@@ -34,6 +36,7 @@ impl From<&PipelineError> for DiagnosticCode {
             PipelineError::ValidationSchemaMissing { .. } => SchemaCode::Absent.into(),
             PipelineError::SchemaFetch { .. } => SchemaCode::FetchFailed.into(),
             PipelineError::SeriesRequiresTemporalOperation => RunCode::Misconfigured.into(),
+            PipelineError::LocalContext(error) => local_context_code(error).into(),
             PipelineError::Mapping(_) => RunCode::MappingUnusable.into(),
             PipelineError::StagePanic { .. } => RunCode::StagePanic.into(),
         }
@@ -95,6 +98,21 @@ fn writer_code(error: &WriterError) -> DiagnosticCode {
         WriterError::AtomicSpool(_) => BrokerCode::SpoolFailed.into(),
         WriterError::SimdSerialization { .. } => BrokerCode::SerializationFailed.into(),
         WriterError::ClientInit(_) | WriterError::InvalidBrokerUrl { .. } | WriterError::Io(_) => RunCode::OutputFailed.into(),
+    }
+}
+
+/// Why a local `@context` file could not be attached.
+const fn local_context_code(error: &LocalContextError) -> ContextCode {
+    match error {
+        LocalContextError::Unreadable { .. } => ContextCode::FileUnreadable,
+        LocalContextError::Unusable {
+            source: ContextDocumentError::Unparsable(_),
+            ..
+        } => ContextCode::FileUnparsable,
+        LocalContextError::Unusable {
+            source: ContextDocumentError::ContextMemberMissing | ContextDocumentError::Invalid(_) | ContextDocumentError::RemoteNotAbsolute { .. },
+            ..
+        } => ContextCode::ContextUnreadable,
     }
 }
 

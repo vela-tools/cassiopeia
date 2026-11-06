@@ -2,8 +2,9 @@ use strum::{Display, EnumCount, EnumIter};
 
 /// Why the `@context` a run attaches to its entities could not be resolved or delivered as asked.
 ///
-/// None of these abort a run: an entity without an `@context` is still an entity, so every one of
-/// them degrades rather than fails.
+/// A local `@context` file that cannot be attached aborts the run before anything is written, since
+/// entities written without the context the run named would expand to different attribute IRIs.
+/// Every other reason degrades rather than fails.
 #[derive(Clone, Copy, Debug, Display, EnumCount, EnumIter, Eq, Hash, Ord, PartialEq, PartialOrd)]
 #[strum(serialize_all = "kebab-case")]
 pub enum ContextCode {
@@ -18,7 +19,8 @@ pub enum ContextCode {
     FileUnreadable,
     /// A local `@context` file is not valid JSON.
     FileUnparsable,
-    /// A local `@context` file's `@context` member is not a shape NGSI-LD admits.
+    /// A local `@context` file has no top-level `@context` member, or holds a context that is not
+    /// valid JSON-LD 1.1.
     ContextUnreadable,
     /// The context URL is not a legal HTTP header value, so link-header delivery fell back to body
     /// delivery.

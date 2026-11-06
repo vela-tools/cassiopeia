@@ -49,7 +49,7 @@ impl Pipeline {
         // across the expanders, the fragment resolver, and the extractor.
         let template_resolver = runner.resolver();
 
-        let context = resolve_context_source(&loaded, &self.output.global_context_mode, &self.config.schemas_folder, self.context.reporter);
+        let context = resolve_context_source(&loaded, &self.output.global_context_mode, &self.config.schemas_folder, self.context.reporter)?;
 
         let fragment_resolver = self.create_resolver(template_resolver.clone())?;
         let writer = self.create_writer(context)?;

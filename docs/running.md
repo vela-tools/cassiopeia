@@ -101,7 +101,7 @@ The [representation guide](representation.md) explains how the written represent
 | `url` | Use an explicit remote URL, given with `--context-url`. |
 | `local` | Inline a local `.jsonld` file, given with `--context-file`. |
 
-`--context-url` is required when the mode is `url`, and `--context-file` is required when the mode is `local`. This mode and argument form is specific to the command line. A manifest instead carries `context` as a single string that is read by content (see the [manifest guide](manifest.md#per-input-context)). The [output guide](output.md#deliver-context) explains how the resolved context reaches a file body or a broker request.
+`--context-url` is required when the mode is `url`, and `--context-file` is required when the mode is `local`. This mode and argument form is specific to the command line. A manifest instead carries `context` as a single string that is read by content (see the [manifest guide](manifest.md#per-input-context)). The [output guide](output.md#deliver-context) explains how the resolved context reaches a file body or a broker request, and what a [local context file](output.md#local-context-files) must hold. A local file Cassiopeia cannot attach fails the run before anything is written.
 
 ## Validate
 

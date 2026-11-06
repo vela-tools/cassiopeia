@@ -176,6 +176,30 @@ output: {
 
 You can also select the context mode at input level when different inputs need different contexts. Cassiopeia resolves the effective context per entity type when a run uses multiple mappings or overrides.
 
+### Local context files
+
+A local file is a JSON-LD context document: a JSON object whose top-level `@context` member holds the context. That member may be anything JSON-LD 1.1 allows there: a remote context URL, an inline definition, `null`, or an array of these. An inline definition may use expanded term definitions with `@id`, `@type`, `@container`, or `@protected`, terms mapped to `null`, and context keywords such as `@version`, `@protected`, and `@vocab`. Cassiopeia attaches the context to every entity as the file writes it, although the members of an object may come out in another order, which does not change what the context means.
+
+~~~json
+{
+    "@context": [
+        "https://uri.etsi.org/ngsi-ld/v1/ngsi-ld-core-context-v1.9.jsonld",
+        {
+            "@version": 1.1,
+            "expectedArrival": { "@id": "https://example.org/expectedArrival", "@type": "https://uri.etsi.org/ngsi-ld/DateTime" }
+        }
+    ]
+}
+~~~
+
+A local context Cassiopeia cannot attach fails the cycle before any input is read, so nothing is written or sent. Entities written without the context the run names would expand to other attribute IRIs at the broker, so the data would mean something else. The run fails under one of these codes:
+
+| Code | What happened |
+| --- | --- |
+| `context-file-unreadable` | The file could not be read, for example because it does not exist. |
+| `context-file-unparsable` | The file is not valid JSON. |
+| `context-context-unreadable` | The file has no top-level `@context` member, its `@context` is not a valid JSON-LD 1.1 context, or it names a remote context by a relative reference, which a broker has no base to resolve against. |
+
 ## Send to a context broker
 
 A context broker destination needs a base URL:

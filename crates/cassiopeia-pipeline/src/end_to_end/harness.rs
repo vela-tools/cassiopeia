@@ -1,4 +1,5 @@
 use crate::{
+    error::PipelineError,
     observer::{PipelineResult, RunObserver},
     pipeline::{Pipeline, ValidationOverrides},
     test_engine::{SHUTDOWN, engine_config},
@@ -11,6 +12,7 @@ use cassiopeia_reporter::reporter::Reporter;
 use serde_json::Value;
 use std::{
     fs,
+    io::ErrorKind,
     path::Path,
     sync::{Arc, Mutex, PoisonError},
 };
@@ -69,7 +71,27 @@ fn write_permissive_schemas(folder: &Path, entity_types: &[&str]) {
 
 /// Runs a one-shot pipeline over `inputs`, writing files, on `store`, with `output_extra` spliced
 /// into the manifest's `output` object, and collects what it reported and wrote.
+///
+/// The output attaches no `@context` unless `output_extra` declares one.
 pub(crate) fn run_end_to_end(store: StoreKind, inputs: &[RunInput], entity_types: &[&str], output_extra: &str) -> RunOutcome {
+    let (result, outcome) = attempt_end_to_end(store, inputs, entity_types, output_extra);
+    result.unwrap();
+    outcome
+}
+
+/// Runs a one-shot pipeline like [`run_end_to_end`] that must fail, and returns the failure with
+/// what the run reported and wrote before it.
+pub(crate) fn run_failing_end_to_end(store: StoreKind, inputs: &[RunInput], entity_types: &[&str], output_extra: &str) -> (PipelineError, RunOutcome) {
+    let (result, outcome) = attempt_end_to_end(store, inputs, entity_types, output_extra);
+    let Err(error) = result else {
+        panic!("the run was expected to fail");
+    };
+    (error, outcome)
+}
+
+/// Runs a one-shot pipeline over `inputs` and returns how the run ended with what it reported and
+/// wrote.
+fn attempt_end_to_end(store: StoreKind, inputs: &[RunInput], entity_types: &[&str], output_extra: &str) -> (Result<(), PipelineError>, RunOutcome) {
     let directory = TempDir::new().unwrap();
     let root = directory.path();
     let schemas = root.join("schemas");
@@ -87,7 +109,7 @@ pub(crate) fn run_end_to_end(store: StoreKind, inputs: &[RunInput], entity_types
         })
         .collect();
     let document = format!(
-        r#"{{ version: "v1", inputs: [{}], output: {{ target: "file", directory: "{}", context: "none"{output_extra} }} }}"#,
+        r#"{{ version: "v1", inputs: [{}], output: {{ target: "file", directory: "{}"{output_extra} }} }}"#,
         declared.join(", "),
         output.display()
     );
@@ -116,24 +138,34 @@ pub(crate) fn run_end_to_end(store: StoreKind, inputs: &[RunInput], entity_types
         observer,
     )
     .unwrap();
-    pipeline.run().unwrap();
+    let result = pipeline.run();
 
+    let warnings = totals.0.lock().unwrap_or_else(PoisonError::into_inner).iter().sum();
+    let outcome = RunOutcome {
+        diagnostics: reporter.diagnostics(),
+        warnings,
+        entities: written_entities(&output),
+    };
+    (result, outcome)
+}
+
+/// Every entity written into `output`, across all of its files, or none when the run never
+/// created the directory.
+fn written_entities(output: &Path) -> Vec<Value> {
+    let files = match fs::read_dir(output) {
+        Ok(files) => files,
+        Err(error) if error.kind() == ErrorKind::NotFound => return Vec::new(),
+        Err(error) => panic!("the output directory cannot be read: {error}"),
+    };
     let mut entities = Vec::new();
-    for file in fs::read_dir(&output).unwrap() {
+    for file in files {
         let written: Value = serde_json::from_str(&fs::read_to_string(file.unwrap().path()).unwrap()).unwrap();
         let Value::Array(written) = written else {
             panic!("an entity file must hold a JSON array");
         };
         entities.extend(written);
     }
-    let warnings = totals.0.lock().unwrap_or_else(PoisonError::into_inner).iter().sum();
-    let diagnostics = reporter.diagnostics();
-
-    RunOutcome {
-        diagnostics,
-        warnings,
-        entities,
-    }
+    entities
 }
 
 /// Writes the mapping documents of the input at `index` into `root` and declares them as the input's

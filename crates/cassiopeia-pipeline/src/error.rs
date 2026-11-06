@@ -1,4 +1,4 @@
-use crate::pipeline_stage::PipelineStage;
+use crate::{local_context_error::LocalContextError, pipeline_stage::PipelineStage};
 use cassiopeia_collector::error::CollectorError;
 use cassiopeia_expander::error::ExpanderError;
 use cassiopeia_extractor::error::ExtractionError;
@@ -97,6 +97,10 @@ pub enum PipelineError {
         #[source]
         source: Box<CollectorError>,
     },
+
+    /// A local `@context` file the run asked for could not be attached.
+    #[error(transparent)]
+    LocalContext(#[from] LocalContextError),
 
     /// A mapping file could not be read, parsed, or have its templates compiled.
     #[error(transparent)]
