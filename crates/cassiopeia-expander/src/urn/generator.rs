@@ -63,37 +63,30 @@ impl UrnGenerator {
 
     /// Generates the scope, or scopes, for an entity from its mapping's `scope` declaration.
     ///
-    /// A scope template that resolves to null or an empty string contributes no scope; a multi-scope
-    /// declaration that yields nothing at all resolves to `None` rather than an empty list, and one
-    /// whose templates resolve to the same scope yields it once.
+    /// A scope template that resolves to null or an empty string contributes no scope, and one that
+    /// resolves to a list contributes one scope per item. A declaration that yields nothing at all
+    /// resolves to `None` rather than an empty list, and one whose templates or items resolve to the
+    /// same scope yields it once.
     ///
     /// # Errors
     ///
     /// Returns [`UrnError`] when a scope template fails to resolve, reads or resolves to a value that
-    /// is not text (see [`UrnError::ScopeFieldNotText`] and [`UrnError::ScopeValueNotText`]), or its
-    /// resolved text cannot be the scope of a written entity: text that is not a legal NGSI-LD
-    /// scope, or the NGSI-LD Null.
+    /// is not text (see [`UrnError::ScopeFieldNotText`], [`UrnError::ScopeValueNotText`] and
+    /// [`UrnError::ScopeItemNotText`]), or its resolved text cannot be the scope of a written entity:
+    /// text that is not a legal NGSI-LD scope, or the NGSI-LD Null.
     pub fn generate_scope(&self, mapping: &Mapping, data: &Value) -> Result<Option<NgsiLdScope>> {
-        let Some(compiled_scope) = mapping.compiled_scope() else {
-            return Ok(None);
+        let templates = match mapping.compiled_scope() {
+            Some(CompiledScope::Single(template)) => slice::from_ref(template),
+            Some(CompiledScope::Multiple(templates)) => templates.as_slice(),
+            None => return Ok(None),
         };
 
-        match compiled_scope {
-            CompiledScope::Single(template) => match self.resolve_scope_text(template, data)? {
-                Some(text) => Ok(Some(NgsiLdScope::from(Self::parse_scope(text)?))),
-                None => Ok(None),
-            },
-            CompiledScope::Multiple(templates) => {
-                let mut scopes = Vec::with_capacity(templates.len());
-                for template in templates {
-                    if let Some(text) = self.resolve_scope_text(template, data)? {
-                        scopes.push(Self::parse_scope(text)?);
-                    }
-                }
-
-                Ok(NgsiLdScope::from_scopes(scopes))
-            }
+        let mut scopes = Vec::with_capacity(templates.len());
+        for template in templates {
+            self.collect_scopes(template, data, &mut scopes)?;
         }
+
+        Ok(NgsiLdScope::from_scopes(scopes))
     }
 
     /// Generates the URN of the entity a relationship attribute points at.
@@ -262,28 +255,60 @@ impl UrnGenerator {
         }
     }
 
-    /// Resolves one scope template to its text, treating an absent field anywhere in the template,
-    /// or an empty result, as "no scope".
+    /// Resolves one scope template and appends the scopes it contributes to `scopes`, treating an
+    /// absent field anywhere in the template, or an empty result, as "no scope".
     ///
     /// A scope path is only meaningful whole: `/{{ country }}/{{ city }}` over a record with no city
     /// must contribute no scope rather than `/Slovenia/null`, which is a legal but wrong scope. For
     /// the same reason a value that is not text is never written as its JSON rendering: a scope is a
     /// string of levels (ETSI GS CIM 009 v1.9.1 clause 4.18), and `true` or `/Sensors/true` would be
     /// legal but meaningless. Only a number printed into a longer scope, as in `/Floor{{ floor }}`,
-    /// is part of a level the source meant.
-    fn resolve_scope_text(&self, template: &CompiledScopeTemplate, data: &Value) -> Result<Option<String>> {
+    /// is part of a level the source meant. A list resolved whole is the one value that is not text
+    /// and still names scopes: an entity may belong to several (clause 4.18), so each item is a scope
+    /// of its own.
+    fn collect_scopes(&self, template: &CompiledScopeTemplate, data: &Value, scopes: &mut Vec<ScopeBuf>) -> Result<()> {
         match &template.compiled {
             CompiledTemplate::Composite(parts) => Self::refuse_non_text_parts(template, parts, data)?,
             CompiledTemplate::Static(_) | CompiledTemplate::Simple(_) | CompiledTemplate::Expression(_) | CompiledTemplate::Complex(_) => {}
         }
 
         match self.resolver.resolve_complete(&template.compiled, data)? {
-            Some(Value::String(text)) => Ok((!text.is_empty()).then_some(text)),
-            Some(other @ (Value::Null | Value::Bool(_) | Value::Number(_) | Value::Array(_) | Value::Object(_))) => {
-                NonTextShape::of(&other).map_or(Ok(None), |shape| Err(Self::non_text_scope(template, shape)))
+            Some(Value::String(text)) => Self::push_scope(text, scopes),
+            Some(Value::Array(items)) => items
+                .into_iter()
+                .zip(1..)
+                .try_for_each(|(item, position)| Self::collect_item_scope(template, item, position, scopes)),
+            Some(other @ (Value::Null | Value::Bool(_) | Value::Number(_) | Value::Object(_))) => {
+                NonTextShape::of(&other).map_or(Ok(()), |shape| Err(Self::non_text_scope(template, shape)))
             }
-            None => Ok(None),
+            None => Ok(()),
         }
+    }
+
+    /// Appends the scope one item of a list-valued scope template names, at `position` counted from
+    /// 1. A null or empty item names no scope, as a null or empty field does.
+    fn collect_item_scope(template: &CompiledScopeTemplate, item: Value, position: usize, scopes: &mut Vec<ScopeBuf>) -> Result<()> {
+        match item {
+            Value::String(text) => Self::push_scope(text, scopes),
+            other @ (Value::Null | Value::Bool(_) | Value::Number(_) | Value::Array(_) | Value::Object(_)) => {
+                NonTextShape::of(&other).map_or(Ok(()), |shape| {
+                    Err(UrnError::ScopeItemNotText {
+                        // The error outlives the record and the mapping the template is borrowed from.
+                        template: template.source.clone(),
+                        position,
+                        shape,
+                    })
+                })
+            }
+        }
+    }
+
+    /// Validates resolved scope text and appends it to `scopes`; empty text names no scope.
+    fn push_scope(text: String, scopes: &mut Vec<ScopeBuf>) -> Result<()> {
+        if !text.is_empty() {
+            scopes.push(Self::parse_scope(text)?);
+        }
+        Ok(())
     }
 
     /// Refuses a concatenated scope template whose field holds a boolean, an array or an object,
@@ -464,12 +489,8 @@ mod tests {
     }
 
     #[test]
-    fn a_scope_reading_a_number_an_array_or_an_object_whole_is_refused_naming_its_type() {
-        for (value, shape) in [
-            (json!(3), NonTextShape::Number),
-            (json!(["Madrid"]), NonTextShape::Array),
-            (json!({"city": "Madrid"}), NonTextShape::Object),
-        ] {
+    fn a_scope_reading_a_number_or_an_object_whole_is_refused_naming_its_type() {
+        for (value, shape) in [(json!(3), NonTextShape::Number), (json!({"city": "Madrid"}), NonTextShape::Object)] {
             let result = generate_thing_scope(r#""{{ zone }}""#, &json!({"id": "A", "zone": value}));
 
             assert!(is_field_not_text(&result, "{{ zone }}", "zone", shape), "{value}: {result:?}");
@@ -515,6 +536,96 @@ mod tests {
                 assert_eq!(result.unwrap(), None, "{scope} over {record}");
             }
         }
+    }
+
+    #[test]
+    fn a_scope_reading_a_list_field_whole_gives_one_scope_per_item() {
+        let result = generate_thing_scope(r#""{{ areas }}""#, &json!({"id": "A", "areas": ["/Ljubljana", "/Ljubljana/Center"]}));
+
+        assert_eq!(result.unwrap(), Some(json!(["/Ljubljana", "/Ljubljana/Center"])));
+    }
+
+    #[test]
+    fn a_scope_reading_a_one_item_list_field_gives_a_single_scope() {
+        let result = generate_thing_scope(r#""{{ areas }}""#, &json!({"id": "A", "areas": ["/Ljubljana"]}));
+
+        assert_eq!(result.unwrap(), Some(json!("/Ljubljana")));
+    }
+
+    #[test]
+    fn a_list_field_in_a_scope_list_joins_the_other_scopes_without_duplicates() {
+        let result = generate_thing_scope(
+            r#"["/Ljubljana", "{{ areas }}"]"#,
+            &json!({"id": "A", "areas": ["/Ljubljana/Center", "/Ljubljana"]}),
+        );
+
+        assert_eq!(result.unwrap(), Some(json!(["/Ljubljana", "/Ljubljana/Center"])));
+    }
+
+    #[test]
+    fn a_scope_reading_a_list_with_no_scope_items_gives_no_scope() {
+        for areas in [json!([]), json!([null, ""])] {
+            let result = generate_thing_scope(r#""{{ areas }}""#, &json!({"id": "A", "areas": areas}));
+
+            assert_eq!(result.unwrap(), None, "{areas}");
+        }
+    }
+
+    #[test]
+    fn a_scope_expression_resolving_to_a_list_gives_one_scope_per_item() {
+        let result = generate_thing_scope(r#""{{ areas | reverse }}""#, &json!({"id": "A", "areas": ["/Ljubljana", "/Maribor"]}));
+
+        assert_eq!(result.unwrap(), Some(json!(["/Ljubljana", "/Maribor"])));
+    }
+
+    #[test]
+    fn a_list_item_that_is_not_text_is_refused_naming_its_position_and_type() {
+        for (item, shape) in [
+            (json!(3), NonTextShape::Number),
+            (json!(true), NonTextShape::Boolean),
+            (json!(["/Maribor"]), NonTextShape::Array),
+            (json!({"city": "Maribor"}), NonTextShape::Object),
+        ] {
+            let result = generate_thing_scope(r#""{{ areas }}""#, &json!({"id": "A", "areas": ["/Ljubljana", item]}));
+
+            assert!(
+                matches!(
+                    &result,
+                    Err(UrnError::ScopeItemNotText { template, position: 2, shape: held }) if template.as_str() == "{{ areas }}" && *held == shape
+                ),
+                "{item}: {result:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_list_item_that_is_not_text_is_named_by_itself_in_the_message() {
+        let result = generate_thing_scope(r#""{{ areas }}""#, &json!({"id": "A", "areas": ["/Ljubljana", 3]}));
+
+        assert_eq!(
+            result.unwrap_err().to_string(),
+            "The scope template `{{ areas }}` gives a list whose item 2 holds a number, not a scope"
+        );
+    }
+
+    #[test]
+    fn a_list_item_that_is_not_a_legal_scope_is_rejected_quoting_the_item_alone() {
+        let result = generate_thing_scope(r#""{{ areas }}""#, &json!({"id": "A", "areas": ["/Ljubljana", "/Novo mesto"]}));
+
+        assert!(
+            matches!(
+                &result,
+                Err(UrnError::InvalidScope { rejected, source: NgsiLdError::InvalidScope { .. } }) if &**rejected == "/Novo mesto"
+            ),
+            "{result:?}"
+        );
+    }
+
+    #[test]
+    fn a_list_item_resolving_to_the_ngsi_ld_null_is_rejected() {
+        let result = generate_thing_scope(r#""{{ areas }}""#, &json!({"id": "A", "areas": ["/Ljubljana", "urn:ngsi-ld:null"]}));
+
+        assert!(is_null_scope_rejection(&result), "{result:?}");
     }
 
     /// Mints the identity of an `AircraftType` named by `identity` for one record.

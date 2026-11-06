@@ -76,6 +76,7 @@ impl Expansion<'_> {
                 | UrnError::InvalidScope { .. }
                 | UrnError::ScopeFieldNotText { .. }
                 | UrnError::ScopeValueNotText { .. }
+                | UrnError::ScopeItemNotText { .. }
                 | UrnError::RelationshipMissingSource
                 | UrnError::NoRelationshipTarget),
             ) => Err(other.into()),

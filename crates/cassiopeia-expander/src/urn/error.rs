@@ -37,9 +37,9 @@ pub enum UrnError {
     },
 
     /// A scope template reads a field whose value is not text where a scope needs text: a field read
-    /// as the whole scope holds no string, or a field printed into a longer scope holds a boolean, an
-    /// array or an object. Its JSON rendering, such as `true`, would be written as a scope the
-    /// source never meant.
+    /// as the whole scope holds a boolean, a number or an object, or a field printed into a longer
+    /// scope holds a boolean, an array or an object. Its JSON rendering, such as `true`, would be
+    /// written as a scope the source never meant.
     #[error("The scope template `{template}` reads `{field}`, which holds {shape}, not a scope")]
     ScopeFieldNotText {
         /// The scope template exactly as the mapping document wrote it.
@@ -57,6 +57,18 @@ pub enum UrnError {
         /// The scope template exactly as the mapping document wrote it.
         template: TemplateSource,
         /// What the expression resolves to instead of text.
+        shape: NonTextShape,
+    },
+
+    /// A scope template resolves to a list of scopes, one of whose items is not text, so it names no
+    /// scope of its own.
+    #[error("The scope template `{template}` gives a list whose item {position} holds {shape}, not a scope")]
+    ScopeItemNotText {
+        /// The scope template exactly as the mapping document wrote it.
+        template: TemplateSource,
+        /// Where the item sits in the list, counted from 1.
+        position: usize,
+        /// What the item holds instead of text.
         shape: NonTextShape,
     },
 
