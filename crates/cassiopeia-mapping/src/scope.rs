@@ -22,10 +22,23 @@ pub enum Scope {
 #[derive(Debug, Clone)]
 pub enum CompiledScope {
     /// A single compiled scope template.
-    Single(CompiledTemplate),
+    Single(CompiledScopeTemplate),
 
     /// Several compiled scope templates.
-    Multiple(Vec<CompiledTemplate>),
+    Multiple(Vec<CompiledScopeTemplate>),
+}
+
+/// One compiled scope template, beside the template as the mapping document wrote it.
+///
+/// A record can be refused for what its scope template reads, such as a boolean field whose JSON
+/// rendering is no scope the source meant; the refusal names the template as written, which the
+/// compiled form no longer holds for a field reference or a concatenation.
+#[derive(Debug, Clone)]
+pub struct CompiledScopeTemplate {
+    /// The template exactly as the mapping document wrote it.
+    pub source: TemplateSource,
+    /// The template's compiled form.
+    pub compiled: CompiledTemplate,
 }
 
 #[cfg(test)]

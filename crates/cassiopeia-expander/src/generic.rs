@@ -71,9 +71,14 @@ impl Expansion<'_> {
                 self.losses.links.record(&path(), self.entity, error);
                 Ok(None)
             }
-            Err(other @ (UrnError::BuildUrn { .. } | UrnError::InvalidScope { .. } | UrnError::RelationshipMissingSource | UrnError::NoRelationshipTarget)) => {
-                Err(other.into())
-            }
+            Err(
+                other @ (UrnError::BuildUrn { .. }
+                | UrnError::InvalidScope { .. }
+                | UrnError::ScopeFieldNotText { .. }
+                | UrnError::ScopeValueNotText { .. }
+                | UrnError::RelationshipMissingSource
+                | UrnError::NoRelationshipTarget),
+            ) => Err(other.into()),
         }
     }
 }

@@ -6,7 +6,7 @@ use cassiopeia_mapping::{
     },
     error::{MappingError, Result},
     mapping::Mapping,
-    scope::{CompiledScope, Scope},
+    scope::{CompiledScope, CompiledScopeTemplate, Scope},
     source_reads::SourceReads,
     template::{CompiledTemplate, TemplateSource, runner::TemplateRunner},
     template_location::TemplateLocation,
@@ -79,7 +79,7 @@ impl ExpanderCompiler {
     /// A literal resolves to the same text for every record, so a literal that is no legal scope,
     /// or is the NGSI-LD Null that clause 4.18 reserves for a deleted scope, would skip every record
     /// the mapping reads. An empty literal is kept: it contributes no scope.
-    fn compile_scope(source: &TemplateSource, document: &Arc<Path>, runner: &mut TemplateRunner, reads: &mut SourceReads) -> Result<CompiledTemplate> {
+    fn compile_scope(source: &TemplateSource, document: &Arc<Path>, runner: &mut TemplateRunner, reads: &mut SourceReads) -> Result<CompiledScopeTemplate> {
         let compiled = Self::compile_template(source, document, runner, TemplateSite::Scope, reads)?;
         match &compiled {
             CompiledTemplate::Static(literal) if !literal.is_empty() => {
@@ -95,7 +95,12 @@ impl ExpanderCompiler {
             | CompiledTemplate::Complex(_) => {}
         }
 
-        Ok(compiled)
+        Ok(CompiledScopeTemplate {
+            // The mapping keeps its raw scope declaration, so the compiled scope owns a copy of the
+            // template text for a refused record to name.
+            source: source.clone(),
+            compiled,
+        })
     }
 
     /// Compiles one attribute's source and recurses into everything nested beneath it.

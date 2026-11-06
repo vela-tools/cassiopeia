@@ -1,4 +1,5 @@
-use cassiopeia_mapping::template::error::TemplateError;
+use crate::urn::non_text_shape::NonTextShape;
+use cassiopeia_mapping::template::{TemplateSource, error::TemplateError, field_path::FieldPath};
 use cassiopeia_ngsi_ld::entity::{error::NgsiLdError, name::NameBuf};
 use std::result;
 use thiserror::Error;
@@ -33,6 +34,30 @@ pub enum UrnError {
         /// Why the scope was rejected.
         #[source]
         source: NgsiLdError,
+    },
+
+    /// A scope template reads a field whose value is not text where a scope needs text: a field read
+    /// as the whole scope holds no string, or a field printed into a longer scope holds a boolean, an
+    /// array or an object. Its JSON rendering, such as `true`, would be written as a scope the
+    /// source never meant.
+    #[error("The scope template `{template}` reads `{field}`, which holds {shape}, not a scope")]
+    ScopeFieldNotText {
+        /// The scope template exactly as the mapping document wrote it.
+        template: TemplateSource,
+        /// The field the template reads.
+        field: FieldPath,
+        /// What the field holds instead of text.
+        shape: NonTextShape,
+    },
+
+    /// A scope template's expression resolves to a value that is not text, so its JSON rendering
+    /// would be written as a scope the source never meant.
+    #[error("The scope template `{template}` resolves to {shape}, not a scope")]
+    ScopeValueNotText {
+        /// The scope template exactly as the mapping document wrote it.
+        template: TemplateSource,
+        /// What the expression resolves to instead of text.
+        shape: NonTextShape,
     },
 
     /// A resolved identifier is empty, so no URN can be built.

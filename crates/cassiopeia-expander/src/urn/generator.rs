@@ -2,13 +2,15 @@ use crate::urn::{
     builder::UrnBuilder,
     error::{Result, UrnError},
     id_segment::IdSegment,
+    non_text_shape::NonTextShape,
 };
 use cassiopeia_mapping::{
     attribute::{Attribute, instance::AttributeInstance},
     mapping::Mapping,
-    scope::CompiledScope,
+    scope::{CompiledScope, CompiledScopeTemplate},
     template::{
         CompiledTemplate,
+        TemplatePart,
         resolver::{TemplateResolver, collect_identifiers},
     },
 };
@@ -67,8 +69,10 @@ impl UrnGenerator {
     ///
     /// # Errors
     ///
-    /// Returns [`UrnError`] when a scope template fails to resolve or its resolved text cannot be
-    /// the scope of a written entity: text that is not a legal NGSI-LD scope, or the NGSI-LD Null.
+    /// Returns [`UrnError`] when a scope template fails to resolve, reads or resolves to a value that
+    /// is not text (see [`UrnError::ScopeFieldNotText`] and [`UrnError::ScopeValueNotText`]), or its
+    /// resolved text cannot be the scope of a written entity: text that is not a legal NGSI-LD
+    /// scope, or the NGSI-LD Null.
     pub fn generate_scope(&self, mapping: &Mapping, data: &Value) -> Result<Option<NgsiLdScope>> {
         let Some(compiled_scope) = mapping.compiled_scope() else {
             return Ok(None);
@@ -262,15 +266,58 @@ impl UrnGenerator {
     /// or an empty result, as "no scope".
     ///
     /// A scope path is only meaningful whole: `/{{ country }}/{{ city }}` over a record with no city
-    /// must contribute no scope rather than `/Slovenia/null`, which is a legal but wrong scope.
-    fn resolve_scope_text(&self, template: &CompiledTemplate, data: &Value) -> Result<Option<String>> {
-        let text = match self.resolver.resolve_complete(template, data)? {
-            Some(Value::String(text)) => text,
-            None => return Ok(None),
-            Some(other @ (Value::Null | Value::Bool(_) | Value::Number(_) | Value::Array(_) | Value::Object(_))) => other.to_string(),
-        };
+    /// must contribute no scope rather than `/Slovenia/null`, which is a legal but wrong scope. For
+    /// the same reason a value that is not text is never written as its JSON rendering: a scope is a
+    /// string of levels (ETSI GS CIM 009 v1.9.1 clause 4.18), and `true` or `/Sensors/true` would be
+    /// legal but meaningless. Only a number printed into a longer scope, as in `/Floor{{ floor }}`,
+    /// is part of a level the source meant.
+    fn resolve_scope_text(&self, template: &CompiledScopeTemplate, data: &Value) -> Result<Option<String>> {
+        match &template.compiled {
+            CompiledTemplate::Composite(parts) => Self::refuse_non_text_parts(template, parts, data)?,
+            CompiledTemplate::Static(_) | CompiledTemplate::Simple(_) | CompiledTemplate::Expression(_) | CompiledTemplate::Complex(_) => {}
+        }
 
-        if text.is_empty() { Ok(None) } else { Ok(Some(text)) }
+        match self.resolver.resolve_complete(&template.compiled, data)? {
+            Some(Value::String(text)) => Ok((!text.is_empty()).then_some(text)),
+            Some(other @ (Value::Null | Value::Bool(_) | Value::Number(_) | Value::Array(_) | Value::Object(_))) => {
+                NonTextShape::of(&other).map_or(Ok(None), |shape| Err(Self::non_text_scope(template, shape)))
+            }
+            None => Ok(None),
+        }
+    }
+
+    /// Refuses a concatenated scope template whose field holds a boolean, an array or an object,
+    /// none of which prints as a level the source meant.
+    fn refuse_non_text_parts(template: &CompiledScopeTemplate, parts: &[TemplatePart], data: &Value) -> Result<()> {
+        parts.iter().try_for_each(|part| match part {
+            TemplatePart::Static(_) => Ok(()),
+            TemplatePart::Dynamic(field) => match field.lookup(data).and_then(NonTextShape::of) {
+                None | Some(NonTextShape::Number) => Ok(()),
+                Some(shape @ (NonTextShape::Boolean | NonTextShape::Array | NonTextShape::Object)) => Err(UrnError::ScopeFieldNotText {
+                    // The error outlives the record and the mapping the template is borrowed from.
+                    template: template.source.clone(),
+                    field: field.clone(),
+                    shape,
+                }),
+            },
+        })
+    }
+
+    /// The error for a scope template that resolved to a value of `shape` rather than text, naming
+    /// the field when the template reads one field whole.
+    fn non_text_scope(template: &CompiledScopeTemplate, shape: NonTextShape) -> UrnError {
+        // The error outlives the record and the mapping the template is borrowed from.
+        let source = template.source.clone();
+        match &template.compiled {
+            CompiledTemplate::Simple(field) => UrnError::ScopeFieldNotText {
+                template: source,
+                field: field.clone(),
+                shape,
+            },
+            CompiledTemplate::Static(_) | CompiledTemplate::Composite(_) | CompiledTemplate::Expression(_) | CompiledTemplate::Complex(_) => {
+                UrnError::ScopeValueNotText { template: source, shape }
+            }
+        }
     }
 
     /// Validates resolved scope text into the scope of the entity being written.
@@ -289,7 +336,7 @@ impl UrnGenerator {
 mod tests {
     use crate::{
         compiler::ExpanderCompiler,
-        urn::{error::UrnError, generator::UrnGenerator},
+        urn::{error::UrnError, generator::UrnGenerator, non_text_shape::NonTextShape},
     };
     use cassiopeia_mapping::{mapping::Mapping, template::runner::TemplateRunner};
     use cassiopeia_ngsi_ld::entity::error::NgsiLdError;
@@ -374,6 +421,100 @@ mod tests {
             ),
             "{result:?}"
         );
+    }
+
+    /// Whether `result` refuses the scope template `template` for reading `field` as `shape`.
+    fn is_field_not_text(result: &Result<Option<Value>, UrnError>, template: &str, field: &str, shape: NonTextShape) -> bool {
+        matches!(
+            result,
+            Err(UrnError::ScopeFieldNotText { template: refused, field: read, shape: held })
+                if refused.as_str() == template && read.as_str() == field && *held == shape
+        )
+    }
+
+    #[test]
+    fn a_scope_reading_a_boolean_field_whole_is_refused_naming_the_field_and_its_type() {
+        let result = generate_thing_scope(r#""{{ indoor }}""#, &json!({"id": "A", "indoor": true}));
+
+        assert!(is_field_not_text(&result, "{{ indoor }}", "indoor", NonTextShape::Boolean), "{result:?}");
+        assert_eq!(
+            result.unwrap_err().to_string(),
+            "The scope template `{{ indoor }}` reads `indoor`, which holds a boolean, not a scope"
+        );
+    }
+
+    #[test]
+    fn a_scope_printing_a_boolean_field_into_a_level_is_refused() {
+        let result = generate_thing_scope(r#""/Sensors/{{ indoor }}""#, &json!({"id": "B", "indoor": false}));
+
+        assert!(
+            is_field_not_text(&result, "/Sensors/{{ indoor }}", "indoor", NonTextShape::Boolean),
+            "{result:?}"
+        );
+    }
+
+    #[test]
+    fn a_scope_list_with_a_template_reading_a_boolean_field_is_refused() {
+        let result = generate_thing_scope(r#"["/Madrid", "/Sensors/{{ indoor }}"]"#, &json!({"id": "A", "indoor": true}));
+
+        assert!(
+            is_field_not_text(&result, "/Sensors/{{ indoor }}", "indoor", NonTextShape::Boolean),
+            "{result:?}"
+        );
+    }
+
+    #[test]
+    fn a_scope_reading_a_number_an_array_or_an_object_whole_is_refused_naming_its_type() {
+        for (value, shape) in [
+            (json!(3), NonTextShape::Number),
+            (json!(["Madrid"]), NonTextShape::Array),
+            (json!({"city": "Madrid"}), NonTextShape::Object),
+        ] {
+            let result = generate_thing_scope(r#""{{ zone }}""#, &json!({"id": "A", "zone": value}));
+
+            assert!(is_field_not_text(&result, "{{ zone }}", "zone", shape), "{value}: {result:?}");
+        }
+    }
+
+    #[test]
+    fn a_scope_printing_an_array_or_an_object_into_a_level_is_refused() {
+        for (value, shape) in [(json!(["Madrid"]), NonTextShape::Array), (json!({"city": "Madrid"}), NonTextShape::Object)] {
+            let result = generate_thing_scope(r#""/Zone/{{ zone }}""#, &json!({"id": "A", "zone": value}));
+
+            assert!(is_field_not_text(&result, "/Zone/{{ zone }}", "zone", shape), "{value}: {result:?}");
+        }
+    }
+
+    #[test]
+    fn a_scope_printing_a_number_into_a_level_is_generated() {
+        let result = generate_thing_scope(r#""/Floor{{ floor }}""#, &json!({"id": "A", "floor": 3}));
+
+        assert_eq!(result.unwrap(), Some(json!("/Floor3")));
+    }
+
+    #[test]
+    fn a_scope_expression_resolving_to_a_number_is_refused_naming_its_type() {
+        let result = generate_thing_scope(r#""{{ floor + 1 }}""#, &json!({"id": "A", "floor": 3}));
+
+        assert!(
+            matches!(&result, Err(UrnError::ScopeValueNotText { template, shape: NonTextShape::Number }) if template.as_str() == "{{ floor + 1 }}"),
+            "{result:?}"
+        );
+        assert_eq!(
+            result.unwrap_err().to_string(),
+            "The scope template `{{ floor + 1 }}` resolves to a number, not a scope"
+        );
+    }
+
+    #[test]
+    fn a_scope_over_a_null_or_missing_field_still_gives_no_scope() {
+        for record in [json!({"id": "A", "indoor": null}), json!({"id": "A"})] {
+            for scope in [r#""{{ indoor }}""#, r#""/Sensors/{{ indoor }}""#] {
+                let result = generate_thing_scope(scope, &record);
+
+                assert_eq!(result.unwrap(), None, "{scope} over {record}");
+            }
+        }
     }
 
     /// Mints the identity of an `AircraftType` named by `identity` for one record.
