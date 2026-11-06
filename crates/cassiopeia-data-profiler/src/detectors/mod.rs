@@ -1,10 +1,19 @@
 use crate::{
     content::Content,
-    detectors::{csv::CsvDetector, grib::GribDetector, json::JsonDetector, kml::KmlDetector, shapefile::ShapefileDetector, xml::XmlDetector},
+    detectors::{
+        csv::CsvDetector,
+        geopackage::GeoPackageDetector,
+        grib::GribDetector,
+        json::JsonDetector,
+        kml::KmlDetector,
+        shapefile::ShapefileDetector,
+        xml::XmlDetector,
+    },
     profile::Profile,
 };
 
 pub mod csv;
+pub mod geopackage;
 pub mod grib;
 pub mod json;
 pub mod kml;
@@ -24,14 +33,22 @@ pub trait Detector: Send + Sync {
 /// The detectors run by [`crate::profile_path`] and [`crate::profile_bytes`], in order.
 ///
 /// Order is significant: the cheapest and most specific check runs first. GRIB is an unambiguous
-/// four-octet binary magic, so it leads; then the shapefile (its own four-octet file code, or a `.shp`
-/// zip member), then KML and the JSON family. KML is itself XML, so the specific KML check must precede
+/// four-octet binary magic, so it leads; then the `GeoPackage` (the SQLite header and its `application_id`),
+/// then the shapefile (its own four-octet file code, or a `.shp` zip member), then KML and the JSON family. KML is itself XML, so the specific KML check must precede
 /// the permissive generic-XML detector; that generic-XML detector in turn precedes the CSV detector,
 /// which would otherwise accept many delimited text files. The slice is `'static`: no per-call
 /// allocation occurs.
 #[must_use]
 pub const fn default_detectors() -> &'static [&'static dyn Detector] {
-    &[&GribDetector, &ShapefileDetector, &KmlDetector, &JsonDetector, &XmlDetector, &CsvDetector]
+    &[
+        &GribDetector,
+        &GeoPackageDetector,
+        &ShapefileDetector,
+        &KmlDetector,
+        &JsonDetector,
+        &XmlDetector,
+        &CsvDetector,
+    ]
 }
 
 #[cfg(test)]
@@ -58,8 +75,8 @@ mod tests {
     }
 
     #[test]
-    fn there_are_exactly_six_detectors() {
-        assert_eq!(default_detectors().len(), 6);
+    fn there_are_exactly_seven_detectors() {
+        assert_eq!(default_detectors().len(), 7);
     }
 
     #[test]

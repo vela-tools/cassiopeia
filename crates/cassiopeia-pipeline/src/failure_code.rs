@@ -72,6 +72,7 @@ const fn ingestor_code(error: &IngestorError) -> IngestCode {
         | IngestorError::Io { .. }
         | IngestorError::Csv(_)
         | IngestorError::GeoJson(_)
+        | IngestorError::GeoPackage(_)
         | IngestorError::Grib(_)
         | IngestorError::Json(_)
         | IngestorError::Kml(_)

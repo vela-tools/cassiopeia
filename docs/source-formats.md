@@ -4,7 +4,7 @@ Cassiopeia converts each supported source format into a sequence of records befo
 
 Most inputs can use automatic format detection. Cassiopeia inspects the source and selects the most specific supported format it recognizes. Declare the format when the source has no useful extension, its content is ambiguous, or you want the run configuration to make the choice explicit.
 
-The format can be set on a manifest input with `format`, or through the equivalent command-line option. The accepted values are `csv`, `json`, `geojson`, `kml`, `kmz`, `xml`, `shapefile`, and `grib`.
+The format can be set on a manifest input with `format`, or through the equivalent command-line option. The accepted values are `csv`, `json`, `geojson`, `kml`, `kmz`, `xml`, `shapefile`, `geopackage`, and `grib`.
 
 ## At a glance
 
@@ -16,13 +16,14 @@ The format can be set on a manifest input with `format`, or through the equivale
 | KML or KMZ | One record per placemark | `properties` and `geometry` | Folders become collections |
 | XML | Determined by the repeated-child convention | Folded element tree with `@` and `#` keys | No |
 | ESRI Shapefile | One record per feature | `properties` and WGS84 `geometry` | Multiple layers become collections |
+| GeoPackage | One record per table row | `properties` and, for features, WGS84 `geometry` | Multiple tables become collections |
 | GRIB | One record per unmasked grid cell | Coordinates, times, level, and parameter columns | No |
 
-The collection column matters when a source contains several logical groups that need different mappings. KML folders, multi-layer Shapefile archives, and nested JSON arrays are currently the only formats that provide collections.
+The collection column matters when a source contains several logical groups that need different mappings. KML folders, multi-layer Shapefile archives, multi-table GeoPackages, and nested JSON arrays are currently the only formats that provide collections.
 
 ## Automatic detection and explicit format
 
-Automatic detection uses the source content. A JSON document that is also valid GeoJSON is classified as GeoJSON rather than generic JSON. Cassiopeia checks for KML before generic XML and distinguishes a Shapefile archive from other ZIP files by its contents. It identifies GRIB from its binary marker and reads the edition from the header.
+Automatic detection uses the source content. A JSON document that is also valid GeoJSON is classified as GeoJSON rather than generic JSON. Cassiopeia checks for KML before generic XML and distinguishes a Shapefile archive from other ZIP files by its contents. It identifies GRIB from its binary marker and reads the edition from the header. It recognizes a GeoPackage from its SQLite header and the `application_id` it declares, including the `GP10` and `GP11` identifiers of GeoPackage 1.0 and 1.1, so a plain SQLite database is not mistaken for one.
 
 Use an explicit format when detection does not have enough context. For example, a small or unusual delimited file may need to be declared as CSV. A source downloaded without a meaningful filename may also need an explicit format in the run configuration.
 
@@ -42,7 +43,7 @@ CSV · text/csv · 90% confidence
 delimiter "," · quote "\"" · skipRows 0 · headerRows 1 · terminator "crlf" · encoding "UTF-8"
 ~~~
 
-The report has at most three lines. The first names the file and gives its size. The second shows the detection result: the format, its media type, and a confidence score. The third appears only when the format has detectable parsing details. For CSV, it shows the dialect above: the delimiter, the quoting, the preamble, the header, the line terminator, and the character encoding. It uses the member names and value syntax of a manifest input's [`dialect`](manifest.md#csv-dialect), so a member that detection got wrong can be copied into a manifest and corrected there. For GRIB, it shows the edition. Formats that need no such parameters, including JSON, GeoJSON, KML, XML, and Shapefile, print only the first two lines.
+The report has at most three lines. The first names the file and gives its size. The second shows the detection result: the format, its media type, and a confidence score. The third appears only when the format has detectable parsing details. For CSV, it shows the dialect above: the delimiter, the quoting, the preamble, the header, the line terminator, and the character encoding. It uses the member names and value syntax of a manifest input's [`dialect`](manifest.md#csv-dialect), so a member that detection got wrong can be copied into a manifest and corrected there. For GRIB, it shows the edition. Formats that need no such parameters, including JSON, GeoJSON, KML, XML, Shapefile, and GeoPackage, print only the first two lines.
 
 ~~~text
 stations.geojson · 4.2 KiB
@@ -560,6 +561,49 @@ The `.dbf` companion is required because it carries the feature attributes. A ba
 
 A ZIP containing one Shapefile layer produces ordinary records without a collection label. A ZIP containing several `.shp` layers gives each layer a collection label based on its filename without the extension. Use collection-specific manifest bindings when the layers need different mappings.
 
+## GeoPackage
+
+A GeoPackage source is an OGC GeoPackage file (`.gpkg`): a SQLite database that lists its data tables in a `gpkg_contents` catalog. Cassiopeia reads every table listed with the `features` data type and every table listed with the `attributes` data type, then emits one record per row. Tile and gridded-coverage tables hold raster pyramids rather than records, so Cassiopeia skips them.
+
+Each record has this general shape:
+
+~~~json
+{
+    "properties": {
+        "fid": 1,
+        "name": "Main station",
+        "active": true,
+        "level": 21.5,
+        "opened": "2026-06-03"
+    },
+    "geometry": {
+        "type": "Point",
+        "coordinates": [
+            14.51,
+            46.05
+        ]
+    }
+}
+~~~
+
+Table columns are under `properties`, named exactly as in the table. The primary key comes first under its own column name, usually `fid`, so a mapping can use it in the entity identifier. Cassiopeia converts each value by its column's declared type: `BOOLEAN` becomes a boolean, the integer types and `FLOAT`, `DOUBLE`, and `REAL` become numbers, `TEXT` stays a string, `DATE` becomes an ISO 8601 date such as `2026-06-03`, and `DATETIME` becomes an ISO 8601 timestamp such as `2026-06-03T12:30:05.250Z`. Besides the strict GeoPackage form, `DATETIME` text in the common ISO 8601 variants is accepted, such as second precision, a space separator, or a numeric UTC offset; an offset is kept in the output. A `BLOB` column becomes its standard base64 encoding, the form GDAL uses for binary fields when it writes GeoJSON. Cassiopeia omits `NULL` columns.
+
+Rows of an attributes table have no `geometry` member. A feature whose geometry is `NULL` or empty has no `geometry` member either.
+
+### Geometry and coordinate reference systems
+
+GeoPackage geometries are emitted as GeoJSON for use as NGSI-LD `GeoProperty` values. Each feature table names its coordinate reference system through the `srs_id` of its geometry column, which `gpkg_spatial_ref_sys` defines. Cassiopeia reads that definition, preferring the WKT2 form of the `gpkg_crs_wkt` extension when the file has one, and reprojects the geometry to EPSG:4326, using WGS84 longitude and latitude. An EPSG:4326 table is emitted unchanged. A table whose definition is `undefined`, as it is for the reserved `srs_id` values `0` and `-1`, is assumed to be EPSG:4326 already: Cassiopeia emits its coordinates unchanged and logs a warning. A geometry column whose `srs_id` has no `gpkg_spatial_ref_sys` row fails the read.
+
+Geometries keep their X and Y coordinates only; Z and M values are dropped. Curved geometry types, such as `CIRCULARSTRING` and `COMPOUNDCURVE`, have no GeoJSON form, and a row holding one fails the read.
+
+### Build feature
+
+GeoPackage support is the `geopackage` Cargo feature, on in the default build. It compiles a bundled SQLite from C and links it statically. A build without it, such as one made with `--no-default-features`, still detects a GeoPackage but reports it as unsupported instead of reading it. Run `cassiopeia --version` to see whether a binary has it: its `features` line shows `+geopackage` or `-geopackage`. See [GeoPackage and SQLite](getting-started.md#geopackage-and-sqlite).
+
+### Multiple tables
+
+A GeoPackage with one record table produces ordinary records without a collection label. A GeoPackage with several record tables, counting both feature and attributes tables, gives each table's records a collection label equal to the table name. Use collection-specific manifest bindings when the tables need different mappings.
+
 ## GRIB
 
 GRIB is a binary format for gridded meteorological and climate data. Cassiopeia supports GRIB1 and GRIB2 through the single `grib` source format and reads the edition from the file header.
@@ -673,11 +717,11 @@ With the default build, ecCodes can decode projected GRIB2 grids, such as the La
 
 Start by looking at one profiled record, not at the original file alone. Then build the mapping around the fields Cassiopeia actually exposes:
 
-1. Identify the record boundary: row, JSON object, GeoJSON feature, placemark, XML repeated child, Shapefile feature, or grid cell.
+1. Identify the record boundary: row, JSON object, GeoJSON feature, placemark, XML repeated child, Shapefile feature, GeoPackage table row, or grid cell.
 2. Locate the values in the record shape, including containers such as `properties`, `geometry`, and XML `@` or `#` fields.
 3. Decide whether the source value already has the required JSON type or needs a transformation.
 4. For geometry, select `GeoProperty`. A complete GeoJSON geometry needs no transformation; coordinates need the geometry transformation that matches the type to build.
-5. For KML folders or multi-layer Shapefiles, decide whether collection-specific mappings are needed.
+5. For KML folders, multi-layer Shapefiles, or multi-table GeoPackages, decide whether collection-specific mappings are needed.
 
 The [mapping guide](mapping.md) explains the mapping language in detail. The format page tells you what the source record looks like; it does not replace the mapping's responsibility to choose the target entity identity and attribute model.
 

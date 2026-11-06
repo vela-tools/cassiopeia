@@ -52,7 +52,8 @@ bindman-utils = { version = "0.2.3", optional = true }
 shadow-rs = "2.0.0"
 
 [features]
-default = ["grib1", "grib2-full"]
+default = ["geopackage", "grib1", "grib2-full"]
+geopackage = ["cassiopeia-pipeline/geopackage"]
 grib1 = ["cassiopeia-pipeline/grib1", "dep:bindman-utils", "dep:eccodes-sys"]
 grib2-full = ["cassiopeia-pipeline/grib2-full", "dep:bindman-utils", "dep:eccodes-sys"]
 

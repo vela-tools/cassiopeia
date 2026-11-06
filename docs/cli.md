@@ -207,6 +207,8 @@ Generate a manifest file from command-line arguments
     WMO GRIB gridded binary (meteorological/climate fields)
   - `shapefile`:
     ESRI Shapefile: a geometry `.shp` with its companion `.dbf`/`.shx`/`.prj`/`.cpg` files
+  - `geopackage`:
+    OGC `GeoPackage`: a SQLite database holding feature and attribute tables
   - `xml`:
     Generic XML
 
@@ -392,6 +394,8 @@ Map data to a Smart Data Model
     WMO GRIB gridded binary (meteorological/climate fields)
   - `shapefile`:
     ESRI Shapefile: a geometry `.shp` with its companion `.dbf`/`.shx`/`.prj`/`.cpg` files
+  - `geopackage`:
+    OGC `GeoPackage`: a SQLite database holding feature and attribute tables
   - `xml`:
     Generic XML
 

@@ -8,6 +8,7 @@ license.workspace = true
 repository.workspace = true
 
 [dependencies]
+base64 = { version = "0.23.1", optional = true }
 bytecount = "0.6.9"
 cassiopeia-common.workspace = true
 cassiopeia-crs.workspace = true
@@ -23,6 +24,7 @@ encoding_rs = "0.8.44"
 encoding_rs_rw = "0.4.3"
 geo-types = "0.7.20"
 geojson = "1.0.0"
+geopackage = { version = "0.13.0", features = ["bundled"], optional = true }
 grib = { version = "0.20.3", default-features = false, features = ["ccsds-unpack-with-rust-aec", "jpeg2000-unpack-with-hayro", "png-unpack-with-png-crate", "time-calculation"] }
 indexmap = "2.14.2"
 kml = { version = "0.15.0", features = ["geo-types"] }
@@ -39,13 +41,15 @@ tracing = "0.1.44"
 zip = { version = "9.4.1", default-features = false, features = ["deflate"] }
 
 [features]
-default = ["grib1", "grib2-full"]
+default = ["geopackage", "grib1", "grib2-full"]
+geopackage = ["dep:base64", "dep:geopackage"]
 grib1 = ["dep:eccodes"]
 grib2-full = ["dep:eccodes"]
 
 [dev-dependencies]
 cassiopeia-data-profiler.workspace = true
 cassiopeia-encoding-detection.workspace = true
+geopackage-core = "0.13.0"
 grib-core = "0.7.0"
 grib-writer = "0.7.0"
 mediatype = "0.23.0"

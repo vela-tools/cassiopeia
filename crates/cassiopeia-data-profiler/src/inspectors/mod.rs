@@ -17,7 +17,7 @@ pub mod grib;
 /// same way regardless of how the format was chosen: a declared CSV keeps its real dialect and a
 /// declared GRIB keeps its edition, exactly as the detected paths attach them. A CSV yields its
 /// dialect and a GRIB its edition; a self-describing or schemaless format (JSON, `GeoJSON`, KML, KMZ,
-/// Shapefile, XML) has no structural inspector and yields `None`, its record shape deferred to the
+/// Shapefile, `GeoPackage`, XML) has no structural inspector and yields `None`, its record shape deferred to the
 /// ingestor.
 ///
 /// `statement` is what the source's manifest input states about a CSV dialect: the inspector takes the
@@ -33,7 +33,14 @@ pub fn inspect(format: DataFormat, content: &Content<'_>, statement: &DialectSta
             Ok(Some(FormatMetadata::Csv(CsvMetadata::new(dialect))))
         }
         DataFormat::Grib => Ok(GribInspector::inspect(content.bytes()).map(FormatMetadata::Grib)),
-        DataFormat::Auto | DataFormat::Json | DataFormat::GeoJson | DataFormat::Kml | DataFormat::Kmz | DataFormat::Shapefile | DataFormat::Xml => Ok(None),
+        DataFormat::Auto
+        | DataFormat::Json
+        | DataFormat::GeoJson
+        | DataFormat::Kml
+        | DataFormat::Kmz
+        | DataFormat::Shapefile
+        | DataFormat::GeoPackage
+        | DataFormat::Xml => Ok(None),
     }
 }
 
@@ -69,6 +76,11 @@ mod tests {
         assert!(inspect(DataFormat::Json, &Content::new(b"{}"), &DialectStatement::NOTHING).unwrap().is_none());
         assert!(
             inspect(DataFormat::Shapefile, &Content::new(b"anything"), &DialectStatement::NOTHING)
+                .unwrap()
+                .is_none()
+        );
+        assert!(
+            inspect(DataFormat::GeoPackage, &Content::new(b"anything"), &DialectStatement::NOTHING)
                 .unwrap()
                 .is_none()
         );

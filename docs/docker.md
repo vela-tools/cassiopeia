@@ -22,7 +22,7 @@ Pull the image:
 docker pull ghcr.io/vela-tools/cassiopeia:latest
 ```
 
-Unlike the prebuilt release binaries, the image is a **default build**. Its runtime layer links ecCodes, so it decodes both GRIB2 and GRIB1. The host does not need any additional system dependency for GRIB1. See [GRIB1 and ecCodes](getting-started.md#grib1-and-eccodes) for background.
+Unlike the prebuilt release binaries, the image is a **default build**. Its runtime layer links ecCodes, so it decodes both GRIB2 and GRIB1, and it carries a statically linked SQLite, so it reads GeoPackage files. The host does not need any additional system dependency for either. See [GRIB1 and ecCodes](getting-started.md#grib1-and-eccodes) and [GeoPackage and SQLite](getting-started.md#geopackage-and-sqlite) for background.
 
 ## Verifying the image
 

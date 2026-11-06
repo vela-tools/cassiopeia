@@ -1,10 +1,9 @@
-use crate::shapefile::error::ShapefileIngestError;
+use crate::{shapefile::error::ShapefileIngestError, wgs84_geometry::wgs84_geometry_value};
 use cassiopeia_common::collection::CollectionName;
 use cassiopeia_crs::source::SourceCrs;
 use cassiopeia_ir::record::Record;
 use dbase::{FieldValue, Record as DbaseRecord};
 use geo_types::Geometry;
-use geojson::{Geometry as GeoJsonGeometry, GeometryValue};
 use serde_json::{Map, Number, Value};
 use shapefile::Shape;
 
@@ -52,13 +51,7 @@ fn shape_to_geojson(shape: Shape, crs: Option<&SourceCrs>) -> Result<Option<Valu
     }
 
     let geometry = Geometry::<f64>::try_from(shape).map_err(ShapefileIngestError::Read)?;
-    let geometry = match crs {
-        Some(crs) => crs.reproject(&geometry)?,
-        None => geometry,
-    };
-
-    let geojson_geometry = GeoJsonGeometry::new(GeometryValue::from(&geometry));
-    Ok(serde_json::to_value(&geojson_geometry).ok())
+    Ok(wgs84_geometry_value(geometry, crs)?)
 }
 
 /// Converts a `.dbf` field value to a JSON value, returning `None` for a null field so it is omitted.

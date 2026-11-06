@@ -4,7 +4,7 @@ use cassiopeia_ir::record::Record;
 
 /// A data ingestor that reads from input sources and produces records.
 ///
-/// Each implementation handles a specific data format (CSV, JSON, `GeoJSON`, KML).
+/// Each implementation handles a specific data format (CSV, JSON, `GeoJSON`, KML, `GeoPackage`, and others).
 /// The ingestor is consumed when `ingest` is called, sending batches of records
 /// through the provided channel.
 pub trait Ingestor: Send {

@@ -27,7 +27,7 @@ Every run needs an input and a mapping that shapes it:
 - `--input` (`-i`): the data source, a local file path or an `http`/`https` URL.
 - `--input-header`: an extra request header sent when fetching a remote input, written `"Name: Value"`. Repeat the flag for several headers. This is where a source's API key goes, for example `--input-header "X-Api-Key: <key>"`. A local input refuses it. The manifest form is the input's `headers` (see the [manifest guide](manifest.md#per-input-headers)).
 - `--mapping` (`-m`): the JSON5 mapping file that defines the transformation rules.
-- `--type` (`-t`): the source format. It defaults to `auto`, which detects the format from the content, so you rarely need to set it. Give it explicitly when detection cannot tell, such as with a headerless CSV, or when you want to force a specific reader. The accepted values are `auto`, `csv`, `json`, `geojson`, `kml`, `kmz`, `grib`, `shapefile`, and `xml`.
+- `--type` (`-t`): the source format. It defaults to `auto`, which detects the format from the content, so you rarely need to set it. Give it explicitly when detection cannot tell, such as with a headerless CSV, or when you want to force a specific reader. The accepted values are `auto`, `csv`, `json`, `geojson`, `kml`, `kmz`, `grib`, `shapefile`, `geopackage`, and `xml`.
 
 The [source-format guide](source-formats.md) describes the records each format produces and how detection works.
 

@@ -26,18 +26,24 @@ enum Capability {
 }
 
 /// The optional, feature-gated capabilities this build may carry, each paired with whether it was
-/// compiled in. Both GRIB features link the native ecCodes library, so a build can legitimately ship
-/// without either; the banner has to make that difference visible. `grib1` routes GRIB1 through
-/// ecCodes; `grib2-full` routes GRIB2 through ecCodes too (projected grids and more parameter tables),
-/// versus the always-present pure-Rust GRIB2 fallback.
-const fn capabilities() -> [(&'static str, Capability); 2] {
+/// compiled in. Each one links native C code, so a build can legitimately ship without it; the banner
+/// has to make that difference visible. `geopackage` reads `GeoPackage` files through a bundled SQLite.
+/// Both GRIB features link the native ecCodes library: `grib1` routes GRIB1 through ecCodes;
+/// `grib2-full` routes GRIB2 through ecCodes too (projected grids and more parameter tables), versus
+/// the always-present pure-Rust GRIB2 fallback.
+const fn capabilities() -> [(&'static str, Capability); 3] {
+    let geopackage = if cfg!(feature = "geopackage") {
+        Capability::Present
+    } else {
+        Capability::Absent
+    };
     let grib1 = if cfg!(feature = "grib1") { Capability::Present } else { Capability::Absent };
     let grib2_full = if cfg!(feature = "grib2-full") {
         Capability::Present
     } else {
         Capability::Absent
     };
-    [("grib1", grib1), ("grib2-full", grib2_full)]
+    [("geopackage", geopackage), ("grib1", grib1), ("grib2-full", grib2_full)]
 }
 
 /// Renders the feature-flag line: each optional capability marked `+name` when compiled in or
@@ -150,6 +156,15 @@ mod tests {
         assert!(block.contains(LICENSE));
         assert!(block.contains("built "));
         assert_eq!(block.lines().count(), 4);
+    }
+
+    #[test]
+    fn the_plain_long_version_reports_the_geopackage_capability_with_its_build_state() {
+        let block = render_long_version(Rendering::Plain);
+        let expected = if cfg!(feature = "geopackage") { "+geopackage" } else { "-geopackage" };
+
+        assert!(block.contains("features "));
+        assert!(block.contains(expected));
     }
 
     #[test]

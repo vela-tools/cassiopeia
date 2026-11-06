@@ -6,7 +6,7 @@
 
 <p align="center">
   <strong>Turn data from common formats into <a href="https://ngsi-ld.org/">NGSI-LD</a> entities.</strong><br>
-  Convert CSV, JSON, GeoJSON, KML/KMZ, XML, Shapefiles, and GRIB into validated, standards-compliant context data.
+  Convert CSV, JSON, GeoJSON, KML/KMZ, XML, Shapefiles, GeoPackages, and GRIB into validated, standards-compliant context data.
 </p>
 
 <p align="center">
@@ -34,7 +34,7 @@
 
 ## How it works
 
-Give Cassiopeia a source such as a CSV, JSON file, GeoJSON layer, or XML feed, then describe how its data maps to an entity type. Cassiopeia produces standards-compliant NGSI-LD entities, then either writes them to files or sends them to a context broker. It supports CSV, JSON, GeoJSON, KML/KMZ, XML, ESRI Shapefiles, and GRIB.
+Give Cassiopeia a source such as a CSV, JSON file, GeoJSON layer, or XML feed, then describe how its data maps to an entity type. Cassiopeia produces standards-compliant NGSI-LD entities, then either writes them to files or sends them to a context broker. It supports CSV, JSON, GeoJSON, KML/KMZ, XML, ESRI Shapefiles, GeoPackages, and GRIB.
 
 NGSI-LD is the linked-data model used by many smart-city, IoT, and dataspace platforms across Europe. Cassiopeia prepares data for these systems, but does not store or serve context itself.
 
@@ -122,7 +122,7 @@ git clone https://github.com/vela-tools/cassiopeia-examples.git
 cd cassiopeia-examples/examples/01-json-field-mapping
 ```
 
-The prebuilt binaries do not include ecCodes. They decode GRIB2 with the bundled pure-Rust reader, but they do not support GRIB1. To build from source with GRIB1 support, see [Getting started](docs/getting-started.md).
+The prebuilt binaries do not include ecCodes or SQLite. They decode GRIB2 with the bundled pure-Rust reader, but they do not support GRIB1 or GeoPackage. To build from source with GRIB1 and GeoPackage support, see [Getting started](docs/getting-started.md).
 
 ## Why?
 
@@ -148,7 +148,7 @@ Everything listed under FOSS remains in that edition permanently. Features relea
 
 ### FOSS
 
-The FOSS edition includes the transformation engine and everything needed to run it in production. It reads CSV, JSON, GeoJSON, KML/KMZ, XML, ESRI Shapefiles, and GRIB, detecting the format from the content. Mappings build entity attributes with templates, conditional logic, nested objects, relationships, and synthetic entities. The result can be emitted in any NGSI-LD representation and validated against Smart Data Model schemas before it leaves the pipeline. Entities go to files or straight to a context broker over HTTP.
+The FOSS edition includes the transformation engine and everything needed to run it in production. It reads CSV, JSON, GeoJSON, KML/KMZ, XML, ESRI Shapefiles, GeoPackages, and GRIB, detecting the format from the content. Mappings build entity attributes with templates, conditional logic, nested objects, relationships, and synthetic entities. The result can be emitted in any NGSI-LD representation and validated against Smart Data Model schemas before it leaves the pipeline. Entities go to files or straight to a context broker over HTTP.
 
 You can repeat runs without extra machinery: a manifest or command-line flag turns a one-off transformation into a poller on a fixed interval, a cron expression, or fixed times of day. The process stays in the foreground and keeps running until you stop it. That works for a container, a systemd unit, or a cron entry that owns the process lifecycle.
 

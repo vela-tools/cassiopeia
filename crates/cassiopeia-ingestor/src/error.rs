@@ -1,6 +1,7 @@
 use crate::{
     csv::error::CsvIngestError,
     geojson::error::GeoJsonIngestError,
+    geopackage::error::GeoPackageIngestError,
     grib::error::GribIngestError,
     json::error::JsonIngestError,
     kml::error::KmlIngestError,
@@ -36,6 +37,10 @@ pub enum IngestorError {
     /// A `GeoJSON` parsing error occurred.
     #[error(transparent)]
     GeoJson(#[from] GeoJsonIngestError),
+
+    /// A `GeoPackage` ingestion error occurred.
+    #[error(transparent)]
+    GeoPackage(#[from] GeoPackageIngestError),
 
     /// A GRIB parsing error occurred.
     #[error(transparent)]

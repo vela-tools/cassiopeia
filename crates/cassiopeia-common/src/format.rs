@@ -59,6 +59,15 @@ pub enum DataFormat {
     #[strum(serialize = "Shapefile")]
     Shapefile,
 
+    /// OGC `GeoPackage`: a SQLite database holding feature and attribute tables.
+    ///
+    /// Every `features` and `attributes` table listed in `gpkg_contents` is read; a file holding
+    /// several of them routes each table to its own collection.
+    #[serde(alias = "geopackage")]
+    #[value(name = "geopackage")]
+    #[strum(serialize = "GeoPackage")]
+    GeoPackage,
+
     /// Generic XML.
     ///
     /// Schemaless like JSON: the ingestor discovers records at parse time from a deterministic
@@ -86,6 +95,7 @@ impl DataFormat {
             DataFormat::Kmz => "kmz",
             DataFormat::Grib => "grib",
             DataFormat::Shapefile => "shp",
+            DataFormat::GeoPackage => "gpkg",
             DataFormat::Xml => "xml",
         }
     }
@@ -93,7 +103,8 @@ impl DataFormat {
     /// Whether this format can pack several logical record collections into one source.
     ///
     /// KML nests placemarks under sibling `<Folder>`s, a shapefile `.zip` bundle can hold several
-    /// `.shp` layers (each becoming one collection), and a JSON document can nest arrays of objects
+    /// `.shp` layers (each becoming one collection), a `GeoPackage` can hold several feature and
+    /// attribute tables (each becoming one collection), and a JSON document can nest arrays of objects
     /// (each labelled by its member path), so one source can carry collections a manifest routes to
     /// different entity types; CSV, `GeoJSON`, and XML are always a single collection.
     /// GRIB is single-collection too: its parameters are pivoted into columns of one location record
@@ -103,7 +114,7 @@ impl DataFormat {
     #[must_use]
     pub const fn supports_collections(&self) -> bool {
         match self {
-            DataFormat::Kml | DataFormat::Kmz | DataFormat::Shapefile | DataFormat::Json => true,
+            DataFormat::Kml | DataFormat::Kmz | DataFormat::Shapefile | DataFormat::GeoPackage | DataFormat::Json => true,
             DataFormat::Auto | DataFormat::Csv | DataFormat::GeoJson | DataFormat::Grib | DataFormat::Xml => false,
         }
     }
@@ -123,6 +134,7 @@ impl DataFormat {
             | DataFormat::Kmz
             | DataFormat::Grib
             | DataFormat::Shapefile
+            | DataFormat::GeoPackage
             | DataFormat::Xml => Some(self),
         }
     }
@@ -150,8 +162,9 @@ mod tests {
     }
 
     #[test]
-    fn only_the_kml_family_shapefile_and_json_support_multiple_collections() {
+    fn only_the_kml_family_shapefile_geopackage_and_json_support_multiple_collections() {
         assert!(DataFormat::Kml.supports_collections());
+        assert!(DataFormat::GeoPackage.supports_collections());
         assert!(DataFormat::Kmz.supports_collections());
         assert!(!DataFormat::Auto.supports_collections());
         assert!(!DataFormat::Csv.supports_collections());
@@ -180,6 +193,20 @@ mod tests {
     fn shapefile_deserializes_from_its_lowercase_alias_and_displays_conventionally() {
         assert_eq!(serde_json::from_str::<DataFormat>(r#""shapefile""#).unwrap(), DataFormat::Shapefile);
         assert_eq!(DataFormat::Shapefile.to_string(), "Shapefile");
+    }
+
+    #[test]
+    fn geopackage_carries_its_extension_supports_collections_and_survives_to_option() {
+        assert_eq!(DataFormat::GeoPackage.extension(), "gpkg");
+        assert!(DataFormat::GeoPackage.supports_collections());
+        assert_eq!(DataFormat::GeoPackage.to_option(), Some(DataFormat::GeoPackage));
+    }
+
+    #[test]
+    fn geopackage_deserializes_from_both_spellings_and_displays_conventionally() {
+        assert_eq!(serde_json::from_str::<DataFormat>(r#""geopackage""#).unwrap(), DataFormat::GeoPackage);
+        assert_eq!(serde_json::from_str::<DataFormat>(r#""geo-package""#).unwrap(), DataFormat::GeoPackage);
+        assert_eq!(DataFormat::GeoPackage.to_string(), "GeoPackage");
     }
 
     #[test]

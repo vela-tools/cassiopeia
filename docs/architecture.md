@@ -52,9 +52,9 @@ The profiler determines what a source contains. Detection is based on content an
 
 ### Ingestion
 
-Ingestors know about source formats, not about the target data model. They decode supported formats such as CSV, JSON, GeoJSON, KML and KMZ, XML, Shapefile, and GRIB into records. A record keeps the source fields and, for formats with folders or layers, the collection label that can select a mapping later.
+Ingestors know about source formats, not about the target data model. They decode supported formats such as CSV, JSON, GeoJSON, KML and KMZ, XML, Shapefile, GeoPackage, and GRIB into records. A record keeps the source fields and, for formats with folders, layers, or tables, the collection label that can select a mapping later.
 
-Each format has its own record boundary. CSV usually produces one record per row, GeoJSON one per feature, and KML one per placemark. JSON and XML use deterministic rules to find arrays of records. Shapefile layers and KML folders can be treated as separate collections within one source. These format-specific rules are described in the [source formats guide](source-formats.md).
+Each format has its own record boundary. CSV usually produces one record per row, GeoJSON one per feature, and KML one per placemark. JSON and XML use deterministic rules to find arrays of records. Shapefile layers, GeoPackage tables, and KML folders can be treated as separate collections within one source. These format-specific rules are described in the [source formats guide](source-formats.md).
 
 Coordinate conversion is part of input preparation. Source coordinates are reprojected to EPSG:4326 before the mapping consumes them.
 

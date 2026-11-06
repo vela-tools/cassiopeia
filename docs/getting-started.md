@@ -16,7 +16,7 @@ Then either restart your shell or source the Cargo environment for the current s
 source "$HOME/.cargo/env"
 ```
 
-GRIB is the only source format that links C code. Whether your build compiles that code depends on the features you choose, so read the next section before building.
+GRIB and GeoPackage are the only source formats that link C code. Whether your build compiles that code depends on the features you choose, so read the next two sections before building.
 
 ## GRIB1 and ecCodes
 
@@ -44,7 +44,11 @@ sudo apt install cmake g++ git libclang-dev libopenjp2-7-dev
 
 ecCodes, eckit, and libaec are built as shared libraries. `cargo install` copies them to `lib/cassiopeia` beside its `bin` directory, which is usually `~/.cargo/lib/cassiopeia`, and the binary finds them there. Keep that directory next to the binary. If you install to a custom root, set `CARGO_INSTALL_ROOT` rather than passing `--root`, because the build script cannot see `--root`. A binary built in place with `cargo build` loads the libraries from the target directory instead.
 
-If you do not need GRIB1, skip these tools and add `--no-default-features` to the install command you choose below. That build does not compile or link any C code, and GRIB2 on a regular latitude/longitude grid still works. It reports GRIB1 input as unsupported instead of decoding it.
+If you do not need GRIB1, skip these tools and add `--no-default-features --features geopackage` to the install command you choose below. That build does not compile ecCodes, and GRIB2 on a regular latitude/longitude grid still works. It reports GRIB1 input as unsupported instead of decoding it. Leave out `--features geopackage` too for a build that compiles no C code at all; it also reports GeoPackage input as unsupported.
+
+## GeoPackage and SQLite
+
+A GeoPackage is a SQLite database, so Cassiopeia reads it through SQLite. GeoPackage support is controlled by the `geopackage` Cargo feature, which is **on by default**. The feature compiles a bundled copy of SQLite from its C source as part of the build and links it statically, so the binary needs no SQLite library at run time and you do not install SQLite yourself. The build needs only a C compiler, which the Xcode command line tools on macOS and the GRIB1 build tools below already include. A build without the feature still recognizes a GeoPackage, but reports it as unsupported instead of reading it.
 
 ## Installing
 
@@ -76,7 +80,7 @@ gh attestation verify cassiopeia-linux-x86_64-musl.tar.xz --repo vela-tools/cass
 
 Add `--signer-workflow vela-tools/cassiopeia/.github/workflows/release.yaml` to pin the check to the release workflow rather than accepting any workflow in the repository.
 
-The release binaries are built with `--no-default-features`, so they do **not** link ecCodes. They can decode GRIB2 with the pure-Rust reader, but report GRIB1 input as unsupported. If you need GRIB1, build from source with the default features using one of the options below.
+The release binaries are built with `--no-default-features`, so they do **not** link ecCodes or SQLite. They can decode GRIB2 with the pure-Rust reader, but report GRIB1 and GeoPackage input as unsupported. If you need GRIB1 or GeoPackage, build from source with the default features using one of the options below.
 
 ### 2. Clone and install onto your PATH
 
@@ -110,7 +114,7 @@ cargo build --release
 
 The binary is left at `target/release/cassiopeia`, and you run it by that path.
 
-To build any of these without GRIB1, add `--no-default-features` to the command.
+To build any of these without GRIB1, add `--no-default-features --features geopackage` to the command.
 
 ## Confirm it runs
 
@@ -126,7 +130,7 @@ If you built a standalone binary instead, run it by its path:
 ./target/release/cassiopeia --version
 ```
 
-You should see the release number, the edition, the licence, and the build environment. This confirms that the toolchain and features are set up correctly and, for a default build, that ecCodes is linked.
+You should see the release number, the edition, the licence, and the build environment. The `features` line marks each optional capability `+` when it is compiled in and `-` when it is not. This confirms that the toolchain and features are set up correctly and, for a default build, that ecCodes and SQLite are linked.
 
 ## Run with Docker
 
