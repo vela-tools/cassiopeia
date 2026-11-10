@@ -3,6 +3,7 @@ use crate::{
     pipeline_stage::PipelineStage,
     stages::{
         misshapen_rows_report::report_misshapen_rows,
+        nonexistent_dates_report::report_nonexistent_dates,
         renamed_columns_report::report_renamed_columns,
         unreadable_tables_report::report_unreadable_tables,
     },
@@ -97,9 +98,34 @@ pub(crate) fn spawn_ingestor_bank(
     );
     let mut routes: ProfilerRoutes = HashMap::new();
 
+    for (format, factory) in ingestor_factories(mapping_binding) {
+        let (ingestor_tx, ingestor_rx) = channel_with_telemetry::<Signal<ProfiledPayload, ProfilerError>>(
+            channel_policy,
+            Some(Arc::clone(telemetry)),
+            Some(ChannelBoundary::between(Stage::Profiler, Stage::Ingestor)),
+        );
+        let shared_tx = output_tx.clone();
+        let lane_telemetry = Arc::clone(telemetry);
+        spawn(move || run_ingestor_lane(&factory, batch_size, channel_policy, ingestor_rx, &shared_tx, reporter, &lane_telemetry));
+        routes.insert(format, ingestor_tx);
+    }
+
+    // Drop the original sender so the output receiver ends once every ingestor's clone is gone.
+    drop(output_tx);
+
+    IngestorBank { routes, output_rx }
+}
+
+/// The ingestor factory of each supported format, paired with the format.
+///
+/// `mapping_binding` is the lane's binding, which decides how a JSON source is split into records and
+/// which tables of a `GeoPackage` are read. A format whose ingestor gathers what it meets while it
+/// reads, such as a CSV file's misshapen rows or a `NetCDF` file's nonexistent dates, reports that once
+/// the ingestor has run.
+fn ingestor_factories(mapping_binding: &MappingBinding) -> [(DataFormat, IngestorFactory); 10] {
     let json_selection = Arc::new(json_record_selection(mapping_binding));
     let geopackage_selection = Arc::new(geopackage_table_selection(mapping_binding));
-    let factories: [(DataFormat, IngestorFactory); 10] = [
+    [
         (
             DataFormat::Csv,
             Box::new(|payload, batch, sink| {
@@ -165,30 +191,25 @@ pub(crate) fn spawn_ingestor_bank(
         ),
         (
             DataFormat::NetCdf,
-            Box::new(|payload, batch, _| Ok(PreparedIngestor::quiet(Box::new(NetCdfIngestor::from_payload(payload, batch)?)))),
+            Box::new(|payload, batch, _| {
+                let ingestor = NetCdfIngestor::from_payload(payload, batch)?;
+                let nonexistent = ingestor.nonexistent_dates();
+                // The ingestor is given up when it runs, while the report names its source after.
+                let source = ingestor.source().clone();
+                Ok(PreparedIngestor {
+                    ingestor: Box::new(ingestor),
+                    warnings: 0,
+                    after_ingest: Some(Box::new(move |sink: &dyn DiagnosticSink| {
+                        report_nonexistent_dates(sink, &source, nonexistent.lock().variables())
+                    })),
+                })
+            }),
         ),
         (
             DataFormat::Xml,
             Box::new(|payload, batch, _| Ok(PreparedIngestor::quiet(Box::new(XmlIngestor::from_payload(payload, batch)?)))),
         ),
-    ];
-
-    for (format, factory) in factories {
-        let (ingestor_tx, ingestor_rx) = channel_with_telemetry::<Signal<ProfiledPayload, ProfilerError>>(
-            channel_policy,
-            Some(Arc::clone(telemetry)),
-            Some(ChannelBoundary::between(Stage::Profiler, Stage::Ingestor)),
-        );
-        let shared_tx = output_tx.clone();
-        let lane_telemetry = Arc::clone(telemetry);
-        spawn(move || run_ingestor_lane(&factory, batch_size, channel_policy, ingestor_rx, &shared_tx, reporter, &lane_telemetry));
-        routes.insert(format, ingestor_tx);
-    }
-
-    // Drop the original sender so the output receiver ends once every ingestor's clone is gone.
-    drop(output_tx);
-
-    IngestorBank { routes, output_rx }
+    ]
 }
 
 /// Picks how a lane's JSON source is split into records from the lane's mapping binding.

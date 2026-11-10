@@ -12,6 +12,7 @@ use crate::{
         coordinate_role::CoordinateRole,
         decode::Decode,
         error::NetCdfIngestError,
+        nonexistent_dates::NonexistentDateLog,
         record_keys::{RecordKey, ensure_distinct},
         referenced_variables::referenced_variables,
         time_series::{
@@ -34,16 +35,17 @@ use netcdf_reader::{NcFile, NcGroup, NcVariable};
 /// array's count or index, or a bounds or grid mapping variable, and that varies along the element
 /// dimension. Station files are small, so every variable is read whole. An observation whose time is
 /// masked is padding (the incomplete layout fills unused slots) and is skipped, as is one where every
-/// numeric value is masked.
+/// numeric value is masked. The dates of its time coordinates that the Gregorian calendar does not have
+/// are recorded in `nonexistent`.
 ///
 /// # Errors
 ///
 /// Returns [`IngestorError::NetCdf`] when the coordinates or layout cannot be resolved or a variable
 /// cannot be read, and [`IngestorError::ChannelClosed`] when the downstream channel has closed.
-pub fn ingest_time_series(file: &NcFile, batches: &mut RecordBatches<'_>) -> Result<(), IngestorError> {
+pub fn ingest_time_series(file: &NcFile, nonexistent: &mut NonexistentDateLog, batches: &mut RecordBatches<'_>) -> Result<(), IngestorError> {
     let root = file.root_group().map_err(NetCdfIngestError::from)?;
     let series = TimeSeries::resolve(file, root)?;
-    series.read(file)?.emit(&series.layout, batches)
+    series.read(file, nonexistent)?.emit(&series.layout, batches)
 }
 
 /// A `timeSeries` file resolved from its metadata: where its stations and observations are, and which
@@ -106,13 +108,14 @@ impl<'f> TimeSeries<'f> {
         ensure_distinct(position.into_iter().chain(self.time_key.record_keys(self.time)).chain(facets).chain(columns))
     }
 
-    /// Reads every variable the records are built from, whole.
-    fn read(&self, file: &NcFile) -> Result<ReadTimeSeries<'_>, NetCdfIngestError> {
+    /// Reads every variable the records are built from, whole, recording in `nonexistent` the dates of
+    /// its time coordinates the Gregorian calendar does not have.
+    fn read(&self, file: &NcFile, nonexistent: &mut NonexistentDateLog) -> Result<ReadTimeSeries<'_>, NetCdfIngestError> {
         let longitudes = read_location(file, self.longitude, &self.layout)?;
         let facets = self
             .facets
             .iter()
-            .map(|(variable, key)| ReadFacet::read(file, variable, key))
+            .map(|(variable, key)| ReadFacet::read(file, variable, key, nonexistent))
             .collect::<Result<_, _>>()?;
         let columns = self
             .columns
@@ -133,7 +136,7 @@ impl<'f> TimeSeries<'f> {
                 variable: longitudes.variable,
                 values: longitudes.values.into_iter().map(normalize_longitude).collect(),
             },
-            time: ReadFacet::read(file, self.time, &self.time_key)?,
+            time: ReadFacet::read(file, self.time, &self.time_key, nonexistent)?,
             facets,
             columns,
         })
@@ -209,11 +212,12 @@ struct ReadFacet<'k> {
 }
 
 impl<'k> ReadFacet<'k> {
-    /// Reads `variable` whole, masked and unpacked, to be emitted under `key`.
-    fn read(file: &NcFile, variable: &'k NcVariable, key: &'k CoordinateKey) -> Result<ReadFacet<'k>, NetCdfIngestError> {
+    /// Reads `variable` whole, masked and unpacked, to be emitted under `key`, recording in
+    /// `nonexistent` the dates of a time variable the Gregorian calendar does not have.
+    fn read(file: &NcFile, variable: &'k NcVariable, key: &'k CoordinateKey, nonexistent: &mut NonexistentDateLog) -> Result<ReadFacet<'k>, NetCdfIngestError> {
         Ok(ReadFacet {
             variable,
-            facets: CoordinateFacets::read(file, variable, key, Decode::MaskAndUnpack)?,
+            facets: CoordinateFacets::read(file, variable, key, Decode::MaskAndUnpack, nonexistent)?,
         })
     }
 
@@ -297,15 +301,19 @@ mod tests {
     use crate::{
         error::IngestorError,
         netcdf::{
+            calendar::Calendar,
             coordinate_role::CoordinateRole,
             error::NetCdfIngestError,
-            fixture::{annotate, coordinate, filled_variable, ingest, text, variable, write},
+            fixture::{annotate, coordinate, filled_variable, ingest, ingest_logged, text, variable, write},
+            nonexistent_dates::NonexistentDates,
+            variable_name::VariableName,
         },
     };
     use cassiopeia_ir::record::Record;
     use netcdf_writer::{DimensionId, NC_FILL_INT, NcFileBuilder, NcWriteFormat};
     use pretty_assertions::assert_eq;
     use serde_json::{Map, Value, json};
+    use std::num::NonZeroU64;
     use temp_dir::TempDir;
 
     const FILL: f64 = -999.0;
@@ -396,6 +404,43 @@ mod tests {
             &[("coordinates", "time lat lon station_name")],
         );
         (builder, obs)
+    }
+
+    #[test]
+    fn a_station_series_in_a_360_day_calendar_keeps_its_labels_and_logs_the_dates_the_gregorian_calendar_lacks() {
+        let mut builder = feature("timeSeries");
+        let time = coordinate(
+            &mut builder,
+            "time",
+            &[58.0, 59.0, 60.0],
+            &[("standard_name", "time"), ("units", "days since 2026-01-01"), ("calendar", "360_day")],
+        );
+        variable(&mut builder, "lat", &[], &[46.05], LATITUDE);
+        variable(&mut builder, "lon", &[], &[14.5], LONGITUDE);
+        variable(&mut builder, "temp", &[time], &[10.0, 11.0, 12.0], &[("coordinates", "lat lon")]);
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("stations.nc");
+        write(&builder, &path, NcWriteFormat::Classic);
+
+        let (records, nonexistent) = ingest_logged(&path);
+        let times: Vec<Option<&Value>> = records.iter().map(|record| record.data().get("time")).collect();
+        assert_eq!(
+            times,
+            [
+                Some(&json!("2026-02-29T00:00:00+00:00")),
+                Some(&json!("2026-02-30T00:00:00+00:00")),
+                Some(&json!("2026-03-01T00:00:00+00:00")),
+            ]
+        );
+        assert_eq!(
+            nonexistent.lock().variables(),
+            [NonexistentDates {
+                variable: VariableName::from("time"),
+                calendar: Calendar::Day360,
+                first: "2026-02-29T00:00:00+00:00".to_owned(),
+                count: NonZeroU64::new(2).unwrap(),
+            }]
+        );
     }
 
     #[test]

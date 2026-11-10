@@ -1,4 +1,8 @@
-use crate::{error::IngestorError, ingestor::Ingestor, netcdf::ingestor::NetCdfIngestor};
+use crate::{
+    error::IngestorError,
+    ingestor::Ingestor,
+    netcdf::{ingestor::NetCdfIngestor, nonexistent_dates::NonexistentDateLog},
+};
 use cassiopeia_common::{channel::ChannelSender, format::DataFormat, signal::Signal};
 use cassiopeia_data_profiler::profile::Profile;
 use cassiopeia_encoding_detection::encoding_hint::EncodingHint;
@@ -8,7 +12,13 @@ use cassiopeia_ir::{
 };
 use mediatype::media_type;
 use netcdf_writer::{DimensionId, NcAttrValue, NcFileBuilder, NcWriteFormat, NcWriteOptions, VariableId};
-use std::{fs, path::Path, sync::mpsc::sync_channel, thread};
+use parking_lot::Mutex;
+use std::{
+    fs,
+    path::Path,
+    sync::{Arc, mpsc::sync_channel},
+    thread,
+};
 
 /// A character attribute value.
 pub(crate) fn text(value: &str) -> NcAttrValue {
@@ -69,7 +79,19 @@ pub(crate) fn payload(path: &Path) -> ProfiledPayload {
 
 /// Ingests the file at `path`, returning each batch the ingestor sent.
 pub(crate) fn ingest_batches(path: &Path, batch_size: usize) -> Result<Vec<Vec<Record>>, IngestorError> {
-    let ingestor = NetCdfIngestor::from_payload(payload(path), batch_size)?;
+    run(NetCdfIngestor::from_payload(payload(path), batch_size)?)
+}
+
+/// Ingests the file at `path`, returning every record in order and the nonexistent dates the ingestor
+/// logged.
+pub(crate) fn ingest_logged(path: &Path) -> (Vec<Record>, Arc<Mutex<NonexistentDateLog>>) {
+    let ingestor = NetCdfIngestor::from_payload(payload(path), 4096).unwrap();
+    let nonexistent = ingestor.nonexistent_dates();
+    (run(ingestor).unwrap().into_iter().flatten().collect(), nonexistent)
+}
+
+/// Runs `ingestor` to completion, returning each batch it sent.
+fn run(ingestor: NetCdfIngestor) -> Result<Vec<Vec<Record>>, IngestorError> {
     let (sender, receiver) = sync_channel(64);
     let handle = thread::spawn(move || Box::new(ingestor).ingest(ChannelSender::bounded(sender)));
     let batches = receiver

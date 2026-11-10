@@ -5,17 +5,20 @@ use crate::{
         error::NetCdfIngestError,
         feature_type::FeatureType,
         grid::{plane::ingest_grid_group, variables::grid_groups},
+        nonexistent_dates::NonexistentDateLog,
         time_series::observations::ingest_time_series,
     },
     record_batches::RecordBatches,
 };
-use cassiopeia_common::{channel::ChannelSender, signal::Signal};
+use cassiopeia_common::{channel::ChannelSender, input::Input, signal::Signal};
 use cassiopeia_ir::{
     payload::{CollectedPayload, ProfiledPayload},
     record::Record,
 };
 use derive_more::Debug;
 use netcdf_reader::NcFile;
+use parking_lot::Mutex;
+use std::sync::Arc;
 
 /// Ingestor for `NetCDF` files: classic CDF-1, CDF-2 and CDF-5, and `NetCDF-4` on HDF5.
 ///
@@ -25,11 +28,19 @@ use netcdf_reader::NcFile;
 /// column per data variable sharing the plane's dimensions. A CF `timeSeries` file emits one such
 /// record per station observation. Coordinates are recognized by their CF attributes, never their
 /// names, so one mapping fits every producer.
+///
+/// A time coordinate's dates in a model calendar keep their labels, and those the Gregorian calendar
+/// does not have, such as `360_day` February 30, are recorded among the
+/// [`nonexistent dates`](NetCdfIngestor::nonexistent_dates) as the file is read.
 #[derive(Debug)]
 pub struct NetCdfIngestor {
     #[debug(skip)]
     file: Option<NcFile>,
+    /// The input the file was collected from.
+    source: Input,
     batch_size: usize,
+    /// The nonexistent dates found so far, shared with whoever reports them once the ingest has run.
+    nonexistent: Arc<Mutex<NonexistentDateLog>>,
 }
 
 impl NetCdfIngestor {
@@ -40,12 +51,32 @@ impl NetCdfIngestor {
     /// Returns [`IngestorError`] when the payload is an in-memory byte buffer rather than a file, or
     /// the file cannot be opened as `NetCDF`.
     pub fn from_payload(payload: ProfiledPayload, batch_size: usize) -> Result<NetCdfIngestor, IngestorError> {
-        let path = match payload.into_payload() {
-            CollectedPayload::File(file) => file.into_path(),
+        let (path, source) = match payload.into_payload() {
+            CollectedPayload::File(file) => file.into_path_and_source(),
             CollectedPayload::Bytes(_) => return Err(NetCdfIngestError::RequiresFile.into()),
         };
         let file = NcFile::open(&path).map_err(NetCdfIngestError::from)?;
-        Ok(NetCdfIngestor { file: Some(file), batch_size })
+        Ok(NetCdfIngestor {
+            file: Some(file),
+            source,
+            batch_size,
+            nonexistent: Arc::default(),
+        })
+    }
+
+    /// The input the file was collected from: the file itself, or the URL a downloaded file was
+    /// fetched from, which stays the same from one run to the next where the downloaded copy's path
+    /// does not.
+    #[must_use]
+    pub const fn source(&self) -> &Input {
+        &self.source
+    }
+
+    /// The time variables whose dates the Gregorian calendar does not have, filled in as the file is
+    /// read: complete once [`Ingestor::ingest`] has returned.
+    #[must_use]
+    pub fn nonexistent_dates(&self) -> Arc<Mutex<NonexistentDateLog>> {
+        Arc::clone(&self.nonexistent)
     }
 }
 
@@ -53,12 +84,16 @@ impl Ingestor for NetCdfIngestor {
     fn ingest(mut self: Box<Self>, sender: ChannelSender<Signal<Vec<Record>, IngestorError>>) -> Result<(), IngestorError> {
         let file = self.file.take().ok_or(IngestorError::CannotBeStreamedTwice)?;
         let mut batches = RecordBatches::new(&sender, self.batch_size);
+        // The log is read only after the ingest has returned, so it stays locked while the file is read.
+        let mut nonexistent = self.nonexistent.lock();
         match FeatureType::of(file.global_attributes().map_err(NetCdfIngestError::from)?)? {
             FeatureType::Grid => {
                 let groups = grid_groups(file.root_group().map_err(NetCdfIngestError::from)?)?;
-                groups.iter().try_for_each(|group| ingest_grid_group(&file, group, &mut batches))?;
+                groups
+                    .iter()
+                    .try_for_each(|group| ingest_grid_group(&file, group, &mut nonexistent, &mut batches))?;
             }
-            FeatureType::TimeSeries => ingest_time_series(&file, &mut batches)?,
+            FeatureType::TimeSeries => ingest_time_series(&file, &mut nonexistent, &mut batches)?,
         }
         batches.finish()
     }
@@ -70,12 +105,15 @@ mod tests {
         error::IngestorError,
         ingestor::Ingestor,
         netcdf::{
+            calendar::Calendar,
             error::NetCdfIngestError,
-            fixture::{coordinate, filled_variable, ingest, ingest_batches, payload, variable, write},
+            fixture::{coordinate, filled_variable, ingest, ingest_batches, ingest_logged, payload, variable, write},
             ingestor::NetCdfIngestor,
+            nonexistent_dates::NonexistentDates,
+            variable_name::VariableName,
         },
     };
-    use cassiopeia_common::{channel::ChannelSender, format::DataFormat};
+    use cassiopeia_common::{channel::ChannelSender, format::DataFormat, input::Input};
     use cassiopeia_data_profiler::profile::Profile;
     use cassiopeia_encoding_detection::encoding_hint::EncodingHint;
     use cassiopeia_ir::{
@@ -86,7 +124,12 @@ mod tests {
     use netcdf_writer::{DimensionId, NC_FILL_INT, NcAttrValue, NcFileBuilder, NcWriteFormat, VariableId};
     use pretty_assertions::assert_eq;
     use serde_json::{Map, Value, json};
-    use std::{fs, path::PathBuf, sync::mpsc::sync_channel};
+    use std::{
+        fs,
+        num::NonZeroU64,
+        path::PathBuf,
+        sync::{Arc, mpsc::sync_channel},
+    };
     use temp_dir::TempDir;
 
     const FILL: f64 = -999.0;
@@ -479,9 +522,97 @@ mod tests {
 
     #[test]
     fn a_consumed_ingestor_cannot_be_streamed_again() {
-        let ingestor = NetCdfIngestor { file: None, batch_size: 8 };
+        let ingestor = NetCdfIngestor {
+            file: None,
+            source: Input::Local(PathBuf::from("grid.nc")),
+            batch_size: 8,
+            nonexistent: Arc::default(),
+        };
         let (sender, _receiver) = sync_channel(4);
         let result = Box::new(ingestor).ingest(ChannelSender::bounded(sender));
         assert!(matches!(result, Err(IngestorError::CannotBeStreamedTwice)));
+    }
+
+    /// A `time` coordinate of `days` since 2026-01-01 in `calendar`.
+    fn calendar_time(builder: &mut NcFileBuilder, calendar: &str, days: &[f64]) -> DimensionId {
+        coordinate(
+            builder,
+            "time",
+            days,
+            &[("standard_name", "time"), ("units", "days since 2026-01-01"), ("calendar", calendar)],
+        )
+    }
+
+    /// A single-cell grid of `tas` over a `time` of `days` since 2026-01-01 in `calendar`.
+    fn calendar_grid(calendar: &str, days: &[f64]) -> NcFileBuilder {
+        let mut builder = NcFileBuilder::new();
+        let time = calendar_time(&mut builder, calendar, days);
+        let [latitude, longitude] = single_cell(&mut builder);
+        variable(&mut builder, "tas", &[time, latitude, longitude], &vec![280.0; days.len()], &[("units", "K")]);
+        builder
+    }
+
+    fn times(records: &[Record]) -> Vec<Option<&Value>> {
+        records.iter().map(|record| record.data().get("time")).collect()
+    }
+
+    #[test]
+    fn a_julian_time_is_emitted_as_the_gregorian_date_the_file_means() {
+        let dir = TempDir::new().unwrap();
+        let (records, nonexistent) = ingest_logged(&written(&dir, &calendar_grid("julian", &[0.0]), NcWriteFormat::Classic));
+
+        assert_eq!(times(&records), [Some(&json!("2026-01-14T00:00:00+00:00"))]);
+        assert_eq!(nonexistent.lock().variables(), []);
+    }
+
+    #[test]
+    fn a_360_day_time_keeps_its_labels_and_logs_the_dates_the_gregorian_calendar_lacks() {
+        let dir = TempDir::new().unwrap();
+        let (records, nonexistent) = ingest_logged(&written(&dir, &calendar_grid("360_day", &[29.0, 58.0, 59.0]), NcWriteFormat::Classic));
+
+        assert_eq!(
+            times(&records),
+            [
+                Some(&json!("2026-01-30T00:00:00+00:00")),
+                Some(&json!("2026-02-29T00:00:00+00:00")),
+                Some(&json!("2026-02-30T00:00:00+00:00")),
+            ]
+        );
+        assert_eq!(
+            nonexistent.lock().variables(),
+            [NonexistentDates {
+                variable: VariableName::from("time"),
+                calendar: Calendar::Day360,
+                first: "2026-02-29T00:00:00+00:00".to_owned(),
+                count: NonZeroU64::new(2).unwrap(),
+            }]
+        );
+    }
+
+    #[test]
+    fn a_time_coordinate_two_grid_groups_share_is_logged_once() {
+        let mut builder = NcFileBuilder::new();
+        let time = calendar_time(&mut builder, "360_day", &[59.0]);
+        let pressure = coordinate(&mut builder, "plev", &[85_000.0], &[("units", "Pa"), ("positive", "down")]);
+        let [latitude, longitude] = single_cell(&mut builder);
+        // A variable without the pressure dimension and one with it are two groups, each reading `time`.
+        variable(&mut builder, "tas", &[time, latitude, longitude], &[280.0], &[("units", "K")]);
+        variable(&mut builder, "ta", &[time, pressure, latitude, longitude], &[270.0], &[("units", "K")]);
+        let dir = TempDir::new().unwrap();
+
+        let (records, nonexistent) = ingest_logged(&written(&dir, &builder, NcWriteFormat::Classic));
+        assert_eq!(records.len(), 2);
+        let log = nonexistent.lock();
+        assert_eq!(log.variables().len(), 1);
+        assert_eq!(log.variables()[0].count, NonZeroU64::MIN);
+    }
+
+    #[test]
+    fn a_netcdf_ingestor_names_the_file_it_was_collected_from() {
+        let dir = TempDir::new().unwrap();
+        let path = written(&dir, &temperature_and_humidity().0, NcWriteFormat::Classic);
+
+        let ingestor = NetCdfIngestor::from_payload(payload(&path), 8).unwrap();
+        assert_eq!(ingestor.source(), &Input::Local(path));
     }
 }

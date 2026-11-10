@@ -11,6 +11,7 @@ use crate::{
             plane_indices::PlaneIndices,
             variables::{GridGroup, GridLayout},
         },
+        nonexistent_dates::NonexistentDateLog,
     },
     record_batches::RecordBatches,
 };
@@ -29,9 +30,10 @@ struct GridCoordinates<'k> {
 }
 
 impl<'k> GridCoordinates<'k> {
-    /// Reads every coordinate of `layout`. Dimension coordinates may not hold missing values (CF 1.11
+    /// Reads every coordinate of `layout`, recording in `nonexistent` the dates of its time coordinates
+    /// the Gregorian calendar does not have. Dimension coordinates may not hold missing values (CF 1.11
     /// §5), so they are only unpacked; auxiliary coordinates may, so theirs are masked too.
-    fn read(file: &NcFile, layout: &'k GridLayout<'k>) -> Result<GridCoordinates<'k>, NetCdfIngestError> {
+    fn read(file: &NcFile, layout: &'k GridLayout<'k>, nonexistent: &mut NonexistentDateLog) -> Result<GridCoordinates<'k>, NetCdfIngestError> {
         let latitudes = Decode::Unpack.read(file, layout.latitude.coordinate)?;
         let longitudes = Decode::Unpack
             .read(file, layout.longitude.coordinate)?
@@ -41,12 +43,17 @@ impl<'k> GridCoordinates<'k> {
         let facets = layout
             .facets
             .iter()
-            .map(|axis| CoordinateFacets::read(file, axis.coordinate, &axis.key, Decode::Unpack))
+            .map(|axis| CoordinateFacets::read(file, axis.coordinate, &axis.key, Decode::Unpack, nonexistent))
             .collect::<Result<_, _>>()?;
         let auxiliaries = layout
             .auxiliaries
             .iter()
-            .map(|axis| Ok((axis, CoordinateFacets::read(file, axis.coordinate, &axis.key, Decode::MaskAndUnpack)?)))
+            .map(|axis| {
+                Ok((
+                    axis,
+                    CoordinateFacets::read(file, axis.coordinate, &axis.key, Decode::MaskAndUnpack, nonexistent)?,
+                ))
+            })
             .collect::<Result<_, NetCdfIngestError>>()?;
         Ok(GridCoordinates {
             latitudes,
@@ -78,15 +85,21 @@ impl<'k> GridCoordinates<'k> {
 /// the non-horizontal dimensions; for each, every variable's plane is read with its fill values masked
 /// and its packing undone, so memory holds one latitude-longitude plane per variable, never a whole
 /// variable. Cells are indexed by the positions of the latitude and longitude dimensions, so any
-/// dimension order pairs values with the right coordinates.
+/// dimension order pairs values with the right coordinates. The dates of its time coordinates that the
+/// Gregorian calendar does not have are recorded in `nonexistent`.
 ///
 /// # Errors
 ///
 /// Returns [`IngestorError::NetCdf`] when a coordinate or plane cannot be read or decoded, and
 /// [`IngestorError::ChannelClosed`] when the downstream channel has closed.
-pub fn ingest_grid_group(file: &NcFile, group: &GridGroup<'_>, batches: &mut RecordBatches<'_>) -> Result<(), IngestorError> {
+pub fn ingest_grid_group(
+    file: &NcFile,
+    group: &GridGroup<'_>,
+    nonexistent: &mut NonexistentDateLog,
+    batches: &mut RecordBatches<'_>,
+) -> Result<(), IngestorError> {
     let layout = &group.layout;
-    let coordinates = GridCoordinates::read(file, layout)?;
+    let coordinates = GridCoordinates::read(file, layout, nonexistent)?;
     let sizes = layout
         .facets
         .iter()
@@ -144,4 +157,77 @@ fn plane_selection(layout: &GridLayout<'_>, indices: &[usize]) -> Result<NcSlice
         )
         .collect::<Result<Vec<_>, _>>()?;
     Ok(NcSliceInfo { selections })
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::{
+        netcdf::{
+            fixture::{coordinate, variable, write},
+            grid::{plane::ingest_grid_group, variables::grid_groups},
+            nonexistent_dates::NonexistentDateLog,
+        },
+        record_batches::RecordBatches,
+    };
+    use cassiopeia_common::{channel::ChannelSender, signal::Signal};
+    use netcdf_reader::NcFile;
+    use netcdf_writer::{NcFileBuilder, NcWriteFormat};
+    use pretty_assertions::assert_eq;
+    use serde_json::{Value, json};
+    use std::{num::NonZeroU64, sync::mpsc::sync_channel};
+    use temp_dir::TempDir;
+
+    #[test]
+    fn each_cell_of_each_plane_is_a_record_and_the_planes_time_dates_the_gregorian_calendar_lacks_are_logged() {
+        let mut builder = NcFileBuilder::new();
+        let time = coordinate(
+            &mut builder,
+            "time",
+            &[29.0, 59.0],
+            &[("standard_name", "time"), ("units", "days since 2026-01-01"), ("calendar", "360_day")],
+        );
+        let latitude = coordinate(&mut builder, "lat", &[46.0], &[("units", "degrees_north")]);
+        let longitude = coordinate(&mut builder, "lon", &[14.0, 14.5], &[("units", "degrees_east")]);
+        variable(
+            &mut builder,
+            "tas",
+            &[time, latitude, longitude],
+            &[280.0, 281.0, 282.0, 283.0],
+            &[("units", "K")],
+        );
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("grid.nc");
+        write(&builder, &path, NcWriteFormat::Classic);
+        let file = NcFile::open(&path).unwrap();
+        let groups = grid_groups(file.root_group().unwrap()).unwrap();
+
+        let (sender, receiver) = sync_channel(8);
+        let sender = ChannelSender::bounded(sender);
+        let mut nonexistent = NonexistentDateLog::default();
+        let mut batches = RecordBatches::new(&sender, 16);
+        ingest_grid_group(&file, &groups[0], &mut nonexistent, &mut batches).unwrap();
+        batches.finish().unwrap();
+        drop(sender);
+
+        let records: Vec<Value> = receiver
+            .iter()
+            .flat_map(|signal| match signal {
+                Signal::Data(records) => records,
+                Signal::Start | Signal::Stop | Signal::Meta(_) | Signal::Error(_) => panic!("expected a data signal"),
+            })
+            .map(|record| Value::Object(record.into_data()))
+            .collect();
+        assert_eq!(
+            records,
+            [
+                json!({"latitude": 46.0, "longitude": 14.0, "time": "2026-01-30T00:00:00+00:00", "tas": 280.0}),
+                json!({"latitude": 46.0, "longitude": 14.5, "time": "2026-01-30T00:00:00+00:00", "tas": 281.0}),
+                json!({"latitude": 46.0, "longitude": 14.0, "time": "2026-02-30T00:00:00+00:00", "tas": 282.0}),
+                json!({"latitude": 46.0, "longitude": 14.5, "time": "2026-02-30T00:00:00+00:00", "tas": 283.0}),
+            ]
+        );
+        let logged = nonexistent.variables();
+        assert_eq!(logged.len(), 1);
+        assert_eq!((logged[0].first.as_str(), logged[0].count), ("2026-02-30T00:00:00+00:00", NonZeroU64::MIN));
+    }
 }

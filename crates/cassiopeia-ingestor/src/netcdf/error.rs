@@ -1,4 +1,5 @@
 use crate::netcdf::coordinate_role::CoordinateRole;
+use calendrical_calculations::helpers::I32CastError;
 
 /// Errors that can occur while ingesting a `NetCDF` file.
 #[derive(Debug, thiserror::Error)]
@@ -28,6 +29,11 @@ pub enum NetCdfIngestError {
     /// names, or `utc`, `tai` or `none`, whose leap-second or calendar-free arithmetic it lacks.
     #[error("the NetCDF time variable '{variable}' uses the calendar '{calendar}', which Cassiopeia cannot decode")]
     UnknownCalendar { variable: String, calendar: String },
+
+    /// A time coordinate's epoch in a calendar of real days falls, once restated in the proleptic
+    /// Gregorian calendar, in a year that does not fit in 32 bits.
+    #[error("a NetCDF time epoch restated in the Gregorian calendar falls in a year beyond the range Cassiopeia counts")]
+    EpochOutOfRange(#[from] I32CastError),
 
     /// A time coordinate's epoch carries a UTC offset other than zero.
     #[error("the units '{units}' of the NetCDF time variable '{variable}' name a time zone other than UTC")]

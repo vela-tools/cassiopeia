@@ -13,6 +13,9 @@ pub enum IngestCode {
     /// A table of a source holding several failed before its first row was read, so it was skipped
     /// and the other tables were read.
     TableUnreadable,
+    /// A time variable in a model calendar held dates the Gregorian calendar does not have, such as
+    /// `360_day` February 30, which name no instant, so the records keep them as they are labelled.
+    DatesNonexistent,
     /// The source could not be fetched or opened.
     SourceUnavailable,
     /// The payload's format could not be determined from its content.
@@ -36,5 +39,6 @@ mod tests {
         assert_eq!(IngestCode::ColumnsRenamed.to_string(), "columns-renamed");
         assert_eq!(IngestCode::RowsMisshapen.to_string(), "rows-misshapen");
         assert_eq!(IngestCode::TableUnreadable.to_string(), "table-unreadable");
+        assert_eq!(IngestCode::DatesNonexistent.to_string(), "dates-nonexistent");
     }
 }

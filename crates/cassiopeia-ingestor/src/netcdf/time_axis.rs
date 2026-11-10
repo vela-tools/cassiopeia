@@ -1,7 +1,14 @@
-use crate::netcdf::{cf_attribute::CfAttribute, epoch_zone::EpochZone, error::NetCdfIngestError, time_unit::TimeUnitScale};
+use crate::netcdf::{
+    calendar::{Calendar, gregorian_has},
+    cf_attribute::CfAttribute,
+    decoded_time::DecodedTime,
+    epoch_zone::EpochZone,
+    error::NetCdfIngestError,
+    time_unit::TimeUnitScale,
+};
 use netcdf_reader::{
     NcVariable,
-    cf::{CfCalendar, CfTimeRef, CfTimeUnit, decode_time_exact, parse_time_units},
+    cf::{CfTimeRef, CfTimeUnit, decode_time_exact, parse_time_units},
 };
 
 /// The microseconds in one second.
@@ -22,8 +29,12 @@ pub fn declares_epoch(units: &str) -> bool {
 /// RFC 3339 timestamps.
 #[derive(Debug, Clone)]
 pub struct TimeAxis {
+    /// The reference values are decoded against: in a calendar of real days, the file's own restated
+    /// in the proleptic Gregorian calendar.
     reference: CfTimeRef,
     scale: TimeUnitScale,
+    /// The calendar the file states its dates in.
+    calendar: Calendar,
 }
 
 impl TimeAxis {
@@ -34,13 +45,16 @@ impl TimeAxis {
     /// assumes lowercasing keeps byte offsets; a `calendar` outside the CF set is refused, because the
     /// decoder would read it as the standard calendar; and a UTC zone designator, which UDUNITS allows
     /// but the decoder rejects, is removed, while any other offset is refused. A UDUNITS time unit the
-    /// decoder does not spell, such as `sec` or `milliseconds`, is then rewritten to one it does.
+    /// decoder does not spell, such as `sec` or `milliseconds`, is then rewritten to one it does. The
+    /// reference of a calendar of real days is restated in the proleptic Gregorian calendar, as
+    /// [`Calendar::gregorian_reference`] describes.
     ///
     /// # Errors
     ///
     /// Returns [`NetCdfIngestError::NonAsciiTimeUnits`], [`NetCdfIngestError::UnknownCalendar`] or
-    /// [`NetCdfIngestError::UnsupportedTimeZone`] for the guarded cases, and
-    /// [`NetCdfIngestError::Read`] when the decoder cannot parse the units.
+    /// [`NetCdfIngestError::UnsupportedTimeZone`] for the guarded cases,
+    /// [`NetCdfIngestError::Read`] when the decoder cannot parse the units, and
+    /// [`NetCdfIngestError::EpochOutOfRange`] when the restated epoch's year does not fit in 32 bits.
     pub fn from_variable(variable: &NcVariable) -> Result<Option<TimeAxis>, NetCdfIngestError> {
         let Some(units) = CfAttribute::Units.text(variable.attributes()).filter(|units| declares_epoch(units)) else {
             return Ok(None);
@@ -51,11 +65,11 @@ impl TimeAxis {
             });
         }
         let calendar = match CfAttribute::Calendar.text(variable.attributes()) {
-            Some(name) => calendar(name).ok_or_else(|| NetCdfIngestError::UnknownCalendar {
+            Some(name) => name.parse::<Calendar>().map_err(|_| NetCdfIngestError::UnknownCalendar {
                 variable: variable.name().to_owned(),
                 calendar: name.to_owned(),
             })?,
-            None => CfCalendar::Standard,
+            None => Calendar::Standard,
         };
         let units = match EpochZone::split(units) {
             EpochZone::Utc(units) => units,
@@ -68,9 +82,16 @@ impl TimeAxis {
         };
         let (units, scale) = TimeUnitScale::rewrite(units);
         Ok(Some(TimeAxis {
-            reference: parse_time_units(&units, calendar)?,
+            reference: calendar.gregorian_reference(parse_time_units(&units, calendar.decoder())?)?,
             scale,
+            calendar,
         }))
+    }
+
+    /// The calendar the file states the coordinate's dates in.
+    #[must_use]
+    pub const fn calendar(&self) -> Calendar {
+        self.calendar
     }
 
     /// Decodes a coordinate value into an RFC 3339 timestamp, `YYYY-MM-DDTHH:MM:SS[.fraction]+00:00`.
@@ -83,14 +104,18 @@ impl TimeAxis {
     /// therefore split into whole days, which the decoder places exactly for some eighteen thousand
     /// years either side of the epoch, and the seconds of the rest of the day, rounded to the
     /// microsecond and added through the decoder's calendar arithmetic so a rounding up to the next
-    /// minute or day carries correctly. A date in a non-Gregorian calendar is written as that calendar
-    /// states it, such as February 30 in `360_day`.
+    /// minute or day carries correctly.
+    ///
+    /// A value in a calendar of real days is written as the proleptic Gregorian date of its instant,
+    /// so a `julian` date reads 13 days later than the file labels it in the 20th and 21st centuries. A
+    /// model calendar's date keeps its label, and one the Gregorian calendar does not have, such as
+    /// February 30 in `360_day`, is returned as [`DecodedTime::Nonexistent`].
     ///
     /// # Errors
     ///
     /// Returns [`NetCdfIngestError::Read`] when the value is not finite or its date falls outside the
     /// calendar's range.
-    pub fn rfc3339(&self, value: f64) -> Result<String, NetCdfIngestError> {
+    pub fn decode(&self, value: f64) -> Result<DecodedTime, NetCdfIngestError> {
         let value = self.scale.to_decoder_unit(value);
         let time = match seconds_per_unit(self.reference.unit) {
             Some(seconds) => {
@@ -114,10 +139,15 @@ impl TimeAxis {
         let nanoseconds = format!("{:09}", time.nanosecond);
         let fraction = nanoseconds.trim_end_matches('0');
         let separator = if fraction.is_empty() { "" } else { "." };
-        Ok(format!(
+        let timestamp = format!(
             "{:04}-{:02}-{:02}T{:02}:{:02}:{:02}{separator}{fraction}+00:00",
             time.year, time.month, time.day, time.hour, time.minute, time.second
-        ))
+        );
+        Ok(if gregorian_has(time.year, time.month, time.day) {
+            DecodedTime::Gregorian(timestamp)
+        } else {
+            DecodedTime::Nonexistent(timestamp)
+        })
     }
 }
 
@@ -133,25 +163,9 @@ const fn seconds_per_unit(unit: CfTimeUnit) -> Option<f64> {
     }
 }
 
-/// The decoder calendar a CF `calendar` attribute names (CF 1.11 §4.4.2), compared case-insensitively.
-///
-/// Returns `None` for a name outside the CF set, and for `utc`, `tai` and `none`, whose leap-second or
-/// calendar-free arithmetic the decoder does not perform.
-fn calendar(name: &str) -> Option<CfCalendar> {
-    match name.to_ascii_lowercase().as_str() {
-        "standard" | "gregorian" => Some(CfCalendar::Standard),
-        "proleptic_gregorian" => Some(CfCalendar::ProlepticGregorian),
-        "noleap" | "365_day" => Some(CfCalendar::NoLeap),
-        "all_leap" | "366_day" => Some(CfCalendar::AllLeap),
-        "360_day" => Some(CfCalendar::Day360),
-        "julian" => Some(CfCalendar::Julian),
-        _unknown => None,
-    }
-}
-
 #[cfg(test)]
 mod tests {
-    use crate::netcdf::{error::NetCdfIngestError, time_axis::TimeAxis};
+    use crate::netcdf::{calendar::Calendar, decoded_time::DecodedTime, error::NetCdfIngestError, time_axis::TimeAxis};
     use netcdf_reader::{NcAttrValue, NcAttribute, NcType, NcVariable};
     use pretty_assertions::assert_eq;
 
@@ -174,20 +188,36 @@ mod tests {
         }
     }
 
-    fn decode(attributes: &[(&str, &str)], value: f64) -> Result<String, NetCdfIngestError> {
-        TimeAxis::from_variable(&variable(attributes))?.unwrap().rfc3339(value)
+    fn decode(attributes: &[(&str, &str)], value: f64) -> Result<DecodedTime, NetCdfIngestError> {
+        TimeAxis::from_variable(&variable(attributes))?.unwrap().decode(value)
+    }
+
+    /// `value` days since `epoch` in `calendar`, decoded.
+    fn day(epoch: &str, calendar: &str, value: f64) -> DecodedTime {
+        decode(&[("units", &format!("days since {epoch}")), ("calendar", calendar)], value).unwrap()
+    }
+
+    fn gregorian(timestamp: &str) -> DecodedTime {
+        DecodedTime::Gregorian(timestamp.to_owned())
+    }
+
+    fn nonexistent(timestamp: &str) -> DecodedTime {
+        DecodedTime::Nonexistent(timestamp.to_owned())
     }
 
     #[test]
     fn fractional_days_decode_to_an_rfc3339_timestamp() {
-        assert_eq!(decode(&[("units", "days since 2026-01-01")], 1.5).unwrap(), "2026-01-02T12:00:00+00:00");
+        assert_eq!(
+            decode(&[("units", "days since 2026-01-01")], 1.5).unwrap(),
+            gregorian("2026-01-02T12:00:00+00:00")
+        );
     }
 
     #[test]
     fn a_z_designator_on_the_epoch_is_read_as_utc() {
         assert_eq!(
             decode(&[("units", "seconds since 1970-01-01T00:00:00Z")], 0.0).unwrap(),
-            "1970-01-01T00:00:00+00:00"
+            gregorian("1970-01-01T00:00:00+00:00")
         );
     }
 
@@ -195,7 +225,7 @@ mod tests {
     fn a_utc_designator_on_the_epoch_is_read_as_utc() {
         assert_eq!(
             decode(&[("units", "hours since 2026-01-01 00:00:00 UTC")], 6.0).unwrap(),
-            "2026-01-01T06:00:00+00:00"
+            gregorian("2026-01-01T06:00:00+00:00")
         );
     }
 
@@ -203,7 +233,7 @@ mod tests {
     fn the_unsigned_zero_offset_of_the_ncei_templates_is_read_as_utc() {
         assert_eq!(
             decode(&[("units", "seconds since 1970-01-01 00:00:00 0:00")], 10.0).unwrap(),
-            "1970-01-01T00:00:10+00:00"
+            gregorian("1970-01-01T00:00:10+00:00")
         );
     }
 
@@ -215,15 +245,100 @@ mod tests {
 
     #[test]
     fn a_fraction_of_a_second_keeps_only_its_significant_digits() {
-        assert_eq!(decode(&[("units", "seconds since 2026-01-01")], 0.25).unwrap(), "2026-01-01T00:00:00.25+00:00");
+        assert_eq!(
+            decode(&[("units", "seconds since 2026-01-01")], 0.25).unwrap(),
+            gregorian("2026-01-01T00:00:00.25+00:00")
+        );
     }
 
     #[test]
-    fn a_360_day_calendar_date_is_written_as_the_calendar_states_it() {
+    fn a_julian_date_is_written_as_the_gregorian_date_of_its_day() {
+        // Julian dates run 13 days behind Gregorian ones from Julian 1900-03-01 to 2100-02-28.
+        assert_eq!(day("2026-01-01", "julian", 0.0), gregorian("2026-01-14T00:00:00+00:00"));
+        assert_eq!(day("2026-01-01", "julian", 365.0), gregorian("2027-01-14T00:00:00+00:00"));
+    }
+
+    #[test]
+    fn a_february_29_only_the_julian_calendar_has_is_written_as_the_gregorian_date_of_its_day() {
+        assert_eq!(day("1900-02-28", "julian", 1.0), gregorian("1900-03-13T00:00:00+00:00"));
+    }
+
+    #[test]
+    fn a_julian_time_of_day_and_fraction_survive_the_restatement() {
         assert_eq!(
-            decode(&[("units", "days since 2026-01-01"), ("calendar", "360_day")], 59.0).unwrap(),
-            "2026-02-30T00:00:00+00:00"
+            decode(&[("units", "hours since 2026-01-01 06:00:00"), ("calendar", "julian")], 1.5).unwrap(),
+            gregorian("2026-01-14T07:30:00+00:00")
         );
+    }
+
+    #[test]
+    fn a_standard_date_before_the_reform_is_written_in_the_proleptic_gregorian_calendar() {
+        assert_eq!(day("1582-10-15", "standard", -1.0), gregorian("1582-10-14T00:00:00+00:00"));
+        assert_eq!(day("1500-01-01", "gregorian", 0.0), gregorian("1500-01-10T00:00:00+00:00"));
+    }
+
+    #[test]
+    fn a_standard_count_from_a_julian_epoch_runs_across_the_reform_in_real_days() {
+        // In the standard calendar Julian 1582-10-04 is followed by Gregorian 1582-10-15.
+        assert_eq!(day("1582-10-04", "standard", 1.0), gregorian("1582-10-15T00:00:00+00:00"));
+    }
+
+    #[test]
+    fn a_proleptic_gregorian_date_before_the_reform_is_written_as_the_file_states_it() {
+        assert_eq!(day("1582-10-15", "proleptic_gregorian", -1.0), gregorian("1582-10-14T00:00:00+00:00"));
+    }
+
+    #[test]
+    fn a_360_day_date_keeps_its_label_and_one_the_gregorian_calendar_lacks_is_nonexistent() {
+        assert_eq!(day("2026-01-01", "360_day", 30.0), gregorian("2026-02-01T00:00:00+00:00"));
+        // 2026 is a Gregorian common year, so it has neither February 29 nor February 30.
+        assert_eq!(day("2026-01-01", "360_day", 58.0), nonexistent("2026-02-29T00:00:00+00:00"));
+        assert_eq!(day("2026-01-01", "360_day", 59.0), nonexistent("2026-02-30T00:00:00+00:00"));
+        assert_eq!(day("2024-01-01", "360_day", 58.0), gregorian("2024-02-29T00:00:00+00:00"));
+    }
+
+    #[test]
+    fn an_all_leap_february_29_is_nonexistent_only_in_a_gregorian_common_year() {
+        assert_eq!(day("2026-01-01", "all_leap", 59.0), nonexistent("2026-02-29T00:00:00+00:00"));
+        assert_eq!(day("2024-01-01", "366_day", 59.0), gregorian("2024-02-29T00:00:00+00:00"));
+    }
+
+    #[test]
+    fn a_noleap_date_keeps_its_label_even_where_the_gregorian_year_is_a_leap_year() {
+        assert_eq!(day("2024-01-01", "noleap", 59.0), gregorian("2024-03-01T00:00:00+00:00"));
+    }
+
+    #[test]
+    fn whole_360_day_months_keep_their_labels() {
+        assert_eq!(
+            decode(&[("units", "months since 2026-01-30"), ("calendar", "360_day")], 1.0).unwrap(),
+            nonexistent("2026-02-30T00:00:00+00:00")
+        );
+    }
+
+    #[test]
+    fn the_axis_names_the_calendar_the_file_states_its_dates_in() {
+        let axis = |calendar: &str| {
+            TimeAxis::from_variable(&variable(&[("units", "days since 2026-01-01"), ("calendar", calendar)]))
+                .unwrap()
+                .unwrap()
+                .calendar()
+        };
+        assert_eq!(axis("julian"), Calendar::Julian);
+        assert_eq!(axis("360_DAY"), Calendar::Day360);
+        assert_eq!(
+            TimeAxis::from_variable(&variable(&[("units", "days since 2026-01-01")]))
+                .unwrap()
+                .unwrap()
+                .calendar(),
+            Calendar::Standard
+        );
+    }
+
+    #[test]
+    fn a_julian_epoch_whose_gregorian_year_does_not_fit_in_32_bits_is_refused() {
+        let error = TimeAxis::from_variable(&variable(&[("units", "days since 2147483647-12-31"), ("calendar", "julian")])).unwrap_err();
+        assert!(matches!(error, NetCdfIngestError::EpochOutOfRange(_)), "{error:?}");
     }
 
     #[test]
@@ -241,7 +356,10 @@ mod tests {
     #[test]
     fn without_a_calendar_attribute_the_standard_calendar_applies() {
         // 2024 is a Gregorian leap year, so day 59 is February 29 in the standard calendar.
-        assert_eq!(decode(&[("units", "days since 2024-01-01")], 59.0).unwrap(), "2024-02-29T00:00:00+00:00");
+        assert_eq!(
+            decode(&[("units", "days since 2024-01-01")], 59.0).unwrap(),
+            gregorian("2024-02-29T00:00:00+00:00")
+        );
     }
 
     #[test]
@@ -251,7 +369,7 @@ mod tests {
         let value = 23_634.0 + 250.0 / 1_440.0;
         assert_eq!(
             decode(&[("units", "days since 1950-01-01T00:00:00Z")], value).unwrap(),
-            "2014-09-16T04:10:00+00:00"
+            gregorian("2014-09-16T04:10:00+00:00")
         );
     }
 
@@ -259,7 +377,7 @@ mod tests {
     fn a_fraction_rounding_up_to_the_next_day_carries_into_the_date() {
         assert_eq!(
             decode(&[("units", "days since 2026-02-28")], 0.999_999_999_999).unwrap(),
-            "2026-03-01T00:00:00+00:00"
+            gregorian("2026-03-01T00:00:00+00:00")
         );
     }
 
@@ -269,25 +387,31 @@ mod tests {
         // 2^62, where a double is spaced 1,024 ns apart.
         assert_eq!(
             decode(&[("units", "seconds since 1800-01-01")], 7_076_678_401.0).unwrap(),
-            "2024-04-02T00:00:01+00:00"
+            gregorian("2024-04-02T00:00:01+00:00")
         );
     }
 
     #[test]
     fn a_negative_fraction_counts_back_from_the_epoch() {
-        assert_eq!(decode(&[("units", "hours since 2026-01-01")], -1.5).unwrap(), "2025-12-31T22:30:00+00:00");
+        assert_eq!(
+            decode(&[("units", "hours since 2026-01-01")], -1.5).unwrap(),
+            gregorian("2025-12-31T22:30:00+00:00")
+        );
     }
 
     #[test]
     fn the_cf_sec_abbreviation_decodes_as_seconds() {
-        assert_eq!(decode(&[("units", "sec since 1970-01-01")], 90.0).unwrap(), "1970-01-01T00:01:30+00:00");
+        assert_eq!(
+            decode(&[("units", "sec since 1970-01-01")], 90.0).unwrap(),
+            gregorian("1970-01-01T00:01:30+00:00")
+        );
     }
 
     #[test]
     fn milliseconds_since_the_epoch_keep_their_exact_fraction() {
         assert_eq!(
             decode(&[("units", "milliseconds since 1970-01-01T00:00:00Z")], 1_717_200_000_123.0).unwrap(),
-            "2024-06-01T00:00:00.123+00:00"
+            gregorian("2024-06-01T00:00:00.123+00:00")
         );
     }
 
