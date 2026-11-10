@@ -6,8 +6,9 @@ use crate::location_record::{level::Level, parameter_name::ParameterName};
 /// GRIB2, ecCodes for GRIB1) produce this same shape, and everything downstream (the grid-slice
 /// pivot, record emission) is identical for both editions.
 ///
-/// Coordinates and values are `f64`: ecCodes decodes GRIB1 in double precision, and GRIB2's single
-/// precision widens losslessly into it, so no narrowing cast is needed on either path.
+/// Coordinates and values are `f64`: ecCodes decodes both editions in double precision, and grib-rs
+/// decodes GRIB2 values in single precision, each carried as the double nearest its shortest decimal
+/// (see [`crate::single_precision::shortest_decimal`]), so no narrowing cast is needed on either path.
 pub struct DecodedField {
     /// A stable per-grid identity: the raw Grid Definition Section bytes for GRIB2, a grid-section
     /// hash for GRIB1. Byte-equal identities share geometry and cell ordering, so values line up cell

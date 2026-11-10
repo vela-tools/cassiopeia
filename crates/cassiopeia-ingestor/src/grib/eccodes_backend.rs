@@ -129,7 +129,7 @@ fn format_timestamp(date: i64, time: i64) -> String {
 #[cfg(feature = "grib1")]
 mod tests {
     use crate::{
-        grib::{eccodes_backend, grid_slice::GridSliceSet, ingestor::GribIngestor},
+        grib::{eccodes_backend, fixture::drain, grid_slice::GridSliceSet, ingestor::GribIngestor},
         ingestor::Ingestor,
     };
     use cassiopeia_common::{channel::ChannelSender, format::DataFormat, signal::Signal};
@@ -280,24 +280,6 @@ mod tests {
 
     fn ingest_all(payload: ProfiledPayload) -> Vec<Record> {
         ingest_batches(payload, 4096).into_iter().flatten().collect()
-    }
-
-    /// Drains a slice set's records through a buffered channel, for tests that decode into a set
-    /// directly rather than through the ingestor.
-    fn drain(set: GridSliceSet) -> Vec<Record> {
-        // Flush on its own thread: a large set produces more batches than the channel buffers, so the
-        // sender would block if this thread were not concurrently draining the receiver.
-        let (sender, receiver) = sync_channel(64);
-        let handle = thread::spawn(move || set.flush(4096, &ChannelSender::bounded(sender)));
-        let records: Vec<Record> = receiver
-            .iter()
-            .flat_map(|signal| match signal {
-                Signal::Data(records) => records,
-                Signal::Start | Signal::Stop | Signal::Meta(_) | Signal::Error(_) => panic!("expected a data signal"),
-            })
-            .collect();
-        handle.join().unwrap().unwrap();
-        records
     }
 
     #[test]

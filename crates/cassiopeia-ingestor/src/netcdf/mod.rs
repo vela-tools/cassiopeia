@@ -22,6 +22,7 @@ pub mod standard_name;
 pub mod time_axis;
 pub mod time_series;
 pub mod time_unit;
+pub mod unpacked_type;
 pub mod value_kind;
 pub mod variable_name;
 pub mod vertical_level;

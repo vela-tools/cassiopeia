@@ -722,6 +722,8 @@ Two compile-time features select the backend for each edition. Both link the ecC
 
 Both backends use the same canonical vocabulary and level normalization, so changing the backend does not require a different mapping. A build made with `--no-default-features` supports only regular-grid GRIB2 through grib-rs and rejects GRIB1. Add `--features grib1` or `--features grib2-full` to re-enable either ecCodes path.
 
+The backends decode values at different precisions. grib-rs decodes GRIB2 values in single precision, so each is written as the shortest decimal that reads back as the same single-precision number, such as `280.12` rather than `280.1199951171875`. ecCodes decodes both editions in double precision, and its values are written exactly, so a value from a default build can carry digits that the release binaries do not write.
+
 With the default build, ecCodes can decode projected GRIB2 grids, such as the Lambert conformal or polar stereographic grids used by regional models like HRRR. It handles these alongside global regular-grid products such as GFS and the ICON global model. Only the pure-Rust fallback, built with `grib2-full` off, is limited to regular latitude/longitude grids. With that fallback, a projected file fails to ingest instead of producing records. The two worked examples cover both editions: [GRIB1 regional](https://github.com/vela-tools/cassiopeia-examples/blob/main/examples/18-grib1-derived-values/example.md) and [GRIB2 global](https://github.com/vela-tools/cassiopeia-examples/blob/main/examples/19-grib2-byte-range/example.md).
 
 ## NetCDF
@@ -756,6 +758,8 @@ For example, a record from a pressure-level file with temperature `t` and relati
 ~~~
 
 Values are unpacked with `scale_factor` and `add_offset`. A value equal to `_FillValue` or `missing_value`, or outside `valid_min`, `valid_max`, or `valid_range`, counts as masked and is omitted from the record. A variable without a `_FillValue` attribute is also masked at its type's netCDF default fill value, the value the library leaves in an element no writer set; byte variables are exempt, since their whole range is commonly real data. A cell masked in every data variable produces no record. Data variable names are kept exactly as the producer wrote them. A name that is not a plain identifier, such as one containing a hyphen, is read in a template with `this['...']`.
+
+A single-precision value is written as the shortest decimal that reads back as the same single-precision number, the value xarray and netCDF4-python show: a stored `float` `34.408` is written as `34.408`, not its binary expansion `34.40800094604492`. Packed data is unpacked to the type of its `scale_factor` and `add_offset` (CF 1.11 section 8.1). With `float` attributes, a `byte`, `unsigned byte`, `short`, `unsigned short`, or `float` variable is unpacked in single precision and written the same way, so NOAA OISST's `sst`, a `short` with `scale_factor = 0.01f`, gives `-1.67` for a stored `-167`. With `double` attributes, or with packing the section does not allow, such as an `int` with `float` attributes, the data are unpacked in double precision. A value stored as `double` is written exactly. This holds for every value of a record, data variables, coordinates, and levels alike. The masks above compare the stored values before any unpacking, so rounding never decides whether a value is masked.
 
 ### Coordinate roles
 

@@ -45,6 +45,7 @@ temp-dir = "0.2.0"
 thiserror = "2.0.21"
 tracing = "0.1.44"
 zip = { version = "9.5.0", default-features = false, features = ["deflate"] }
+zmij = "1.0.23"
 
 [features]
 default = ["geopackage", "grib1", "grib2-full"]

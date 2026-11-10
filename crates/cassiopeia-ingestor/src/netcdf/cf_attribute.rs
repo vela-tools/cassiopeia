@@ -35,17 +35,27 @@ pub enum CfAttribute {
     /// The value standing for an unwritten or missing element (NUG, "Attribute Conventions").
     #[strum(serialize = "_FillValue")]
     FillValue,
+    /// The factor packed data is multiplied by when read (CF 1.11 §8.1).
+    ScaleFactor,
+    /// The offset added to packed data once it is scaled (CF 1.11 §8.1).
+    AddOffset,
 }
 
 impl CfAttribute {
+    /// The attribute's value in `attributes`, when they declare it.
+    #[must_use]
+    pub fn value(self, attributes: &[NcAttribute]) -> Option<&NcAttrValue> {
+        let name: &'static str = self.into();
+        attributes.iter().find(|attribute| attribute.name == name).map(|attribute| &attribute.value)
+    }
+
     /// The attribute's text value in `attributes`, trimmed of surrounding whitespace and the NUL padding
     /// some writers leave in classic character attributes.
     ///
     /// Returns `None` when the attribute is absent or holds numbers rather than text.
     #[must_use]
     pub fn text(self, attributes: &[NcAttribute]) -> Option<&str> {
-        let name: &'static str = self.into();
-        let text = match &attributes.iter().find(|attribute| attribute.name == name)?.value {
+        let text = match self.value(attributes)? {
             NcAttrValue::Chars(text) => text.as_str(),
             NcAttrValue::Strings(texts) => match texts.as_slice() {
                 [text] => text.as_str(),
@@ -69,8 +79,7 @@ impl CfAttribute {
     /// Whether `attributes` declare this attribute, whatever its value.
     #[must_use]
     pub fn is_declared(self, attributes: &[NcAttribute]) -> bool {
-        let name: &'static str = self.into();
-        attributes.iter().any(|attribute| attribute.name == name)
+        self.value(attributes).is_some()
     }
 
     /// The variable names a reference attribute lists (`coordinates`, `bounds`, `grid_mapping`, ...).
@@ -125,6 +134,24 @@ mod tests {
         let attributes = [attribute("_FillValue", NcAttrValue::Floats(vec![-999.0]))];
         assert!(CfAttribute::FillValue.is_declared(&attributes));
         assert!(!CfAttribute::Units.is_declared(&attributes));
+    }
+
+    #[test]
+    fn a_declared_attribute_gives_its_value_whatever_its_type() {
+        let attributes = [
+            attribute("scale_factor", NcAttrValue::Floats(vec![0.01])),
+            attribute("add_offset", NcAttrValue::Doubles(vec![273.15])),
+        ];
+        assert_eq!(CfAttribute::ScaleFactor.value(&attributes), Some(&NcAttrValue::Floats(vec![0.01])));
+        assert_eq!(CfAttribute::AddOffset.value(&attributes), Some(&NcAttrValue::Doubles(vec![273.15])));
+        assert_eq!(CfAttribute::FillValue.value(&attributes), None);
+    }
+
+    #[test]
+    fn the_packing_attributes_keep_their_snake_case_spelling() {
+        let scale_factor: &'static str = CfAttribute::ScaleFactor.into();
+        let add_offset: &'static str = CfAttribute::AddOffset.into();
+        assert_eq!((scale_factor, add_offset), ("scale_factor", "add_offset"));
     }
 
     #[test]
