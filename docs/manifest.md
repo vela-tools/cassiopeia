@@ -79,7 +79,7 @@ inputs: [
 
 ### One mapping or many
 
-Each input must have exactly one of `mapping` or `mappings`. Use `mapping` for the common case of one source producing one entity type. Use `mappings` when the source divides into named collections that need different mappings, such as the folders of a KML document, the layers of a Shapefile, the tables of a GeoPackage, or the nested arrays of a JSON document. Only the collection-capable formats, `kml`, `kmz`, `shapefile`, `geopackage`, and `json`, accept `mappings`. A JSON input with `mappings` reads its nested arrays of objects as collections instead of applying the top-level record rules; see [nested collections](source-formats.md#nested-collections).
+Each input must have exactly one of `mapping` or `mappings`. Use `mapping` for the common case of one source producing one entity type. Use `mappings` when the source divides into named collections that need different mappings, such as the folders of a KML document, the layers of a Shapefile, the tables of a GeoPackage, or the nested arrays of a JSON document. Only the collection-capable formats, `kml`, `kmz`, `shapefile`, `geopackage`, and `json`, accept `mappings`. A JSON input with `mappings` reads its nested arrays of objects as collections instead of applying the top-level record rules; see [nested collections](source-formats.md#nested-collections). A GeoPackage input with `mappings` reads only the tables it names; see [multiple tables](source-formats.md#multiple-tables).
 
 A `mappings` list contains objects that bind collection names to mappings. Cassiopeia matches each collection name verbatim and leaves any collection that is not listed unmapped:
 

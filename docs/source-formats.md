@@ -564,7 +564,7 @@ A ZIP containing one Shapefile layer produces ordinary records without a collect
 
 ## GeoPackage
 
-A GeoPackage source is an OGC GeoPackage file (`.gpkg`): a SQLite database that lists its data tables in a `gpkg_contents` catalog. Cassiopeia reads every table listed with the `features` data type and every table listed with the `attributes` data type, then emits one record per row. Tile and gridded-coverage tables hold raster pyramids rather than records, so Cassiopeia skips them.
+A GeoPackage source is an OGC GeoPackage file (`.gpkg`): a SQLite database that lists its data tables in a `gpkg_contents` catalog. Cassiopeia reads every table listed with the `features` data type and every table listed with the `attributes` data type, then emits one record per row. Tile and gridded-coverage tables hold raster pyramids rather than records, so Cassiopeia skips them. An input with a `mappings` list reads only the tables the list names (see [Multiple tables](#multiple-tables)), and a table that cannot be read is skipped with a warning (see [Tables that cannot be read](#tables-that-cannot-be-read)).
 
 Each record has this general shape:
 
@@ -593,9 +593,9 @@ Rows of an attributes table have no `geometry` member. A feature whose geometry 
 
 ### Geometry and coordinate reference systems
 
-GeoPackage geometries are emitted as GeoJSON for use as NGSI-LD `GeoProperty` values. Each feature table names its coordinate reference system through the `srs_id` of its geometry column, which `gpkg_spatial_ref_sys` defines. Cassiopeia reads that definition, preferring the WKT2 form of the `gpkg_crs_wkt` extension when the file has one, and reprojects the geometry to EPSG:4326, using WGS84 longitude and latitude. An EPSG:4326 table is emitted unchanged. A table whose definition is `undefined`, as it is for the reserved `srs_id` values `0` and `-1`, is assumed to be EPSG:4326 already: Cassiopeia emits its coordinates unchanged and logs a warning. A geometry column whose `srs_id` has no `gpkg_spatial_ref_sys` row fails the read.
+GeoPackage geometries are emitted as GeoJSON for use as NGSI-LD `GeoProperty` values. Each feature table names its coordinate reference system through the `srs_id` of its geometry column, which `gpkg_spatial_ref_sys` defines. Cassiopeia reads that definition, preferring the WKT2 form of the `gpkg_crs_wkt` extension when the file has one, and reprojects the geometry to EPSG:4326, using WGS84 longitude and latitude. An EPSG:4326 table is emitted unchanged. A table whose definition is `undefined`, as it is for the reserved `srs_id` values `0` and `-1`, is assumed to be EPSG:4326 already: Cassiopeia emits its coordinates unchanged and logs a warning. A table whose geometry column names an `srs_id` that `gpkg_spatial_ref_sys` does not define, or whose definition Cassiopeia cannot parse, cannot be read and is skipped.
 
-Geometries keep their X and Y coordinates only; Z and M values are dropped. Curved geometry types, such as `CIRCULARSTRING` and `COMPOUNDCURVE`, have no GeoJSON form, and a row holding one fails the read.
+Geometries keep their X and Y coordinates only; Z and M values are dropped. Curved geometry types, such as `CIRCULARSTRING` and `COMPOUNDCURVE`, have no GeoJSON form, and a row holding one fails the run.
 
 ### Build feature
 
@@ -603,7 +603,17 @@ GeoPackage support is the `geopackage` Cargo feature, on in the default build. I
 
 ### Multiple tables
 
-A GeoPackage with one record table produces ordinary records without a collection label. A GeoPackage with several record tables, counting both feature and attributes tables, gives each table's records a collection label equal to the table name. Use collection-specific manifest bindings when the tables need different mappings.
+A GeoPackage with one record table produces ordinary records without a collection label. A GeoPackage with several record tables, counting both feature and attributes tables, gives each table's records a collection label equal to the table name as `gpkg_contents` lists it. Use collection-specific manifest bindings when the tables need different mappings.
+
+An input with a single `mapping` reads every record table. An input with a `mappings` list reads only the tables whose names it lists, so a table no mapping uses is never opened and cannot fail the run. A listed name that matches no table yields no records. The labels are counted over every record table `gpkg_contents` lists, so a table keeps its label when it is the only one an input reads.
+
+### Tables that cannot be read
+
+A table that fails before Cassiopeia reads its first row is skipped, and every other table is still read. The run reports one `ingest-table-unreadable` warning per skipped table, naming the table and the file and giving the reason. A table fails this way when `gpkg_contents` lists it but the file has no table or view of that name, when a `features` table has no `gpkg_geometry_columns` row, when its coordinate reference system cannot be read, or when SQLite cannot select its rows.
+
+A view is the common case of the last. `gpkg_contents` may list a view as well as a table, but Cassiopeia identifies each row by the table's integer primary key, or by SQLite's `rowid` when there is none, and a view has neither, so every view is skipped. Reading a view needs the `geopackage` crate to read rows that have no row id, which it cannot yet. Until it can, convert a view you need into a table, or leave it out of a `mappings` list so it is not opened at all.
+
+The run fails when none of the tables it reads can be read, with an error naming the first one and why. A row that cannot be read or converted, such as one holding a curved geometry, still fails the run, because the records before it have already been sent.
 
 ## GRIB
 

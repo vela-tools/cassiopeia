@@ -14,7 +14,10 @@
 use cassiopeia_common::{channel::ChannelSender, collection::CollectionName, format::DataFormat, signal::Signal};
 use cassiopeia_data_profiler::profile_path;
 use cassiopeia_encoding_detection::encoding_hint::EncodingHint;
-use cassiopeia_ingestor::{geopackage::ingestor::GeoPackageIngestor, ingestor::Ingestor};
+use cassiopeia_ingestor::{
+    geopackage::{ingestor::GeoPackageIngestor, table_selection::GeoPackageTableSelection},
+    ingestor::Ingestor,
+};
 use cassiopeia_ir::{
     payload::{CollectedPayload, FilePayload, ProfiledPayload},
     record::Record,
@@ -23,7 +26,12 @@ use geo_types::Point;
 use geopackage::{ColumnSpec, GeoPackage, GeometrySpec, NewFeature, TableSchemaBuilder, Value};
 use geopackage_core::types::{ColumnType, GeometryType};
 use pretty_assertions::assert_eq;
-use std::{collections::HashMap, path::Path, sync::mpsc::sync_channel, thread};
+use std::{
+    collections::HashMap,
+    path::Path,
+    sync::{Arc, mpsc::sync_channel},
+    thread,
+};
 use temp_dir::TempDir;
 
 /// Writes an EPSG:4326 point layer named `table` with one `name` text column.
@@ -52,7 +60,7 @@ fn profiled(path: &Path) -> ProfiledPayload {
 }
 
 fn ingest(payload: ProfiledPayload) -> Vec<Record> {
-    let ingestor = GeoPackageIngestor::from_payload(payload, 8).unwrap();
+    let ingestor = GeoPackageIngestor::from_payload(payload, 8, Arc::new(GeoPackageTableSelection::Every)).unwrap();
     let (tx, rx) = sync_channel(8);
     let handle = thread::spawn(move || Box::new(ingestor).ingest(ChannelSender::bounded(tx)));
     let records: Vec<Record> = rx

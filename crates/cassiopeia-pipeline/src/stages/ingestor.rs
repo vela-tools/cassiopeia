@@ -1,11 +1,16 @@
 use crate::{
     error::PipelineError,
     pipeline_stage::PipelineStage,
-    stages::{misshapen_rows_report::report_misshapen_rows, renamed_columns_report::report_renamed_columns},
+    stages::{
+        misshapen_rows_report::report_misshapen_rows,
+        renamed_columns_report::report_renamed_columns,
+        unreadable_tables_report::report_unreadable_tables,
+    },
 };
 use cassiopeia_common::{
     batch::Batch,
     channel::{ChannelPolicy, ChannelReceiver, ChannelSender, channel_with_telemetry},
+    collection::CollectionName,
     format::DataFormat,
     signal::Signal,
     stage::Stage,
@@ -15,7 +20,7 @@ use cassiopeia_ingestor::{
     csv::ingestor::CsvIngestor,
     error::IngestorError,
     geojson::ingestor::GeoJsonIngestor,
-    geopackage::ingestor::GeoPackageIngestor,
+    geopackage::{ingestor::GeoPackageIngestor, table_selection::GeoPackageTableSelection},
     grib::ingestor::GribIngestor,
     ingestor::Ingestor,
     json::{ingestor::JsonIngestor, record_selection::JsonRecordSelection},
@@ -25,7 +30,7 @@ use cassiopeia_ingestor::{
     xml::ingestor::XmlIngestor,
 };
 use cassiopeia_ir::{payload::ProfiledPayload, record::Record};
-use cassiopeia_manifest::mapping_binding::MappingBinding;
+use cassiopeia_manifest::mapping_binding::{CollectionMapping, MappingBinding};
 use cassiopeia_profiler::{error::ProfilerError, profiler::ProfilerRoutes};
 use cassiopeia_reporter::reporter::{DiagnosticSink, Reporter};
 use execution_time::ExecutionTime;
@@ -76,7 +81,8 @@ pub(crate) struct IngestorBank {
 
 /// Spawns one ingestor thread per supported format, each idle until a payload for its format arrives.
 ///
-/// `mapping_binding` is the lane's binding, which decides how a JSON source is split into records.
+/// `mapping_binding` is the lane's binding, which decides how a JSON source is split into records and
+/// which tables of a `GeoPackage` are read.
 pub(crate) fn spawn_ingestor_bank(
     mapping_binding: &MappingBinding,
     batch_size: usize,
@@ -92,6 +98,7 @@ pub(crate) fn spawn_ingestor_bank(
     let mut routes: ProfilerRoutes = HashMap::new();
 
     let json_selection = Arc::new(json_record_selection(mapping_binding));
+    let geopackage_selection = Arc::new(geopackage_table_selection(mapping_binding));
     let factories: [(DataFormat, IngestorFactory); 10] = [
         (
             DataFormat::Csv,
@@ -142,7 +149,19 @@ pub(crate) fn spawn_ingestor_bank(
         ),
         (
             DataFormat::GeoPackage,
-            Box::new(|payload, batch, _| Ok(PreparedIngestor::quiet(Box::new(GeoPackageIngestor::from_payload(payload, batch)?)))),
+            Box::new(move |payload, batch, _| {
+                let ingestor = GeoPackageIngestor::from_payload(payload, batch, Arc::clone(&geopackage_selection))?;
+                let unreadable = ingestor.unreadable_tables();
+                // The ingestor is given up when it runs, while the report names its source after.
+                let source = ingestor.source().clone();
+                Ok(PreparedIngestor {
+                    ingestor: Box::new(ingestor),
+                    warnings: 0,
+                    after_ingest: Some(Box::new(move |sink: &dyn DiagnosticSink| {
+                        report_unreadable_tables(sink, &source, &unreadable.lock())
+                    })),
+                })
+            }),
         ),
         (
             DataFormat::NetCdf,
@@ -179,9 +198,25 @@ pub(crate) fn spawn_ingestor_bank(
 fn json_record_selection(mapping_binding: &MappingBinding) -> JsonRecordSelection {
     match mapping_binding {
         MappingBinding::Single { .. } => JsonRecordSelection::LoneArray,
-        // The selection outlives the binding, which the lane keeps for routing.
-        MappingBinding::Collections { mappings } => JsonRecordSelection::Collections(mappings.iter().map(|entry| entry.collection().clone()).collect()),
+        MappingBinding::Collections { mappings } => JsonRecordSelection::Collections(listed_collections(mappings)),
     }
+}
+
+/// Picks which tables of a lane's `GeoPackage` are read from the lane's mapping binding.
+///
+/// A lone `mapping` maps every record, so every table is read; a `mappings` list maps only the
+/// collections it names, so only the tables of those names are.
+fn geopackage_table_selection(mapping_binding: &MappingBinding) -> GeoPackageTableSelection {
+    match mapping_binding {
+        MappingBinding::Single { .. } => GeoPackageTableSelection::Every,
+        MappingBinding::Collections { mappings } => GeoPackageTableSelection::Listed(listed_collections(mappings)),
+    }
+}
+
+/// The collection labels a `mappings` list names, in order.
+fn listed_collections(mappings: &[CollectionMapping]) -> Vec<CollectionName> {
+    // The labels outlive the binding, which the lane keeps for routing.
+    mappings.iter().map(|entry| entry.collection().clone()).collect()
 }
 
 /// Waits for payloads of one format, building and running an ingestor for each.
@@ -295,9 +330,9 @@ fn ingest_one(ingestor: Box<dyn Ingestor>, channel_policy: ChannelPolicy, shared
 
 #[cfg(test)]
 mod tests {
-    use crate::stages::ingestor::json_record_selection;
+    use crate::stages::ingestor::{geopackage_table_selection, json_record_selection};
     use cassiopeia_common::collection::CollectionName;
-    use cassiopeia_ingestor::json::record_selection::JsonRecordSelection;
+    use cassiopeia_ingestor::{geopackage::table_selection::GeoPackageTableSelection, json::record_selection::JsonRecordSelection};
     use cassiopeia_manifest::mapping_binding::{CollectionMapping, MappingBinding};
     use pretty_assertions::assert_eq;
     use std::path::PathBuf;
@@ -323,6 +358,30 @@ mod tests {
         assert_eq!(
             json_record_selection(&binding),
             JsonRecordSelection::Collections(vec![CollectionName::from("data.lines"), CollectionName::from("data.lines.stops")])
+        );
+    }
+
+    #[test]
+    fn a_single_mapping_reads_every_geopackage_table() {
+        let binding = MappingBinding::Single {
+            mapping: PathBuf::from("m.json5"),
+        };
+
+        assert_eq!(geopackage_table_selection(&binding), GeoPackageTableSelection::Every);
+    }
+
+    #[test]
+    fn a_mappings_list_reads_only_the_geopackage_tables_it_names() {
+        let binding = MappingBinding::Collections {
+            mappings: vec![
+                CollectionMapping::new(CollectionName::from("vg5000_gem"), PathBuf::from("municipality.json5")),
+                CollectionMapping::new(CollectionName::from("vg5000_krs"), PathBuf::from("district.json5")),
+            ],
+        };
+
+        assert_eq!(
+            geopackage_table_selection(&binding),
+            GeoPackageTableSelection::Listed(vec![CollectionName::from("vg5000_gem"), CollectionName::from("vg5000_krs")])
         );
     }
 }

@@ -1,3 +1,4 @@
+use crate::geopackage::unreadable_table::UnreadableTable;
 use cassiopeia_crs::error::CrsError;
 
 /// Errors that can occur while ingesting an OGC `GeoPackage`.
@@ -17,6 +18,16 @@ pub enum GeoPackageIngestError {
     /// `gpkg_contents` lists no `features` or `attributes` table, so the file holds no records.
     #[error("the GeoPackage holds no features or attributes table")]
     NoTables,
+
+    /// Every record table the run reads failed before its first row was read, each skipped with a
+    /// warning, so the file yielded no records. The first table to fail is the source.
+    #[error("no record table of the GeoPackage can be read")]
+    NoReadableTable(#[source] UnreadableTable),
+
+    /// `gpkg_contents` lists a table as `features`, but `gpkg_geometry_columns` has no row for its
+    /// geometry column, so its geometries cannot be told from its other columns.
+    #[error("the GeoPackage table '{table}' is listed as features, but gpkg_geometry_columns names no geometry column for it")]
+    NoGeometryColumn { table: String },
 
     /// A table's geometry column names an `srs_id` that `gpkg_spatial_ref_sys` does not define, so the
     /// coordinates cannot be placed in any coordinate reference system.

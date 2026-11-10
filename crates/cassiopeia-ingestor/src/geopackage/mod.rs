@@ -6,5 +6,7 @@ pub mod ingestor;
 pub mod record;
 #[cfg(feature = "geopackage")]
 pub mod table;
+pub mod table_selection;
+pub mod unreadable_table;
 #[cfg(feature = "geopackage")]
 pub mod value;

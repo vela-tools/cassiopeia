@@ -155,7 +155,7 @@ Cassiopeia checks every template in a mapping when it loads the mapping. A templ
 
 A geometry declaration that could never run is rejected at load time the same way, naming the attribute: a `GeoProperty` whose `transformation` produces no geometry, such as `string`, a `geometry` block on an attribute whose value is never converted to a geometry, and a `geometry` conversion that cannot produce the declared type. See [GeoProperty](mapping.md#geoproperty).
 
-Problems that depend on one record's data, or on the rows and header of one CSV file, do not stop the run. Each is a warning, and the `Reasons` block counts it under one of these codes:
+Problems that depend on one record's data, on the rows and header of one CSV file, or on one table of a GeoPackage, do not stop the run. Each is a warning, and the `Reasons` block counts it under one of these codes:
 
 | Code | What happened |
 | --- | --- |
@@ -180,6 +180,7 @@ Problems that depend on one record's data, or on the rows and header of one CSV 
 | `geometry-*` | A source geometry could not become the geometry its `GeoProperty` declares, such as a `GeometryCollection` (`geometry-collection-inadmissible`) or a `MultiPolygon` of several surfaces asked for a `Polygon` (`geometry-ambiguous-multi-geometry`). Cassiopeia dropped that attribute, sub-attribute, or instance and kept the entity. One warning per attribute and reason names the attribute by its path, such as `location` or `temperature.footprint` for a sub-attribute, and the reason, so two attributes that each declare a `footprint` sub-attribute are reported separately. |
 | `ingest-columns-renamed` | A CSV file's header gave two columns the same field name, so Cassiopeia kept both and renamed each repeat. One warning per file names up to three renamed columns and the field name to read each by, and counts the rest. With `--verbose`, it lists every renamed column. See [CSV](source-formats.md#dialect-detection). |
 | `ingest-rows-misshapen` | Rows of a CSV file had another number of fields than its table, so Cassiopeia skipped them and kept the rows around them. One warning per file names up to three skipped rows and counts every one. See [CSV](source-formats.md#rows-of-another-width). |
+| `ingest-table-unreadable` | A GeoPackage table failed before Cassiopeia read its first row, such as a view, which has no row id to read its rows by, so Cassiopeia skipped it and read the other tables. One warning per table names the table and the file, and gives the reason. See [GeoPackage](source-formats.md#tables-that-cannot-be-read). |
 | `transform-expires-at-unreadable` | An attribute's `expiresAt` could not be read as a date and time, so the attribute is written without it. |
 | `transform-observed-at-unreadable` | An `observedAt` declared without a transformation could not be read as a date and time, so the attribute is written without it. |
 

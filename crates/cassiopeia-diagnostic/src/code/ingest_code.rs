@@ -10,6 +10,9 @@ pub enum IngestCode {
     ColumnsRenamed,
     /// Rows of a tabular source had another number of fields than the table, so each was skipped.
     RowsMisshapen,
+    /// A table of a source holding several failed before its first row was read, so it was skipped
+    /// and the other tables were read.
+    TableUnreadable,
     /// The source could not be fetched or opened.
     SourceUnavailable,
     /// The payload's format could not be determined from its content.
@@ -32,5 +35,6 @@ mod tests {
         assert_eq!(IngestCode::RecordsUnreadable.to_string(), "records-unreadable");
         assert_eq!(IngestCode::ColumnsRenamed.to_string(), "columns-renamed");
         assert_eq!(IngestCode::RowsMisshapen.to_string(), "rows-misshapen");
+        assert_eq!(IngestCode::TableUnreadable.to_string(), "table-unreadable");
     }
 }
