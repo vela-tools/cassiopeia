@@ -208,6 +208,54 @@ mod tests {
         assert_eq!(records[6].data().get("t"), Some(&json!(250.0)));
     }
 
+    /// The records of a two-layer depth grid in a single cell, whose one variable over `depth` is
+    /// called `name` and carries `attributes`.
+    fn depth_records(name: &str, attributes: &[(&str, &str)]) -> Vec<Value> {
+        let mut builder = NcFileBuilder::new();
+        let depth = coordinate(
+            &mut builder,
+            "depth",
+            &[0.05, 0.5],
+            &[("standard_name", "depth"), ("units", "m"), ("positive", "down")],
+        );
+        let [latitude, longitude] = single_cell(&mut builder);
+        variable(&mut builder, name, &[depth, latitude, longitude], &[281.0, 283.0], attributes);
+        ingested(&builder).into_iter().map(|record| Value::Object(record.into_data())).collect()
+    }
+
+    #[test]
+    fn a_depth_under_soil_temperatures_is_a_depth_below_the_land() {
+        let records = depth_records("tsl", &[("standard_name", "soil_temperature"), ("units", "K")]);
+        assert_eq!(
+            records,
+            vec![
+                json!({"latitude": 46.0, "longitude": 14.0, "level_type": "depth_below_land", "level": 0.05, "tsl": 281.0}),
+                json!({"latitude": 46.0, "longitude": 14.0, "level_type": "depth_below_land", "level": 0.5, "tsl": 283.0}),
+            ]
+        );
+    }
+
+    #[test]
+    fn a_depth_under_sea_water_temperatures_is_a_depth_below_the_sea() {
+        let records = depth_records("thetao", &[("standard_name", "sea_water_potential_temperature"), ("units", "degC")]);
+        assert_eq!(
+            records[1],
+            json!({"latitude": 46.0, "longitude": 14.0, "level_type": "depth_below_sea", "level": 0.5, "thetao": 283.0})
+        );
+    }
+
+    #[test]
+    fn a_depth_whose_data_declares_no_standard_name_keeps_its_own_name_and_raw_value() {
+        let records = depth_records("tsl", &[("units", "K")]);
+        assert_eq!(
+            records,
+            vec![
+                json!({"latitude": 46.0, "longitude": 14.0, "depth": 0.05, "tsl": 281.0}),
+                json!({"latitude": 46.0, "longitude": 14.0, "depth": 0.5, "tsl": 283.0}),
+            ]
+        );
+    }
+
     #[test]
     fn a_packed_short_is_unpacked_with_its_scale_factor_and_offset() {
         let mut builder = NcFileBuilder::new();

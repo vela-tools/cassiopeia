@@ -773,10 +773,13 @@ A vertical coordinate maps onto the same `level_type` tokens GRIB uses, so a lev
 | Pressure in `Pa`, `hPa`, `mbar`, or `millibar` | `isobaric` | hPa |
 | `standard_name` `height` in metres | `height_above_ground` | metres |
 | `standard_name` `altitude` or `height_above_mean_sea_level` in metres | `altitude_above_mean_sea` | metres |
-| `standard_name` `depth`, or `positive = "down"`, in metres | `depth_below_sea` | metres |
+| `standard_name` `depth`, or `positive = "down"` and no vertical `standard_name`, in metres, under soil quantities | `depth_below_land` | metres |
+| The same depth under sea water quantities | `depth_below_sea` | metres |
 | `atmosphere_sigma_coordinate` | `sigma` | the coordinate value |
 
-A vertical `standard_name` other than `air_pressure` decides on its own, ahead of the units. A hybrid coordinate that declares `hPa`, as CAM history files do for their nominal `1000 * (a + b)` values, is therefore not read as a pressure. Any other vertical coordinate is emitted under its own variable name with its raw value. That includes a `model_level_number`, a height in kilometres, an ocean s-coordinate, and the hybrid sigma-pressure and hybrid height coordinates, whose values are not the model level numbers GRIB's `hybrid` level carries. CF's `depth` does not say which surface it is measured from, so a soil depth in metres becomes `depth_below_sea` too.
+A vertical `standard_name` other than `air_pressure` decides on its own, ahead of the units and of `positive`. A hybrid coordinate that declares `hPa`, as CAM history files do for their nominal `1000 * (a + b)` values, is therefore not read as a pressure. Any other vertical coordinate is emitted under its own variable name with its raw value. That includes a `model_level_number`, a height in kilometres, a `depth_below_geoid`, an ocean s-coordinate, and the hybrid sigma-pressure and hybrid height coordinates, whose values are not the model level numbers GRIB's `hybrid` level carries.
+
+CF's `depth` is the distance below a surface it does not name, so the data variables on the coordinate name it: those that span its dimension or list it in their `coordinates` attribute. A `standard_name` with the word `soil`, such as `soil_temperature` or `mass_content_of_water_in_soil_layer`, is a soil quantity, measured below the land surface like GRIB's `depth_below_land`. One with `sea_water` or `ocean`, such as `sea_water_salinity` or `ocean_mixed_layer_thickness`, is a sea water quantity. A variable without a standard name, such as a quality flag, or with one that is neither, such as `sea_ice_temperature`, does not count. A depth that no variable gives a surface, or that soil and sea water quantities share, is emitted under its own variable name with its raw value.
 
 ### Time
 

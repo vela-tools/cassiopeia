@@ -90,7 +90,7 @@ impl<'f> TimeSeries<'f> {
             latitude,
             longitude,
             time,
-            time_key: CoordinateKey::of(time, CoordinateRole::Time),
+            time_key: CoordinateKey::of(root, time, CoordinateRole::Time),
             facets,
             columns,
         };
@@ -556,6 +556,42 @@ mod tests {
         assert_eq!(
             Value::Object(records[2].data().clone()),
             json!({"latitude": 0.0, "longitude": -140.0, "time": "2026-01-01T02:00:00+00:00", "level_type": "height_above_ground", "level": 4, "AIRT": 24.7})
+        );
+    }
+
+    #[test]
+    fn a_mooring_depth_under_a_sea_water_temperature_and_its_unnamed_flag_is_a_depth_below_the_sea() {
+        let mut builder = feature("timeSeries");
+        let time = coordinate(&mut builder, "TIME", &[0.0, 1.0, 2.0], TIME);
+        let depth = coordinate(
+            &mut builder,
+            "DEPTH",
+            &[1.5],
+            &[("standard_name", "depth"), ("units", "meters"), ("positive", "down"), ("axis", "Z")],
+        );
+        coordinate(&mut builder, "LATITUDE", &[0.0], LATITUDE);
+        coordinate(&mut builder, "LONGITUDE", &[-140.0], LONGITUDE);
+        variable(
+            &mut builder,
+            "TEMP",
+            &[time, depth],
+            &[24.5, 24.6, 24.7],
+            &[("standard_name", "sea_water_temperature"), ("units", "degree_Celsius")],
+        );
+        variable(&mut builder, "TEMP_QC", &[time, depth], &[1.0, 1.0, 4.0], &[("long_name", "quality flag")]);
+
+        let records = ingested(&builder).unwrap();
+        assert_eq!(
+            Value::Object(records[2].data().clone()),
+            json!({
+                "latitude": 0.0,
+                "longitude": -140.0,
+                "time": "2026-01-01T02:00:00+00:00",
+                "level_type": "depth_below_sea",
+                "level": 1.5,
+                "TEMP": 24.7,
+                "TEMP_QC": 4.0
+            })
         );
     }
 

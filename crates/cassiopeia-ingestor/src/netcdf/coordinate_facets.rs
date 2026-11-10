@@ -7,6 +7,7 @@ use crate::{
     netcdf::{
         coordinate_role::CoordinateRole,
         decode::Decode,
+        depth_surface::DepthSurface,
         error::NetCdfIngestError,
         record_keys::RecordKey,
         time_axis::TimeAxis,
@@ -14,7 +15,7 @@ use crate::{
         vertical_level::VerticalAxis,
     },
 };
-use netcdf_reader::{NcFile, NcVariable};
+use netcdf_reader::{NcFile, NcGroup, NcVariable};
 use serde_json::Value;
 
 /// The record key a time coordinate is emitted under.
@@ -32,14 +33,15 @@ pub enum CoordinateKey {
 }
 
 impl CoordinateKey {
-    /// The key a coordinate in `role` is emitted under, decided from its metadata alone so collisions
-    /// are found before any value is read.
+    /// The key a coordinate of `root` in `role` is emitted under, decided from the file's metadata alone
+    /// so collisions are found before any value is read. A depth takes the surface it is measured below
+    /// from the standard names of the variables it locates.
     #[must_use]
-    pub fn of(variable: &NcVariable, role: CoordinateRole) -> CoordinateKey {
+    pub fn of(root: &NcGroup, variable: &NcVariable, role: CoordinateRole) -> CoordinateKey {
         let own_name = || CoordinateKey::Named(ParameterName::from(variable.name()));
         match role {
             CoordinateRole::Vertical => match ValueKind::of(variable.dtype()) {
-                ValueKind::Numeric => VerticalAxis::of(variable.attributes()).map_or_else(own_name, CoordinateKey::Level),
+                ValueKind::Numeric => VerticalAxis::of(variable.attributes(), || DepthSurface::of(root, variable)).map_or_else(own_name, CoordinateKey::Level),
                 ValueKind::Text | ValueKind::UserDefined => own_name(),
             },
             CoordinateRole::Time => CoordinateKey::Named(ParameterName::from(TIME)),

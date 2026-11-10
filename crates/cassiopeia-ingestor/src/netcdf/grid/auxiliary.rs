@@ -72,8 +72,8 @@ pub fn auxiliary_axes<'f>(root: &'f NcGroup, variable: &NcVariable, dimensions: 
             continue;
         };
         let candidates = [
-            CoordinateKey::of(coordinate, CoordinateRole::of(coordinate.attributes())),
-            CoordinateKey::of(coordinate, CoordinateRole::Other),
+            CoordinateKey::of(root, coordinate, CoordinateRole::of(coordinate.attributes())),
+            CoordinateKey::of(root, coordinate, CoordinateRole::Other),
         ];
         let Some(key) = candidates.into_iter().find(|key| !is_taken(key, coordinate, facets, &auxiliaries)) else {
             tracing::warn!(coordinate = coordinate.name(), "NetCDF coordinate skipped: its record key is already taken");

@@ -197,7 +197,7 @@ fn grid_layout<'f>(root: &'f NcGroup, variable: &'f NcVariable) -> Result<GridLa
                 facets.push(FacetAxis {
                     position,
                     coordinate,
-                    key: CoordinateKey::of(coordinate, role),
+                    key: CoordinateKey::of(root, coordinate, role),
                 });
             }
         }

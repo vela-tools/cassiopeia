@@ -3,6 +3,7 @@ pub mod coordinate_facets;
 pub mod coordinate_role;
 pub mod decode;
 pub mod default_fill;
+pub mod depth_surface;
 pub mod dimension_length;
 pub mod epoch_zone;
 pub mod error;

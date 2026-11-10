@@ -69,14 +69,14 @@ impl<'f> TimeSeriesCoordinates<'f> {
                 CoordinateRole::Latitude if latitude.is_none() => latitude = Some(variable),
                 CoordinateRole::Longitude if longitude.is_none() => longitude = Some(variable),
                 CoordinateRole::Time if time.is_none() => time = Some(variable),
-                CoordinateRole::Vertical if !has_level => facets.push((variable, CoordinateKey::of(variable, role))),
+                CoordinateRole::Vertical if !has_level => facets.push((variable, CoordinateKey::of(root, variable, role))),
                 CoordinateRole::Latitude
                 | CoordinateRole::Longitude
                 | CoordinateRole::Time
                 | CoordinateRole::Vertical
                 | CoordinateRole::ProjectedX
                 | CoordinateRole::ProjectedY
-                | CoordinateRole::Other => facets.push((variable, CoordinateKey::of(variable, CoordinateRole::Other))),
+                | CoordinateRole::Other => facets.push((variable, CoordinateKey::of(root, variable, CoordinateRole::Other))),
             }
         }
 

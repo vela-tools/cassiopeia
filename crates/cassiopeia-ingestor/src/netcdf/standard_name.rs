@@ -37,7 +37,7 @@ pub enum StandardName {
     Altitude,
     /// Height above mean sea level, the historical alias of `altitude`.
     HeightAboveMeanSeaLevel,
-    /// Depth below the sea surface, a dimensional vertical coordinate.
+    /// Depth below a surface the name leaves unnamed, a dimensional vertical coordinate.
     Depth,
     /// Depth below the geoid, a dimensional vertical coordinate.
     DepthBelowGeoid,

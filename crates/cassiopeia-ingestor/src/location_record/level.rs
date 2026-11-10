@@ -19,7 +19,8 @@ pub enum LevelType {
     AltitudeAboveMeanSea,
     /// An isobaric (constant-pressure) surface; canonical unit hPa.
     Isobaric,
-    /// A depth below the land surface (m).
+    /// A depth below the land surface (m), as GRIB2 Code Table 4.5 type 106 and CF soil depth
+    /// coordinates express it.
     DepthBelowLand,
     /// A depth below the sea surface (m), as CF ocean depth coordinates express it.
     DepthBelowSea,
