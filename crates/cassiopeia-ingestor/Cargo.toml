@@ -25,7 +25,7 @@ encoding_rs = "0.8.44"
 encoding_rs_rw = "0.4.3"
 geo-types = "0.7.20"
 geojson = "1.0.0"
-geopackage = { version = "0.13.0", features = ["bundled"], optional = true }
+geopackage = { version = "0.14.3", features = ["bundled"], optional = true }
 grib = { version = "0.20.3", default-features = false, features = ["ccsds-unpack-with-rust-aec", "jpeg2000-unpack-with-hayro", "png-unpack-with-png-crate", "time-calculation"] }
 indexmap = "2.14.2"
 kml = { version = "0.15.0", features = ["geo-types"] }
@@ -43,7 +43,7 @@ strum = { version = "0.28.0", features = ["derive"] }
 temp-dir = "0.2.0"
 thiserror = "2.0.21"
 tracing = "0.1.44"
-zip = { version = "9.4.1", default-features = false, features = ["deflate"] }
+zip = { version = "9.5.0", default-features = false, features = ["deflate"] }
 
 [features]
 default = ["geopackage", "grib1", "grib2-full"]
@@ -54,14 +54,14 @@ grib2-full = ["dep:eccodes"]
 [dev-dependencies]
 cassiopeia-data-profiler.workspace = true
 cassiopeia-encoding-detection.workspace = true
-geopackage-core = "0.13.0"
-grib-core = "0.7.0"
-grib-writer = "0.7.0"
+geopackage-core = "0.14.3"
+grib-core = "0.8.0"
+grib-writer = "0.8.0"
 mediatype = "0.23.0"
 netcdf-writer = "0.12.1"
 pretty_assertions = "1.4.1"
 temp-dir = "0.2.0"
-zip = { version = "9.4.1", default-features = false, features = ["deflate"] }
+zip = { version = "9.5.0", default-features = false, features = ["deflate"] }
 
 [lints]
 workspace = true

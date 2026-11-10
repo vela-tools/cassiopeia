@@ -18,7 +18,7 @@ crossbeam-channel = "0.5.17"
 getset = "0.1.7"
 http = "1.5.0"
 indexmap = "2.14.2"
-iri-rs = { version = "4.0.0", features = ["serde", "static"] }
+iri-rs = { version = "4.1.1", features = ["serde", "static"] }
 memchr = "2.8.3"
 parking_lot = "0.13.0"
 rayon = "1.12.0"

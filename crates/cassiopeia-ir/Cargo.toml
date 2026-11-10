@@ -18,10 +18,10 @@ derive_more = { version = "2.1.1", features = ["display", "from", "from_str", "i
 foldhash = "0.2.0"
 getset = "0.1.7"
 indexmap = { version = "2.14.2", features = ["serde"] }
-iri-rs = { version = "4.0.0", features = ["serde"] }
+iri-rs = { version = "4.1.1", features = ["serde"] }
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = { version = "1.0.154", features = ["preserve_order"] }
-smallvec = "1.16.4"
+smallvec = "1.16.5"
 smart-default = "0.7.1"
 thiserror = "2.0.21"
 url = "2.5.8"
