@@ -21,23 +21,24 @@ use crate::template::{
     field_reads::field_reads,
     registered_template::RegisteredTemplate,
     resolver::RECORD_VARIABLE,
+    template_input::TemplateInput,
 };
 use serde_json::Value as JsonValue;
 use tera::Tera;
 
-/// Explains why Tera failed to render `template` against `data`.
-pub(crate) fn diagnose(tera: &Tera, template: &RegisteredTemplate, data: &JsonValue, engine: tera::Error) -> ResolutionFailure {
+/// Explains why Tera failed to render `template` against `input`.
+pub(crate) fn diagnose(tera: &Tera, template: &RegisteredTemplate, input: TemplateInput<'_>, engine: tera::Error) -> ResolutionFailure {
     let source = EngineReport::unlocated(engine);
     // The failure outlives the record and the mapping the template is borrowed from.
     let text = template.source.clone();
     if let Some(field) = source.undefined_variable().map(FieldPath::new) {
         return ResolutionFailure::MissingField { template: text, field, source };
     }
-    if !data.is_object() {
+    if !input.record().is_object() {
         return ResolutionFailure::Render { template: text, source };
     }
     let paths = field_reads(template.source.as_str(), &read_variables(tera, template));
-    let mut missing = paths.iter().filter_map(|path| path.missing_prefix(data));
+    let mut missing = paths.iter().filter_map(|path| path.missing_prefix(input));
 
     let found = match source.undefined_field() {
         Some(segment) => missing.find(|prefix| prefix.last_segment() == segment),
@@ -48,7 +49,7 @@ pub(crate) fn diagnose(tera: &Tera, template: &RegisteredTemplate, data: &JsonVa
         return ResolutionFailure::MissingField { template: text, field, source };
     }
     if source.mentions_null_value()
-        && let Some(field) = paths.into_iter().find(|path| path.lookup(data).is_some_and(JsonValue::is_null))
+        && let Some(field) = paths.into_iter().find(|path| path.lookup(input).is_some_and(JsonValue::is_null))
     {
         return ResolutionFailure::NullField { template: text, field, source };
     }
@@ -71,6 +72,8 @@ mod tests {
             error::ResolutionFailure,
             registered_template::RegisteredTemplate,
             render_diagnosis::diagnose,
+            run_variables::RunVariables,
+            template_input::TemplateInput,
             template_name::TemplateName,
         },
         template_location::TemplateLocation,
@@ -80,7 +83,8 @@ mod tests {
     use std::{path::Path, sync::Arc};
     use tera::{Context, Tera};
 
-    /// The diagnosis of rendering `source`, registered as written, against `data`.
+    /// The diagnosis of rendering `source`, registered as written, against `data` read with no run
+    /// variables.
     fn diagnosis(source: &str, data: &JsonValue) -> ResolutionFailure {
         let template = RegisteredTemplate {
             name: TemplateName::for_source(source),
@@ -93,10 +97,12 @@ mod tests {
         for (key, value) in data.as_object().unwrap() {
             context.insert(key.clone(), value);
         }
+        let variables = RunVariables::none();
+        context.insert("vars", variables.as_value());
         context.insert("this", data);
         let engine = tera.render(template.name.as_str(), &context).unwrap_err();
 
-        diagnose(&tera, &template, data, engine)
+        diagnose(&tera, &template, TemplateInput::new(data, &variables), engine)
     }
 
     #[test]
@@ -211,6 +217,15 @@ mod tests {
             diagnosis("{{ a.x | upper }}", &json!({"a": {"x": null}})),
             ResolutionFailure::NullField { field, .. } if field.as_str() == "a.x"
         ));
+    }
+
+    #[test]
+    fn a_missing_run_variable_is_named_by_its_path_from_vars() {
+        assert_eq!(missing_field("{{ vars.region | upper }}", &json!({"id": "A"})).as_deref(), Some("vars.region"));
+        assert_eq!(
+            missing_field("{{ vars.region }}-{{ id | lower }}", &json!({"id": "A"})).as_deref(),
+            Some("vars.region")
+        );
     }
 
     #[test]

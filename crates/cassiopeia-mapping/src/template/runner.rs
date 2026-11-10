@@ -155,12 +155,20 @@ impl TemplateRunner {
 mod tests {
     use crate::{
         source_reads::{SourceKey, SourceReads},
-        template::{CompiledTemplate, TemplatePart, TemplateSource, compile_error::TemplateCompileError, runner::TemplateRunner},
+        template::{
+            CompiledTemplate,
+            TemplatePart,
+            TemplateSource,
+            compile_error::TemplateCompileError,
+            run_variables::RunVariables,
+            runner::TemplateRunner,
+            template_input::TemplateInput,
+        },
         template_location::TemplateLocation,
         template_site::TemplateSite,
     };
     use pretty_assertions::assert_eq;
-    use serde_json::{Value as JsonValue, json};
+    use serde_json::{Map, Value as JsonValue, json};
     use std::{error::Error, path::Path, sync::Arc};
 
     fn location() -> TemplateLocation {
@@ -184,9 +192,20 @@ mod tests {
     }
 
     fn resolve(source: &str, data: &JsonValue) -> JsonValue {
+        resolve_with(source, data, &RunVariables::none())
+    }
+
+    fn resolve_with(source: &str, data: &JsonValue, variables: &RunVariables) -> JsonValue {
         let (runner, compiled) = compile(source);
 
-        runner.resolver().resolve(&compiled, data).unwrap()
+        runner.resolver().resolve(&compiled, TemplateInput::new(data, variables)).unwrap()
+    }
+
+    /// Run variables holding the single variable `name`.
+    fn one_variable(name: &str, value: JsonValue) -> RunVariables {
+        let mut variables = Map::new();
+        variables.insert(name.to_string(), value);
+        RunVariables::new(variables)
     }
 
     #[test]
@@ -301,26 +320,40 @@ mod tests {
     }
 
     #[test]
-    fn a_bare_var_reference_reads_the_injected_vars_map() {
-        let data = json!({"id": 1, "vars": {"valid_from": "2026-08-04T16:00:00Z"}});
+    fn a_bare_var_reference_reads_the_run_variables() {
+        let variables = one_variable("valid_from", json!("2026-08-04T16:00:00Z"));
 
-        assert_eq!(resolve("{{ vars.valid_from }}", &data), json!("2026-08-04T16:00:00Z"));
+        assert_eq!(
+            resolve_with("{{ vars.valid_from }}", &json!({"id": 1}), &variables),
+            json!("2026-08-04T16:00:00Z")
+        );
     }
 
     #[test]
     fn a_filtered_var_reference_resolves_through_tera() {
-        let data = json!({"id": 1, "vars": {"name": "senlab"}});
+        let variables = one_variable("name", json!("senlab"));
 
-        assert_eq!(resolve("{{ vars.name | upper }}", &data), json!("SENLAB"));
+        assert_eq!(resolve_with("{{ vars.name | upper }}", &json!({"id": 1}), &variables), json!("SENLAB"));
     }
 
     #[test]
-    fn the_reserved_vars_key_does_not_disturb_positional_this_access() {
-        // A headerless record carrying injected vars still binds `this` to its column array, so a
-        // Tera positional expression reads the column rather than tripping over the extra key.
-        let data = json!({"0": "1", "1": "GKA", "vars": {"x": "y"}});
+    fn the_run_variables_do_not_disturb_positional_this_access() {
+        let variables = one_variable("x", json!("y"));
+        let data = json!({"0": "1", "1": "GKA"});
 
-        assert_eq!(resolve("{% if this[1] %}{{ this[1] }}{% else %}none{% endif %}", &data), json!("GKA"));
+        assert_eq!(
+            resolve_with("{% if this[1] %}{{ this[1] }}{% else %}none{% endif %}", &data, &variables),
+            json!("GKA")
+        );
+    }
+
+    #[test]
+    fn a_direct_lookup_of_a_run_variable_reads_what_tera_reads() {
+        let variables = one_variable("x", json!(13));
+        let data = json!({"vars": {"x": "from the source"}});
+
+        assert_eq!(resolve_with("{{ vars.x }}", &data, &variables), json!(13));
+        assert_eq!(resolve_with("{{ vars.x | json_encode | json_decode }}", &data, &variables), json!(13));
     }
 
     #[test]
@@ -387,14 +420,24 @@ mod tests {
         let compiled = runner.compile(&TemplateSource::new("{{ value | upper }}"), &location()).unwrap();
         let resolver = runner.resolver();
 
-        assert_eq!(resolver.resolve(&compiled, &json!({"value": "x"})).unwrap(), json!("X"));
+        assert_eq!(
+            resolver
+                .resolve(&compiled, TemplateInput::new(&json!({"value": "x"}), &RunVariables::none()))
+                .unwrap(),
+            json!("X")
+        );
     }
 
     #[test]
     fn rendering_an_expression_over_a_missing_field_is_an_error() {
         let (runner, compiled) = compile("{{ missing | upper }}");
 
-        assert!(runner.resolver().resolve(&compiled, &json!({})).is_err());
+        assert!(
+            runner
+                .resolver()
+                .resolve(&compiled, TemplateInput::new(&json!({}), &RunVariables::none()))
+                .is_err()
+        );
     }
 
     #[test]
@@ -438,7 +481,13 @@ mod tests {
         let (runner, compiled) = compile(&source);
 
         assert!(matches!(compiled, CompiledTemplate::Complex(_)));
-        assert_eq!(runner.resolver().resolve(&compiled, &json!({"a": "x"})).unwrap(), json!("X"));
+        assert_eq!(
+            runner
+                .resolver()
+                .resolve(&compiled, TemplateInput::new(&json!({"a": "x"}), &RunVariables::none()))
+                .unwrap(),
+            json!("X")
+        );
     }
 
     #[test]
@@ -552,7 +601,7 @@ mod tests {
     fn a_direct_lookup_reads_what_tera_reads_for_the_same_reference() {
         let named = json!({
             "and": 1, "in": 2, "is": 3, "or": 4, "loop": 5, "self": 6, "context": 7,
-            "a": {"not": 8, "none": 9, "b": {"c": 10}}, "CO(GT)": 11, "": 12, "vars": {"x": 13},
+            "a": {"not": 8, "none": 9, "b": {"c": 10}}, "CO(GT)": 11, "": 12,
         });
         let positional = json!({"0": "zero", "1": "one", "7": "seven", "2": "two", "3": "three", "4": "four", "5": "five", "6": "six"});
 
@@ -569,7 +618,6 @@ mod tests {
             ("a.b.c", &named),
             ("this['CO(GT)']", &named),
             ("this['']", &named),
-            ("vars.x", &named),
             ("this[1]", &positional),
             ("this[007]", &positional),
         ] {
@@ -664,7 +712,13 @@ mod tests {
         let compiled = runner.compile(&TemplateSource::new("{{ value | upper }}"), &location()).unwrap();
         assert!(runner.compile(&TemplateSource::new("{{ value | upper "), &location()).is_err());
 
-        assert_eq!(runner.resolver().resolve(&compiled, &json!({"value": "x"})).unwrap(), json!("X"));
+        assert_eq!(
+            runner
+                .resolver()
+                .resolve(&compiled, TemplateInput::new(&json!({"value": "x"}), &RunVariables::none()))
+                .unwrap(),
+            json!("X")
+        );
     }
 
     #[test]
@@ -855,7 +909,8 @@ mod tests {
     }
 
     #[test]
-    fn a_run_variable_reads_the_vars_key() {
-        assert_eq!(reads("{{ vars.region }}-{{ id }}"), keys(&["id", "vars"]));
+    fn a_run_variable_reads_no_source_key() {
+        assert_eq!(reads("{{ vars.region }}-{{ id }}"), keys(&["id"]));
+        assert_eq!(reads("{{ vars.region | upper }}"), SourceReads::nothing());
     }
 }

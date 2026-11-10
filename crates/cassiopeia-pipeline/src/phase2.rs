@@ -94,7 +94,10 @@ mod tests {
     };
     use cassiopeia_extractor::{dropped_attributes::DroppedAttributes, entity_extractor::EntityExtractor, extractor::Extractor};
     use cassiopeia_ir::{fragment::Fragment, mapped::Mapped, record::Record};
-    use cassiopeia_mapping::{mapping::Mapping, template::runner::TemplateRunner};
+    use cassiopeia_mapping::{
+        mapping::Mapping,
+        template::{run_variables::RunVariables, runner::TemplateRunner},
+    };
     use cassiopeia_ngsi_ld::entity::{
         NgsiLdEntity,
         attribute::{NgsiLdAttribute, NgsiLdAttributeWrapper},
@@ -113,7 +116,7 @@ mod tests {
     use cassiopeia_unreadable_timestamps::unreadable_timestamps::UnreadableTimestamps;
     use chrono::{TimeZone, Utc};
     use pretty_assertions::assert_eq;
-    use serde_json::{Map, Value, json};
+    use serde_json::{Value, json};
     use std::{ops::ControlFlow, path::Path, sync::Arc};
     use urn_rs::Urn;
 
@@ -130,7 +133,10 @@ mod tests {
 
         let sink: &dyn FragmentSink = &fragment_resolver;
         for id in ["urn:ngsi-ld:Station:1", "urn:ngsi-ld:Station:2"] {
-            let fragment = Fragment::new(json!({"temperature": 20}), id.parse().unwrap(), None, None, None);
+            let fragment = Fragment::builder()
+                .source_data(json!({"temperature": 20}))
+                .target_urn(id.parse().unwrap())
+                .build();
             sink.resolve(Mapped::new(fragment, Arc::clone(&mapping))).unwrap();
         }
 
@@ -182,7 +188,7 @@ mod tests {
             panic!("test record must be a JSON object");
         };
 
-        let expander = GenericExpander::new(MappingRouter::Single(Arc::clone(&mapping)), resolver.clone(), Map::new());
+        let expander = GenericExpander::new(MappingRouter::Single(Arc::clone(&mapping)), resolver.clone(), RunVariables::none());
         let fragments = Expander::expand(&expander, Record::new(None, data), &ExpansionLosses::new()).unwrap();
         let fragment_resolver = FragmentResolver::new(
             Box::new(DashMapLatestEntityStore::new()),

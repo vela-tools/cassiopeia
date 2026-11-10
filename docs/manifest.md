@@ -37,6 +37,7 @@ Manifests are JSON5 documents, so comments, trailing commas, and unquoted keys a
 | `onFailure` | No | How the run reacts to a failed cycle and what it exits with: `abort` (the default) stops and exits non-zero, `continue` runs the rest and exits non-zero, `ignore` runs the rest and exits zero. Governs one-shot and scheduled runs alike. See [Handle failures](running.md#handle-failures). |
 | `schedule` | No | Repeat the run on a schedule instead of running once. See [Schedule](#schedule). |
 | `memoryProfile` | No | `default` (the default) or `low-memory`, which trades throughput for a smaller footprint. |
+| `vars` | No | Variables every mapping in the run reads as `{{ vars.NAME }}`. See [Run variables](#run-variables). |
 
 ### Relative paths
 
@@ -74,6 +75,7 @@ inputs: [
 | `context` | No | A per-input `@context` override that wins over the output-level `context` for this input's entities. |
 | `schema` | No | A per-input custom validation schema. Use a local path or an `http(s)` URL. It wins over the output-level `output.validation.schema` for the types this input produces. |
 | `headers` | No | Extra HTTP headers sent on every request that fetches a remote `source`, such as an API key. See [Per-input headers](#per-input-headers). |
+| `vars` | No | Variables for this input's records alone, winning over a top-level variable of the same name. See [Run variables](#run-variables). |
 
 ### One mapping or many
 
@@ -218,6 +220,76 @@ output: {
 
 A `file` target adds `directory` and `framing`. A `context-broker` target adds a required `url` and broker delivery settings: `operation`, `atomicity`, `contextDelivery`, `tenant`, `userAgent`, `headers`, and the operation refinements `upsertMode` and `attributeOverwrite`. The [output guide](output.md) documents every destination field, the framing and extension rules, and broker delivery in full.
 
+## Run variables
+
+`vars` holds values a mapping reads but the source does not, such as a network name, a dataset identifier, or a validity instant. It is an object of names to values. At the top level of the manifest it applies to every input, and on an input it applies to that input's records alone:
+
+~~~json5
+{
+    version: "v1",
+    vars: {
+        districts: ["Center", "Bežigrad"],
+    },
+    inputs: [
+        {
+            source: "bikes.csv",
+            mapping: "station.json5",
+            vars: {
+                network: "bikes",
+            },
+        },
+        {
+            source: "scooters.csv",
+            mapping: "station.json5",
+            vars: {
+                network: "scooters",
+            },
+        },
+    ],
+}
+~~~
+
+A mapping reads a variable as `{{ vars.NAME }}`, so both inputs share one mapping:
+
+~~~json5
+{
+    version: "v4",
+    dataModel: "Station",
+    identity: {
+        entityName: "{{ vars.network }}-{{ id }}",
+    },
+    attributes: {
+        name: {
+            source: "{{ name }}",
+        },
+        network: {
+            source: "{{ vars.network }}",
+        },
+        district: {
+            source: "{{ vars.districts[0] }}",
+        },
+    },
+}
+~~~
+
+A record with `id` 1 in `bikes.csv` becomes `urn:ngsi-ld:Station:bikes-1`, with `network` set to `bikes`. The same `id` in `scooters.csv` becomes `urn:ngsi-ld:Station:scooters-1`, so the two sources label their entities differently and never collide on an ID.
+
+A value written in the manifest keeps its JSON type. A template can index an array, as `{{ vars.districts[0] }}` does, follow an object's members with dot access, and do arithmetic on a number. A variable is read like any source field, so [Keep a value's type](templates.md#keep-a-values-type) decides whether an attribute receives an array or a number as it is or as text. A variable that no level sets is a missing field, by the rules in [Read the record](templates.md#read-the-record).
+
+`--var NAME=VALUE` on the command line sets a variable too, on an inline run and alongside `--manifest`. Its value is always text. A transformation such as `integer` still reads a number from it, but a template that treats it as a number, such as `{{ vars.capacity + 1 }}`, fails to render and drops its attribute.
+
+When the same name is set in more than one place, the value is taken from the first of these that sets it:
+
+1. The input's own `vars`.
+2. `--var` on the command line. A repeated `--var` keeps its last value.
+3. The top-level `vars`.
+
+So `--var` overrides a top-level variable for the whole run, but never a variable an input sets for itself.
+
+A mapping reads the variables beside each record, never as part of it, in the main mapping and in a [`syntheticEntity`](mapping.md#emit-a-related-entity) alike. `{{ context }}` and `this` hold only the fields the source gave, so a variable reaches an entity only through an attribute that reads it. A bare `vars` always names the variables, so a source field called `vars` is read as `{{ this['vars'] }}`, or as `this.vars.NAME` inside an expression.
+
+`${NAME}` is ordinary text in `vars` at either level, so a variable never carries an environment value into an entity. A credential belongs in a field that reads the environment, as [Environment variables](#environment-variables) describes.
+
 ## Environment variables
 
 A manifest can read a value from the environment as `${NAME}`, so a credential never has to be written into the file. Cassiopeia fills each one when it loads the manifest, from the environment of the process it runs in:
@@ -241,7 +313,7 @@ A manifest can read a value from the environment as `${NAME}`, so a credential n
 }
 ~~~
 
-`${NAME}` works only in the fields that carry credentials: an input's `source` and `headers` values, and the output's `url` and `headers` values. Anywhere else, including `vars` and every mapping, `${NAME}` is ordinary text, so a mapping can never read an environment value into an entity. A name is letters, digits, and underscores, and does not start with a digit. Write `$${` for a literal `${`. A `$` that does not open a placeholder is ordinary text.
+`${NAME}` works only in the fields that carry credentials: an input's `source` and `headers` values, and the output's `url` and `headers` values. Anywhere else, including [`vars`](#run-variables) and every mapping, `${NAME}` is ordinary text, so a mapping can never read an environment value into an entity. A name is letters, digits, and underscores, and does not start with a digit. Write `$${` for a literal `${`. A `$` that does not open a placeholder is ordinary text.
 
 A variable that is not set stops the run before anything is fetched. The error names the variable and the field it sits in, such as `the output header 'authorization': the environment variable 'BROKER_TOKEN' is not set`, and never shows a value. A `source` that reads the environment must be a URL: a local path that reads a variable is refused, since a path is shown as it is wherever a message names the file.
 

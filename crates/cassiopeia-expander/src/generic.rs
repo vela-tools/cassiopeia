@@ -16,10 +16,15 @@ use cassiopeia_ir::{
     relationship_key::RelationshipKey,
     relationship_path::RelationshipPath,
 };
-use cassiopeia_mapping::{attribute::Attribute, mapping::Mapping, template::resolver::TemplateResolver};
-use cassiopeia_ngsi_ld::entity::{attribute::NgsiLdAttributeKind, name::NameBuf};
+use cassiopeia_mapping::{
+    attribute::Attribute,
+    mapping::Mapping,
+    template::{resolver::TemplateResolver, run_variables::RunVariables, template_input::TemplateInput},
+};
+use cassiopeia_ngsi_ld::entity::{attribute::NgsiLdAttributeKind, name::NameBuf, scope::NgsiLdScope};
+use chrono::{DateTime, Utc};
 use rayon::prelude::*;
-use serde_json::{Map, Value, json};
+use serde_json::{Value, json};
 use std::sync::Arc;
 use urn_rs::Urn;
 
@@ -36,21 +41,22 @@ pub struct GenericExpander {
     urn_generator: UrnGenerator,
     expiry_resolver: ExpiryResolver,
     parallelism: Parallelism,
-    /// The run-level variables injected into every record this lane expands, under the reserved
-    /// top-level `vars` key, so a mapping reads them as `{{ vars.<name> }}`. Empty when the run
-    /// declares none, in which case no key is inserted.
-    vars: Map<String, Value>,
+    /// The run variables this lane's records are read with, which a mapping reads as
+    /// `{{ vars.<name> }}`. They travel beside each record on its fragments rather than inside it, so
+    /// the record stays what the source gave.
+    variables: RunVariables,
 }
 
-/// The record one expansion is working through: its entity, its data, and where its losses go.
+/// The record one expansion is working through: its entity, its data with the run variables it is
+/// read with, and where its losses go.
 ///
 /// Every relationship the record declares is minted against the same three, so they travel
 /// together rather than as three parameters threaded through each minting step.
 struct Expansion<'a> {
     /// The entity the record expands into, which every link it loses is recorded against.
     entity: &'a Urn,
-    /// The record's data, read by every relationship source and synthetic identity.
-    data: &'a Value,
+    /// The record's data and run variables, read by every relationship source and synthetic identity.
+    input: TemplateInput<'a>,
     /// Where the record's losses are recorded.
     losses: &'a ExpansionLosses,
 }
@@ -87,26 +93,38 @@ impl Expansion<'_> {
 impl GenericExpander {
     /// Creates an expander for an already-compiled set of mappings and the resolver that backs them.
     ///
-    /// `vars` is this lane's effective run-level variables (manifest-global overlaid by CLI `--var`
-    /// and this input's own `vars`), injected into each record under the reserved `vars` key.
+    /// `variables` is this lane's effective run variables (the manifest's global `vars` overlaid by
+    /// CLI `--var` and this input's own `vars`), carried on every fragment the lane produces.
     #[must_use]
-    pub fn new(router: MappingRouter, resolver: TemplateResolver, vars: Map<String, Value>) -> GenericExpander {
+    pub fn new(router: MappingRouter, resolver: TemplateResolver, variables: RunVariables) -> GenericExpander {
         GenericExpander {
             router,
             // Cloning the resolver shares its engine through an `Arc`, so both hold the same one.
             expiry_resolver: ExpiryResolver::new(resolver.clone()),
             urn_generator: UrnGenerator::new(resolver),
             parallelism: Parallelism::Parallel,
-            vars,
+            variables,
         }
     }
 
-    /// Inserts the lane's run-level variables into a record object under the reserved `vars` key,
-    /// leaving the object untouched when the lane declares no variables.
-    fn inject_vars(&self, object: &mut Map<String, Value>) {
-        if !self.vars.is_empty() {
-            object.insert("vars".to_string(), Value::Object(self.vars.clone()));
-        }
+    /// Builds a fragment of this lane, carrying the lane's run variables beside its source data.
+    fn fragment(
+        &self,
+        source_data: Value,
+        target_urn: Urn,
+        scope: Option<NgsiLdScope>,
+        expires_at: Option<DateTime<Utc>>,
+        parent_context: Option<Vec<ParentContext>>,
+    ) -> Fragment {
+        Fragment::builder()
+            .source_data(source_data)
+            .target_urn(target_urn)
+            .scope(scope)
+            .expires_at(expires_at)
+            .parent_context(parent_context)
+            // Every fragment of the lane shares one map, so the clone only bumps its reference count.
+            .variables(self.variables.clone())
+            .build()
     }
 
     /// Sets whether batch expansion runs across threads.
@@ -126,12 +144,13 @@ impl GenericExpander {
         let mut fragments = Vec::new();
         let mut child_contexts = Vec::new();
 
-        let main_urn = self.urn_generator.generate_id(mapping, &data)?;
-        let main_scope = self.urn_generator.generate_scope(mapping, &data)?;
-        let main_expires_at = self.expiry_resolver.resolve(mapping, &main_urn, &data, &losses.expiries)?;
+        let input = TemplateInput::new(&data, &self.variables);
+        let main_urn = self.urn_generator.generate_id(mapping, input)?;
+        let main_scope = self.urn_generator.generate_scope(mapping, input)?;
+        let main_expires_at = self.expiry_resolver.resolve(mapping, &main_urn, input, &losses.expiries)?;
         let expansion = Expansion {
             entity: &main_urn,
-            data: &data,
+            input,
             losses,
         };
 
@@ -149,7 +168,7 @@ impl GenericExpander {
                 // instance that minted it, so the instance boundaries reach the transformer intact
                 // however many tokens an instance dropped.
                 for (index, instance) in attribute.instances().iter().flatten().enumerate() {
-                    let minted = self.urn_generator.generate_instance_child_ids(instance, attribute, &data);
+                    let minted = self.urn_generator.generate_instance_child_ids(instance, attribute, input);
                     for child_urn in expansion.keep(minted, path)?.into_iter().flatten() {
                         child_contexts.push(ParentContext::new(
                             ParentContextType::Child(child_urn),
@@ -160,7 +179,7 @@ impl GenericExpander {
             } else if attribute.target().is_some() && matches!(attribute.kind(), NgsiLdAttributeKind::ListRelationship) {
                 // A list relationship fans its source out into one object per identifier, so a field
                 // holding several ids links to each of them.
-                let minted = self.urn_generator.generate_child_ids(attribute, &data);
+                let minted = self.urn_generator.generate_child_ids(attribute, input);
                 for child_urn in expansion.keep(minted, path)?.into_iter().flatten() {
                     child_contexts.push(ParentContext::new(ParentContextType::Child(child_urn), Self::top_level_key(attribute_name)));
                 }
@@ -170,7 +189,7 @@ impl GenericExpander {
                     // recorded under that instance; an instance that names no target contributes no
                     // link and so has no object under its index.
                     for (index, instance) in instances.iter().enumerate() {
-                        let minted = self.urn_generator.generate_instance_child_id(instance, attribute, &data);
+                        let minted = self.urn_generator.generate_instance_child_id(instance, attribute, input);
                         if let Some(child_urn) = expansion.keep(minted, path)? {
                             child_contexts.push(ParentContext::new(
                                 ParentContextType::Child(child_urn),
@@ -178,7 +197,7 @@ impl GenericExpander {
                             ));
                         }
                     }
-                } else if let Some(child_urn) = expansion.keep(self.urn_generator.generate_child_id(attribute, &data), path)? {
+                } else if let Some(child_urn) = expansion.keep(self.urn_generator.generate_child_id(attribute, input), path)? {
                     child_contexts.push(ParentContext::new(ParentContextType::Child(child_urn), Self::top_level_key(attribute_name)));
                 }
             }
@@ -195,7 +214,7 @@ impl GenericExpander {
         }
 
         let parent_context = if child_contexts.is_empty() { None } else { Some(child_contexts) };
-        let main_fragment = Fragment::new(data, main_urn, main_scope, main_expires_at, parent_context);
+        let main_fragment = self.fragment(data, main_urn, main_scope, main_expires_at, parent_context);
         fragments.push(Mapped::new(main_fragment, Arc::clone(mapping)));
 
         Ok(fragments)
@@ -222,25 +241,23 @@ impl GenericExpander {
     ) -> Result<Vec<ParentContext>, ExpanderError> {
         let path = || RelationshipPath::flat(attribute_name.clone());
         let mut child_contexts = Vec::new();
-        let tokens = expansion.keep(self.urn_generator.source_identifiers(attribute, expansion.data), path)?;
+        let tokens = expansion.keep(self.urn_generator.source_identifiers(attribute, expansion.input), path)?;
         for token in tokens.into_iter().flatten() {
-            let mut token_data = json!({ "0": token });
-            if let Value::Object(object) = &mut token_data {
-                self.inject_vars(object);
-            }
-            let Some(synthetic_urn) = expansion.keep(self.urn_generator.generate_id(synthetic, &token_data), path)? else {
+            let token_data = json!({ "0": token });
+            let token_input = expansion.input.with_record(&token_data);
+            let Some(synthetic_urn) = expansion.keep(self.urn_generator.generate_id(synthetic, token_input), path)? else {
                 continue;
             };
-            let synthetic_scope = self.urn_generator.generate_scope(synthetic, &token_data)?;
+            let synthetic_scope = self.urn_generator.generate_scope(synthetic, token_input)?;
             let synthetic_expires_at = self
                 .expiry_resolver
-                .resolve(synthetic, &synthetic_urn, &token_data, &expansion.losses.expiries)?;
+                .resolve(synthetic, &synthetic_urn, token_input, &expansion.losses.expiries)?;
 
             child_contexts.push(ParentContext::new(
                 ParentContextType::Child(synthetic_urn.clone()),
                 Self::top_level_key(attribute_name),
             ));
-            let fragment = Fragment::new(token_data, synthetic_urn, synthetic_scope, synthetic_expires_at, None);
+            let fragment = self.fragment(token_data, synthetic_urn, synthetic_scope, synthetic_expires_at, None);
             // The fragment owns its mapping behind an `Arc`, and the synthetic mapping is only
             // borrowed from the parent attribute here.
             fragments.push(Mapped::new(fragment, Arc::new(synthetic.clone())));
@@ -269,24 +286,32 @@ impl GenericExpander {
         // target, under the very definition the plain Relationship path uses.
         if attribute.target().is_some()
             && attribute.source().is_some()
-            && expansion.keep(self.urn_generator.generate_child_id(attribute, expansion.data), path)?.is_none()
+            && expansion
+                .keep(self.urn_generator.generate_child_id(attribute, expansion.input), path)?
+                .is_none()
         {
             return Ok(None);
         }
 
-        let Some(synthetic_urn) = expansion.keep(self.urn_generator.generate_id(synthetic, expansion.data), path)? else {
+        let Some(synthetic_urn) = expansion.keep(self.urn_generator.generate_id(synthetic, expansion.input), path)? else {
             return Ok(None);
         };
-        let synthetic_scope = self.urn_generator.generate_scope(synthetic, expansion.data)?;
+        let synthetic_scope = self.urn_generator.generate_scope(synthetic, expansion.input)?;
         let synthetic_expires_at = self
             .expiry_resolver
-            .resolve(synthetic, &synthetic_urn, expansion.data, &expansion.losses.expiries)?;
+            .resolve(synthetic, &synthetic_urn, expansion.input, &expansion.losses.expiries)?;
 
         // The parent context owns its URN and path, while the main entity keeps its own for its fragment.
         let parent = ParentContext::new(ParentContextType::Parent(expansion.entity.clone()), Self::top_level_key(attribute_name));
         // Each synthetic fragment carries its own copy of the source data; the main fragment consumes
         // the record once every attribute has been expanded.
-        let fragment = Fragment::new(expansion.data.clone(), synthetic_urn, synthetic_scope, synthetic_expires_at, Some(vec![parent]));
+        let fragment = self.fragment(
+            expansion.input.record().clone(),
+            synthetic_urn,
+            synthetic_scope,
+            synthetic_expires_at,
+            Some(vec![parent]),
+        );
         // The fragment owns its mapping behind an `Arc`, and the synthetic mapping is only borrowed
         // from the parent attribute here.
         Ok(Some(Mapped::new(fragment, Arc::new(synthetic.clone()))))
@@ -318,11 +343,11 @@ impl GenericExpander {
             if property.target().is_some() {
                 let minted = match property.kind() {
                     NgsiLdAttributeKind::Relationship => expansion
-                        .keep(self.urn_generator.generate_child_id(property, expansion.data), || child_path.clone())?
+                        .keep(self.urn_generator.generate_child_id(property, expansion.input), || child_path.clone())?
                         .into_iter()
                         .collect(),
                     NgsiLdAttributeKind::ListRelationship => expansion
-                        .keep(self.urn_generator.generate_child_ids(property, expansion.data), || child_path.clone())?
+                        .keep(self.urn_generator.generate_child_ids(property, expansion.input), || child_path.clone())?
                         .unwrap_or_default(),
                     NgsiLdAttributeKind::Property
                     | NgsiLdAttributeKind::GeoProperty
@@ -367,9 +392,7 @@ impl GenericExpander {
 impl Expander for GenericExpander {
     fn expand(&self, record: Record, losses: &ExpansionLosses) -> Result<Vec<Mapped<Fragment>>, ExpanderError> {
         let mapping = self.router.select(record.collection().as_ref())?;
-        let mut data = record.into_data();
-        self.inject_vars(&mut data);
-        self.expand_value(mapping, Value::Object(data), losses)
+        self.expand_value(mapping, Value::Object(record.into_data()), losses)
     }
 
     fn expand_batch(&self, records: Vec<Record>, losses: &ExpansionLosses) -> Vec<Result<Vec<Mapped<Fragment>>, ExpanderError>> {
@@ -394,7 +417,10 @@ mod tests {
     use cassiopeia_batch_sink::batch_sink::BatchSink;
     use cassiopeia_common::collection::CollectionName;
     use cassiopeia_ir::{fragment::Fragment, mapped::Mapped, parent_context::ParentContextType, record::Record};
-    use cassiopeia_mapping::{mapping::Mapping, template::runner::TemplateRunner};
+    use cassiopeia_mapping::{
+        mapping::Mapping,
+        template::{run_variables::RunVariables, runner::TemplateRunner},
+    };
     use chrono::{TimeZone, Utc};
     use pretty_assertions::assert_eq;
     use serde_json::{Map, Value, json};
@@ -438,7 +464,7 @@ mod tests {
         let resolver = runner.resolver();
 
         ExpanderUnderTest {
-            expander: GenericExpander::new(MappingRouter::Single(mapping), resolver, vars),
+            expander: GenericExpander::new(MappingRouter::Single(mapping), resolver, RunVariables::new(vars)),
             losses: ExpansionLosses::new(),
         }
     }
@@ -517,9 +543,31 @@ mod tests {
     }
 
     #[test]
+    fn a_fragment_keeps_the_source_record_as_given_and_carries_the_lane_variables_beside_it() {
+        let mut vars = Map::new();
+        vars.insert("region".to_string(), json!("Ljubljana"));
+        let expander = expander_with_vars(
+            r#"{
+                version: "v4",
+                dataModel: "Sensor",
+                identity: { entityName: "{{ vars.region }}-{{ id }}" },
+                attributes: { temperature: { source: "{{ temperature }}" } },
+            }"#,
+            vars,
+        );
+        let source = json!({"id": 1, "temperature": 21.5, "vars": "a source field"});
+
+        // The record is consumed by the expansion, while the test keeps the source to compare with.
+        let fragments = expander.expand(record(source.clone())).unwrap();
+
+        assert_eq!(fragments[0].inner().source_data(), &source);
+        assert_eq!(fragments[0].inner().variables().as_value(), &json!({"region": "Ljubljana"}));
+    }
+
+    #[test]
     fn a_run_variable_is_absent_when_the_lane_declares_none() {
-        // With no vars injected there is no `vars` key, so `{{ vars.region }}` reads as a missing
-        // field and the composite identity names no entity, exactly as any other absent field would.
+        // A lane that sets no variables reads `{{ vars.region }}` as a missing variable, so the
+        // composite identity names no entity, exactly as any other absent field would.
         let expander = expander(
             r#"{
                 version: "v4",
@@ -1635,7 +1683,7 @@ mod tests {
         mappings.insert(CollectionName::from("Camera"), camera);
         mappings.insert(CollectionName::from("Flowcount"), sensor);
         ExpanderUnderTest {
-            expander: GenericExpander::new(MappingRouter::Collections(mappings), resolver, Map::new()),
+            expander: GenericExpander::new(MappingRouter::Collections(mappings), resolver, RunVariables::none()),
             losses: ExpansionLosses::new(),
         }
     }
@@ -1900,7 +1948,7 @@ mod tests {
         assert!(!mapping.has_nested_relationships());
         let resolver = runner.resolver();
         let expander = ExpanderUnderTest {
-            expander: GenericExpander::new(MappingRouter::Single(mapping), resolver, Map::new()),
+            expander: GenericExpander::new(MappingRouter::Single(mapping), resolver, RunVariables::none()),
             losses: ExpansionLosses::new(),
         };
 

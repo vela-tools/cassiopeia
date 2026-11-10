@@ -29,7 +29,9 @@ For a field name that is not a valid identifier, such as one with spaces, parent
 
 Inside a filter, an operator, or a tag, Tera reads only ASCII names. Write a field with a non-ASCII name through `this` there as well, as in `{{ this['čas'] | upper }}`, or `{{ ulica['številka'] | upper }}` for a nested one. Cassiopeia rejects `{{ čas | upper }}` when it loads the mapping.
 
-`{{ context }}`, written as the whole `source` string and spaced any way, resolves to the whole current record as a value. Use it when a transformation needs the entire source object, such as when passing a structured geometry straight through.
+`{{ context }}`, written as the whole `source` string and spaced any way, resolves to the whole current record as a value: the fields the source gave, without the run variables. Use it when a transformation needs the entire source object, such as when passing a structured geometry straight through.
+
+A run's variables are read the same way, as `{{ vars.NAME }}`, from the `vars` a manifest sets or from `--var` on the command line. A bare `vars` always names them, so a source field called `vars` is read through `this`, as `{{ this['vars'] }}`. See [Run variables](manifest.md#run-variables).
 
 A plain reference to a field the record does not have, or holds as null, resolves to nothing, and Cassiopeia omits the attribute. A field that holds empty text resolves to empty text, and Cassiopeia writes the attribute with that empty value (see [Handle null and empty values](output.md#handle-null-and-empty-values)). A template of literal text and plain references resolves to nothing as soon as any of its fields is missing, null, or empty, so `{{ first }} {{ last }}` over a record with no `last` omits the attribute rather than writing `John null` or `John `.
 

@@ -1,6 +1,9 @@
 use crate::dropped_attributes::DroppedAttributes;
 use cassiopeia_ir::{entity_relationships::EntityRelationships, metadata::EntityMetadata};
-use cassiopeia_mapping::{attribute::declaration_trail::DeclarationTrail, template::resolver::TemplateResolver};
+use cassiopeia_mapping::{
+    attribute::declaration_trail::DeclarationTrail,
+    template::{resolver::TemplateResolver, template_input::TemplateInput},
+};
 use cassiopeia_ngsi_ld::entity::{attribute_path::AttributePath, name::NameBuf};
 use serde_json::Value as JsonValue;
 
@@ -10,17 +13,17 @@ const RECURSION_LIMIT: usize = 50;
 
 /// The state threaded through one entity's attribute resolution.
 ///
-/// A context borrows the source record, the shared template resolver, and the entity's
-/// already-minted relationship objects (top-level, nested, and per instance). It optionally borrows a
-/// metadata sink;
-/// child contexts, spawned for nested declarations, never collect metadata of their own.
+/// A context borrows the source record with its run variables, the shared template resolver, and
+/// the entity's already-minted relationship objects (top-level, nested, and per instance). It
+/// optionally borrows a metadata sink; child contexts, spawned for nested declarations, never collect
+/// metadata of their own.
 ///
 /// The batch's loss sinks are borrowed shared rather than mutably, and every child context carries
 /// the same ones: a nested declaration can be refused as readily as a top-level one, and a batch
 /// resolves across a Rayon pool, neither of which a `&mut` sink could cross.
 pub(crate) struct ResolutionContext<'a> {
-    /// The source record the entity was built from.
-    pub(crate) data: &'a JsonValue,
+    /// The source record the entity was built from, with the run variables it is read with.
+    pub(crate) input: TemplateInput<'a>,
     /// The compiled-template resolver shared across the extraction stage.
     pub(crate) resolver: &'a TemplateResolver,
     /// Relationship objects already minted for this entity. Its nested objects are `None` when the
@@ -42,14 +45,14 @@ pub(crate) struct ResolutionContext<'a> {
 impl<'a> ResolutionContext<'a> {
     /// Builds the root context for one entity's extraction.
     pub(crate) const fn new(
-        data: &'a JsonValue,
+        input: TemplateInput<'a>,
         resolver: &'a TemplateResolver,
         relationships: &'a EntityRelationships,
         dropped: &'a DroppedAttributes,
         metadata: Option<&'a mut EntityMetadata>,
     ) -> ResolutionContext<'a> {
         ResolutionContext {
-            data,
+            input,
             resolver,
             relationships,
             dropped,
@@ -59,10 +62,11 @@ impl<'a> ResolutionContext<'a> {
         }
     }
 
-    /// Derives a deeper context over `data`, one level down and collecting no metadata.
-    pub(crate) const fn child(&self, data: &'a JsonValue) -> ResolutionContext<'a> {
+    /// Derives a deeper context over `record`, read with the same run variables, one level down and
+    /// collecting no metadata.
+    pub(crate) const fn child(&self, record: &'a JsonValue) -> ResolutionContext<'a> {
         ResolutionContext {
-            data,
+            input: self.input.with_record(record),
             resolver: self.resolver,
             relationships: self.relationships,
             dropped: self.dropped,
@@ -76,7 +80,7 @@ impl<'a> ResolutionContext<'a> {
     /// collecting no metadata.
     pub(crate) const fn beneath<'b>(&'b self, owner: &'b DeclarationTrail<'b>) -> ResolutionContext<'b> {
         ResolutionContext {
-            data: self.data,
+            input: self.input,
             resolver: self.resolver,
             relationships: self.relationships,
             dropped: self.dropped,

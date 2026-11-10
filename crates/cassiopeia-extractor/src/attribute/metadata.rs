@@ -118,7 +118,7 @@ impl MetadataExtractor {
 
             if let Some(content) = resolve_content(ctx, name, property)? {
                 let owner = DeclarationTrail::below(name, Nesting::SubAttribute, ctx.owners);
-                let child = ctx.beneath(&owner).child(ctx.data);
+                let child = ctx.beneath(&owner).child(ctx.input.record());
                 // Grow the path only when nested relationships exist, so a deeper one under this
                 // Property sub-attribute can still be keyed; otherwise recurse with an empty path.
                 let nested = if ctx.relationships.nested().is_some() {
@@ -177,7 +177,11 @@ impl MetadataExtractor {
             .as_ref()
             .and_then(|target| NameBuf::new(target.entity().entity_type().as_str()).ok());
         let owner = DeclarationTrail::below(name, Nesting::SubAttribute, ctx.owners);
-        let nested = Self::resolve_property_map(&ctx.beneath(&owner).child(ctx.data), rel_path.segments(), property.properties().as_ref())?;
+        let nested = Self::resolve_property_map(
+            &ctx.beneath(&owner).child(ctx.input.record()),
+            rel_path.segments(),
+            property.properties().as_ref(),
+        )?;
 
         Ok(Some(SubAttribute::new_relationship(kind, value, object_type, nested)))
     }

@@ -28,13 +28,13 @@ pub(crate) fn field_reads(source: &str, variables: &[&str]) -> Vec<FieldPath> {
         let last = path_end(&lexemes, start);
         let written = &source[lexemes[start].offset..lexemes[last].end()];
         let path = match written.split_once('.') {
-            Some((RECORD_VARIABLE, beneath)) => beneath,
-            Some((head, _)) if variables.contains(&head) => written,
-            None if written != RECORD_VARIABLE && variables.contains(&written) => written,
+            Some((RECORD_VARIABLE, beneath)) => FieldPath::in_record(beneath),
+            Some((head, _)) if variables.contains(&head) => FieldPath::new(written),
+            None if written != RECORD_VARIABLE && variables.contains(&written) => FieldPath::new(written),
             Some(_) | None => continue,
         };
-        if !paths.iter().any(|known| known.as_str() == path) {
-            paths.push(FieldPath::new(path));
+        if !paths.contains(&path) {
+            paths.push(path);
         }
     }
     paths
@@ -103,6 +103,13 @@ mod tests {
     #[test]
     fn a_path_through_the_record_variable_is_the_path_beneath_it() {
         assert_eq!(reads("{{ this.address.city }}", &["this"]), ["address.city"]);
+    }
+
+    #[test]
+    fn a_vars_path_through_the_record_variable_stays_on_the_record() {
+        let paths = field_reads("{{ this.vars.network }}-{{ vars.network }}", &["this", "vars"]);
+
+        assert_eq!(paths.iter().map(FieldPath::record_key).collect::<Vec<_>>(), [Some("vars"), None]);
     }
 
     #[test]

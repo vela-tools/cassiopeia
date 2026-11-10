@@ -4,6 +4,8 @@ use crate::template::{
     error::{ResolutionFailure, Result},
     registered_template::RegisteredTemplate,
     render_diagnosis::diagnose,
+    run_variables::VARIABLES,
+    template_input::TemplateInput,
 };
 use serde_json::{Map, Value as JsonValue};
 use std::sync::Arc;
@@ -40,14 +42,14 @@ impl TemplateResolver {
     /// to render, or an `Expression` template's rendering is not the JSON encoding of a value; it
     /// names the template's declaration, and its [`ResolutionFailure`] names a field the record lacks
     /// or holds as null when that is what Tera failed on.
-    pub fn resolve(&self, compiled: &CompiledTemplate, data: &JsonValue) -> Result<JsonValue> {
+    pub fn resolve(&self, compiled: &CompiledTemplate, input: TemplateInput<'_>) -> Result<JsonValue> {
         match compiled {
             // The return type owns its `JsonValue`, so the literal is cloned into an owned string.
             CompiledTemplate::Static(literal) => Ok(JsonValue::String(literal.clone())),
-            CompiledTemplate::Simple(key) => Ok(key.read(data)),
-            CompiledTemplate::Composite(parts) => Ok(Self::join_complete(parts, data).map_or(JsonValue::Null, JsonValue::String)),
-            CompiledTemplate::Expression(template) => self.evaluate(template, data),
-            CompiledTemplate::Complex(template) => Ok(JsonValue::String(self.render(template, data)?)),
+            CompiledTemplate::Simple(key) => Ok(key.read(input)),
+            CompiledTemplate::Composite(parts) => Ok(Self::join_complete(parts, input).map_or(JsonValue::Null, JsonValue::String)),
+            CompiledTemplate::Expression(template) => self.evaluate(template, input),
+            CompiledTemplate::Complex(template) => Ok(JsonValue::String(self.render(template, input)?)),
         }
     }
 
@@ -61,12 +63,12 @@ impl TemplateResolver {
     ///
     /// # Errors
     /// Returns the errors of [`resolve`](Self::resolve).
-    pub fn resolve_complete(&self, compiled: &CompiledTemplate, data: &JsonValue) -> Result<Option<JsonValue>> {
+    pub fn resolve_complete(&self, compiled: &CompiledTemplate, input: TemplateInput<'_>) -> Result<Option<JsonValue>> {
         match compiled {
             // The return type owns its `JsonValue`, so the literal is cloned into an owned string.
             CompiledTemplate::Static(literal) => Ok(Some(JsonValue::String(literal.clone()))),
             CompiledTemplate::Simple(_) | CompiledTemplate::Composite(_) | CompiledTemplate::Expression(_) | CompiledTemplate::Complex(_) => {
-                Ok(present(self.resolve(compiled, data)?))
+                Ok(present(self.resolve(compiled, input)?))
             }
         }
     }
@@ -83,10 +85,10 @@ impl TemplateResolver {
     ///
     /// # Errors
     /// Returns the errors of [`resolve`](Self::resolve).
-    pub fn resolve_joined(&self, templates: &[CompiledTemplate], data: &JsonValue) -> Result<Option<String>> {
+    pub fn resolve_joined(&self, templates: &[CompiledTemplate], input: TemplateInput<'_>) -> Result<Option<String>> {
         let mut combined = String::new();
         for template in templates {
-            match self.resolve_complete(template, data)? {
+            match self.resolve_complete(template, input)? {
                 Some(value) => append_value(&mut combined, value),
                 None => return Ok(None),
             }
@@ -108,11 +110,11 @@ impl TemplateResolver {
     ///
     /// # Errors
     /// Returns the errors of [`resolve`](Self::resolve).
-    pub fn resolve_parts(&self, templates: &[CompiledTemplate], data: &JsonValue) -> Result<Option<Vec<JsonValue>>> {
+    pub fn resolve_parts(&self, templates: &[CompiledTemplate], input: TemplateInput<'_>) -> Result<Option<Vec<JsonValue>>> {
         let mut values = Vec::with_capacity(templates.len());
         let mut reads = Reads::Nothing;
         for template in templates {
-            let value = self.resolve(template, data)?;
+            let value = self.resolve(template, input)?;
             reads = match (reads, template) {
                 (Reads::Present, _) | (_, CompiledTemplate::Static(_)) => reads,
                 (Reads::Nothing | Reads::OnlyAbsent, _) if is_absent(&value) => Reads::OnlyAbsent,
@@ -136,10 +138,10 @@ impl TemplateResolver {
     ///
     /// # Errors
     /// Returns the errors of [`resolve`](Self::resolve).
-    pub fn resolve_tokens(&self, templates: &[CompiledTemplate], data: &JsonValue) -> Result<Vec<String>> {
+    pub fn resolve_tokens(&self, templates: &[CompiledTemplate], input: TemplateInput<'_>) -> Result<Vec<String>> {
         let mut tokens = Vec::new();
         for template in templates {
-            collect_identifiers(self.resolve(template, data)?, &mut tokens);
+            collect_identifiers(self.resolve(template, input)?, &mut tokens);
         }
 
         Ok(tokens)
@@ -152,11 +154,11 @@ impl TemplateResolver {
     /// as nothing, would turn `Station-{{ id }}` over a record with no `id` into `Station-null` or
     /// `Station-`: a legal NGSI-LD entity id (ETSI GS CIM 009 v1.9.1 clause 4.5.1) that names an
     /// entity the source never described, into which every such record would merge.
-    fn join_complete(parts: &[TemplatePart], data: &JsonValue) -> Option<String> {
+    fn join_complete(parts: &[TemplatePart], input: TemplateInput<'_>) -> Option<String> {
         parts.iter().try_fold(String::with_capacity(Self::joined_capacity(parts)), |mut out, part| {
             match part {
                 TemplatePart::Static(literal) => out.push_str(literal),
-                TemplatePart::Dynamic(key) => append_value(&mut out, present(key.read(data))?),
+                TemplatePart::Dynamic(key) => append_value(&mut out, present(key.read(input))?),
             }
             Some(out)
         })
@@ -181,8 +183,8 @@ impl TemplateResolver {
     /// [`typed_form`](crate::template::value_expression::typed_form)), so the rendering is either that
     /// encoding, padded only by the whitespace around the guards, or nothing at all when a guard
     /// suppressed the expression; nothing is an absent value.
-    fn evaluate(&self, template: &RegisteredTemplate, data: &JsonValue) -> Result<JsonValue> {
-        let rendered = self.render(template, data)?;
+    fn evaluate(&self, template: &RegisteredTemplate, input: TemplateInput<'_>) -> Result<JsonValue> {
+        let rendered = self.render(template, input)?;
         let encoded = rendered.trim();
         if encoded.is_empty() {
             return Ok(JsonValue::Null);
@@ -197,57 +199,54 @@ impl TemplateResolver {
         })
     }
 
-    /// Renders a registered Tera template against a source record.
+    /// Renders a registered Tera template against a source record and its run variables.
     ///
     /// Top-level fields are inserted as bare names and the whole record is also bound to `this`, so a
-    /// field whose name is not a valid Tera identifier stays reachable as `this['CO(GT)']`. A
-    /// positional (headerless) record is bound to `this` as an array instead, so a Tera expression
-    /// can index it as `this[0]`; object key access, which the direct-lookup path uses, cannot be
-    /// written inside a Tera expression.
-    fn render(&self, template: &RegisteredTemplate, data: &JsonValue) -> Result<String> {
+    /// field whose name is not a valid Tera identifier stays reachable as `this['CO(GT)']`. The run
+    /// variables are bound to `vars` after the fields, so `vars` always names them, even in a record
+    /// with a field of that name, which stays reachable as `this.vars`. A positional (headerless)
+    /// record is bound to `this` as an array instead, so a Tera expression can index it as `this[0]`;
+    /// object key access, which the direct-lookup path uses, cannot be written inside a Tera
+    /// expression.
+    fn render(&self, template: &RegisteredTemplate, input: TemplateInput<'_>) -> Result<String> {
         let mut context = Context::new();
+        let record = input.record();
 
-        if let Some(fields) = data.as_object() {
+        if let Some(fields) = record.as_object() {
             for (key, value) in fields {
                 // The context owns its keys as `Cow<'static, str>`, so a borrowed field name has to
                 // be cloned into it; the value is serialised in place and need not be owned.
                 context.insert(key.clone(), value);
             }
+            context.insert(VARIABLES, input.variables().as_value());
 
             if let Some(positional) = Self::positional_array(fields) {
                 context.insert(RECORD_VARIABLE, &positional);
             } else {
-                context.insert(RECORD_VARIABLE, data);
+                context.insert(RECORD_VARIABLE, record);
             }
         } else {
-            context.insert(RECORD_VARIABLE, data);
+            context.insert(VARIABLES, input.variables().as_value());
+            context.insert(RECORD_VARIABLE, record);
         }
 
         self.tera
             .render(template.name.as_str(), &context)
-            .map_err(|engine| template.fail(diagnose(&self.tera, template, data, engine)))
+            .map_err(|engine| template.fail(diagnose(&self.tera, template, input, engine)))
     }
 
     /// Views a record as a positional array when its keys are exactly the contiguous zero-based
     /// indices `0..len`, as a headerless CSV source produces; otherwise returns `None`.
     ///
-    /// The reserved `vars` key (run-level variables injected into every record) is not a source
-    /// column, so it neither disqualifies an otherwise-positional record nor occupies a slot: a
-    /// headerless record still binds `this` to its column array with `vars` reachable separately.
-    ///
     /// The values are borrowed, not cloned: the returned slice serialises in place when Tera binds
     /// it to `this`.
     fn positional_array(fields: &Map<String, JsonValue>) -> Option<Vec<&JsonValue>> {
-        let columns = fields.len() - usize::from(fields.contains_key("vars"));
-        if columns == 0 {
+        if fields.is_empty() {
             return None;
         }
 
-        let mut slots: Vec<Option<&JsonValue>> = vec![None; columns];
+        let mut slots: Vec<Option<&JsonValue>> = vec![None; fields.len()];
         for (key, value) in fields {
-            if key == "vars" {
-                continue;
-            }
             let index: usize = key.parse().ok()?;
             let slot = slots.get_mut(index)?;
             if slot.is_some() {
@@ -340,7 +339,9 @@ mod tests {
             field_path::FieldPath,
             registered_template::RegisteredTemplate,
             resolver::collect_identifiers,
+            run_variables::RunVariables,
             runner::TemplateRunner,
+            template_input::TemplateInput,
             template_name::TemplateName,
         },
         template_location::TemplateLocation,
@@ -348,8 +349,81 @@ mod tests {
     };
     use cassiopeia_ngsi_ld::entity::{attribute_path::AttributePath, name::NameBuf};
     use pretty_assertions::assert_eq;
-    use serde_json::{Value as JsonValue, json};
-    use std::{path::Path, sync::Arc};
+    use serde_json::{Map, Value as JsonValue, json};
+    use std::{
+        path::Path,
+        sync::{Arc, LazyLock},
+    };
+
+    /// The empty run variables every record is read with unless a test sets some.
+    static NO_VARIABLES: LazyLock<RunVariables> = LazyLock::new(RunVariables::none);
+
+    /// Reads `record` with no run variables.
+    fn input(record: &JsonValue) -> TemplateInput<'_> {
+        TemplateInput::new(record, &NO_VARIABLES)
+    }
+
+    /// The run variables `network`, set to `bikes`, and `districts`, a list.
+    fn network_variables() -> RunVariables {
+        let mut variables = Map::new();
+        variables.insert("network".to_string(), json!("bikes"));
+        variables.insert("districts".to_string(), json!(["Center", "Bežigrad"]));
+        RunVariables::new(variables)
+    }
+
+    /// Compiles `source` and resolves it against `record` read with `variables`.
+    fn resolve_with(source: &str, record: &JsonValue, variables: &RunVariables) -> JsonValue {
+        let mut runner = TemplateRunner::new();
+        let compiled = runner.compile(&TemplateSource::new(source), &location()).unwrap();
+        runner.resolver().resolve(&compiled, TemplateInput::new(record, variables)).unwrap()
+    }
+
+    #[test]
+    fn a_run_variable_is_read_from_vars_and_never_from_a_record_field_of_that_name() {
+        let variables = network_variables();
+        let record = json!({"id": 1, "vars": {"network": "from the source"}});
+
+        assert_eq!(resolve_with("{{ vars.network }}", &record, &variables), json!("bikes"));
+        assert_eq!(resolve_with("{{ vars.network | upper }}", &record, &variables), json!("BIKES"));
+        assert_eq!(resolve_with("{{ vars.districts[0] }}", &record, &variables), json!("Center"));
+        assert_eq!(resolve_with("{{ vars.network }}-{{ id }}", &record, &variables), json!("bikes-1"));
+    }
+
+    #[test]
+    fn a_record_field_called_vars_is_read_through_this() {
+        let variables = network_variables();
+        let record = json!({"id": 1, "vars": {"network": "from the source"}});
+
+        assert_eq!(resolve_with("{{ this['vars'] }}", &record, &variables), json!({"network": "from the source"}));
+        assert_eq!(resolve_with("{{ this.vars.network | upper }}", &record, &variables), json!("FROM THE SOURCE"));
+    }
+
+    #[test]
+    fn the_record_bound_to_this_holds_only_the_source_fields() {
+        let variables = network_variables();
+        let record = json!({"id": 1, "name": "Main station"});
+
+        assert_eq!(resolve_with("{{ this | json_encode | json_decode }}", &record, &variables), record);
+        assert_eq!(resolve_with("{{ this | length }}", &record, &variables), json!(2));
+    }
+
+    #[test]
+    fn a_headerless_record_binds_this_to_its_columns_beside_the_run_variables() {
+        let variables = network_variables();
+        let record = json!({"0": "1", "1": "GKA"});
+
+        assert_eq!(
+            resolve_with("{{ this[1] | lower }}-{{ vars.network }}", &record, &variables),
+            json!("gka-bikes")
+        );
+    }
+
+    #[test]
+    fn a_run_variable_no_level_sets_is_missing() {
+        let record = json!({"id": 1});
+
+        assert_eq!(resolve_with("{{ vars.network }}", &record, &NO_VARIABLES), JsonValue::Null);
+    }
 
     fn location() -> TemplateLocation {
         TemplateLocation::new(
@@ -363,7 +437,7 @@ mod tests {
         let resolver = TemplateRunner::new().resolver();
         let compiled = CompiledTemplate::Static("Start".to_string());
 
-        assert_eq!(resolver.resolve(&compiled, &json!({})).unwrap(), json!("Start"));
+        assert_eq!(resolver.resolve(&compiled, input(&json!({}))).unwrap(), json!("Start"));
     }
 
     #[test]
@@ -371,7 +445,7 @@ mod tests {
         let resolver = TemplateRunner::new().resolver();
         let compiled = CompiledTemplate::Simple(FieldPath::new("count"));
 
-        assert_eq!(resolver.resolve(&compiled, &json!({"count": 7})).unwrap(), json!(7));
+        assert_eq!(resolver.resolve(&compiled, input(&json!({"count": 7}))).unwrap(), json!(7));
     }
 
     #[test]
@@ -379,7 +453,7 @@ mod tests {
         let resolver = TemplateRunner::new().resolver();
         let compiled = CompiledTemplate::Composite(vec![TemplatePart::Static("Station-".to_string()), TemplatePart::Dynamic(FieldPath::new("id"))]);
 
-        assert_eq!(resolver.resolve(&compiled, &json!({"id": 42})).unwrap(), json!("Station-42"));
+        assert_eq!(resolver.resolve(&compiled, input(&json!({"id": 42}))).unwrap(), json!("Station-42"));
     }
 
     #[test]
@@ -392,7 +466,7 @@ mod tests {
         ]);
 
         assert_eq!(
-            resolver.resolve(&compiled, &json!({"first": "John", "last": "Doe"})).unwrap(),
+            resolver.resolve(&compiled, input(&json!({"first": "John", "last": "Doe"}))).unwrap(),
             json!("John Doe")
         );
     }
@@ -403,7 +477,7 @@ mod tests {
         let compiled = CompiledTemplate::Composite(vec![TemplatePart::Static("Station-".to_string()), TemplatePart::Dynamic(FieldPath::new("id"))]);
 
         for record in [json!({}), json!({"id": null}), json!({"id": ""})] {
-            assert_eq!(resolver.resolve(&compiled, &record).unwrap(), json!(null), "{record}");
+            assert_eq!(resolver.resolve(&compiled, input(&record)).unwrap(), json!(null), "{record}");
         }
     }
 
@@ -419,7 +493,7 @@ mod tests {
 
         assert_eq!(
             resolver
-                .resolve_complete(&compiled, &json!({"country": "Slovenia", "city": "Ljubljana"}))
+                .resolve_complete(&compiled, input(&json!({"country": "Slovenia", "city": "Ljubljana"})))
                 .unwrap(),
             Some(json!("/Slovenia/Ljubljana"))
         );
@@ -440,7 +514,7 @@ mod tests {
             json!({"country": "Slovenia", "city": null}),
             json!({"country": "Slovenia", "city": ""}),
         ] {
-            assert_eq!(resolver.resolve_complete(&compiled, &record).unwrap(), None, "{record}");
+            assert_eq!(resolver.resolve_complete(&compiled, input(&record)).unwrap(), None, "{record}");
         }
     }
 
@@ -449,7 +523,7 @@ mod tests {
         let resolver = TemplateRunner::new().resolver();
         let compiled = CompiledTemplate::Composite(vec![TemplatePart::Static("/Zone".to_string()), TemplatePart::Dynamic(FieldPath::new("zone"))]);
 
-        assert_eq!(resolver.resolve_complete(&compiled, &json!({"zone": 7})).unwrap(), Some(json!("/Zone7")));
+        assert_eq!(resolver.resolve_complete(&compiled, input(&json!({"zone": 7}))).unwrap(), Some(json!("/Zone7")));
     }
 
     #[test]
@@ -457,10 +531,10 @@ mod tests {
         let resolver = TemplateRunner::new().resolver();
         let compiled = CompiledTemplate::Simple(FieldPath::new("city"));
 
-        assert_eq!(resolver.resolve_complete(&compiled, &json!({})).unwrap(), None);
-        assert_eq!(resolver.resolve_complete(&compiled, &json!({"city": ""})).unwrap(), None);
+        assert_eq!(resolver.resolve_complete(&compiled, input(&json!({}))).unwrap(), None);
+        assert_eq!(resolver.resolve_complete(&compiled, input(&json!({"city": ""}))).unwrap(), None);
         assert_eq!(
-            resolver.resolve_complete(&compiled, &json!({"city": "/Ljubljana"})).unwrap(),
+            resolver.resolve_complete(&compiled, input(&json!({"city": "/Ljubljana"}))).unwrap(),
             Some(json!("/Ljubljana"))
         );
     }
@@ -470,7 +544,7 @@ mod tests {
         let resolver = TemplateRunner::new().resolver();
         let compiled = CompiledTemplate::Static("/Ljubljana".to_string());
 
-        assert_eq!(resolver.resolve_complete(&compiled, &json!({})).unwrap(), Some(json!("/Ljubljana")));
+        assert_eq!(resolver.resolve_complete(&compiled, input(&json!({}))).unwrap(), Some(json!("/Ljubljana")));
     }
 
     #[test]
@@ -482,7 +556,7 @@ mod tests {
             location: location(),
         });
 
-        assert!(resolver.resolve(&compiled, &json!({})).is_err());
+        assert!(resolver.resolve(&compiled, input(&json!({}))).is_err());
     }
 
     #[test]
@@ -490,7 +564,7 @@ mod tests {
         let mut runner = TemplateRunner::new();
         let compiled = runner.compile(&TemplateSource::new("{{ n + 1 }}"), &location()).unwrap();
 
-        let error = runner.resolver().resolve(&compiled, &json!({"id": "a"})).unwrap_err();
+        let error = runner.resolver().resolve(&compiled, input(&json!({"id": "a"}))).unwrap_err();
 
         assert_eq!(error.location, location());
         assert!(matches!(error.failure.as_ref(), ResolutionFailure::MissingField { field, .. } if field.as_str() == "n"));
@@ -501,7 +575,7 @@ mod tests {
         let mut runner = TemplateRunner::new();
         let compiled = runner.compile(&TemplateSource::new("{{ nothere }}-{{ id | lower }}"), &location()).unwrap();
 
-        let error = runner.resolver().resolve(&compiled, &json!({"id": "A"})).unwrap_err();
+        let error = runner.resolver().resolve(&compiled, input(&json!({"id": "A"}))).unwrap_err();
 
         assert_eq!(
             error.failure.to_string(),
@@ -518,7 +592,7 @@ mod tests {
 
         let error = runner
             .resolver()
-            .resolve(&compiled, &json!({"id": "A", "address": {"street": "Main"}}))
+            .resolve(&compiled, input(&json!({"id": "A", "address": {"street": "Main"}})))
             .unwrap_err();
 
         assert_eq!(
@@ -548,11 +622,11 @@ mod tests {
         let record = json!({"id": "A", "address": {}});
         let resolver = runner.resolver();
 
-        let error = resolver.resolve(&failing, &record).unwrap_err();
+        let error = resolver.resolve(&failing, input(&record)).unwrap_err();
 
         assert!(matches!(error.failure.as_ref(), ResolutionFailure::MissingField { field, .. } if field.as_str() == "address.street"));
-        assert_eq!(resolver.resolve(&defaulted, &record).unwrap(), json!("none-a"));
-        assert_eq!(resolver.resolve(&guarded, &record).unwrap(), json!("-a"));
+        assert_eq!(resolver.resolve(&defaulted, input(&record)).unwrap(), json!("none-a"));
+        assert_eq!(resolver.resolve(&guarded, input(&record)).unwrap(), json!("-a"));
     }
 
     #[test]
@@ -560,7 +634,7 @@ mod tests {
         let mut runner = TemplateRunner::new();
         let compiled = runner.compile(&TemplateSource::new("{{ address.city | upper }}"), &location()).unwrap();
 
-        let error = runner.resolver().resolve(&compiled, &json!({"address": {"city": null}})).unwrap_err();
+        let error = runner.resolver().resolve(&compiled, input(&json!({"address": {"city": null}}))).unwrap_err();
 
         assert!(matches!(error.failure.as_ref(), ResolutionFailure::NullField { field, .. } if field.as_str() == "address.city"));
     }
@@ -570,7 +644,7 @@ mod tests {
         let mut runner = TemplateRunner::new();
         let compiled = runner.compile(&TemplateSource::new("{{ code | split(pat=' ') }}"), &location()).unwrap();
 
-        let error = runner.resolver().resolve(&compiled, &json!({"code": null})).unwrap_err();
+        let error = runner.resolver().resolve(&compiled, input(&json!({"code": null}))).unwrap_err();
 
         assert!(matches!(error.failure.as_ref(), ResolutionFailure::NullField { field, .. } if field.as_str() == "code"));
     }
@@ -580,8 +654,8 @@ mod tests {
         let mut runner = TemplateRunner::new();
         let compiled = runner.compile(&TemplateSource::new("{% if n %}{{ n + 1 }}{% endif %}"), &location()).unwrap();
 
-        assert_eq!(runner.resolver().resolve(&compiled, &json!({"id": "a"})).unwrap(), JsonValue::Null);
-        assert_eq!(runner.resolver().resolve(&compiled, &json!({"n": 1})).unwrap(), json!(2));
+        assert_eq!(runner.resolver().resolve(&compiled, input(&json!({"id": "a"}))).unwrap(), JsonValue::Null);
+        assert_eq!(runner.resolver().resolve(&compiled, input(&json!({"n": 1}))).unwrap(), json!(2));
     }
 
     #[test]
@@ -590,7 +664,7 @@ mod tests {
         let templates = vec![CompiledTemplate::Static("Airport-".to_string()), CompiledTemplate::Simple(FieldPath::new("id"))];
 
         assert_eq!(
-            resolver.resolve_joined(&templates, &json!({"id": 535})).unwrap().as_deref(),
+            resolver.resolve_joined(&templates, input(&json!({"id": 535}))).unwrap().as_deref(),
             Some("Airport-535")
         );
     }
@@ -600,7 +674,7 @@ mod tests {
         let resolver = TemplateRunner::new().resolver();
         let templates = vec![CompiledTemplate::Simple(FieldPath::new("missing"))];
 
-        assert_eq!(resolver.resolve_joined(&templates, &json!({})).unwrap(), None);
+        assert_eq!(resolver.resolve_joined(&templates, input(&json!({}))).unwrap(), None);
     }
 
     #[test]
@@ -609,7 +683,7 @@ mod tests {
         let templates = vec![CompiledTemplate::Static("Airport-".to_string()), CompiledTemplate::Simple(FieldPath::new("id"))];
 
         for record in [json!({}), json!({"id": null}), json!({"id": ""})] {
-            assert_eq!(resolver.resolve_joined(&templates, &record).unwrap(), None, "{record}");
+            assert_eq!(resolver.resolve_joined(&templates, input(&record)).unwrap(), None, "{record}");
         }
     }
 
@@ -628,7 +702,11 @@ mod tests {
 
         for separator in [" ", ", ", "Station-"] {
             for record in [json!({}), json!({"street": null, "no": ""}), json!({"street": "", "no": null})] {
-                assert_eq!(resolver.resolve_parts(&address(separator), &record).unwrap(), None, "{separator:?} {record}");
+                assert_eq!(
+                    resolver.resolve_parts(&address(separator), input(&record)).unwrap(),
+                    None,
+                    "{separator:?} {record}"
+                );
             }
         }
     }
@@ -638,7 +716,7 @@ mod tests {
         let resolver = TemplateRunner::new().resolver();
 
         assert_eq!(
-            resolver.resolve_parts(&address(", "), &json!({"no": 7})).unwrap(),
+            resolver.resolve_parts(&address(", "), input(&json!({"no": 7}))).unwrap(),
             Some(vec![JsonValue::Null, json!(", "), json!(7)])
         );
     }
@@ -648,7 +726,10 @@ mod tests {
         let resolver = TemplateRunner::new().resolver();
         let templates = vec![CompiledTemplate::Static("N/A".to_string()), CompiledTemplate::Static(" ".to_string())];
 
-        assert_eq!(resolver.resolve_parts(&templates, &json!({})).unwrap(), Some(vec![json!("N/A"), json!(" ")]));
+        assert_eq!(
+            resolver.resolve_parts(&templates, input(&json!({}))).unwrap(),
+            Some(vec![json!("N/A"), json!(" ")])
+        );
     }
 
     #[test]
@@ -664,7 +745,7 @@ mod tests {
         ];
 
         assert_eq!(
-            resolver.resolve_parts(&templates, &json!({})).unwrap(),
+            resolver.resolve_parts(&templates, input(&json!({}))).unwrap(),
             Some(vec![json!("unknown"), json!(" "), JsonValue::Null])
         );
     }
@@ -674,7 +755,7 @@ mod tests {
         let resolver = TemplateRunner::new().resolver();
         let templates = vec![CompiledTemplate::Static("Airport-".to_string()), CompiledTemplate::Static("LJU".to_string())];
 
-        assert_eq!(resolver.resolve_joined(&templates, &json!({})).unwrap().as_deref(), Some("Airport-LJU"));
+        assert_eq!(resolver.resolve_joined(&templates, input(&json!({}))).unwrap().as_deref(), Some("Airport-LJU"));
     }
 
     #[test]
@@ -685,7 +766,7 @@ mod tests {
             TemplatePart::Dynamic(FieldPath::new("gate")),
         ])];
 
-        assert_eq!(resolver.resolve_tokens(&templates, &json!({})).unwrap(), [] as [String; 0]);
+        assert_eq!(resolver.resolve_tokens(&templates, input(&json!({}))).unwrap(), [] as [String; 0]);
     }
 
     #[test]
@@ -694,7 +775,7 @@ mod tests {
         let templates = vec![CompiledTemplate::Simple(FieldPath::new("equipment"))];
 
         assert_eq!(
-            resolver.resolve_tokens(&templates, &json!({"equipment": "744,  ,777"})).unwrap(),
+            resolver.resolve_tokens(&templates, input(&json!({"equipment": "744,  ,777"}))).unwrap(),
             ["744", "777"]
         );
     }
@@ -704,7 +785,7 @@ mod tests {
         let resolver = TemplateRunner::new().resolver();
         let templates = vec![CompiledTemplate::Simple(FieldPath::new("missing"))];
 
-        assert_eq!(resolver.resolve_tokens(&templates, &json!({})).unwrap(), [] as [String; 0]);
+        assert_eq!(resolver.resolve_tokens(&templates, input(&json!({}))).unwrap(), [] as [String; 0]);
     }
 
     #[test]
@@ -715,8 +796,8 @@ mod tests {
             .unwrap();
         let resolver = runner.resolver();
 
-        assert_eq!(resolver.resolve_complete(&compiled, &json!({"city": null})).unwrap(), None);
-        assert_eq!(resolver.resolve_complete(&compiled, &json!({"city": "lj"})).unwrap(), Some(json!("LJ")));
+        assert_eq!(resolver.resolve_complete(&compiled, input(&json!({"city": null}))).unwrap(), None);
+        assert_eq!(resolver.resolve_complete(&compiled, input(&json!({"city": "lj"}))).unwrap(), Some(json!("LJ")));
     }
 
     #[test]
@@ -725,7 +806,10 @@ mod tests {
         let templates = vec![runner.compile(&TemplateSource::new("{{ equipment | split(pat=';') }}"), &location()).unwrap()];
         let resolver = runner.resolver();
 
-        assert_eq!(resolver.resolve_tokens(&templates, &json!({"equipment": "744;777"})).unwrap(), ["744", "777"]);
+        assert_eq!(
+            resolver.resolve_tokens(&templates, input(&json!({"equipment": "744;777"}))).unwrap(),
+            ["744", "777"]
+        );
     }
 
     #[test]
@@ -735,7 +819,7 @@ mod tests {
         let resolver = runner.resolver();
 
         assert_eq!(
-            resolver.resolve_joined(&templates, &json!({"codes": "BS IN"})).unwrap().as_deref(),
+            resolver.resolve_joined(&templates, input(&json!({"codes": "BS IN"}))).unwrap().as_deref(),
             Some(r#"["BS","IN"]"#)
         );
     }

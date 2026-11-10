@@ -895,6 +895,7 @@ dependencies = [
  "smallvec",
  "smart-default",
  "thiserror 2.0.21",
+ "typed-builder",
  "url",
  "urn-rs",
 ]

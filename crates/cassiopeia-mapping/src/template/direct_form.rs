@@ -81,12 +81,12 @@ fn field_reference(body: &str) -> Option<FieldPath> {
 
     if let Some(captures) = regex!(r"^this\[(?:'([^'.\\]*)'|([0-9]+))\]$").captures(reference) {
         if let Some(key) = captures.get(1) {
-            return Some(FieldPath::new(key.as_str()));
+            return Some(FieldPath::in_record(key.as_str()));
         }
         // Tera reads the digits as an `i64`, so `this[007]` indexes column 7 and an index past the
         // `i64` range does not parse at all.
         let index: i64 = captures.get(2)?.as_str().parse().ok()?;
-        return Some(FieldPath::new(index.to_string()));
+        return Some(FieldPath::in_record(index.to_string()));
     }
 
     let mut segments = reference.split('.');
@@ -103,6 +103,8 @@ mod tests {
         CompiledTemplate,
         TemplatePart,
         direct_form::{compile, field_reference},
+        run_variables::RunVariables,
+        template_input::TemplateInput,
     };
     use pretty_assertions::assert_eq;
 
@@ -191,6 +193,12 @@ mod tests {
         assert_eq!(reference("this['a.b']"), None);
         assert_eq!(reference(r"this['a\'b']"), None);
         assert_eq!(reference(r#"this["a"]"#), None);
+    }
+
+    #[test]
+    fn a_vars_key_on_this_reads_the_record_while_a_bare_vars_path_reads_the_run_variables() {
+        assert_eq!(field_reference("this['vars']").unwrap().record_key(), Some("vars"));
+        assert_eq!(field_reference("vars.network").unwrap().record_key(), None);
     }
 
     #[test]
@@ -290,7 +298,9 @@ mod tests {
         };
 
         assert_eq!(path.as_str(), "ulica.številka");
-        assert_eq!(path.read(&serde_json::json!({"ulica": {"številka": 12}})), serde_json::json!(12));
+        let variables = RunVariables::none();
+        let record = serde_json::json!({"ulica": {"številka": 12}});
+        assert_eq!(path.read(TemplateInput::new(&record, &variables)), serde_json::json!(12));
     }
 
     #[test]

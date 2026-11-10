@@ -64,9 +64,10 @@ pub struct Manifest {
     /// A global constant every input's records can read (a dataset id, a run stamp, a validity
     /// instant), authored once here rather than pasted as a literal into each mapping. A per-input
     /// [`vars`](crate::input::ManifestInput::vars) map overrides a global of the same name, and a
-    /// `--var` on the command line overrides the manifest. Values are arbitrary JSON; a non-string
-    /// value keeps its type only through a bare `{{ vars.x }}` and stringifies in any concatenation or
-    /// filter, the same rule as every other source field. `vars` is reserved in the record namespace.
+    /// `--var` on the command line overrides the manifest. Values are arbitrary JSON and keep their
+    /// type, read by the same rules as a source field. They are read beside each record rather than
+    /// inside it, so a template reaching the whole record never sees them, and a source field called
+    /// `vars` stays reachable as `this['vars']`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[builder(default = None)]
     #[getset(get = "pub")]

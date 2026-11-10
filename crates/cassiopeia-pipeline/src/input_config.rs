@@ -3,6 +3,7 @@ use cassiopeia_collector::{file_extension::FileExtension, source::CollectorSourc
 use cassiopeia_common::{context::mode::AtContextMode, format::DataFormat, request_header::RequestHeaders, schema_source::SchemaSource};
 use cassiopeia_csv_dialect::statement::DialectStatement;
 use cassiopeia_manifest::{input::ManifestInput, mapping_binding::MappingBinding};
+use cassiopeia_mapping::template::run_variables::RunVariables;
 use serde_json::{Map, Value};
 
 /// The extension used to name a downloaded source whose format is not declared.
@@ -31,10 +32,10 @@ pub(crate) struct InputConfig {
     /// A per-input custom validation schema overriding the manifest-wide global schema for the types
     /// this lane produces. Resolved to an on-disk path once per cycle by schema resolution.
     pub(crate) schema: Option<SchemaSource>,
-    /// This lane's effective run-level variables: the manifest-global map (already overlaid by CLI
-    /// `--var`) overlaid by this input's own `vars`, injected into every record the lane expands
-    /// under the reserved `vars` key. Empty when the run declares none.
-    pub(crate) vars: Map<String, Value>,
+    /// This lane's effective run variables: the manifest-global map (already overlaid by CLI
+    /// `--var`) overlaid by this input's own `vars`, carried beside every record the lane expands.
+    /// Empty when the run declares none.
+    pub(crate) variables: RunVariables,
 }
 
 /// Builds a lane configuration from one manifest input.
@@ -64,12 +65,12 @@ pub(crate) fn build_input_config(input: &ManifestInput, effective_global: &Map<S
         mapping_binding: input.mapping_binding().clone(),
         context_mode: input.context().clone(),
         schema: input.schema().clone(),
-        vars: merge_vars(effective_global, input.vars().as_ref()),
+        variables: RunVariables::new(merge_vars(effective_global, input.vars().as_ref())),
     })
 }
 
 /// Overlays an input's own variables onto the effective global map, the per-input value winning on a
-/// shared name. The result is cloned since it is stored on the lane and injected into every record.
+/// shared name. The result is cloned since each lane owns its own map, which its records share.
 fn merge_vars(effective_global: &Map<String, Value>, per_input: Option<&Map<String, Value>>) -> Map<String, Value> {
     let mut merged = effective_global.clone();
     if let Some(per_input) = per_input {
@@ -205,8 +206,7 @@ mod tests {
         let config = build_input_config(&input, &global).unwrap();
 
         // The per-input value wins on the shared name; the global-only entry still carries through.
-        assert_eq!(config.vars.get("provider"), Some(&json!("Local")));
-        assert_eq!(config.vars.get("run"), Some(&json!("7")));
+        assert_eq!(config.variables.as_value(), &json!({"provider": "Local", "run": "7"}));
     }
 
     #[test]
@@ -216,6 +216,6 @@ mod tests {
 
         let config = build_input_config(&manifest_input(DataFormat::Csv), &global).unwrap();
 
-        assert_eq!(config.vars.get("valid_from"), Some(&json!("2026-08-04T16:00:00Z")));
+        assert_eq!(config.variables.as_value(), &json!({"valid_from": "2026-08-04T16:00:00Z"}));
     }
 }

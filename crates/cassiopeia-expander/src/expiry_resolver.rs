@@ -1,11 +1,10 @@
 use cassiopeia_mapping::{
     mapping::Mapping,
-    template::{error::TemplateError, resolver::TemplateResolver},
+    template::{error::TemplateError, resolver::TemplateResolver, template_input::TemplateInput},
 };
 use cassiopeia_ngsi_ld::value::{omitted_nulls::OmittedNulls, types::Value as NgsiValue};
 use cassiopeia_unreadable_timestamps::unreadable_expiries::UnreadableExpiries;
 use chrono::{DateTime, Utc};
-use serde_json::Value;
 use urn_rs::Urn;
 
 /// Resolves the entity `expiresAt` each expanded record declares through its mapping.
@@ -39,11 +38,17 @@ impl ExpiryResolver {
     /// # Errors
     ///
     /// Returns [`TemplateError`] when the template fails to resolve.
-    pub fn resolve(&self, mapping: &Mapping, entity: &Urn, data: &Value, unreadable: &UnreadableExpiries) -> Result<Option<DateTime<Utc>>, TemplateError> {
+    pub fn resolve(
+        &self,
+        mapping: &Mapping,
+        entity: &Urn,
+        input: TemplateInput<'_>,
+        unreadable: &UnreadableExpiries,
+    ) -> Result<Option<DateTime<Utc>>, TemplateError> {
         let Some(template) = mapping.compiled_expires_at() else {
             return Ok(None);
         };
-        let Some(resolved) = self.resolver.resolve_complete(template, data)? else {
+        let Some(resolved) = self.resolver.resolve_complete(template, input)? else {
             return Ok(None);
         };
 

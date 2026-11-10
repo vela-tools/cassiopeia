@@ -9,7 +9,7 @@ use crate::{
     observed_at::ObservedAt,
     scope::{CompiledScope, Scope},
     source_reads::SourceReads,
-    template::{CompiledTemplate, TemplateSource, error::TemplateError, resolver::TemplateResolver, runner::TemplateRunner},
+    template::{CompiledTemplate, TemplateSource, error::TemplateError, resolver::TemplateResolver, runner::TemplateRunner, template_input::TemplateInput},
     template_location::TemplateLocation,
     template_site::TemplateSite,
     value_type_placement,
@@ -212,7 +212,7 @@ impl Mapping {
         self.has_nested_relationships
     }
 
-    /// Reads the `observedAt` value for one record.
+    /// Reads the `observedAt` value for one record, read with its run variables.
     ///
     /// Returns `None` when the mapping is not temporal, or when the record's timestamp field is
     /// absent or empty; a missing timestamp drops the temporal qualifier rather than the record.
@@ -221,12 +221,12 @@ impl Mapping {
     /// Returns the [`TemplateError`] when the template fails to render for the record. That is not
     /// the same as a record without a timestamp: the failure has to reach the run's report, which a
     /// record ranked as carrying no timestamp would never do.
-    pub fn extract_observed_at(&self, resolver: &TemplateResolver, data: &JsonValue) -> result::Result<Option<ObservedAt>, TemplateError> {
+    pub fn extract_observed_at(&self, resolver: &TemplateResolver, input: TemplateInput<'_>) -> result::Result<Option<ObservedAt>, TemplateError> {
         let Some(template) = self.observed_at_template.as_ref() else {
             return Ok(None);
         };
 
-        Ok(match resolver.resolve(template, data)? {
+        Ok(match resolver.resolve(template, input)? {
             JsonValue::String(value) if !value.is_empty() => Some(ObservedAt::new(value)),
             JsonValue::Number(value) => Some(ObservedAt::new(value.to_string())),
             JsonValue::String(_) | JsonValue::Null | JsonValue::Bool(_) | JsonValue::Array(_) | JsonValue::Object(_) => None,
@@ -271,7 +271,7 @@ mod tests {
         mapping::Mapping,
         observed_at::ObservedAt,
         scope::Scope,
-        template::{TemplateSource, runner::TemplateRunner},
+        template::{TemplateSource, run_variables::RunVariables, runner::TemplateRunner, template_input::TemplateInput},
         template_site::TemplateSite,
         version::Version,
     };
@@ -334,7 +334,9 @@ mod tests {
         let record = json!({"id": 1, "temperature": 21.5, "timestamp": "2026-04-03T22:00:20Z"});
 
         assert_eq!(
-            mapping.extract_observed_at(&runner.resolver(), &record).unwrap(),
+            mapping
+                .extract_observed_at(&runner.resolver(), TemplateInput::new(&record, &RunVariables::none()))
+                .unwrap(),
             Some(ObservedAt::new("2026-04-03T22:00:20Z"))
         );
     }
@@ -346,7 +348,9 @@ mod tests {
         let record = json!({"id": 1, "timestamp": 1_775_253_620});
 
         assert_eq!(
-            mapping.extract_observed_at(&runner.resolver(), &record).unwrap(),
+            mapping
+                .extract_observed_at(&runner.resolver(), TemplateInput::new(&record, &RunVariables::none()))
+                .unwrap(),
             Some(ObservedAt::new("1775253620"))
         );
     }
@@ -356,7 +360,12 @@ mod tests {
         let mut runner = TemplateRunner::new();
         let mapping = Mapping::from_json5(TEMPORAL, Path::new("test.json5"), &mut runner).unwrap();
 
-        assert_eq!(mapping.extract_observed_at(&runner.resolver(), &json!({"id": 1})).unwrap(), None);
+        assert_eq!(
+            mapping
+                .extract_observed_at(&runner.resolver(), TemplateInput::new(&json!({"id": 1}), &RunVariables::none()))
+                .unwrap(),
+            None
+        );
     }
 
     #[test]
@@ -365,7 +374,12 @@ mod tests {
         let mapping = Mapping::from_json5(NON_TEMPORAL, Path::new("test.json5"), &mut runner).unwrap();
         let record = json!({"timestamp": "2026-04-03T22:00:20Z"});
 
-        assert_eq!(mapping.extract_observed_at(&runner.resolver(), &record).unwrap(), None);
+        assert_eq!(
+            mapping
+                .extract_observed_at(&runner.resolver(), TemplateInput::new(&record, &RunVariables::none()))
+                .unwrap(),
+            None
+        );
     }
 
     #[test]
@@ -382,7 +396,10 @@ mod tests {
         let mapping = Mapping::from_json5(document, Path::new("test.json5"), &mut runner).unwrap();
 
         let error = mapping
-            .extract_observed_at(&runner.resolver(), &json!({"id": "A", "t": 21, "ts": null}))
+            .extract_observed_at(
+                &runner.resolver(),
+                TemplateInput::new(&json!({"id": "A", "t": 21, "ts": null}), &RunVariables::none()),
+            )
             .unwrap_err();
         assert_eq!(error.location.site, TemplateSite::ObservedAt);
     }

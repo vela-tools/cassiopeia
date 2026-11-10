@@ -22,7 +22,7 @@ use cassiopeia_ir::{
 use cassiopeia_mapping::{
     mapping::Mapping,
     observed_at::ObservedAt,
-    template::{error::TemplateError, resolver::TemplateResolver},
+    template::{error::TemplateError, resolver::TemplateResolver, run_variables::RunVariables, template_input::TemplateInput},
 };
 use dashmap::DashMap;
 use rayon::prelude::*;
@@ -220,9 +220,9 @@ impl FragmentResolver {
     /// at all, since no single flush exists to time.
     fn resolve_batch_concurrent(&self, fragments: Vec<Mapped<Fragment>>) -> (Vec<Result<()>>, ResolveBatchTiming) {
         let started = Instant::now();
-        let interned = self.intern_distinct(fragments.iter().map(Mapped::mapping));
+        let interned = self.intern_distinct(fragments.iter().map(|fragment| (fragment.mapping(), fragment.inner().variables())));
         let resolve = |fragment: Mapped<Fragment>| {
-            let mapping_id = self.interned_id(&interned, fragment.mapping());
+            let mapping_id = self.interned_id(&interned, fragment.mapping(), fragment.inner().variables());
             self.resolve_with_mapping_id(fragment, mapping_id)
         };
         let results = match self.parallelism {
@@ -241,34 +241,39 @@ impl FragmentResolver {
         )
     }
 
-    /// Interns every distinct mapping in `mappings`, keyed by `Arc` pointer identity, and returns
-    /// the resulting table.
+    /// Interns every distinct pair of mapping and run variables in `readings`, keyed by the
+    /// addresses of both, and returns the resulting table.
     ///
-    /// A run wires one `Arc<Mapping>` per input and clones it onto every fragment it produces, so
-    /// the table holds a single entry in practice and a linear scan beats any map. Interning once
-    /// per batch instead of once per fragment is what keeps every worker off the registry's one
-    /// matching shard.
-    pub(crate) fn intern_distinct<'a>(&self, mappings: impl Iterator<Item = &'a Arc<Mapping>>) -> Vec<(usize, MappingId)> {
-        let mut interned: Vec<(usize, MappingId)> = Vec::new();
-        for mapping in mappings {
-            let ptr = Arc::as_ptr(mapping) as usize;
-            if interned.iter().any(|(known, _)| *known == ptr) {
+    /// A run wires one `Arc<Mapping>` per mapping file and one set of variables per input, and clones
+    /// both onto every fragment an input produces, so the table holds a single entry in practice and
+    /// a linear scan beats any map. Interning once per batch instead of once per fragment is what
+    /// keeps every worker off the registry's one matching shard.
+    pub(crate) fn intern_distinct<'a>(&self, readings: impl Iterator<Item = (&'a Arc<Mapping>, &'a RunVariables)>) -> Vec<((usize, usize), MappingId)> {
+        let mut interned: Vec<((usize, usize), MappingId)> = Vec::new();
+        for (mapping, variables) in readings {
+            let key = Self::reading_key(mapping, variables);
+            if interned.iter().any(|(known, _)| *known == key) {
                 continue;
             }
-            interned.push((ptr, self.mapping_registry.intern(mapping)));
+            interned.push((key, self.mapping_registry.intern(mapping, variables)));
         }
         interned
     }
 
-    /// Reads a mapping's id out of a table built by
+    /// Reads the id of a mapping read with `variables` out of a table built by
     /// [`intern_distinct`](FragmentResolver::intern_distinct), interning through the registry for a
-    /// pointer the table does not cover.
-    pub(crate) fn interned_id(&self, interned: &[(usize, MappingId)], mapping: &Arc<Mapping>) -> MappingId {
-        let ptr = Arc::as_ptr(mapping) as usize;
+    /// pair the table does not cover.
+    pub(crate) fn interned_id(&self, interned: &[((usize, usize), MappingId)], mapping: &Arc<Mapping>, variables: &RunVariables) -> MappingId {
+        let key = Self::reading_key(mapping, variables);
         interned
             .iter()
-            .find(|(known, _)| *known == ptr)
-            .map_or_else(|| self.mapping_registry.intern(mapping), |(_, id)| *id)
+            .find(|(known, _)| *known == key)
+            .map_or_else(|| self.mapping_registry.intern(mapping, variables), |(_, id)| *id)
+    }
+
+    /// The addresses a mapping and the run variables it reads a fragment with are told apart by.
+    fn reading_key(mapping: &Arc<Mapping>, variables: &RunVariables) -> (usize, usize) {
+        (Arc::as_ptr(mapping) as usize, variables.address())
     }
 
     /// Resolves one fragment whose mapping has already been interned.
@@ -277,14 +282,17 @@ impl FragmentResolver {
     /// of once per fragment; the stored result is identical either way.
     fn resolve_with_mapping_id(&self, fragment: Mapped<Fragment>, mapping_id: MappingId) -> Result<()> {
         let (fragment, mapping) = fragment.into_parts();
-        let timestamp = self.record_timestamp(mapping_id, mapping.extract_observed_at(&self.resolver, fragment.source_data()));
+        let observed_at = mapping.extract_observed_at(&self.resolver, TemplateInput::new(fragment.source_data(), fragment.variables()));
+        let timestamp = self.record_timestamp(mapping_id, observed_at);
         let temporal = mapping.is_temporal();
+        // The variables were interned into the mapping id, which is what the store keeps.
         let FragmentParts {
             source_data,
             target_urn: base_id,
             scope,
             expires_at,
             parent_context,
+            variables: _,
         } = fragment.into_parts();
 
         for (parent, property, child) in self.build_edges(&base_id, parent_context.as_ref(), temporal) {
@@ -307,7 +315,7 @@ impl FragmentResolver {
 
 impl FragmentSink for FragmentResolver {
     fn resolve(&self, fragment: Mapped<Fragment>) -> Result<()> {
-        let mapping_id = self.mapping_registry.intern(fragment.mapping());
+        let mapping_id = self.mapping_registry.intern(fragment.mapping(), fragment.inner().variables());
         self.resolve_with_mapping_id(fragment, mapping_id)
     }
 
@@ -332,10 +340,13 @@ mod tests {
         relationship_key::RelationshipKey,
         relationship_path::RelationshipPath,
     };
-    use cassiopeia_mapping::{mapping::Mapping, template::runner::TemplateRunner};
+    use cassiopeia_mapping::{
+        mapping::Mapping,
+        template::{run_variables::RunVariables, runner::TemplateRunner},
+    };
     use cassiopeia_ngsi_ld::entity::name::NameBuf;
     use pretty_assertions::{assert_eq, assert_ne};
-    use serde_json::json;
+    use serde_json::{Map, json};
     use std::{path::Path, sync::Arc, time::Duration};
     use urn_rs::Urn;
 
@@ -401,13 +412,11 @@ mod tests {
             );
             resolver
                 .resolve(Mapped::new(
-                    Fragment::new(
-                        json!({"temperature": 20, "timestamp": timestamp}),
-                        station.clone(),
-                        None,
-                        None,
-                        Some(vec![context]),
-                    ),
+                    Fragment::builder()
+                        .source_data(json!({"temperature": 20, "timestamp": timestamp}))
+                        .target_urn(station.clone())
+                        .parent_context(Some(vec![context]))
+                        .build(),
                     Arc::clone(&mappings[0]),
                 ))
                 .unwrap();
@@ -426,11 +435,17 @@ mod tests {
         let (resolver, mappings) = latest_resolver(&[SIMPLE]);
         let batch = vec![
             Mapped::new(
-                Fragment::new(json!({"t": 1}), urn("urn:ngsi-ld:Station:1"), None, None, None),
+                Fragment::builder()
+                    .source_data(json!({"t": 1}))
+                    .target_urn(urn("urn:ngsi-ld:Station:1"))
+                    .build(),
                 Arc::clone(&mappings[0]),
             ),
             Mapped::new(
-                Fragment::new(json!({"t": 2}), urn("urn:ngsi-ld:Station:2"), None, None, None),
+                Fragment::builder()
+                    .source_data(json!({"t": 2}))
+                    .target_urn(urn("urn:ngsi-ld:Station:2"))
+                    .build(),
                 Arc::clone(&mappings[0]),
             ),
         ];
@@ -446,7 +461,10 @@ mod tests {
         let batch: Vec<Mapped<Fragment>> = (0..16)
             .map(|index| {
                 Mapped::new(
-                    Fragment::new(json!({"t": index}), urn(&format!("urn:ngsi-ld:Station:{index}")), None, None, None),
+                    Fragment::builder()
+                        .source_data(json!({"t": index}))
+                        .target_urn(urn(&format!("urn:ngsi-ld:Station:{index}")))
+                        .build(),
                     Arc::clone(&mappings[0]),
                 )
             })
@@ -457,9 +475,9 @@ mod tests {
         assert!(results.iter().all(Result::is_ok));
         assert_eq!(resolver.mapping_registry.len(), 1);
         // Interning the same `Arc` again must return the id the batch already assigned it.
-        let id = resolver.mapping_registry.intern(&mappings[0]);
+        let id = resolver.mapping_registry.intern(&mappings[0], &RunVariables::none());
         assert_eq!(resolver.mapping_registry.len(), 1);
-        assert!(Arc::ptr_eq(&resolver.mapping_registry.resolve(id).unwrap(), &mappings[0]));
+        assert!(Arc::ptr_eq(resolver.mapping_registry.resolve(id).unwrap().mapping(), &mappings[0]));
     }
 
     #[test]
@@ -468,21 +486,94 @@ mod tests {
         let air = urn("urn:ngsi-ld:AirQualityObserved:1");
         let weather = urn("urn:ngsi-ld:WeatherObserved:1");
         let batch = vec![
-            Mapped::new(Fragment::new(json!({"t": 1}), air.clone(), None, None, None), Arc::clone(&mappings[0])),
-            Mapped::new(Fragment::new(json!({"h": 2}), weather.clone(), None, None, None), Arc::clone(&mappings[1])),
-            Mapped::new(Fragment::new(json!({"t": 3}), air.clone(), None, None, None), Arc::clone(&mappings[0])),
+            Mapped::new(
+                Fragment::builder().source_data(json!({"t": 1})).target_urn(air.clone()).build(),
+                Arc::clone(&mappings[0]),
+            ),
+            Mapped::new(
+                Fragment::builder().source_data(json!({"h": 2})).target_urn(weather.clone()).build(),
+                Arc::clone(&mappings[1]),
+            ),
+            Mapped::new(
+                Fragment::builder().source_data(json!({"t": 3})).target_urn(air.clone()).build(),
+                Arc::clone(&mappings[0]),
+            ),
         ];
 
         let results = resolver.resolve_batch(batch);
 
         assert!(results.iter().all(Result::is_ok));
         assert_eq!(resolver.mapping_registry.len(), 2);
-        let first = resolver.mapping_registry.intern(&mappings[0]);
-        let second = resolver.mapping_registry.intern(&mappings[1]);
+        let first = resolver.mapping_registry.intern(&mappings[0], &RunVariables::none());
+        let second = resolver.mapping_registry.intern(&mappings[1], &RunVariables::none());
         assert_ne!(first, second);
         // Each id reads back through the mapping its own fragments were resolved under.
-        assert!(Arc::ptr_eq(&resolver.assemble(&air).unwrap().units[0].fragments()[0].1, &mappings[0]));
-        assert!(Arc::ptr_eq(&resolver.assemble(&weather).unwrap().units[0].fragments()[0].1, &mappings[1]));
+        assert!(Arc::ptr_eq(resolver.assemble(&air).unwrap().units[0].fragments()[0].mapping(), &mappings[0]));
+        assert!(Arc::ptr_eq(
+            resolver.assemble(&weather).unwrap().units[0].fragments()[0].mapping(),
+            &mappings[1]
+        ));
+    }
+
+    /// Run variables setting `network` to `value`.
+    fn network(value: &str) -> RunVariables {
+        let mut variables = Map::new();
+        variables.insert("network".to_string(), json!(value));
+        RunVariables::new(variables)
+    }
+
+    /// One fragment of the station `id`, read with `variables`, under `mapping`.
+    fn station_fragment(id: &Urn, record: serde_json::Value, variables: RunVariables, mapping: &Arc<Mapping>) -> Mapped<Fragment> {
+        let fragment = Fragment::builder()
+            .source_data(record)
+            // Every fragment owns its target id, while the test keeps it to assemble the entity.
+            .target_urn(id.clone())
+            .variables(variables)
+            .build();
+        Mapped::new(fragment, Arc::clone(mapping))
+    }
+
+    #[test]
+    fn inputs_sharing_a_mapping_but_not_their_variables_keep_their_records_apart() {
+        let (resolver, mappings) = latest_resolver(&[SIMPLE]);
+        let station = urn("urn:ngsi-ld:Station:1");
+        let batch = vec![
+            station_fragment(&station, json!({"t": 1}), network("bikes"), &mappings[0]),
+            station_fragment(&station, json!({"t": 2}), network("scooters"), &mappings[0]),
+        ];
+
+        assert!(resolver.resolve_batch(batch).iter().all(Result::is_ok));
+
+        let assembled = resolver.assemble(&station).unwrap();
+        // Each record and its variables are copied out of the assembly to be compared in a fixed order.
+        let mut variables: Vec<_> = assembled.units[0]
+            .fragments()
+            .iter()
+            .map(|fragment| (fragment.record().clone(), fragment.variables().as_value().clone()))
+            .collect();
+        variables.sort_by_key(|(record, _)| record.to_string());
+        assert_eq!(
+            variables,
+            [
+                (json!({"t": 1}), json!({"network": "bikes"})),
+                (json!({"t": 2}), json!({"network": "scooters"})),
+            ]
+        );
+    }
+
+    #[test]
+    fn inputs_sharing_a_mapping_and_equal_variables_merge_their_records() {
+        let (resolver, mappings) = latest_resolver(&[SIMPLE]);
+        let station = urn("urn:ngsi-ld:Station:1");
+        let batch = vec![
+            station_fragment(&station, json!({"t": 1}), network("bikes"), &mappings[0]),
+            station_fragment(&station, json!({"t": 1}), network("bikes"), &mappings[0]),
+        ];
+
+        assert!(resolver.resolve_batch(batch).iter().all(Result::is_ok));
+
+        assert_eq!(resolver.mapping_registry.len(), 1);
+        assert_eq!(resolver.assemble(&station).unwrap().units[0].fragments().len(), 1);
     }
 
     #[test]
@@ -492,7 +583,10 @@ mod tests {
             (offset..offset + 4)
                 .map(|index| {
                     Mapped::new(
-                        Fragment::new(json!({"t": index}), urn(&format!("urn:ngsi-ld:Station:{index}")), None, None, None),
+                        Fragment::builder()
+                            .source_data(json!({"t": index}))
+                            .target_urn(urn(&format!("urn:ngsi-ld:Station:{index}")))
+                            .build(),
                         Arc::clone(&mappings[0]),
                     )
                 })
@@ -500,9 +594,9 @@ mod tests {
         };
 
         resolver.resolve_batch(batch(0));
-        let first = resolver.mapping_registry.intern(&mappings[0]);
+        let first = resolver.mapping_registry.intern(&mappings[0], &RunVariables::none());
         resolver.resolve_batch(batch(4));
-        let second = resolver.mapping_registry.intern(&mappings[0]);
+        let second = resolver.mapping_registry.intern(&mappings[0], &RunVariables::none());
 
         assert_eq!(first, second);
         assert_eq!(resolver.mapping_registry.len(), 1);
@@ -516,7 +610,10 @@ mod tests {
         let batch: Vec<Mapped<Fragment>> = (0..64)
             .map(|index| {
                 Mapped::new(
-                    Fragment::new(json!({"t": index}), urn(&format!("urn:ngsi-ld:Station:{index}")), None, None, None),
+                    Fragment::builder()
+                        .source_data(json!({"t": index}))
+                        .target_urn(urn(&format!("urn:ngsi-ld:Station:{index}")))
+                        .build(),
                     Arc::clone(&mappings[0]),
                 )
             })

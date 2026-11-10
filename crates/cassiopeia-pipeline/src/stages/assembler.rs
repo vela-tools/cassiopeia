@@ -194,7 +194,10 @@ mod tests {
 
         let sink: &dyn FragmentSink = &fragment_resolver;
         for id in ids {
-            let fragment = Fragment::new(json!({ "temperature": 20 }), id.parse().unwrap(), None, None, None);
+            let fragment = Fragment::builder()
+                .source_data(json!({ "temperature": 20 }))
+                .target_urn(id.parse().unwrap())
+                .build();
             sink.resolve(Mapped::new(fragment, Arc::clone(&mapping))).unwrap();
         }
         fragment_resolver

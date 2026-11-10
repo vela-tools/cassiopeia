@@ -1,4 +1,4 @@
-use crate::template::{field_path::FieldPath, resolver::RECORD_VARIABLE};
+use crate::template::{field_path::FieldPath, resolver::RECORD_VARIABLE, run_variables::VARIABLES};
 use derive_more::Display;
 use lazy_regex::regex;
 use std::collections::BTreeSet;
@@ -46,14 +46,15 @@ impl SourceReads {
         SourceReads::Keys(BTreeSet::new())
     }
 
-    /// What a direct field reference reads: its first segment, or the whole record for the reference
-    /// an attribute source uses to take the record as its value.
+    /// What a direct field reference reads: its first segment, the whole record for the reference
+    /// an attribute source uses to take the record as its value, or no key at all for a run
+    /// variable, which is not part of the record.
     #[must_use]
     pub fn of_field(path: &FieldPath) -> SourceReads {
         if path.is_whole_record() {
             return SourceReads::Everything;
         }
-        SourceReads::Keys(BTreeSet::from([SourceKey::new(path.head())]))
+        SourceReads::Keys(path.record_key().map(SourceKey::new).into_iter().collect())
     }
 
     /// What a template the engine renders reads, from the top-level variables the engine reports and
@@ -64,21 +65,22 @@ impl SourceReads {
     /// variables are bound for as long as they are visible, so leaving them out hides nothing. A name
     /// assigned inside a branch that does not run falls back to the record's field of that name, so
     /// every assigned name is counted as read too. Reading `this` or an engine variable reaches the
-    /// whole record.
+    /// whole record. `vars` always names the run variables, which are not part of the record, so it
+    /// is never a key read.
     #[must_use]
     pub fn of_engine_template<'a>(variables: impl IntoIterator<Item = &'a str>, source: &str) -> SourceReads {
         if source.contains(ENGINE_VARIABLE_PREFIX) {
             return SourceReads::Everything;
         }
         let mut keys = BTreeSet::new();
-        for variable in variables {
+        for variable in variables.into_iter().filter(|&variable| variable != VARIABLES) {
             if variable == RECORD_VARIABLE {
                 return SourceReads::Everything;
             }
             keys.insert(SourceKey::new(variable));
         }
         for assigned in regex!(r"\{%-?\s*set(?:_global)?\s+([A-Za-z_][A-Za-z0-9_]*)").captures_iter(source) {
-            if let Some(name) = assigned.get(1) {
+            if let Some(name) = assigned.get(1).filter(|name| name.as_str() != VARIABLES) {
                 keys.insert(SourceKey::new(name.as_str()));
             }
         }
@@ -126,6 +128,20 @@ mod tests {
     #[test]
     fn the_whole_record_reference_reads_everything() {
         assert_eq!(SourceReads::of_field(&FieldPath::new("context")), SourceReads::Everything);
+    }
+
+    #[test]
+    fn a_run_variable_reads_no_key_and_a_record_field_called_vars_reads_its_key() {
+        assert_eq!(SourceReads::of_field(&FieldPath::new("vars.network")), SourceReads::nothing());
+        assert_eq!(SourceReads::of_field(&FieldPath::in_record("vars")), keys(&["vars"]));
+    }
+
+    #[test]
+    fn an_engine_template_reading_or_assigning_vars_reads_no_key_for_it() {
+        assert_eq!(
+            SourceReads::of_engine_template(["vars", "id"], "{% set vars = 1 %}{{ vars.network ~ id }}"),
+            keys(&["id"])
+        );
     }
 
     #[test]

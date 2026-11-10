@@ -2,7 +2,7 @@ use crate::{
     entity::{Entity, EntityParts},
     entity_relationships::EntityRelationships,
 };
-use cassiopeia_mapping::mapping::Mapping;
+use cassiopeia_mapping::{mapping::Mapping, template::run_variables::RunVariables};
 use cassiopeia_ngsi_ld::entity::scope::NgsiLdScope;
 use chrono::{DateTime, Utc};
 use getset::Getters;
@@ -11,12 +11,30 @@ use smallvec::{SmallVec, smallvec};
 use std::sync::Arc;
 use urn_rs::Urn;
 
-/// One source record paired with the mapping that renders it into attributes.
+/// One source record paired with the mapping that renders it into attributes, and with the run
+/// variables of the input it came from.
 ///
 /// Each fragment resolves through its own mapping against its own record: a current-state join of a
 /// static geometry mapping and a temporal state mapping keeps each mapping's record distinct rather
 /// than merging them, so two mappings that happen to read the same column do not collide.
-pub type AssembledFragment = (JsonValue, Arc<Mapping>);
+#[derive(Debug, Clone, Getters)]
+#[getset(get = "pub")]
+pub struct AssembledFragment {
+    /// The source record, exactly as the source gave it.
+    record: JsonValue,
+    /// The mapping that renders the record.
+    mapping: Arc<Mapping>,
+    /// The run variables the mapping reads the record with.
+    variables: RunVariables,
+}
+
+impl AssembledFragment {
+    /// Pairs a source record with the mapping that renders it and the run variables it is read with.
+    #[must_use]
+    pub const fn new(record: JsonValue, mapping: Arc<Mapping>, variables: RunVariables) -> AssembledFragment {
+        AssembledFragment { record, mapping, variables }
+    }
+}
 
 /// The fragments contributing to one emit-unit. One in the common case; several when more than one
 /// mapping targets a single entity id (the current-state join). The inline capacity of one keeps the
@@ -36,7 +54,7 @@ pub struct AssembledEntityParts {
     pub expires_at: Option<DateTime<Utc>>,
     /// Every relationship object minted for the entity: top-level, nested, and per instance.
     pub relationships: EntityRelationships,
-    /// One `(record, mapping)` pair per fragment. Never empty.
+    /// One record, with its mapping and run variables, per fragment. Never empty.
     pub fragments: AssembledFragments,
 }
 
@@ -58,8 +76,8 @@ pub struct AssembledEntity {
     expires_at: Option<DateTime<Utc>>,
     /// Every relationship object minted for the entity: top-level, nested, and per instance.
     relationships: EntityRelationships,
-    /// One `(record, mapping)` pair per fragment, each rendered through its own mapping against its
-    /// own record. Never empty.
+    /// One record, with its mapping and run variables, per fragment, each rendered through its own
+    /// mapping against its own record. Never empty.
     fragments: AssembledFragments,
 }
 
@@ -83,7 +101,8 @@ impl AssembledEntity {
         }
     }
 
-    /// Assembles a single-fragment entity from an [`Entity`] and the mapping that produced it.
+    /// Assembles a single-fragment entity from an [`Entity`] and the mapping that produced it, its
+    /// record read with no run variables.
     ///
     /// The entity's already-resolved values and metadata are discarded: an assembled entity holds only
     /// what extraction needs, namely the source record, its mapping, and the relationship objects.
@@ -104,7 +123,7 @@ impl AssembledEntity {
             scope,
             expires_at,
             relationships: EntityRelationships::new(relationships, nested_relationships, instance_relationships),
-            fragments: smallvec![(data, mapping)],
+            fragments: smallvec![AssembledFragment::new(data, mapping, RunVariables::none())],
         }
     }
 
@@ -129,7 +148,10 @@ mod tests {
         instance_index::InstanceIndex,
         relationships::{InstanceObjects, InstanceRelationships},
     };
-    use cassiopeia_mapping::{mapping::Mapping, template::runner::TemplateRunner};
+    use cassiopeia_mapping::{
+        mapping::Mapping,
+        template::{run_variables::RunVariables, runner::TemplateRunner},
+    };
     use cassiopeia_ngsi_ld::entity::name::NameBuf;
     use chrono::{TimeZone, Utc};
     use indexmap::IndexMap;
@@ -155,7 +177,8 @@ mod tests {
 
         assert_eq!(assembled.id(), &urn());
         assert_eq!(assembled.fragments().len(), 1);
-        assert_eq!(assembled.fragments()[0].0, json!({"v": 1}));
+        assert_eq!(assembled.fragments()[0].record(), &json!({"v": 1}));
+        assert_eq!(assembled.fragments()[0].variables(), &RunVariables::none());
     }
 
     #[test]

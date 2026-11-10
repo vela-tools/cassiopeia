@@ -80,7 +80,9 @@ impl Pipeline {
             );
             spawn_profiler_thread(profiler, ingestor_bank.routes, shared_tx.clone(), Arc::clone(&env.telemetry));
 
-            let expander: Box<dyn Expander> = Box::new(GenericExpander::new(router, template_resolver.clone(), input.vars.clone()));
+            // The lane keeps its variables for the next cycle, so the expander takes its own handle on
+            // the shared map.
+            let expander: Box<dyn Expander> = Box::new(GenericExpander::new(router, template_resolver.clone(), input.variables.clone()));
             // Each lane's expander writes its fragments straight onto the shared resolver intake, so
             // no per-lane channel or bridge thread sits between the expander and the resolver.
             spawn_expander_thread(expander, ingestor_bank.output_rx, shared_tx.clone(), batch_size, &env);

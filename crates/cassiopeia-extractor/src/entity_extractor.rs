@@ -12,7 +12,7 @@ use cassiopeia_ir::{
     mapped::{Mapped, Mappings},
     metadata::EntityMetadata,
 };
-use cassiopeia_mapping::template::resolver::TemplateResolver;
+use cassiopeia_mapping::template::{resolver::TemplateResolver, template_input::TemplateInput};
 use rayon::prelude::*;
 use serde_json::Value as JsonValue;
 use std::sync::Arc;
@@ -55,15 +55,16 @@ impl Extractor for EntityExtractor {
         } = assembled.into_parts();
         let mut values = AttributeValues::default();
         let mut metadata = EntityMetadata::default();
-        let mappings: Mappings = fragments.iter().map(|(_, mapping)| Arc::clone(mapping)).collect();
+        let mappings: Mappings = fragments.iter().map(|fragment| Arc::clone(fragment.mapping())).collect();
 
         // Each fragment resolves through its own mapping against its own record; disjoint attribute
         // names across mappings make the union a concatenation, last-writer-wins on the rare collision.
-        for (data, mapping) in &fragments {
+        for fragment in &fragments {
             let mut unresolved = Vec::new();
             {
-                let mut context = ResolutionContext::new(data, &self.resolver, &relationships, dropped, Some(&mut metadata));
-                for (name, config) in mapping.attributes() {
+                let input = TemplateInput::new(fragment.record(), fragment.variables());
+                let mut context = ResolutionContext::new(input, &self.resolver, &relationships, dropped, Some(&mut metadata));
+                for (name, config) in fragment.mapping().attributes() {
                     match resolve(&mut context, name, config) {
                         Ok(None) => {}
                         Ok(Some(resolved)) => {
@@ -128,9 +129,10 @@ mod tests {
     use cassiopeia_expander::compiler::ExpanderCompiler;
     use cassiopeia_geometry::geometry::NgsiLdGeometry;
     use cassiopeia_ir::{
-        assembled_entity::AssembledEntity,
+        assembled_entity::{AssembledEntity, AssembledFragment},
         attribute_content::AttributeContent,
         entity::Entity,
+        entity_relationships::EntityRelationships,
         instance_index::InstanceIndex,
         metadata::MetadataStorage,
         relationship_path::RelationshipPath,
@@ -143,6 +145,7 @@ mod tests {
         template::{
             error::{ResolutionFailure, TemplateError},
             resolver::TemplateResolver,
+            run_variables::RunVariables,
             runner::TemplateRunner,
         },
         template_site::TemplateSite,
@@ -157,7 +160,8 @@ mod tests {
     use cassiopeia_unreadable_timestamps::{attribute_loss::AttributeLoss, timestamp_loss::TimestampLoss};
     use iri_rs::IriBuf;
     use pretty_assertions::assert_eq;
-    use serde_json::{Value as JsonValue, json};
+    use serde_json::{Map, Value as JsonValue, json};
+    use smallvec::smallvec;
     use std::{path::Path, sync::Arc};
     use urn_rs::Urn;
 
@@ -1597,6 +1601,47 @@ mod tests {
         assert!(!result.relationships().contains_key(&name("owner")));
         assert!(result.values().as_ref().expect("values set").contains_key(&name("reference")));
         assert_eq!(BatchSink::from(dropped.templates).into_entries().collect::<Vec<_>>()[0].0, name("owner"));
+    }
+
+    #[test]
+    fn the_whole_record_holds_only_the_source_fields_while_a_run_variable_is_read_beside_it() {
+        let (resolver, mapping) = prepare(
+            r#"{
+                version: "v4",
+                dataModel: "Station",
+                identity: { entityName: "{{ vars.network }}-{{ id }}" },
+                attributes: {
+                    record: { type: "JsonProperty", source: "{{ context }}" },
+                    network: { source: "{{ vars.network }}" },
+                },
+            }"#,
+        );
+        let mut variables = Map::new();
+        variables.insert("network".to_string(), json!("bikes"));
+        let record = json!({"id": "1", "name": "Main station"});
+        let assembled = AssembledEntity::new(
+            urn("urn:ngsi-ld:Station:bikes-1"),
+            None,
+            None,
+            EntityRelationships::default(),
+            // The fragment owns its record, while the test keeps the source to compare with.
+            smallvec![AssembledFragment::new(record.clone(), mapping, RunVariables::new(variables))],
+        );
+
+        let (result, _) = EntityExtractor::new(resolver)
+            .extract(assembled, &DroppedAttributes::new())
+            .unwrap()
+            .into_parts();
+        let values = result.values().as_ref().expect("values set");
+
+        let Some(ResolvedAttribute::Single(AttributeContent::Json(payload))) = values.get(&name("record")).cloned() else {
+            panic!("expected the whole record as raw JSON");
+        };
+        assert_eq!(JsonValue::from(payload), record);
+        assert_eq!(
+            single_value(values.get(&name("network")).cloned()),
+            Some(Value::try_from(json!("bikes")).unwrap())
+        );
     }
 
     /// The raw JSON a `JsonProperty` declaration resolves to over one record, with the losses

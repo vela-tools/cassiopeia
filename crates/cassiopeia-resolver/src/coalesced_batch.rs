@@ -13,7 +13,11 @@ use cassiopeia_ir::{
     fragment::{Fragment, FragmentParts},
     mapped::Mapped,
 };
-use cassiopeia_mapping::{mapping::Mapping, observed_at::ObservedAt, template::error::TemplateError};
+use cassiopeia_mapping::{
+    mapping::Mapping,
+    observed_at::ObservedAt,
+    template::{error::TemplateError, run_variables::RunVariables, template_input::TemplateInput},
+};
 use cassiopeia_ngsi_ld::entity::scope::NgsiLdScope;
 use chrono::{DateTime, Utc};
 use rayon::prelude::*;
@@ -34,6 +38,8 @@ pub(crate) struct PreparedFragment {
     scope: Option<NgsiLdScope>,
     expires_at: Option<DateTime<Utc>>,
     mapping: Arc<Mapping>,
+    /// The run variables the record is read with, interned with the mapping into its id.
+    variables: RunVariables,
     /// What the record-level `observedAt` template yielded; read as a ranking timestamp only once the
     /// mapping is interned, since a failure is kept against the mapping's id.
     observed_at: Result<Option<ObservedAt>, TemplateError>,
@@ -64,7 +70,7 @@ impl FragmentResolver {
         let prepare_started = Instant::now();
         let prepare = |fragment: Mapped<Fragment>| -> PreparedFragment {
             let (fragment, mapping) = fragment.into_parts();
-            let observed_at = mapping.extract_observed_at(&self.resolver, fragment.source_data());
+            let observed_at = mapping.extract_observed_at(&self.resolver, TemplateInput::new(fragment.source_data(), fragment.variables()));
             let temporal = mapping.is_temporal();
             let FragmentParts {
                 source_data,
@@ -72,6 +78,7 @@ impl FragmentResolver {
                 scope,
                 expires_at,
                 parent_context,
+                variables,
             } = fragment.into_parts();
             let edges = self.build_edges(&base_id, parent_context.as_ref(), temporal);
 
@@ -81,6 +88,7 @@ impl FragmentResolver {
                 scope,
                 expires_at,
                 mapping,
+                variables,
                 observed_at,
                 temporal,
                 edges,
@@ -93,11 +101,11 @@ impl FragmentResolver {
         };
         let preparation = prepare_started.elapsed();
 
-        let interned = self.intern_distinct(prepared.iter().map(|prepared| &prepared.mapping));
+        let interned = self.intern_distinct(prepared.iter().map(|prepared| (&prepared.mapping, &prepared.variables)));
         let successes = prepared
             .into_iter()
             .map(|prepared| {
-                let mapping_id = self.interned_id(&interned, &prepared.mapping);
+                let mapping_id = self.interned_id(&interned, &prepared.mapping, &prepared.variables);
                 (prepared, mapping_id)
             })
             .collect();
@@ -230,7 +238,7 @@ mod tests {
             (&loud, json!({"level": 2, "temperature": 21})),
         ]
         .into_iter()
-        .map(|(id, record)| Mapped::new(Fragment::new(record, id.clone(), None, None, None), Arc::clone(&reading)))
+        .map(|(id, record)| Mapped::new(Fragment::builder().source_data(record).target_urn(id.clone()).build(), Arc::clone(&reading)))
         .collect();
 
         let (results, _timing) = resolver.resolve_batch_timed(batch);

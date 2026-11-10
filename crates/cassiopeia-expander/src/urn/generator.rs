@@ -12,6 +12,7 @@ use cassiopeia_mapping::{
         CompiledTemplate,
         TemplatePart,
         resolver::{TemplateResolver, collect_identifiers},
+        template_input::TemplateInput,
     },
 };
 use cassiopeia_ngsi_ld::entity::{
@@ -51,12 +52,12 @@ impl UrnGenerator {
     /// Returns [`UrnError::GeneratedIdEmpty`] when the identity resolves to null, to empty text, to
     /// a composite with any field absent, or to text with no URN-safe character, and another
     /// [`UrnError`] when the identity template is missing or the built URN is malformed.
-    pub fn generate_id(&self, mapping: &Mapping, data: &Value) -> Result<Urn> {
+    pub fn generate_id(&self, mapping: &Mapping, input: TemplateInput<'_>) -> Result<Urn> {
         let entity_type = mapping.data_model().entity_type();
         let template = mapping.identity().compiled_entity_name().as_ref().ok_or(UrnError::RelationshipMissingSource)?;
         // The identity resolves through the same definition of "the identifier a source produces" as
         // a relationship object does, so an identity over an absent field names no entity.
-        let raw_id = self.resolve_identifier(slice::from_ref(template), entity_type, data)?;
+        let raw_id = self.resolve_identifier(slice::from_ref(template), entity_type, input)?;
 
         Self::generate_target_id(entity_type, &raw_id)
     }
@@ -74,7 +75,7 @@ impl UrnGenerator {
     /// is not text (see [`UrnError::ScopeFieldNotText`], [`UrnError::ScopeValueNotText`] and
     /// [`UrnError::ScopeItemNotText`]), or its resolved text cannot be the scope of a written entity:
     /// text that is not a legal NGSI-LD scope, or the NGSI-LD Null.
-    pub fn generate_scope(&self, mapping: &Mapping, data: &Value) -> Result<Option<NgsiLdScope>> {
+    pub fn generate_scope(&self, mapping: &Mapping, input: TemplateInput<'_>) -> Result<Option<NgsiLdScope>> {
         let templates = match mapping.compiled_scope() {
             Some(CompiledScope::Single(template)) => slice::from_ref(template),
             Some(CompiledScope::Multiple(templates)) => templates.as_slice(),
@@ -83,7 +84,7 @@ impl UrnGenerator {
 
         let mut scopes = Vec::with_capacity(templates.len());
         for template in templates {
-            self.collect_scopes(template, data, &mut scopes)?;
+            self.collect_scopes(template, input, &mut scopes)?;
         }
 
         Ok(NgsiLdScope::from_scopes(scopes))
@@ -99,10 +100,10 @@ impl UrnGenerator {
     /// Returns [`UrnError::GeneratedIdEmpty`] when the source names no target, because a field it
     /// reads is absent or its text has no URN-safe character, and another [`UrnError`] when the
     /// relationship has no usable source, no target, or the built URN is malformed.
-    pub fn generate_child_id(&self, attribute: &Attribute, data: &Value) -> Result<Urn> {
+    pub fn generate_child_id(&self, attribute: &Attribute, input: TemplateInput<'_>) -> Result<Urn> {
         let target = attribute.target().as_ref().ok_or(UrnError::NoRelationshipTarget)?;
         let raw_id = match attribute.compiled_source() {
-            Some(templates) => self.resolve_identifier(templates, target.entity().entity_type(), data)?,
+            Some(templates) => self.resolve_identifier(templates, target.entity().entity_type(), input)?,
             // No compiled source: fall back to the raw literal, cloned because the attribute is only
             // borrowed here and the identifier must be owned to build the URN.
             None => match attribute.source() {
@@ -130,10 +131,10 @@ impl UrnGenerator {
     ///
     /// Returns [`UrnError`] when the relationship declares no target, the instance has no source, or
     /// the built URN is malformed.
-    pub fn generate_instance_child_id(&self, instance: &AttributeInstance, attribute: &Attribute, data: &Value) -> Result<Urn> {
+    pub fn generate_instance_child_id(&self, instance: &AttributeInstance, attribute: &Attribute, input: TemplateInput<'_>) -> Result<Urn> {
         let target = attribute.target().as_ref().ok_or(UrnError::NoRelationshipTarget)?;
         let raw_id = match instance.compiled_source() {
-            Some(templates) => self.resolve_identifier(templates, target.entity().entity_type(), data)?,
+            Some(templates) => self.resolve_identifier(templates, target.entity().entity_type(), input)?,
             None => return Err(UrnError::RelationshipMissingSource),
         };
 
@@ -154,10 +155,10 @@ impl UrnGenerator {
     ///
     /// Returns [`UrnError`] when the relationship declares no target, a source template fails to
     /// resolve, or a built URN is malformed.
-    pub fn generate_instance_child_ids(&self, instance: &AttributeInstance, attribute: &Attribute, data: &Value) -> Result<Vec<Urn>> {
+    pub fn generate_instance_child_ids(&self, instance: &AttributeInstance, attribute: &Attribute, input: TemplateInput<'_>) -> Result<Vec<Urn>> {
         let target = attribute.target().as_ref().ok_or(UrnError::NoRelationshipTarget)?;
         let tokens = match instance.compiled_source() {
-            Some(templates) => self.resolver.resolve_tokens(templates, data)?,
+            Some(templates) => self.resolver.resolve_tokens(templates, input)?,
             None => Vec::new(),
         };
 
@@ -175,10 +176,10 @@ impl UrnGenerator {
     /// # Errors
     /// Returns [`UrnError`] when the relationship declares no target, a source template fails to
     /// resolve, or a built URN is malformed.
-    pub fn generate_child_ids(&self, attribute: &Attribute, data: &Value) -> Result<Vec<Urn>> {
+    pub fn generate_child_ids(&self, attribute: &Attribute, input: TemplateInput<'_>) -> Result<Vec<Urn>> {
         let target = attribute.target().as_ref().ok_or(UrnError::NoRelationshipTarget)?;
 
-        Self::mint_targets(target.entity().entity_type(), &self.source_identifiers(attribute, data)?)
+        Self::mint_targets(target.entity().entity_type(), &self.source_identifiers(attribute, input)?)
     }
 
     /// Mints one target URN per identifier, dropping each identifier that names no target.
@@ -209,9 +210,9 @@ impl UrnGenerator {
     ///
     /// # Errors
     /// Returns [`UrnError`] when a source template fails to resolve.
-    pub fn source_identifiers(&self, attribute: &Attribute, data: &Value) -> Result<Vec<String>> {
+    pub fn source_identifiers(&self, attribute: &Attribute, input: TemplateInput<'_>) -> Result<Vec<String>> {
         if let Some(templates) = attribute.compiled_source() {
-            Ok(self.resolver.resolve_tokens(templates, data)?)
+            Ok(self.resolver.resolve_tokens(templates, input)?)
         } else {
             // No compiled source: tokenize the raw literal source, cloned because the attribute is
             // only borrowed here and the tokens must be owned.
@@ -236,9 +237,9 @@ impl UrnGenerator {
     /// Resolves the raw identifier a source's templates join into, an absent one (see
     /// [`resolve_joined`](TemplateResolver::resolve_joined)) being an empty identifier for
     /// `entity_type`.
-    fn resolve_identifier(&self, templates: &[CompiledTemplate], entity_type: &NameBuf, data: &Value) -> Result<String> {
+    fn resolve_identifier(&self, templates: &[CompiledTemplate], entity_type: &NameBuf, input: TemplateInput<'_>) -> Result<String> {
         self.resolver
-            .resolve_joined(templates, data)?
+            .resolve_joined(templates, input)?
             .ok_or_else(|| Self::empty_identifier(entity_type))
     }
 
@@ -266,13 +267,13 @@ impl UrnGenerator {
     /// is part of a level the source meant. A list resolved whole is the one value that is not text
     /// and still names scopes: an entity may belong to several (clause 4.18), so each item is a scope
     /// of its own.
-    fn collect_scopes(&self, template: &CompiledScopeTemplate, data: &Value, scopes: &mut Vec<ScopeBuf>) -> Result<()> {
+    fn collect_scopes(&self, template: &CompiledScopeTemplate, input: TemplateInput<'_>, scopes: &mut Vec<ScopeBuf>) -> Result<()> {
         match &template.compiled {
-            CompiledTemplate::Composite(parts) => Self::refuse_non_text_parts(template, parts, data)?,
+            CompiledTemplate::Composite(parts) => Self::refuse_non_text_parts(template, parts, input)?,
             CompiledTemplate::Static(_) | CompiledTemplate::Simple(_) | CompiledTemplate::Expression(_) | CompiledTemplate::Complex(_) => {}
         }
 
-        match self.resolver.resolve_complete(&template.compiled, data)? {
+        match self.resolver.resolve_complete(&template.compiled, input)? {
             Some(Value::String(text)) => Self::push_scope(text, scopes),
             Some(Value::Array(items)) => items
                 .into_iter()
@@ -313,10 +314,10 @@ impl UrnGenerator {
 
     /// Refuses a concatenated scope template whose field holds a boolean, an array or an object,
     /// none of which prints as a level the source meant.
-    fn refuse_non_text_parts(template: &CompiledScopeTemplate, parts: &[TemplatePart], data: &Value) -> Result<()> {
+    fn refuse_non_text_parts(template: &CompiledScopeTemplate, parts: &[TemplatePart], input: TemplateInput<'_>) -> Result<()> {
         parts.iter().try_for_each(|part| match part {
             TemplatePart::Static(_) => Ok(()),
-            TemplatePart::Dynamic(field) => match field.lookup(data).and_then(NonTextShape::of) {
+            TemplatePart::Dynamic(field) => match field.lookup(input).and_then(NonTextShape::of) {
                 None | Some(NonTextShape::Number) => Ok(()),
                 Some(shape @ (NonTextShape::Boolean | NonTextShape::Array | NonTextShape::Object)) => Err(UrnError::ScopeFieldNotText {
                     // The error outlives the record and the mapping the template is borrowed from.
@@ -363,7 +364,10 @@ mod tests {
         compiler::ExpanderCompiler,
         urn::{error::UrnError, generator::UrnGenerator, non_text_shape::NonTextShape},
     };
-    use cassiopeia_mapping::{mapping::Mapping, template::runner::TemplateRunner};
+    use cassiopeia_mapping::{
+        mapping::Mapping,
+        template::{run_variables::RunVariables, runner::TemplateRunner, template_input::TemplateInput},
+    };
     use cassiopeia_ngsi_ld::entity::error::NgsiLdError;
     use pretty_assertions::assert_eq;
     use serde_json::{Value, json};
@@ -400,7 +404,7 @@ mod tests {
         ));
 
         generator
-            .generate_scope(&mapping, data)
+            .generate_scope(&mapping, TemplateInput::new(data, &RunVariables::none()))
             .map(|scope| scope.map(|scope| serde_json::to_value(scope).unwrap()))
     }
 
@@ -632,7 +636,9 @@ mod tests {
     fn generate_aircraft_type_id(identity: &str, data: &Value) -> Result<String, UrnError> {
         let (generator, mapping) = aircraft_type_generator(identity);
 
-        generator.generate_id(&mapping, data).map(|urn| urn.to_string())
+        generator
+            .generate_id(&mapping, TemplateInput::new(data, &RunVariables::none()))
+            .map(|urn| urn.to_string())
     }
 
     fn is_generated_id_empty(result: &Result<String, UrnError>) -> bool {
@@ -710,7 +716,12 @@ mod tests {
 
         let urns: Vec<String> = ["E7W", "320", "77W"]
             .into_iter()
-            .map(|code| generator.generate_id(&mapping, &json!({ "code": code })).unwrap().to_string())
+            .map(|code| {
+                generator
+                    .generate_id(&mapping, TemplateInput::new(&json!({ "code": code }), &RunVariables::none()))
+                    .unwrap()
+                    .to_string()
+            })
             .collect();
 
         assert_eq!(urns, ["urn:ngsi-ld:AircraftType:AircraftType"; 3]);

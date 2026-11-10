@@ -239,6 +239,7 @@ mod tests {
         output::{ManifestOutput, destination::Destination, validation::ManifestValidation, validation_mode::ValidationMode},
         version::Version,
     };
+    use cassiopeia_mapping::template::run_variables::RunVariables;
     use cassiopeia_reporter::{backend::noop::NoopReporter, reporter::Reporter};
     use pretty_assertions::assert_eq;
     use std::{path::PathBuf, str::FromStr, sync::Arc};
@@ -558,7 +559,7 @@ mod tests {
         cli: serde_json::Map<String, serde_json::Value>,
         global: Option<serde_json::Map<String, serde_json::Value>>,
         per_input: Option<serde_json::Map<String, serde_json::Value>>,
-    ) -> serde_json::Map<String, serde_json::Value> {
+    ) -> RunVariables {
         let observer: Arc<dyn RunObserver> = Arc::new(NoopObserver);
         let pipeline = Pipeline::from_manifest(
             &manifest_with_vars(global, per_input),
@@ -576,7 +577,7 @@ mod tests {
         )
         .unwrap();
 
-        pipeline.inputs.into_iter().next().unwrap().vars
+        pipeline.inputs.into_iter().next().unwrap().variables
     }
 
     /// A single-entry `vars` map, the shape each precedence layer is exercised with.
@@ -590,14 +591,14 @@ mod tests {
     fn a_manifest_global_var_reaches_the_lane() {
         let resolved = resolved_vars(serde_json::Map::new(), Some(vars("valid_from", "2026-08-04T16:00:00Z")), None);
 
-        assert_eq!(resolved.get("valid_from"), Some(&serde_json::json!("2026-08-04T16:00:00Z")));
+        assert_eq!(resolved.as_value().get("valid_from"), Some(&serde_json::json!("2026-08-04T16:00:00Z")));
     }
 
     #[test]
     fn a_cli_var_overrides_a_manifest_global_var() {
         let resolved = resolved_vars(vars("valid_from", "cli"), Some(vars("valid_from", "manifest")), None);
 
-        assert_eq!(resolved.get("valid_from"), Some(&serde_json::json!("cli")));
+        assert_eq!(resolved.as_value().get("valid_from"), Some(&serde_json::json!("cli")));
     }
 
     #[test]
@@ -608,6 +609,6 @@ mod tests {
             Some(vars("valid_from", "input")),
         );
 
-        assert_eq!(resolved.get("valid_from"), Some(&serde_json::json!("input")));
+        assert_eq!(resolved.as_value().get("valid_from"), Some(&serde_json::json!("input")));
     }
 }

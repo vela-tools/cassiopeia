@@ -43,7 +43,7 @@ pub(crate) fn resolve(ctx: &mut ResolutionContext, attr_name: &NameBuf, config: 
 
 /// Resolves a sub-attribute's declaration into the one content it contributes.
 pub(crate) fn resolve_content(ctx: &ResolutionContext, key: &NameBuf, config: &Attribute) -> Result<Option<AttributeContent>> {
-    resolve_declaration(&mut ctx.child(ctx.data), key, config)
+    resolve_declaration(&mut ctx.child(ctx.input.record()), key, config)
 }
 
 /// Resolves one declaration into what it produces where it sits (see [`DeclarationOutput`]), or
@@ -86,7 +86,7 @@ fn assemble(ctx: &ResolutionContext, attr_name: &NameBuf, config: &Attribute) ->
     let members = ctx.beneath(&owner);
     let mut object = JsonObject::new();
     for (key, child_config) in config.mappings() {
-        if let Some(member) = resolve_declaration::<JsonValue>(&mut members.child(members.data), key, child_config)? {
+        if let Some(member) = resolve_declaration::<JsonValue>(&mut members.child(members.input.record()), key, child_config)? {
             object.insert(String::from(key.as_str()), member);
         }
     }
@@ -242,8 +242,9 @@ fn bind_refusal<T>(ctx: &ResolutionContext, attr_name: &NameBuf, outcome: result
 
 /// Reads the raw source values a declaration is built from, one per template.
 ///
-/// A single source string that is the lone reference `{{ context }}` binds the whole record;
-/// otherwise each source template is evaluated against the record, or, when a source was written as
+/// A single source string that is the lone reference `{{ context }}` binds the whole record, which
+/// holds only what the source gave, never the run variables it is read with; otherwise each source
+/// template is evaluated against the record and its run variables, or, when a source was written as
 /// a literal that never compiled, taken verbatim. A list-form source that reads the record but finds
 /// none of what it reads yields no values (see [`TemplateResolver::resolve_parts`]), so its literal
 /// parts are not written alone, as a single template's would not be. Taking the source and its
@@ -255,13 +256,13 @@ fn collect_source_parts(ctx: &ResolutionContext, source: Option<&JsonValue>, com
     // The compiled form, not the source text, decides: `{{context}}` and `{{ context }}` are the
     // same reference however they are spaced.
     if matches!(source, Some(JsonValue::String(_))) && matches!(compiled.map(Vec::as_slice), Some([CompiledTemplate::Simple(path)]) if path.is_whole_record()) {
-        return Ok(smallvec![ctx.data.clone()]);
+        return Ok(smallvec![ctx.input.record().clone()]);
     }
 
     let mut parts = SourceParts::new();
     match source {
         Some(JsonValue::String(literal)) => match compiled.and_then(|templates| templates.first()) {
-            Some(template) => parts.push(ctx.resolver.resolve(template, ctx.data)?),
+            Some(template) => parts.push(ctx.resolver.resolve(template, ctx.input)?),
             None => parts.push(JsonValue::String(literal.clone())),
         },
         Some(JsonValue::Array(sources)) => match compiled {
@@ -269,7 +270,7 @@ fn collect_source_parts(ctx: &ResolutionContext, source: Option<&JsonValue>, com
             Some(templates) => {
                 return Ok(ctx
                     .resolver
-                    .resolve_parts(templates, ctx.data)?
+                    .resolve_parts(templates, ctx.input)?
                     .map_or_else(SourceParts::new, SourceParts::from_vec));
             }
             None => parts.extend(sources.iter().cloned()),

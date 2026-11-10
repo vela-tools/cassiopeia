@@ -21,7 +21,11 @@ pub mod version;
 
 #[cfg(test)]
 mod tests {
-    use crate::{mapping::Mapping, observed_at::ObservedAt, template::runner::TemplateRunner};
+    use crate::{
+        mapping::Mapping,
+        observed_at::ObservedAt,
+        template::{run_variables::RunVariables, runner::TemplateRunner, template_input::TemplateInput},
+    };
     use pretty_assertions::assert_eq;
     use serde_json::json;
     use std::path::Path;
@@ -45,7 +49,10 @@ mod tests {
         assert!(mapping.is_temporal());
         assert_eq!(
             mapping
-                .extract_observed_at(&runner.resolver(), &json!({"timestamp": "2026-04-03T22:00:20Z"}))
+                .extract_observed_at(
+                    &runner.resolver(),
+                    TemplateInput::new(&json!({"timestamp": "2026-04-03T22:00:20Z"}), &RunVariables::none())
+                )
                 .unwrap(),
             Some(ObservedAt::new("2026-04-03T22:00:20Z"))
         );
