@@ -554,7 +554,7 @@ dBase fields are under `properties`. Cassiopeia converts their values to JSON wh
 
 ### Geometry and coordinate reference systems
 
-Shapefile geometries are emitted as GeoJSON for use as NGSI-LD `GeoProperty` values. When a `.prj` companion is present, Cassiopeia parses its coordinate reference system and reprojects the geometry to EPSG:4326, using WGS84 longitude and latitude. Without a `.prj` file, it assumes the coordinates are already EPSG:4326 and emits them unchanged.
+Shapefile geometries are emitted as GeoJSON for use as NGSI-LD `GeoProperty` values. When a `.prj` companion is present, Cassiopeia parses its coordinate reference system and reprojects the geometry to EPSG:4326, using WGS84 longitude and latitude. A coordinate the reprojection does not move, as under a WGS84 or an ETRS89 `.prj`, is emitted exactly as the shapefile stores it. Without a `.prj` file, it assumes the coordinates are already EPSG:4326 and emits them unchanged.
 
 The `.dbf` companion is required because it carries the feature attributes. A bare `.shp` without its required companion files is not a complete input.
 
@@ -593,7 +593,7 @@ Rows of an attributes table have no `geometry` member. A feature whose geometry 
 
 ### Geometry and coordinate reference systems
 
-GeoPackage geometries are emitted as GeoJSON for use as NGSI-LD `GeoProperty` values. Each feature table names its coordinate reference system through the `srs_id` of its geometry column, which `gpkg_spatial_ref_sys` defines. Cassiopeia reads that definition, preferring the WKT2 form of the `gpkg_crs_wkt` extension when the file has one, and reprojects the geometry to EPSG:4326, using WGS84 longitude and latitude. An EPSG:4326 table is emitted unchanged. A table whose definition is `undefined`, as it is for the reserved `srs_id` values `0` and `-1`, is assumed to be EPSG:4326 already: Cassiopeia emits its coordinates unchanged and logs a warning. A table whose geometry column names an `srs_id` that `gpkg_spatial_ref_sys` does not define, or whose definition Cassiopeia cannot parse, cannot be read and is skipped.
+GeoPackage geometries are emitted as GeoJSON for use as NGSI-LD `GeoProperty` values. Each feature table names its coordinate reference system through the `srs_id` of its geometry column, which `gpkg_spatial_ref_sys` defines. Cassiopeia reads that definition, preferring the WKT2 form of the `gpkg_crs_wkt` extension when the file has one, and reprojects the geometry to EPSG:4326, using WGS84 longitude and latitude. An EPSG:4326 table is emitted unchanged, and so is any coordinate the reprojection does not move, such as one in an ETRS89 table, which EPSG transformation 1149 carries to WGS84 with no shift. A table whose definition is `undefined`, as it is for the reserved `srs_id` values `0` and `-1`, is assumed to be EPSG:4326 already: Cassiopeia emits its coordinates unchanged and logs a warning. A table whose geometry column names an `srs_id` that `gpkg_spatial_ref_sys` does not define, or whose definition Cassiopeia cannot parse, cannot be read and is skipped.
 
 Geometries keep their X and Y coordinates only; Z and M values are dropped. Curved geometry types, such as `CIRCULARSTRING` and `COMPOUNDCURVE`, have no GeoJSON form, and a row holding one fails the run.
 

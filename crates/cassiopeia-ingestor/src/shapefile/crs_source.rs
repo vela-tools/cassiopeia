@@ -6,8 +6,8 @@ use std::{fs, io::ErrorKind, path::Path};
 ///
 /// An absent `.prj` yields `Ok(None)`: by common real-world convention the coordinates are then assumed
 /// to already be EPSG:4326 and are emitted unchanged, and a warning is logged. A present `.prj` is
-/// parsed from its WKT; a non-4326 CRS is reprojected downstream, an already-4326 one round-trips as an
-/// identity.
+/// parsed from its WKT and its coordinates are reprojected downstream; a coordinate the transformation
+/// does not move, as under a WGS84 or ETRS89 `.prj`, keeps the value the shapefile stores.
 ///
 /// # Errors
 ///

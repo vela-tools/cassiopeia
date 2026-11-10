@@ -312,6 +312,25 @@ mod tests {
     }
 
     #[test]
+    fn a_layer_whose_prj_is_wgs84_is_emitted_with_the_coordinates_the_source_stored() {
+        let dir = TempDir::new().unwrap();
+        write_point_layer(
+            dir.path(),
+            "points",
+            Some(WGS84_WKT),
+            &[Feature {
+                x: 14.5058,
+                y: 46.0569,
+                name: "Ljubljana",
+                value: 0.0,
+            }],
+        );
+        let records = ingest(bare_payload(&dir.path().join("points.shp"))).unwrap();
+
+        assert_eq!(coordinates(&records[0]), (14.5058, 46.0569));
+    }
+
+    #[test]
     fn an_absent_prj_passes_coordinates_through_unchanged() {
         let dir = TempDir::new().unwrap();
         write_point_layer(

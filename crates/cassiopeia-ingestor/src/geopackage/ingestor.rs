@@ -276,6 +276,9 @@ mod tests {
     /// easting of 1113194.9079 m at northing 0 reprojects to lon 10, lat 0.
     const WEB_MERCATOR_WKT: &str = r#"PROJCS["WGS 84 / Pseudo-Mercator",GEOGCS["WGS 84",DATUM["WGS_1984",SPHEROID["WGS 84",6378137,298.257223563]],PRIMEM["Greenwich",0],UNIT["degree",0.0174532925199433]],PROJECTION["Mercator_1SP"],PARAMETER["central_meridian",0],PARAMETER["scale_factor",1],PARAMETER["false_easting",0],PARAMETER["false_northing",0],UNIT["metre",1]]"#;
 
+    /// EPSG:4258 (ETRS89) as GDAL writes it into `gpkg_spatial_ref_sys`.
+    const ETRS89_WKT: &str = r#"GEOGCS["ETRS89",DATUM["European_Terrestrial_Reference_System_1989",SPHEROID["GRS 1980",6378137,298.257222101,AUTHORITY["EPSG","7019"]],AUTHORITY["EPSG","6258"]],PRIMEM["Greenwich",0,AUTHORITY["EPSG","8901"]],UNIT["degree",0.0174532925199433,AUTHORITY["EPSG","9122"]],AXIS["Latitude",NORTH],AXIS["Longitude",EAST],AUTHORITY["EPSG","4258"]]"#;
+
     /// The `srs_id` every `GeoPackage` reserves for an undefined geographic CRS.
     const UNDEFINED_GEOGRAPHIC: i32 = 0;
 
@@ -502,6 +505,28 @@ mod tests {
         let (lon, lat) = coordinates(&ingest(&path).unwrap()[0]);
         assert!((lon - 10.0).abs() < 1e-6, "lon was {lon}");
         assert!(lat.abs() < 1e-6, "lat was {lat}");
+    }
+
+    #[test]
+    fn an_etrs89_geometry_is_emitted_with_the_coordinates_the_source_stored() {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("etrs89.gpkg");
+        let gpkg = GeoPackage::create(&path).unwrap();
+        gpkg.add_srs(&Srs {
+            name: "ETRS89".to_string(),
+            srs_id: 4258,
+            organization: "EPSG".to_string(),
+            organization_coordsys_id: 4258,
+            definition: ETRS89_WKT.to_string(),
+            description: None,
+            definition_wkt2: None,
+            epoch: None,
+        })
+        .unwrap();
+        write_point_layer(&gpkg, "points", 4258, &[(14.5058, 46.0569, "Ljubljana")]);
+        gpkg.close().unwrap();
+
+        assert_eq!(coordinates(&ingest(&path).unwrap()[0]), (14.5058, 46.0569));
     }
 
     #[test]
