@@ -821,7 +821,6 @@ An observation whose time is masked is padding and is skipped. A masked data val
 - Projected and curvilinear grids are skipped, because their cells have no latitude and longitude coordinate variables to read. That includes a Lambert grid whose two-dimensional latitude and longitude are auxiliary coordinates, as the HRRR and MEPS forecasts are. Feature types other than `timeSeries`, such as `point`, `trajectory`, `profile`, `timeSeriesProfile`, and `trajectoryProfile`, are rejected.
 - A station file's coordinates and data variables are read whole and held in memory together, along with one entry per observation, so a very large station archive needs memory for all of its variables at once.
 - NetCDF-4 variables compressed with deflate, shuffle, Fletcher-32, SZIP, N-bit, scale-offset, or LZ4 are read. A variable compressed with another HDF5 filter, such as zstd or Blosc, or stored as an HDF5 virtual dataset fails to read.
-- Automatic detection reads only the file header. Declaring the format explicitly, with `--type netcdf` or `format: "netcdf"`, makes the profiler read the whole file into memory before it is ingested, so leave a large file to automatic detection.
 
 ## Choosing a format for a mapping
 

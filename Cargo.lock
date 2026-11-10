@@ -711,6 +711,7 @@ dependencies = [
  "quick-xml 0.42.0",
  "serde",
  "serde_json",
+ "tempfile",
  "thiserror 2.0.21",
  "url",
  "zip",
@@ -1035,8 +1036,10 @@ dependencies = [
  "cassiopeia-encoding-detection",
  "cassiopeia-ir",
  "mediatype",
+ "peak_alloc",
  "pretty_assertions",
  "serde_json",
+ "tempfile",
  "thiserror 2.0.21",
 ]
 
@@ -5191,6 +5194,12 @@ name = "pdqselect"
 version = "0.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4ec91767ecc0a0bbe558ce8c9da33c068066c57ecc8bb8477ef8c1ad3ef77c27"
+
+[[package]]
+name = "peak_alloc"
+version = "0.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ccc90935a8dd139fdf341762773687a1e361d3f54b396a55d9dd1f7001e484bb"
 
 [[package]]
 name = "percent-encoding"

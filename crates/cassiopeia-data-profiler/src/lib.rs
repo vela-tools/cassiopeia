@@ -9,28 +9,25 @@ use crate::{
     content::Content,
     detectors::default_detectors,
     error::{DataProfilerError, Result},
+    mapped_file::MappedFile,
     profile::Profile,
 };
-use cassiopeia_common::error::io::{IoAction, IoError};
 use cassiopeia_encoding_detection::encoding_hint::EncodingHint;
-use memmap2::Mmap;
-use std::{fs::File, path::Path};
+use std::path::Path;
 
 pub mod content;
 pub mod detectors;
 pub mod error;
 pub mod inspectors;
+pub mod mapped_file;
 pub mod metadata;
 pub mod profile;
 
 /// Profiles a file at the given path to determine its data format.
 ///
-/// The file is memory-mapped rather than read into a heap buffer, then run through every detector
-/// in order, returning the first match. Mapping keeps the profiler's resident memory proportional to
-/// the bytes each detector actually touches: a magic-number check faults in only the leading page,
-/// and a whole-file scan (JSON validation, a CSV sample) streams through clean read-only pages the
-/// kernel can evict under pressure, instead of holding the entire file, which for a multi-gigabyte
-/// input is the difference between a few pages and an out-of-memory abort.
+/// The file is mapped read-only through [`MappedFile`] rather than read into a heap buffer, then run
+/// through every detector in order, returning the first match, so only the bytes the detectors
+/// actually touch are read from disk.
 ///
 /// # Arguments
 /// * `path` - The path to the file to profile.
@@ -44,40 +41,8 @@ pub mod profile;
 /// included, as it can match no format).
 pub fn profile_path(path: impl AsRef<Path>, encoding_hint: &EncodingHint) -> Result<Profile> {
     let path = path.as_ref();
-    if !path.exists() {
-        return Err(DataProfilerError::NotFound(path.to_path_buf()));
-    }
-
-    let file = File::open(path).map_err(|source| IoError::FileOperation {
-        source,
-        path: path.to_path_buf(),
-        action: IoAction::Open,
-    })?;
-    let length = file
-        .metadata()
-        .map_err(|source| IoError::FileOperation {
-            source,
-            path: path.to_path_buf(),
-            action: IoAction::Read,
-        })?
-        .len();
-    // A zero-length file cannot be mapped (a zero-length mapping is an error on most platforms) and
-    // matches no detector regardless, so it is an unknown format rather than an I/O failure.
-    if length == 0 {
-        return Err(DataProfilerError::UnknownFormat(path.to_path_buf()));
-    }
-
-    // SAFETY: the mapping is read-only and lives only for the duration of detection, during which
-    // Cassiopeia never writes to the path. The residual hazard is another process truncating the
-    // file underneath the mapping; that is the accepted trade-off for sniffing large inputs without
-    // loading them, the same one made by ripgrep and fd.
-    let mapping = unsafe { Mmap::map(&file) }.map_err(|source| IoError::FileOperation {
-        source,
-        path: path.to_path_buf(),
-        action: IoAction::Read,
-    })?;
-
-    let content = Content::hinted(&mapping, encoding_hint);
+    let file = MappedFile::open(path)?;
+    let content = Content::hinted(file.bytes(), encoding_hint);
     default_detectors()
         .iter()
         .find_map(|detector| detector.detect(&content))
@@ -104,11 +69,36 @@ pub fn profile_bytes(bytes: &[u8], encoding_hint: &EncodingHint) -> Result<Profi
 
 #[cfg(test)]
 mod tests {
-    use crate::{error::DataProfilerError, metadata::FormatMetadata, profile_bytes};
+    use crate::{error::DataProfilerError, metadata::FormatMetadata, profile_bytes, profile_path};
     use cassiopeia_common::format::DataFormat;
     use cassiopeia_csv_dialect::dialect_byte::DialectByte;
     use cassiopeia_encoding_detection::encoding_hint::EncodingHint;
     use pretty_assertions::assert_eq;
+    use std::io::Write;
+    use tempfile::NamedTempFile;
+
+    #[test]
+    fn a_csv_file_is_detected_from_its_mapping() {
+        let mut file = NamedTempFile::new().unwrap();
+        file.write_all(b"id;name;value\n1;alpha;10\n2;beta;20\n").unwrap();
+
+        let profile = profile_path(file.path(), &EncodingHint::NONE).unwrap();
+
+        assert_eq!(*profile.format(), DataFormat::Csv);
+        assert_eq!(
+            profile.metadata().as_ref().and_then(FormatMetadata::as_csv).unwrap().dialect().delimiter,
+            DialectByte::SEMICOLON
+        );
+    }
+
+    #[test]
+    fn an_empty_file_is_an_unknown_format() {
+        let file = NamedTempFile::new().unwrap();
+
+        let error = profile_path(file.path(), &EncodingHint::NONE).unwrap_err();
+
+        assert!(matches!(error, DataProfilerError::UnknownFormat(path) if path == file.path()));
+    }
 
     #[test]
     fn kml_is_detected_by_its_root_element_and_ogc_namespace() {
