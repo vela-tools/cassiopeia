@@ -1,9 +1,12 @@
-use crate::grib::{
-    error::GribIngestError,
-    field::{DecodedField, normalize_longitude},
-    grid_slice::GridSliceSet,
-    level::GribLevel,
-    parameter::{ParameterName, parameter_key_grib1, parameter_key_grib2},
+use crate::{
+    grib::{
+        error::GribIngestError,
+        field::DecodedField,
+        grid_slice::GridSliceSet,
+        level::eccodes_level,
+        parameter::{parameter_key_grib1, parameter_key_grib2},
+    },
+    location_record::{longitude::normalize_longitude, parameter_name::ParameterName},
 };
 use cassiopeia_data_profiler::metadata::GribEdition;
 use eccodes::{GribFile, GribMessage};
@@ -59,7 +62,7 @@ pub fn decode(path: &Path, set: &mut GridSliceSet, edition: GribEdition) -> Resu
         // decode. `level` is a native `long`, so it is read as `i64` and widened during normalization.
         let type_of_level: Option<String> = message.get("typeOfLevel")?;
         let level_value: Option<i64> = message.get("level")?;
-        let level = type_of_level.map(|kind| GribLevel::from_eccodes(&kind, level_value));
+        let level = type_of_level.map(|kind| eccodes_level(&kind, level_value));
 
         let reference_time = Some(format_timestamp(message.get("dataDate")?, message.get("dataTime")?));
         // `validityDate`/`validityTime` are the forecast valid time ecCodes derives from the step.

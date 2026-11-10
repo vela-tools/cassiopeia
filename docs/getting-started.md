@@ -16,7 +16,7 @@ Then either restart your shell or source the Cargo environment for the current s
 source "$HOME/.cargo/env"
 ```
 
-GRIB and GeoPackage are the only source formats that link C code. Whether your build compiles that code depends on the features you choose, so read the next two sections before building.
+GRIB and GeoPackage are the only source formats that link C code. NetCDF, classic and NetCDF-4 alike, is read in pure Rust by every build, the release binaries included. Whether your build compiles that code depends on the features you choose, so read the next two sections before building.
 
 ## GRIB1 and ecCodes
 

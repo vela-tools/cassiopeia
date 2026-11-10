@@ -1,4 +1,4 @@
-use crate::grib::{error::GribIngestError, field::DecodedField, grid_slice::GridSliceSet, level::GribLevel, parameter::parameter_key_grib2};
+use crate::grib::{error::GribIngestError, field::DecodedField, grid_slice::GridSliceSet, level::grib2_level, parameter::parameter_key_grib2};
 use grib::{Grib2SubmessageDecoder, LatLons};
 use std::{fs::File, io::BufReader};
 
@@ -35,11 +35,11 @@ pub fn decode(reader: BufReader<File>, set: &mut GridSliceSet) -> Result<(), Gri
         let reference_time = temporal.ref_time.map(|time| time.to_rfc3339());
         let forecast_time = temporal.forecast_time_target.map(|time| time.to_rfc3339());
         // The first fixed surface is the vertical level; its Code Table 4.5 type and decoded value
-        // normalize into the backend-agnostic `GribLevel` (surface type 255 means "no level").
+        // normalize into the backend-agnostic `Level` (surface type 255 means "no level").
         let level = submessage
             .prod_def()
             .fixed_surfaces()
-            .and_then(|(first, _second)| GribLevel::from_grib2(first.surface_type, first.value()));
+            .and_then(|(first, _second)| grib2_level(first.surface_type, first.value()));
         // The raw Grid Definition Section bytes identify the grid: byte-equal definitions share
         // geometry and cell ordering, so their values line up cell for cell.
         let grid = submessage.grid_def().iter().copied().collect::<Vec<u8>>();

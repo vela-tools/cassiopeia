@@ -77,6 +77,7 @@ const fn ingestor_code(error: &IngestorError) -> IngestCode {
         | IngestorError::Grib(_)
         | IngestorError::Json(_)
         | IngestorError::Kml(_)
+        | IngestorError::NetCdf(_)
         | IngestorError::Shapefile(_)
         | IngestorError::Xml(_) => IngestCode::RecordsUnreadable,
     }

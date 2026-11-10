@@ -4,7 +4,7 @@ Cassiopeia converts each supported source format into a sequence of records befo
 
 Most inputs can use automatic format detection. Cassiopeia inspects the source and selects the most specific supported format it recognizes. Declare the format when the source has no useful extension, its content is ambiguous, or you want the run configuration to make the choice explicit.
 
-The format can be set on a manifest input with `format`, or through the equivalent command-line option. The accepted values are `csv`, `json`, `geojson`, `kml`, `kmz`, `xml`, `shapefile`, `geopackage`, and `grib`.
+The format can be set on a manifest input with `format`, or through the equivalent command-line option. The accepted values are `csv`, `json`, `geojson`, `kml`, `kmz`, `xml`, `shapefile`, `geopackage`, `grib`, and `netcdf`.
 
 ## At a glance
 
@@ -18,12 +18,13 @@ The format can be set on a manifest input with `format`, or through the equivale
 | ESRI Shapefile | One record per feature | `properties` and WGS84 `geometry` | Multiple layers become collections |
 | GeoPackage | One record per table row | `properties` and, for features, WGS84 `geometry` | Multiple tables become collections |
 | GRIB | One record per unmasked grid cell | Coordinates, times, level, and parameter columns | No |
+| NetCDF | One record per unmasked grid cell, or per station observation | Coordinates, time, level, other coordinates, and data variable columns | No |
 
 The collection column matters when a source contains several logical groups that need different mappings. KML folders, multi-layer Shapefile archives, multi-table GeoPackages, and nested JSON arrays are currently the only formats that provide collections.
 
 ## Automatic detection and explicit format
 
-Automatic detection uses the source content. A JSON document that is also valid GeoJSON is classified as GeoJSON rather than generic JSON. Cassiopeia checks for KML before generic XML and distinguishes a Shapefile archive from other ZIP files by its contents. It identifies GRIB from its binary marker and reads the edition from the header. It recognizes a GeoPackage from its SQLite header and the `application_id` it declares, including the `GP10` and `GP11` identifiers of GeoPackage 1.0 and 1.1, so a plain SQLite database is not mistaken for one.
+Automatic detection uses the source content. A JSON document that is also valid GeoJSON is classified as GeoJSON rather than generic JSON. Cassiopeia checks for KML before generic XML and distinguishes a Shapefile archive from other ZIP files by its contents. It identifies GRIB from its binary marker and reads the edition from the header. It identifies NetCDF from the classic `CDF` marker and version byte, or from the HDF5 signature of a NetCDF-4 file, including one placed behind an HDF5 user block. It recognizes a GeoPackage from its SQLite header and the `application_id` it declares, including the `GP10` and `GP11` identifiers of GeoPackage 1.0 and 1.1, so a plain SQLite database is not mistaken for one.
 
 Use an explicit format when detection does not have enough context. For example, a small or unusual delimited file may need to be declared as CSV. A source downloaded without a meaningful filename may also need an explicit format in the run configuration.
 
@@ -43,7 +44,7 @@ CSV · text/csv · 90% confidence
 delimiter "," · quote "\"" · skipRows 0 · headerRows 1 · terminator "crlf" · encoding "UTF-8"
 ~~~
 
-The report has at most three lines. The first names the file and gives its size. The second shows the detection result: the format, its media type, and a confidence score. The third appears only when the format has detectable parsing details. For CSV, it shows the dialect above: the delimiter, the quoting, the preamble, the header, the line terminator, and the character encoding. It uses the member names and value syntax of a manifest input's [`dialect`](manifest.md#csv-dialect), so a member that detection got wrong can be copied into a manifest and corrected there. For GRIB, it shows the edition. Formats that need no such parameters, including JSON, GeoJSON, KML, XML, Shapefile, and GeoPackage, print only the first two lines.
+The report has at most three lines. The first names the file and gives its size. The second shows the detection result: the format, its media type, and a confidence score. The third appears only when the format has detectable parsing details. For CSV, it shows the dialect above: the delimiter, the quoting, the preamble, the header, the line terminator, and the character encoding. It uses the member names and value syntax of a manifest input's [`dialect`](manifest.md#csv-dialect), so a member that detection got wrong can be copied into a manifest and corrected there. For GRIB, it shows the edition. Formats that need no such parameters, including JSON, GeoJSON, KML, XML, Shapefile, GeoPackage, and NetCDF, print only the first two lines.
 
 ~~~text
 stations.geojson · 4.2 KiB
@@ -713,11 +714,120 @@ Both backends use the same canonical vocabulary and level normalization, so chan
 
 With the default build, ecCodes can decode projected GRIB2 grids, such as the Lambert conformal or polar stereographic grids used by regional models like HRRR. It handles these alongside global regular-grid products such as GFS and the ICON global model. Only the pure-Rust fallback, built with `grib2-full` off, is limited to regular latitude/longitude grids. With that fallback, a projected file fails to ingest instead of producing records. The two worked examples cover both editions: [GRIB1 regional](https://github.com/vela-tools/cassiopeia-examples/blob/main/examples/18-grib1-derived-values/example.md) and [GRIB2 global](https://github.com/vela-tools/cassiopeia-examples/blob/main/examples/19-grib2-byte-range/example.md).
 
+## NetCDF
+
+NetCDF is a self-describing format for gridded and station data. Copernicus services (CAMS air quality, CMEMS ocean, C3S and ERA5), national meteorological services, and ERDDAP and NCEI archives publish it. Cassiopeia reads the classic CDF-1, CDF-2, and CDF-5 formats and NetCDF-4, which is stored in HDF5, through the single `netcdf` source format. The reader is pure Rust, so every build includes it, the release binaries too, and it needs no system library.
+
+A NetCDF file produces the same wide location records as GRIB, so the same mapping style builds `AirQualityObserved`, `WeatherObserved`, or `SeaConditions` entities from either format. A file without a global `featureType` attribute is read as a grid, and so is one that declares `featureType = "GRID"`, which THREDDS servers write on every grid their NetCDF Subset Service returns. A file that declares `featureType = "timeSeries"` is read as station time series, as described in [Station time series](#station-time-series). Any other feature type is rejected.
+
+### Gridded records
+
+Each data variable located by latitude and longitude produces one record per unmasked cell of every latitude-longitude plane. Data variables with the same ordered dimensions and the same listed scalar and auxiliary coordinates pivot into columns of the same record, so a 2 m temperature and a 10 m wind told apart only by their scalar `height` produce records of their own. A record contains:
+
+- `latitude` and `longitude` as separate numeric fields. A longitude in `[0, 360)` is folded into `[-180, 180)`.
+- `time` when the variable has a time dimension, as an RFC 3339 timestamp (see [Time](#time)).
+- `level_type` and `level` when the variable has a vertical dimension that maps onto a level (see [Levels](#levels)).
+- One field for every other dimension, keyed by the name of its coordinate variable, such as an ensemble member `number` or a `forecast_reference_time`.
+- One field for each scalar coordinate, and each auxiliary coordinate over those other dimensions, that the data variable lists in its `coordinates` attribute. CF 1.11 section 5.7 makes a scalar coordinate equivalent to a dimension of length one, so a scalar `time` becomes the record's `time` and a scalar `height` its level. Any other is keyed by its variable name, such as the `reftime` or `time_run` forecast reference time THREDDS writes along the time dimension. When a dimension already gives the record its time or level, a second time or vertical coordinate is keyed by its variable name too.
+- One field for each data variable, keyed by its NetCDF variable name.
+
+For example, a record from a pressure-level file with temperature `t` and relative humidity `r` may look like:
+
+~~~json
+{
+    "latitude": 46.0,
+    "longitude": 14.5,
+    "time": "2026-08-23T06:00:00+00:00",
+    "level_type": "isobaric",
+    "level": 850,
+    "t": 285.3,
+    "r": 71.2
+}
+~~~
+
+Values are unpacked with `scale_factor` and `add_offset`. A value equal to `_FillValue` or `missing_value`, or outside `valid_min`, `valid_max`, or `valid_range`, counts as masked and is omitted from the record. A variable without a `_FillValue` attribute is also masked at its type's netCDF default fill value, the value the library leaves in an element no writer set; byte variables are exempt, since their whole range is commonly real data. A cell masked in every data variable produces no record. Data variable names are kept exactly as the producer wrote them. A name that is not a plain identifier, such as one containing a hyphen, is read in a template with `this['...']`.
+
+### Coordinate roles
+
+Cassiopeia recognizes a coordinate by its CF attributes, never by its name. It checks the attributes CF 1.11 section 4 names in this order: `standard_name`, then `units`, then `axis`, then `positive`.
+
+| Role | Recognized by | Record key |
+| --- | --- | --- |
+| Latitude | `standard_name` `latitude`, or `units` `degrees_north`, `degree_north`, `degree_N`, `degrees_N`, `degreeN`, or `degreesN` | `latitude` |
+| Longitude | `standard_name` `longitude`, or `units` `degrees_east`, `degree_east`, `degree_E`, `degrees_E`, `degreeE`, or `degreesE` | `longitude` |
+| Time | `standard_name` `time`, `axis` `T`, or `<unit> since <epoch>` units on a variable with no other `standard_name` | `time` |
+| Vertical | a vertical `standard_name` such as `air_pressure`, `height`, `altitude`, `depth`, `model_level_number`, or a dimensionless coordinate such as `atmosphere_sigma_coordinate`; pressure `units`; `axis` `Z`; or a `positive` attribute | `level_type` and `level`, or the variable name when it maps onto no level |
+| Projected | `standard_name` `projection_x_coordinate`, `projection_y_coordinate`, `grid_longitude`, or `grid_latitude`, or `axis` `X` or `Y` without degree units | none on a grid, where the variable is skipped; the variable name on a station |
+| Other | anything else | the variable name |
+
+A variable called `lat` without these attributes is therefore not a latitude. A `forecast_reference_time` with epoch units has a standard name of its own, so it is emitted as a timestamp under `forecast_reference_time` rather than competing with the valid `time`.
+
+A data variable is a numeric variable with at least two dimensions that is neither a coordinate variable nor named by another variable's `bounds`, `climatology`, or `grid_mapping` attribute. It is skipped, with a warning that names it and the reason, when it holds characters or strings, when a dimension has no coordinate variable, when its horizontal axes are projected or curvilinear, or when more than one dimension has the time role or the vertical role. The run fails when no data variable remains. It also fails when two values would land under one record key, such as a data variable named `time` on a grid that also has a time coordinate, rather than letting one overwrite the other.
+
+### Levels
+
+A vertical coordinate maps onto the same `level_type` tokens GRIB uses, so a level condition in a template works for both formats:
+
+| CF vertical coordinate | `level_type` | `level` |
+| --- | --- | --- |
+| Pressure in `Pa`, `hPa`, `mbar`, or `millibar` | `isobaric` | hPa |
+| `standard_name` `height` in metres | `height_above_ground` | metres |
+| `standard_name` `altitude` or `height_above_mean_sea_level` in metres | `altitude_above_mean_sea` | metres |
+| `standard_name` `depth`, or `positive = "down"`, in metres | `depth_below_sea` | metres |
+| `atmosphere_sigma_coordinate` | `sigma` | the coordinate value |
+
+A vertical `standard_name` other than `air_pressure` decides on its own, ahead of the units. A hybrid coordinate that declares `hPa`, as CAM history files do for their nominal `1000 * (a + b)` values, is therefore not read as a pressure. Any other vertical coordinate is emitted under its own variable name with its raw value. That includes a `model_level_number`, a height in kilometres, an ocean s-coordinate, and the hybrid sigma-pressure and hybrid height coordinates, whose values are not the model level numbers GRIB's `hybrid` level carries. CF's `depth` does not say which surface it is measured from, so a soil depth in metres becomes `depth_below_sea` too.
+
+### Time
+
+Every coordinate whose units take the form `<unit> since <epoch>` is decoded into an RFC 3339 timestamp ending in `+00:00`, whatever its role. The unit can be any UDUNITS spelling of seconds, minutes, hours, days, or weeks, such as `sec`, `msec`, or `milliseconds`, or `months` in the `360_day` calendar. Times are rounded to the microsecond, the finest a double counting days or seconds from a distant epoch can resolve, so a ten-minute series stored as fractional days reads `04:10:00` rather than `04:09:59.999999744`. A fraction of a second is written with its trailing zeros trimmed. The supported calendars are `standard` (also `gregorian`), `proleptic_gregorian`, `noleap` (also `365_day`), `all_leap` (also `366_day`), `360_day`, and `julian`. A variable without a `calendar` attribute uses `standard`. A date in a non-Gregorian calendar is written as that calendar states it, so day 59 of a `360_day` year is `2026-02-30T00:00:00+00:00`.
+
+The epoch may end with a UTC designator: `Z`, `UTC`, `GMT`, or a zero offset such as `+00:00`, `+0000`, or the unsigned `0:00` the NCEI netCDF templates prescribe. The run fails when the epoch names a non-zero offset, when the `calendar` attribute names anything else (including `utc`, `tai`, and `none`, whose leap-second or calendar-free arithmetic Cassiopeia does not perform), or when the units contain non-ASCII characters. A coordinate in the time role whose units name no epoch, such as the `day as %Y%m%d.%f` CDO writes for an absolute time axis, is emitted as its raw number.
+
+### Station time series
+
+A file that declares `featureType = "timeSeries"` holds observations at fixed stations, a CF discrete sampling geometry (CF 1.11 section 9 and Appendix H.2). Cassiopeia emits one record per observation and recognizes all five CF layouts:
+
+| Layout | How it is recognized |
+| --- | --- |
+| Single | The latitude is a scalar, and the data runs along the time dimension. |
+| Orthogonal multidimensional | The data has a station and a time dimension, in either order, and all stations share the `time(time)` coordinate. |
+| Incomplete multidimensional | The time is `time(station, obs)`, padded with fill values where a station has fewer observations. |
+| Contiguous ragged | A count variable carries `sample_dimension`; each station's observations follow those of the station before it. |
+| Indexed ragged | An index variable carries `instance_dimension`; each observation names its station. |
+
+A dimension of length one that is neither the station nor the time dimension holds one value for every observation. An OceanSITES station file, whose `LATITUDE`, `LONGITUDE`, and `HEIGHT` each have a dimension of length one, is therefore read as a single station, with `HEIGHT` as its level. A file whose latitude runs along a station dimension and whose time runs along another is read as orthogonal only when some variable spans both dimensions. Otherwise it is a ragged file whose count or index variable lacks its `sample_dimension` or `instance_dimension`, and the run fails rather than repeating every observation at every station.
+
+The coordinates come from the variables the data variables list in their `coordinates` attribute, the coordinate variables, and the variable whose `cf_role` is `timeseries_id`. The latitude, longitude, and time are required, and the run fails when one is missing. A vertical station coordinate, such as an `altitude`, becomes `level_type` and `level`. A station name or identifier is emitted as a string under its own name, and any other listed coordinate as a number or a string under its own name. A station variable that no `coordinates` attribute lists and that has no `cf_role` is not emitted. A text variable that varies by observation, such as the per-observation `station_name` ERDDAP writes or an OceanSITES data mode flag, is emitted as a string under its own name. An empty string counts as missing. For example:
+
+~~~json
+{
+    "latitude": 46.07,
+    "longitude": 14.52,
+    "time": "2026-08-23T06:00:00+00:00",
+    "level_type": "altitude_above_mean_sea",
+    "level": 299,
+    "station_name": "LJUBLJANA",
+    "pm10": 18.2,
+    "no2": 21.5
+}
+~~~
+
+An observation whose time is masked is padding and is skipped. A masked data value is omitted from its record, and an observation masked in every data variable produces no record. A count or index that points outside its dimension fails the run. When the counts of a contiguous ragged array cover fewer elements than its sample dimension, the elements left over belong to no station and are skipped with a warning.
+
+### Limitations
+
+- Only the root group is read. A NetCDF-4 file with subgroups logs a warning and ignores them.
+- Projected and curvilinear grids are skipped, because their cells have no latitude and longitude coordinate variables to read. That includes a Lambert grid whose two-dimensional latitude and longitude are auxiliary coordinates, as the HRRR and MEPS forecasts are. Feature types other than `timeSeries`, such as `point`, `trajectory`, `profile`, `timeSeriesProfile`, and `trajectoryProfile`, are rejected.
+- A station file's coordinates and data variables are read whole and held in memory together, along with one entry per observation, so a very large station archive needs memory for all of its variables at once.
+- NetCDF-4 variables compressed with deflate, shuffle, Fletcher-32, SZIP, N-bit, scale-offset, or LZ4 are read. A variable compressed with another HDF5 filter, such as zstd or Blosc, or stored as an HDF5 virtual dataset fails to read.
+- Automatic detection reads only the file header. Declaring the format explicitly, with `--type netcdf` or `format: "netcdf"`, makes the profiler read the whole file into memory before it is ingested, so leave a large file to automatic detection.
+
 ## Choosing a format for a mapping
 
 Start by looking at one profiled record, not at the original file alone. Then build the mapping around the fields Cassiopeia actually exposes:
 
-1. Identify the record boundary: row, JSON object, GeoJSON feature, placemark, XML repeated child, Shapefile feature, GeoPackage table row, or grid cell.
+1. Identify the record boundary: row, JSON object, GeoJSON feature, placemark, XML repeated child, Shapefile feature, GeoPackage table row, grid cell, or station observation.
 2. Locate the values in the record shape, including containers such as `properties`, `geometry`, and XML `@` or `#` fields.
 3. Decide whether the source value already has the required JSON type or needs a transformation.
 4. For geometry, select `GeoProperty`. A complete GeoJSON geometry needs no transformation; coordinates need the geometry transformation that matches the type to build.

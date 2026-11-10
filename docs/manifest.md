@@ -113,6 +113,7 @@ The `format` field accepts one of the following values. When omitted, it default
 | `grib` | GRIB gridded binary. |
 | `shapefile` | ESRI Shapefile, plain or zipped. |
 | `geopackage` | OGC GeoPackage. Also spelled `geo-package`. |
+| `netcdf` | NetCDF, classic or NetCDF-4. Also spelled `net-cdf`. |
 
 The [source-format guide](source-formats.md) describes the records each format produces.
 

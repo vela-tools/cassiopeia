@@ -5,6 +5,7 @@ use crate::{
     grib::error::GribIngestError,
     json::error::JsonIngestError,
     kml::error::KmlIngestError,
+    netcdf::error::NetCdfIngestError,
     shapefile::error::ShapefileIngestError,
     xml::error::XmlIngestError,
 };
@@ -53,6 +54,10 @@ pub enum IngestorError {
     /// A KML parsing error occurred.
     #[error(transparent)]
     Kml(#[from] KmlIngestError),
+
+    /// A `NetCDF` ingestion error occurred.
+    #[error(transparent)]
+    NetCdf(#[from] NetCdfIngestError),
 
     /// A shapefile ingestion error occurred.
     #[error(transparent)]

@@ -1,3 +1,4 @@
+use crate::location_record::parameter_name::ParameterName;
 use strum::IntoStaticStr;
 
 /// A Cassiopeia-canonical GRIB parameter: a short, space-free, level-independent name shared by both
@@ -169,28 +170,6 @@ impl GribParameter {
     }
 }
 
-/// The key under which a GRIB parameter's value is stored in a location record.
-///
-/// A newtype rather than a bare string so a parameter column key cannot be confused with an unrelated
-/// string (a level token, a timestamp) as it flows through the pivot. It holds either a canonical
-/// [`GribParameter`] key or, for a parameter outside the curated vocabulary, a synthetic code key.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ParameterName(String);
-
-impl ParameterName {
-    /// Returns the parameter name as a string slice, for use as a record column key.
-    #[must_use]
-    pub fn as_str(&self) -> &str {
-        &self.0
-    }
-}
-
-impl From<&str> for ParameterName {
-    fn from(value: &str) -> ParameterName {
-        ParameterName(value.to_string())
-    }
-}
-
 /// Resolves the canonical column key for a GRIB2 parameter from its `(discipline, category, number)`
 /// triple.
 ///
@@ -200,7 +179,7 @@ impl From<&str> for ParameterName {
 #[must_use]
 pub fn parameter_key_grib2(discipline: u8, category: u8, number: u8) -> ParameterName {
     GribParameter::from_grib2(discipline, category, number).map_or_else(
-        || ParameterName::from(format!("d{discipline}c{category}n{number}").as_str()),
+        || ParameterName::from(format!("d{discipline}c{category}n{number}")),
         |parameter| ParameterName::from(parameter.key()),
     )
 }
@@ -213,7 +192,7 @@ pub fn parameter_key_grib2(discipline: u8, category: u8, number: u8) -> Paramete
 #[must_use]
 pub fn parameter_key_grib1(table2_version: i64, centre: i64, indicator: i64) -> ParameterName {
     GribParameter::from_grib1(indicator).map_or_else(
-        || ParameterName::from(format!("g1t{table2_version}c{centre}p{indicator}").as_str()),
+        || ParameterName::from(format!("g1t{table2_version}c{centre}p{indicator}")),
         |parameter| ParameterName::from(parameter.key()),
     )
 }

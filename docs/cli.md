@@ -196,7 +196,7 @@ Generate a manifest file from command-line arguments
   - `csv`:
     Comma-separated values
   - `json`:
-    A JSON array of objects
+    A JSON document: an array of objects, or objects whose arrays of objects nest at any depth
   - `geojson`:
     A `GeoJSON` `FeatureCollection`
   - `kml`:
@@ -209,6 +209,8 @@ Generate a manifest file from command-line arguments
     ESRI Shapefile: a geometry `.shp` with its companion `.dbf`/`.shx`/`.prj`/`.cpg` files
   - `geopackage`:
     OGC `GeoPackage`: a SQLite database holding feature and attribute tables
+  - `netcdf`:
+    `NetCDF`: the classic CDF-1, CDF-2 and CDF-5 formats and `NetCDF-4` on HDF5
   - `xml`:
     Generic XML
 
@@ -383,7 +385,7 @@ Map data to a Smart Data Model
   - `csv`:
     Comma-separated values
   - `json`:
-    A JSON array of objects
+    A JSON document: an array of objects, or objects whose arrays of objects nest at any depth
   - `geojson`:
     A `GeoJSON` `FeatureCollection`
   - `kml`:
@@ -396,6 +398,8 @@ Map data to a Smart Data Model
     ESRI Shapefile: a geometry `.shp` with its companion `.dbf`/`.shx`/`.prj`/`.cpg` files
   - `geopackage`:
     OGC `GeoPackage`: a SQLite database holding feature and attribute tables
+  - `netcdf`:
+    `NetCDF`: the classic CDF-1, CDF-2 and CDF-5 formats and `NetCDF-4` on HDF5
   - `xml`:
     Generic XML
 

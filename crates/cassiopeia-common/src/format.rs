@@ -68,6 +68,16 @@ pub enum DataFormat {
     #[strum(serialize = "GeoPackage")]
     GeoPackage,
 
+    /// `NetCDF`: the classic CDF-1, CDF-2 and CDF-5 formats and `NetCDF-4` on HDF5.
+    ///
+    /// A gridded file pivots its data variables into columns of one location record per cell, and a
+    /// CF discrete sampling geometry `timeSeries` file into one record per observation, so like GRIB
+    /// it is a single flat table of locations.
+    #[serde(alias = "netcdf")]
+    #[value(name = "netcdf")]
+    #[strum(serialize = "NetCDF")]
+    NetCdf,
+
     /// Generic XML.
     ///
     /// Schemaless like JSON: the ingestor discovers records at parse time from a deterministic
@@ -96,6 +106,7 @@ impl DataFormat {
             DataFormat::Grib => "grib",
             DataFormat::Shapefile => "shp",
             DataFormat::GeoPackage => "gpkg",
+            DataFormat::NetCdf => "nc",
             DataFormat::Xml => "xml",
         }
     }
@@ -107,15 +118,15 @@ impl DataFormat {
     /// attribute tables (each becoming one collection), and a JSON document can nest arrays of objects
     /// (each labelled by its member path), so one source can carry collections a manifest routes to
     /// different entity types; CSV, `GeoJSON`, and XML are always a single collection.
-    /// GRIB is single-collection too: its parameters are pivoted into columns of one location record
-    /// (like a CSV row), not split into separate collections. This is the static, format-stated
+    /// GRIB and `NetCDF` are single-collection too: their parameters are pivoted into columns of one
+    /// location record (like a CSV row), not split into separate collections. This is the static, format-stated
     /// guarantee used for an early manifest check; when the format is `Auto`/omitted the runtime router
     /// in the expander is the backstop instead.
     #[must_use]
     pub const fn supports_collections(&self) -> bool {
         match self {
             DataFormat::Kml | DataFormat::Kmz | DataFormat::Shapefile | DataFormat::GeoPackage | DataFormat::Json => true,
-            DataFormat::Auto | DataFormat::Csv | DataFormat::GeoJson | DataFormat::Grib | DataFormat::Xml => false,
+            DataFormat::Auto | DataFormat::Csv | DataFormat::GeoJson | DataFormat::Grib | DataFormat::NetCdf | DataFormat::Xml => false,
         }
     }
 
@@ -135,6 +146,7 @@ impl DataFormat {
             | DataFormat::Grib
             | DataFormat::Shapefile
             | DataFormat::GeoPackage
+            | DataFormat::NetCdf
             | DataFormat::Xml => Some(self),
         }
     }
@@ -207,6 +219,20 @@ mod tests {
         assert_eq!(serde_json::from_str::<DataFormat>(r#""geopackage""#).unwrap(), DataFormat::GeoPackage);
         assert_eq!(serde_json::from_str::<DataFormat>(r#""geo-package""#).unwrap(), DataFormat::GeoPackage);
         assert_eq!(DataFormat::GeoPackage.to_string(), "GeoPackage");
+    }
+
+    #[test]
+    fn netcdf_carries_its_extension_is_single_collection_and_survives_to_option() {
+        assert_eq!(DataFormat::NetCdf.extension(), "nc");
+        assert!(!DataFormat::NetCdf.supports_collections());
+        assert_eq!(DataFormat::NetCdf.to_option(), Some(DataFormat::NetCdf));
+    }
+
+    #[test]
+    fn netcdf_deserializes_from_both_spellings_and_displays_conventionally() {
+        assert_eq!(serde_json::from_str::<DataFormat>(r#""netcdf""#).unwrap(), DataFormat::NetCdf);
+        assert_eq!(serde_json::from_str::<DataFormat>(r#""net-cdf""#).unwrap(), DataFormat::NetCdf);
+        assert_eq!(DataFormat::NetCdf.to_string(), "NetCDF");
     }
 
     #[test]

@@ -19,6 +19,7 @@ cassiopeia-ir.workspace = true
 convert_case = "0.12.0"
 csv = "1.4.0"
 dbase = { version = "0.8.0", features = ["encoding_rs", "yore"] }
+derive_more = { version = "2.1.1", features = ["debug", "display", "from", "into_iterator"] }
 eccodes = { version = "2.50.0", optional = true }
 encoding_rs = "0.8.44"
 encoding_rs_rw = "0.4.3"
@@ -28,6 +29,10 @@ geopackage = { version = "0.13.0", features = ["bundled"], optional = true }
 grib = { version = "0.20.3", default-features = false, features = ["ccsds-unpack-with-rust-aec", "jpeg2000-unpack-with-hayro", "png-unpack-with-png-crate", "time-calculation"] }
 indexmap = "2.14.2"
 kml = { version = "0.15.0", features = ["geo-types"] }
+ndarray = "0.17.2"
+netcdf-core = "0.12.1"
+netcdf-reader = { version = "0.12.1", default-features = false, features = ["cf", "netcdf4"] }
+num-traits = "0.2.19"
 parking_lot = "0.13.0"
 quick-xml = { version = "0.42.0", features = ["encoding"] }
 serde = "1.0.229"
@@ -53,6 +58,7 @@ geopackage-core = "0.13.0"
 grib-core = "0.7.0"
 grib-writer = "0.7.0"
 mediatype = "0.23.0"
+netcdf-writer = "0.12.1"
 pretty_assertions = "1.4.1"
 temp-dir = "0.2.0"
 zip = { version = "9.4.1", default-features = false, features = ["deflate"] }

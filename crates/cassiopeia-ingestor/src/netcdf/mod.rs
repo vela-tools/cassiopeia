@@ -1,0 +1,22 @@
+pub mod cf_attribute;
+pub mod coordinate_facets;
+pub mod coordinate_role;
+pub mod decode;
+pub mod default_fill;
+pub mod dimension_length;
+pub mod epoch_zone;
+pub mod error;
+pub mod feature_type;
+#[cfg(test)]
+pub(crate) mod fixture;
+pub mod grid;
+pub mod ingestor;
+pub mod pressure_unit;
+pub mod record_keys;
+pub mod referenced_variables;
+pub mod standard_name;
+pub mod time_axis;
+pub mod time_series;
+pub mod time_unit;
+pub mod value_kind;
+pub mod vertical_level;

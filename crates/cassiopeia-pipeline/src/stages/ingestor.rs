@@ -20,6 +20,7 @@ use cassiopeia_ingestor::{
     ingestor::Ingestor,
     json::{ingestor::JsonIngestor, record_selection::JsonRecordSelection},
     kml::ingestor::KmlIngestor,
+    netcdf::ingestor::NetCdfIngestor,
     shapefile::ingestor::ShapefileIngestor,
     xml::ingestor::XmlIngestor,
 };
@@ -91,7 +92,7 @@ pub(crate) fn spawn_ingestor_bank(
     let mut routes: ProfilerRoutes = HashMap::new();
 
     let json_selection = Arc::new(json_record_selection(mapping_binding));
-    let factories: [(DataFormat, IngestorFactory); 9] = [
+    let factories: [(DataFormat, IngestorFactory); 10] = [
         (
             DataFormat::Csv,
             Box::new(|payload, batch, sink| {
@@ -142,6 +143,10 @@ pub(crate) fn spawn_ingestor_bank(
         (
             DataFormat::GeoPackage,
             Box::new(|payload, batch, _| Ok(PreparedIngestor::quiet(Box::new(GeoPackageIngestor::from_payload(payload, batch)?)))),
+        ),
+        (
+            DataFormat::NetCdf,
+            Box::new(|payload, batch, _| Ok(PreparedIngestor::quiet(Box::new(NetCdfIngestor::from_payload(payload, batch)?)))),
         ),
         (
             DataFormat::Xml,

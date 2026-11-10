@@ -1,16 +1,17 @@
 use crate::{
     error::IngestorError,
-    grib::{
-        field::DecodedField,
-        level::{GribLevel, LevelGroupKey},
-        parameter::ParameterName,
+    grib::field::DecodedField,
+    location_record::{
+        facets::LocationFacets,
+        level::{Level, LevelGroupKey},
+        parameter_name::ParameterName,
+        record::location_record,
     },
     record_batches::RecordBatches,
 };
 use cassiopeia_common::{channel::ChannelSender, signal::Signal};
 use cassiopeia_ir::record::Record;
 use indexmap::{IndexMap, map::Entry};
-use serde_json::{Map, Number, Value};
 
 /// Identity of a grid slice: GRIB fields sharing all of these describe the same locations at the same
 /// level and time, so their parameters pivot into columns of one shared set of records.
@@ -62,7 +63,7 @@ impl GridSliceSet {
     /// Folds one decoded field into its slice, opening a new slice or adding a column to an existing
     /// one. Fields sharing a grid, level, and time pivot into columns of the same location records.
     pub fn add(&mut self, field: DecodedField) {
-        let level_key = field.level.as_ref().map(GribLevel::group_key);
+        let level_key = field.level.as_ref().map(Level::group_key);
         let key = GridSliceKey::new(field.grid, level_key, field.reference_time.clone(), field.forecast_time.clone());
         match self.slices.entry(key) {
             Entry::Occupied(mut occupied) => occupied.get_mut().add_parameter(field.parameter, field.values),
@@ -98,7 +99,7 @@ impl GridSliceSet {
 /// transposes them into per-location records.
 pub struct GridSlice {
     latlons: Vec<(f64, f64)>,
-    level: Option<GribLevel>,
+    level: Option<Level>,
     reference_time: Option<String>,
     forecast_time: Option<String>,
     columns: Vec<(ParameterName, Vec<f64>)>,
@@ -107,7 +108,7 @@ pub struct GridSlice {
 impl GridSlice {
     /// Starts a slice from its grid's cell coordinates and shared level and times.
     #[must_use]
-    pub const fn new(latlons: Vec<(f64, f64)>, level: Option<GribLevel>, reference_time: Option<String>, forecast_time: Option<String>) -> GridSlice {
+    pub const fn new(latlons: Vec<(f64, f64)>, level: Option<Level>, reference_time: Option<String>, forecast_time: Option<String>) -> GridSlice {
         GridSlice {
             latlons,
             level,
@@ -128,73 +129,41 @@ impl GridSlice {
     /// Consumes the slice, producing one record per grid cell that has at least one non-masked value.
     ///
     /// Bitmap-masked cells decode to NaN; a parameter is simply omitted from a record where its value
-    /// is masked, and a cell where every parameter is masked yields no record at all. Coordinates are
-    /// emitted as the separate `longitude` and `latitude` scalars a mapping composes into a `Point`
-    /// `GeoProperty` (RFC 7946 order), rather than a pre-built coordinate pair.
+    /// is masked, and a cell where every parameter is masked yields no record at all. The level and the
+    /// two times are the same for every cell of the slice, so they are resolved once into the facets
+    /// each cell's record shares.
     #[must_use]
     pub fn into_records(self) -> Vec<Record> {
-        // The level facets are the same for every cell of the slice, so resolve them once: `level_type`
-        // is the bare token and `level` its numeric value in the type's canonical unit, absent for the
-        // surface-like types that carry no scalar.
-        let level_token: Option<&str> = self.level.as_ref().map(GribLevel::type_token);
-        let level_value: Option<Value> = self.level.as_ref().and_then(GribLevel::value).and_then(level_number);
-
-        let mut records = Vec::new();
-        for (index, (latitude, longitude)) in self.latlons.iter().enumerate() {
-            let present: Vec<(&ParameterName, f64)> = self
-                .columns
-                .iter()
-                .filter_map(|(name, values)| values.get(index).copied().filter(|value| !value.is_nan()).map(|value| (name, value)))
-                .collect();
-            if present.is_empty() {
-                continue;
-            }
-
-            let mut data = Map::new();
-            insert_number(&mut data, "latitude", *latitude);
-            insert_number(&mut data, "longitude", *longitude);
-            if let Some(token) = level_token {
-                data.insert("level_type".to_string(), Value::String(token.to_owned()));
-            }
-            if let Some(value) = &level_value {
-                data.insert("level".to_string(), value.clone());
-            }
-            if let Some(reference_time) = &self.reference_time {
-                data.insert("referenceTime".to_string(), Value::String(reference_time.clone()));
-            }
-            if let Some(forecast_time) = &self.forecast_time {
-                data.insert("forecastTime".to_string(), Value::String(forecast_time.clone()));
-            }
-            for (name, value) in present {
-                insert_number(&mut data, name.as_str(), value);
-            }
-
-            records.push(Record::new(None, data));
+        let mut facets = LocationFacets::default();
+        if let Some(level) = &self.level {
+            facets = facets.with_level(level);
         }
-        records
-    }
-}
+        if let Some(reference_time) = self.reference_time {
+            facets = facets.with_time(&ParameterName::from("referenceTime"), reference_time);
+        }
+        if let Some(forecast_time) = self.forecast_time {
+            facets = facets.with_time(&ParameterName::from("forecastTime"), forecast_time);
+        }
+        let facets = facets;
 
-/// Inserts a finite float as a JSON number, omitting the field when the value cannot be represented.
-fn insert_number(data: &mut Map<String, Value>, key: &str, value: f64) {
-    if let Some(number) = Number::from_f64(value) {
-        data.insert(key.to_string(), Value::Number(number));
+        let columns = &self.columns;
+        self.latlons
+            .iter()
+            .enumerate()
+            .filter_map(|(index, &(latitude, longitude))| {
+                let values = columns.iter().filter_map(|(name, values)| values.get(index).map(|value| (name, *value)));
+                location_record(latitude, longitude, &facets, values)
+            })
+            .collect()
     }
-}
-
-/// Renders a level value as a JSON number, preserving whole numbers as integers.
-///
-/// A whole level (2 m, 850 hPa) reads better as `2` than as `2.0`, and Rust's float `Display` drops a
-/// trailing zero (`2.0` -> "2"), so re-parsing that text lands a whole value as a JSON integer and a
-/// fractional one (sigma 0.995) as a float, without a lossy `f64`-to-integer cast. The value is
-/// already finite when this is called, so parsing does not fail in practice.
-fn level_number(value: f64) -> Option<Value> {
-    serde_json::from_str::<Value>(&format!("{value}")).ok()
 }
 
 #[cfg(test)]
 mod tests {
-    use crate::grib::{grid_slice::GridSlice, level::GribLevel, parameter::ParameterName};
+    use crate::{
+        grib::{grid_slice::GridSlice, level::grib2_level},
+        location_record::parameter_name::ParameterName,
+    };
     use pretty_assertions::assert_eq;
     use serde_json::Value;
 
@@ -202,7 +171,7 @@ mod tests {
         let mut slice = GridSlice::new(
             vec![(46.25, 14.0), (46.25, 14.5)],
             // Code Table 4.5 surface type 103 at 2 m normalizes to the height-above-ground level.
-            GribLevel::from_grib2(103, 2.0),
+            grib2_level(103, 2.0),
             Some("2026-08-18T07:30:00+00:00".to_string()),
             Some("2026-08-18T13:30:00+00:00".to_string()),
         );

@@ -6,6 +6,7 @@ use crate::{
         grib::GribDetector,
         json::JsonDetector,
         kml::KmlDetector,
+        netcdf::NetCdfDetector,
         shapefile::ShapefileDetector,
         xml::XmlDetector,
     },
@@ -17,6 +18,7 @@ pub mod geopackage;
 pub mod grib;
 pub mod json;
 pub mod kml;
+pub mod netcdf;
 pub mod shapefile;
 pub mod xml;
 
@@ -34,7 +36,8 @@ pub trait Detector: Send + Sync {
 ///
 /// Order is significant: the cheapest and most specific check runs first. GRIB is an unambiguous
 /// four-octet binary magic, so it leads; then the `GeoPackage` (the SQLite header and its `application_id`),
-/// then the shapefile (its own four-octet file code, or a `.shp` zip member), then KML and the JSON family. KML is itself XML, so the specific KML check must precede
+/// then `NetCDF` (the classic `CDF` magic, or the HDF5 signature at its user-block offsets), then the
+/// shapefile (its own four-octet file code, or a `.shp` zip member), then KML and the JSON family. KML is itself XML, so the specific KML check must precede
 /// the permissive generic-XML detector; that generic-XML detector in turn precedes the CSV detector,
 /// which would otherwise accept many delimited text files. The slice is `'static`: no per-call
 /// allocation occurs.
@@ -43,6 +46,7 @@ pub const fn default_detectors() -> &'static [&'static dyn Detector] {
     &[
         &GribDetector,
         &GeoPackageDetector,
+        &NetCdfDetector,
         &ShapefileDetector,
         &KmlDetector,
         &JsonDetector,
@@ -75,8 +79,8 @@ mod tests {
     }
 
     #[test]
-    fn there_are_exactly_seven_detectors() {
-        assert_eq!(default_detectors().len(), 7);
+    fn there_are_exactly_eight_detectors() {
+        assert_eq!(default_detectors().len(), 8);
     }
 
     #[test]

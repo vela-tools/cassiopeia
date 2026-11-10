@@ -17,8 +17,8 @@ pub mod grib;
 /// same way regardless of how the format was chosen: a declared CSV keeps its real dialect and a
 /// declared GRIB keeps its edition, exactly as the detected paths attach them. A CSV yields its
 /// dialect and a GRIB its edition; a self-describing or schemaless format (JSON, `GeoJSON`, KML, KMZ,
-/// Shapefile, `GeoPackage`, XML) has no structural inspector and yields `None`, its record shape deferred to the
-/// ingestor.
+/// Shapefile, `GeoPackage`, `NetCDF`, XML) has no structural inspector and yields `None`, its record shape
+/// deferred to the ingestor.
 ///
 /// `statement` is what the source's manifest input states about a CSV dialect: the inspector takes the
 /// stated members and detects the rest. It describes a CSV alone, so every other format ignores it.
@@ -40,6 +40,7 @@ pub fn inspect(format: DataFormat, content: &Content<'_>, statement: &DialectSta
         | DataFormat::Kmz
         | DataFormat::Shapefile
         | DataFormat::GeoPackage
+        | DataFormat::NetCdf
         | DataFormat::Xml => Ok(None),
     }
 }
@@ -81,6 +82,15 @@ mod tests {
         );
         assert!(
             inspect(DataFormat::GeoPackage, &Content::new(b"anything"), &DialectStatement::NOTHING)
+                .unwrap()
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn a_declared_netcdf_has_no_inspector() {
+        assert!(
+            inspect(DataFormat::NetCdf, &Content::new(b"CDF\x01\x00\x00\x00\x00"), &DialectStatement::NOTHING)
                 .unwrap()
                 .is_none()
         );
