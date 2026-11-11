@@ -19,7 +19,7 @@ body = """
 {% for group, commits in commits | group_by(attribute="group") %}\
 #### {{ group }}
 {% for commit in commits %}\
-- {% if commit.scope %}`{{ commit.scope }}` — {% endif %}{{ commit.message }}{% if commit.breaking %} ⚠️ **BREAKING**{% endif %}
+- {% if commit.scope and group != "🔒 Security" %}`{{ commit.scope }}` — {% endif %}{{ commit.message }}{% if commit.breaking %} ⚠️ **BREAKING**{% endif %}
 {% endfor %}
 {% endfor %}\
 """
