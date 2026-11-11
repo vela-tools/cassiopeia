@@ -66,6 +66,14 @@ jobs:
       - name: Build
         run: cargo build --release --locked --no-default-features --bin cassiopeia --target ${{ matrix.target }}
 
+      - name: Verify GeoPackage is disabled
+        shell: bash
+        run: |
+          set -euo pipefail
+          features="$("target/${{ matrix.target }}/release/cassiopeia${{ matrix.ext }}" --version | grep '^features ')"
+          echo "$features"
+          [[ " $features " == *" -geopackage "* && " $features " == *" -geopackage-bundled "* ]]
+
       - name: Package (unix)
         if: runner.os != 'Windows'
         shell: bash
