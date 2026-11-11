@@ -52,8 +52,11 @@ bindman-utils = { version = "0.2.3", optional = true }
 shadow-rs = "2.0.0"
 
 [features]
-default = ["geopackage", "grib1", "grib2-full"]
+default = ["geopackage", "geopackage-bundled", "grib1", "grib2-full"]
 geopackage = ["cassiopeia-pipeline/geopackage"]
+# Temporary solution, to be removed in a future version. It lets a build link a system SQLite while
+# the bundled SQLite predates the fix for RUSTSEC-2026-0459.
+geopackage-bundled = ["geopackage", "cassiopeia-pipeline/geopackage-bundled"]
 grib1 = ["cassiopeia-pipeline/grib1", "dep:bindman-utils", "dep:eccodes-sys"]
 grib2-full = ["cassiopeia-pipeline/grib2-full", "dep:bindman-utils", "dep:eccodes-sys"]
 

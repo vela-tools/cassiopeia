@@ -44,11 +44,17 @@ sudo apt install cmake g++ git libclang-dev libopenjp2-7-dev
 
 ecCodes, eckit, and libaec are built as shared libraries. `cargo install` copies them to `lib/cassiopeia` beside its `bin` directory, which is usually `~/.cargo/lib/cassiopeia`, and the binary finds them there. Keep that directory next to the binary. If you install to a custom root, set `CARGO_INSTALL_ROOT` rather than passing `--root`, because the build script cannot see `--root`. A binary built in place with `cargo build` loads the libraries from the target directory instead.
 
-If you do not need GRIB1, skip these tools and add `--no-default-features --features geopackage` to the install command you choose below. That build does not compile ecCodes, and GRIB2 on a regular latitude/longitude grid still works. It reports GRIB1 input as unsupported instead of decoding it. Leave out `--features geopackage` too for a build that compiles no C code at all; it also reports GeoPackage input as unsupported.
+If you do not need GRIB1, skip these tools and add `--no-default-features --features geopackage-bundled` to the install command you choose below. That build does not compile ecCodes, and GRIB2 on a regular latitude/longitude grid still works. It reports GRIB1 input as unsupported instead of decoding it. Leave out `--features geopackage-bundled` too for a build that compiles no C code at all; it also reports GeoPackage input as unsupported.
 
 ## GeoPackage and SQLite
 
-A GeoPackage is a SQLite database, so Cassiopeia reads it through SQLite. GeoPackage support is controlled by the `geopackage` Cargo feature, which is **on by default**. The feature compiles a bundled copy of SQLite from its C source as part of the build and links it statically, so the binary needs no SQLite library at run time and you do not install SQLite yourself. The build needs only a C compiler, which the Xcode command line tools on macOS and the GRIB1 build tools below already include. A build without the feature still recognizes a GeoPackage, but reports it as unsupported instead of reading it.
+A GeoPackage is a SQLite database, so Cassiopeia reads it through SQLite. GeoPackage support is controlled by the `geopackage` Cargo feature, which is **on by default**. A build without the feature still recognizes a GeoPackage, but reports it as unsupported instead of reading it.
+
+Where that SQLite comes from is controlled by the `geopackage-bundled` feature, which is also on by default and turns on `geopackage` with it. It compiles a bundled copy of SQLite from its C source as part of the build and links it statically, so the binary needs no SQLite library at run time and you do not install SQLite yourself. The build needs only a C compiler, which the Xcode command line tools on macOS and the GRIB1 build tools below already include. The `geopackage-bundled` feature is a temporary solution and will be removed in a future version: it exists so that a build can link a system SQLite while the bundled one predates the fix described under [Write-ahead logs](source-formats.md#write-ahead-logs).
+
+To link your system's SQLite instead, so that SQLite updates reach Cassiopeia through your package manager, turn the default features off and enable `geopackage` without `geopackage-bundled`, adding back the GRIB features you need, for example `cargo install --path . --no-default-features --features geopackage,grib1,grib2-full`. The build then needs SQLite 3.34.1 or newer, which it finds through `pkg-config` (on Debian or Ubuntu, `sudo apt install libsqlite3-dev pkg-config`) or, failing that, in the system library paths. To link one particular SQLite, set `SQLITE3_LIB_DIR` to the directory holding its library and `SQLITE3_INCLUDE_DIR` to the directory holding its `sqlite3.h`; add `SQLITE3_STATIC=1` to link it statically, so the binary needs no SQLite at run time. Use SQLite 3.54.0 or newer where you can: older versions carry the flaw described under [Write-ahead logs](source-formats.md#write-ahead-logs).
+
+Run `cassiopeia --version` to see which build you have: its `features` line shows `+geopackage-bundled` for the bundled SQLite, and `+geopackage` with `-geopackage-bundled` for a system one.
 
 ## Installing
 
@@ -114,7 +120,7 @@ cargo build --release
 
 The binary is left at `target/release/cassiopeia`, and you run it by that path.
 
-To build any of these without GRIB1, add `--no-default-features --features geopackage` to the command.
+To build any of these without GRIB1, add `--no-default-features --features geopackage-bundled` to the command.
 
 ## Confirm it runs
 

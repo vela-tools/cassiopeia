@@ -17,9 +17,10 @@ pub enum GeoPackageIngestError {
     #[error("the GeoPackage ingestor requires a file, not bytes")]
     RequiresFile,
 
-    /// A write-ahead log sits beside the `GeoPackage`, so the file is not opened: the bundled SQLite
-    /// predates the fix for RUSTSEC-2026-0459 (CVE-2026-119375), under which a log whose page size
-    /// differs from the database's makes queries return uninitialised memory as row data.
+    /// A write-ahead log sits beside the `GeoPackage`, so the file is not opened: the bundled SQLite,
+    /// and a system SQLite older than 3.54.0, predate the fix for RUSTSEC-2026-0459 (CVE-2026-119375),
+    /// under which a log whose page size differs from the database's makes queries return
+    /// uninitialised memory as row data.
     #[cfg(feature = "geopackage")]
     #[error(
         "the GeoPackage has a write-ahead log beside it at '{}', and Cassiopeia does not read a GeoPackage together with its log (RUSTSEC-2026-0459); close the program that holds the GeoPackage open so the log is merged back into it, then run again",

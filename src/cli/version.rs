@@ -25,25 +25,30 @@ enum Capability {
     Absent,
 }
 
+/// Pairs the name of a Cargo feature with whether this binary was compiled with it.
+///
+/// Expands to a `(&'static str, Capability)` tuple whose name is the same literal `cfg!` tests, so a
+/// banner label cannot drift from the feature it reports.
+macro_rules! capability {
+    ($feature:literal) => {
+        ($feature, if cfg!(feature = $feature) { Capability::Present } else { Capability::Absent })
+    };
+}
+
 /// The optional, feature-gated capabilities this build may carry, each paired with whether it was
 /// compiled in. Each one links native C code, so a build can legitimately ship without it; the banner
-/// has to make that difference visible. `geopackage` reads `GeoPackage` files through a bundled SQLite.
-/// Both GRIB features link the native ecCodes library: `grib1` routes GRIB1 through ecCodes;
-/// `grib2-full` routes GRIB2 through ecCodes too (projected grids and more parameter tables), versus
-/// the always-present pure-Rust GRIB2 fallback.
-const fn capabilities() -> [(&'static str, Capability); 3] {
-    let geopackage = if cfg!(feature = "geopackage") {
-        Capability::Present
-    } else {
-        Capability::Absent
-    };
-    let grib1 = if cfg!(feature = "grib1") { Capability::Present } else { Capability::Absent };
-    let grib2_full = if cfg!(feature = "grib2-full") {
-        Capability::Present
-    } else {
-        Capability::Absent
-    };
-    [("geopackage", geopackage), ("grib1", grib1), ("grib2-full", grib2_full)]
+/// has to make that difference visible. `geopackage` reads `GeoPackage` files through SQLite, and
+/// `geopackage-bundled` compiles that SQLite from bundled source and links it statically; a build with
+/// `geopackage` alone links the system SQLite instead. Both GRIB features link the native ecCodes
+/// library: `grib1` routes GRIB1 through ecCodes; `grib2-full` routes GRIB2 through ecCodes too
+/// (projected grids and more parameter tables), versus the always-present pure-Rust GRIB2 fallback.
+const fn capabilities() -> [(&'static str, Capability); 4] {
+    [
+        capability!("geopackage"),
+        capability!("geopackage-bundled"),
+        capability!("grib1"),
+        capability!("grib2-full"),
+    ]
 }
 
 /// Renders the feature-flag line: each optional capability marked `+name` when compiled in or
@@ -137,6 +142,16 @@ mod tests {
 
     const ESCAPE: char = '\u{1b}';
 
+    /// The words of the plain `block`'s `features` line. A flag is compared whole, because `+geopackage`
+    /// is a prefix of `+geopackage-bundled`.
+    fn feature_flags(block: &str) -> Vec<&str> {
+        block
+            .lines()
+            .find_map(|line| line.strip_prefix("features "))
+            .map(|flags| flags.split_whitespace().collect())
+            .unwrap_or_default()
+    }
+
     #[test]
     fn the_license_is_the_manifest_licence() {
         assert_eq!(LICENSE, env!("CARGO_PKG_LICENSE"));
@@ -163,8 +178,19 @@ mod tests {
         let block = render_long_version(Rendering::Plain);
         let expected = if cfg!(feature = "geopackage") { "+geopackage" } else { "-geopackage" };
 
-        assert!(block.contains("features "));
-        assert!(block.contains(expected));
+        assert!(feature_flags(&block).contains(&expected));
+    }
+
+    #[test]
+    fn the_plain_long_version_reports_the_geopackage_bundled_capability_with_its_build_state() {
+        let block = render_long_version(Rendering::Plain);
+        let expected = if cfg!(feature = "geopackage-bundled") {
+            "+geopackage-bundled"
+        } else {
+            "-geopackage-bundled"
+        };
+
+        assert!(feature_flags(&block).contains(&expected));
     }
 
     #[test]
@@ -172,8 +198,7 @@ mod tests {
         let block = render_long_version(Rendering::Plain);
         let expected = if cfg!(feature = "grib1") { "+grib1" } else { "-grib1" };
 
-        assert!(block.contains("features "));
-        assert!(block.contains(expected));
+        assert!(feature_flags(&block).contains(&expected));
     }
 
     #[test]
@@ -181,8 +206,7 @@ mod tests {
         let block = render_long_version(Rendering::Plain);
         let expected = if cfg!(feature = "grib2-full") { "+grib2-full" } else { "-grib2-full" };
 
-        assert!(block.contains("features "));
-        assert!(block.contains(expected));
+        assert!(feature_flags(&block).contains(&expected));
     }
 
     #[test]

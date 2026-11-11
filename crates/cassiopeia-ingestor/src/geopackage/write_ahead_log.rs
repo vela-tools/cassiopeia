@@ -13,13 +13,15 @@ const WRITE_AHEAD_LOG_SUFFIX: &str = "-wal";
 ///
 /// SQLite before 3.54.0 returns uninitialised page-cache memory as row data when it reads a frame from a
 /// `-wal` file whose page size differs from the database's (RUSTSEC-2026-0459, CVE-2026-119375), and
-/// the SQLite the `geopackage` crate bundles predates that fix. SQLite opens the log of a non-empty
+/// the SQLite the `geopackage-bundled` feature compiles in predates that fix, as can a system SQLite a
+/// build links instead. SQLite opens the log of a non-empty
 /// database whenever a file named by the database's full path plus `-wal` exists, whatever journal mode
 /// the database header records, so the existence of that file is the exact condition refused here.
 ///
 /// The returned path is the canonical form of `database`, and it is the path SQLite must be given:
 ///
-/// - It is absolute, so SQLite, which the bundled build compiles with `SQLITE_USE_URI`, cannot read it
+/// - It is absolute, so SQLite, which the bundled build and many system builds compile with
+///   `SQLITE_USE_URI`, cannot read it
 ///   as a `file:` URI naming another file or VFS.
 /// - Every symbolic link in it is resolved, so the full path SQLite names the log by is the one checked
 ///   here on every platform. Handed an unresolved path, the Unix VFS would name the log beside the link's
