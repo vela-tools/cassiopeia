@@ -187,8 +187,8 @@ Never report a security vulnerability through a public issue. Follow the [Cassio
 - Issues: [GitHub Issues](../../issues)
 - Discussions: [GitHub Discussions](../../discussions)
 - Newsletter: [velacontext.com/newsletter](https://velacontext.com/newsletter)
-- General contact: info@velacontext.com
-- Security: security@velacontext.com, see the [security policy](https://github.com/vela-tools/cassiopeia/security/policy)
+- General contact: info@senlab.io
+- Security: [private vulnerability reporting](https://github.com/vela-tools/cassiopeia/security/advisories/new), see the [security policy](https://github.com/vela-tools/cassiopeia/security/policy)
 - Code of conduct: [Contributor Covenant](https://github.com/vela-tools/cassiopeia?tab=coc-ov-file)
 
 ## License

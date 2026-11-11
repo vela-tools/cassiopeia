@@ -22,4 +22,4 @@ Everything that is not a code change, and all of it is genuinely useful.
 
 ## Security
 
-Never report a security vulnerability through a public issue. Follow the [Cassiopeia security policy](https://github.com/vela-tools/cassiopeia/security/policy), which routes reports privately to security@velacontext.com and acknowledges them within two working days.
+Never report a security vulnerability through a public issue. Follow the [Cassiopeia security policy](https://github.com/vela-tools/cassiopeia/security/policy), which takes reports privately through GitHub private vulnerability reporting and acknowledges them within two working days.

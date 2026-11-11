@@ -25,10 +25,10 @@ static GLOBAL: MiMalloc = MiMalloc;
 fn main() {
     setup_panic!(
         Metadata::new(env!("CARGO_PKG_NAME"), env!("CARGO_PKG_VERSION"))
-            .authors("Vela Context <info@velacontext.com>")
+            .authors("Vela Context <info@senlab.io>")
             .homepage("https://velacontext.com/")
             .repository("https://github.com/vela-tools/cassiopeia")
-            .support("- Open an issue at https://github.com/vela-tools/cassiopeia/issues and attach the generated report file, or email info@velacontext.com.")
+            .support("- Open an issue at https://github.com/vela-tools/cassiopeia/issues and attach the generated report file, or email info@senlab.io.")
     );
 
     if let Err(error) = run::run() {
