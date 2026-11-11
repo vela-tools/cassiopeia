@@ -514,7 +514,7 @@ dependencies = [
 
 [[package]]
 name = "cassiopeia"
-version = "1.1.1"
+version = "1.2.0"
 dependencies = [
  "bindman-utils",
  "bugreport",
@@ -546,7 +546,7 @@ dependencies = [
 
 [[package]]
 name = "cassiopeia-aggregator"
-version = "1.1.1"
+version = "1.2.0"
 dependencies = [
  "cassiopeia-common",
  "cassiopeia-geometry",
@@ -559,7 +559,7 @@ dependencies = [
 
 [[package]]
 name = "cassiopeia-batch-sink"
-version = "1.1.1"
+version = "1.2.0"
 dependencies = [
  "derive-where",
  "indexmap 2.14.2",
@@ -569,7 +569,7 @@ dependencies = [
 
 [[package]]
 name = "cassiopeia-cli"
-version = "1.1.1"
+version = "1.2.0"
 dependencies = [
  "anstyle",
  "cassiopeia-configuration",
@@ -599,7 +599,7 @@ dependencies = [
 
 [[package]]
 name = "cassiopeia-collector"
-version = "1.1.1"
+version = "1.2.0"
 dependencies = [
  "cassiopeia-common",
  "cassiopeia-encoding-detection",
@@ -621,7 +621,7 @@ dependencies = [
 
 [[package]]
 name = "cassiopeia-common"
-version = "1.1.1"
+version = "1.2.0"
 dependencies = [
  "clap",
  "cpu-time",
@@ -644,7 +644,7 @@ dependencies = [
 
 [[package]]
 name = "cassiopeia-configuration"
-version = "1.1.1"
+version = "1.2.0"
 dependencies = [
  "cassiopeia-common",
  "cassiopeia-directories",
@@ -662,7 +662,7 @@ dependencies = [
 
 [[package]]
 name = "cassiopeia-crs"
-version = "1.1.1"
+version = "1.2.0"
 dependencies = [
  "geo",
  "geo-types",
@@ -673,7 +673,7 @@ dependencies = [
 
 [[package]]
 name = "cassiopeia-csv-column"
-version = "1.1.1"
+version = "1.2.0"
 dependencies = [
  "derive_more",
  "pretty_assertions",
@@ -681,7 +681,7 @@ dependencies = [
 
 [[package]]
 name = "cassiopeia-csv-dialect"
-version = "1.1.1"
+version = "1.2.0"
 dependencies = [
  "csv",
  "csv-core",
@@ -695,7 +695,7 @@ dependencies = [
 
 [[package]]
 name = "cassiopeia-data-profiler"
-version = "1.1.1"
+version = "1.2.0"
 dependencies = [
  "bytecount",
  "cassiopeia-common",
@@ -719,7 +719,7 @@ dependencies = [
 
 [[package]]
 name = "cassiopeia-diagnostic"
-version = "1.1.1"
+version = "1.2.0"
 dependencies = [
  "cassiopeia-common",
  "cassiopeia-csv-column",
@@ -737,7 +737,7 @@ dependencies = [
 
 [[package]]
 name = "cassiopeia-directories"
-version = "1.1.1"
+version = "1.2.0"
 dependencies = [
  "etcetera",
  "is-docker",
@@ -746,7 +746,7 @@ dependencies = [
 
 [[package]]
 name = "cassiopeia-encoding-detection"
-version = "1.1.1"
+version = "1.2.0"
 dependencies = [
  "chardetng",
  "encoding_rs",
@@ -757,7 +757,7 @@ dependencies = [
 
 [[package]]
 name = "cassiopeia-expander"
-version = "1.1.1"
+version = "1.2.0"
 dependencies = [
  "ahash",
  "cassiopeia-batch-sink",
@@ -780,7 +780,7 @@ dependencies = [
 
 [[package]]
 name = "cassiopeia-extractor"
-version = "1.1.1"
+version = "1.2.0"
 dependencies = [
  "cassiopeia-batch-sink",
  "cassiopeia-common",
@@ -807,7 +807,7 @@ dependencies = [
 
 [[package]]
 name = "cassiopeia-geometry"
-version = "1.1.1"
+version = "1.2.0"
 dependencies = [
  "derive_more",
  "geo",
@@ -824,7 +824,7 @@ dependencies = [
 
 [[package]]
 name = "cassiopeia-ingestor"
-version = "1.1.1"
+version = "1.2.0"
 dependencies = [
  "base64 0.23.1",
  "bytecount",
@@ -875,7 +875,7 @@ dependencies = [
 
 [[package]]
 name = "cassiopeia-ir"
-version = "1.1.1"
+version = "1.2.0"
 dependencies = [
  "cassiopeia-common",
  "cassiopeia-data-profiler",
@@ -904,7 +904,7 @@ dependencies = [
 
 [[package]]
 name = "cassiopeia-manifest"
-version = "1.1.1"
+version = "1.2.0"
 dependencies = [
  "cassiopeia-common",
  "cassiopeia-csv-dialect",
@@ -929,7 +929,7 @@ dependencies = [
 
 [[package]]
 name = "cassiopeia-mapping"
-version = "1.1.1"
+version = "1.2.0"
 dependencies = [
  "cassiopeia-common",
  "cassiopeia-geometry",
@@ -959,7 +959,7 @@ dependencies = [
 
 [[package]]
 name = "cassiopeia-ngsi-ld"
-version = "1.1.1"
+version = "1.2.0"
 dependencies = [
  "cassiopeia-common",
  "cassiopeia-geometry",
@@ -987,7 +987,7 @@ dependencies = [
 
 [[package]]
 name = "cassiopeia-pipeline"
-version = "1.1.1"
+version = "1.2.0"
 dependencies = [
  "cassiopeia-aggregator",
  "cassiopeia-batch-sink",
@@ -1031,7 +1031,7 @@ dependencies = [
 
 [[package]]
 name = "cassiopeia-profiler"
-version = "1.1.1"
+version = "1.2.0"
 dependencies = [
  "cassiopeia-common",
  "cassiopeia-csv-dialect",
@@ -1048,7 +1048,7 @@ dependencies = [
 
 [[package]]
 name = "cassiopeia-reporter"
-version = "1.1.1"
+version = "1.2.0"
 dependencies = [
  "anstyle",
  "cassiopeia-common",
@@ -1080,7 +1080,7 @@ dependencies = [
 
 [[package]]
 name = "cassiopeia-resolver"
-version = "1.1.1"
+version = "1.2.0"
 dependencies = [
  "ahash",
  "cassiopeia-common",
@@ -1108,7 +1108,7 @@ dependencies = [
 
 [[package]]
 name = "cassiopeia-scheduler"
-version = "1.1.1"
+version = "1.2.0"
 dependencies = [
  "cassiopeia-common",
  "cassiopeia-manifest",
@@ -1123,7 +1123,7 @@ dependencies = [
 
 [[package]]
 name = "cassiopeia-smart-data-models"
-version = "1.1.1"
+version = "1.2.0"
 dependencies = [
  "cassiopeia-common",
  "cassiopeia-ngsi-ld",
@@ -1147,7 +1147,7 @@ dependencies = [
 
 [[package]]
 name = "cassiopeia-terminal-style"
-version = "1.1.1"
+version = "1.2.0"
 dependencies = [
  "anstyle",
  "pretty_assertions",
@@ -1155,7 +1155,7 @@ dependencies = [
 
 [[package]]
 name = "cassiopeia-transformer"
-version = "1.1.1"
+version = "1.2.0"
 dependencies = [
  "cassiopeia-batch-sink",
  "cassiopeia-common",
@@ -1178,7 +1178,7 @@ dependencies = [
 
 [[package]]
 name = "cassiopeia-tui"
-version = "1.1.1"
+version = "1.2.0"
 dependencies = [
  "cassiopeia-mapping",
  "cassiopeia-ngsi-ld",
@@ -1197,7 +1197,7 @@ dependencies = [
 
 [[package]]
 name = "cassiopeia-unreadable-timestamps"
-version = "1.1.1"
+version = "1.2.0"
 dependencies = [
  "cassiopeia-batch-sink",
  "cassiopeia-ngsi-ld",
@@ -1209,7 +1209,7 @@ dependencies = [
 
 [[package]]
 name = "cassiopeia-unresolved-templates"
-version = "1.1.1"
+version = "1.2.0"
 dependencies = [
  "cassiopeia-batch-sink",
  "cassiopeia-mapping",
@@ -1223,7 +1223,7 @@ dependencies = [
 
 [[package]]
 name = "cassiopeia-validator"
-version = "1.1.1"
+version = "1.2.0"
 dependencies = [
  "cassiopeia-common",
  "cassiopeia-diagnostic",
@@ -1246,7 +1246,7 @@ dependencies = [
 
 [[package]]
 name = "cassiopeia-value-type-expansion"
-version = "1.1.1"
+version = "1.2.0"
 dependencies = [
  "cassiopeia-common",
  "cassiopeia-ngsi-ld",
@@ -1262,7 +1262,7 @@ dependencies = [
 
 [[package]]
 name = "cassiopeia-writer"
-version = "1.1.1"
+version = "1.2.0"
 dependencies = [
  "ahash",
  "bytes",
