@@ -24,6 +24,8 @@ docker pull ghcr.io/vela-tools/cassiopeia:latest
 
 Unlike the prebuilt release binaries, the image is a **default build**. Its runtime layer links ecCodes, so it decodes both GRIB2 and GRIB1, and it reads GeoPackage files through SQLite 3.54.1, which the image build compiles from the official source and links statically in place of the copy the `geopackage-bundled` feature would bundle, so `--version` shows `+geopackage` with `-geopackage-bundled`. That SQLite carries the fix for the flaw described under [Write-ahead logs](source-formats.md#write-ahead-logs). NetCDF needs neither, since every build reads it in pure Rust. The host does not need any additional system dependency for either. See [GRIB1 and ecCodes](getting-started.md#grib1-and-eccodes) and [GeoPackage and SQLite](getting-started.md#geopackage-and-sqlite) for background.
 
+The runtime layer is based on the distroless `gcr.io/distroless/cc-debian13` image, which carries the Debian 13 C and C++ runtime libraries and the CA certificates but no shell, no package manager, and no system SQLite. Cassiopeia is the only program in it, so `docker exec` into a shell is not possible; run `cassiopeia` subcommands through `docker run` instead.
+
 ## Verifying the image
 
 Every published image is signed with [cosign](https://docs.sigstore.dev/) using keyless signing, so there is no public key to distribute. The signature carries a short-lived certificate that names the repository, the workflow, and the git ref the image was built from, and cosign records it in the public Sigstore transparency log. Install cosign, then verify a release:

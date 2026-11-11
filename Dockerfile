@@ -52,14 +52,15 @@ RUN features="$(target/release/cassiopeia --version | grep '^features ')" \
     && case " $features " in *" +geopackage "*" -geopackage-bundled "*" +grib1 "*" +grib2-full "*) ;; *) exit 1 ;; esac \
     && ! ldd target/release/cassiopeia | grep -F libsqlite3
 
-FROM debian:trixie-20261104-slim AS runtime
+FROM chef AS rootfs
 
-RUN apt-get update \
-    && apt-get install -y --no-install-recommends ca-certificates libopenjp2-7 \
-    && rm -rf /var/lib/apt/lists/*
+RUN mkdir -p /rootfs/etc/cassiopeia/mappings /rootfs/var/lib/cassiopeia/schemas /rootfs/var/log/cassiopeia/logs /rootfs/var/lib/dpkg/status.d \
+    && dpkg -L libopenjp2-7 | grep -E '\.so|/copyright$' | xargs cp -a --parents -t /rootfs \
+    && dpkg-query -s libopenjp2-7 > /rootfs/var/lib/dpkg/status.d/libopenjp2-7
 
-RUN mkdir -p /etc/cassiopeia/mappings /var/lib/cassiopeia/schemas /var/log/cassiopeia/logs
+FROM gcr.io/distroless/cc-debian13:latest@sha256:e1f5543d45a2cd7c02a5b43dda5f0ff30729b4832113759d01ed39b0b152cddb AS runtime
 
+COPY --from=rootfs /rootfs/ /
 COPY --from=builder /usr/local/lib/cassiopeia /usr/local/lib/cassiopeia
 COPY --from=builder /cassiopeia/target/release/cassiopeia /usr/local/bin/cassiopeia
 
