@@ -22,7 +22,7 @@ Pull the image:
 docker pull ghcr.io/vela-tools/cassiopeia:latest
 ```
 
-Unlike the prebuilt release binaries, the image is a **default build**. Its runtime layer links ecCodes, so it decodes both GRIB2 and GRIB1, and it carries a statically linked SQLite, so it reads GeoPackage files. NetCDF needs neither, since every build reads it in pure Rust. The host does not need any additional system dependency for either. See [GRIB1 and ecCodes](getting-started.md#grib1-and-eccodes) and [GeoPackage and SQLite](getting-started.md#geopackage-and-sqlite) for background.
+Unlike the prebuilt release binaries, the image is a **default build**. Its runtime layer links ecCodes, so it decodes both GRIB2 and GRIB1, and it reads GeoPackage files through SQLite 3.54.1, which the image build compiles from the official source and links statically in place of the copy the `geopackage-bundled` feature would bundle, so `--version` shows `+geopackage` with `-geopackage-bundled`. That SQLite carries the fix for the flaw described under [Write-ahead logs](source-formats.md#write-ahead-logs). NetCDF needs neither, since every build reads it in pure Rust. The host does not need any additional system dependency for either. See [GRIB1 and ecCodes](getting-started.md#grib1-and-eccodes) and [GeoPackage and SQLite](getting-started.md#geopackage-and-sqlite) for background.
 
 ## Verifying the image
 
