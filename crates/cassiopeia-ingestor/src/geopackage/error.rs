@@ -1,5 +1,7 @@
 use crate::geopackage::unreadable_table::UnreadableTable;
 use cassiopeia_crs::error::CrsError;
+#[cfg(feature = "geopackage")]
+use std::{io, path::PathBuf};
 
 /// Errors that can occur while ingesting an OGC `GeoPackage`.
 #[derive(Debug, thiserror::Error)]
@@ -14,6 +16,26 @@ pub enum GeoPackageIngestError {
     /// file.
     #[error("the GeoPackage ingestor requires a file, not bytes")]
     RequiresFile,
+
+    /// A write-ahead log sits beside the `GeoPackage`, so the file is not opened: the bundled SQLite
+    /// predates the fix for RUSTSEC-2026-0459 (CVE-2026-119375), under which a log whose page size
+    /// differs from the database's makes queries return uninitialised memory as row data.
+    #[cfg(feature = "geopackage")]
+    #[error(
+        "the GeoPackage has a write-ahead log beside it at '{}', and Cassiopeia does not read a GeoPackage together with its log (RUSTSEC-2026-0459); close the program that holds the GeoPackage open so the log is merged back into it, then run again",
+        .log.display()
+    )]
+    WriteAheadLog { log: PathBuf },
+
+    /// Whether a write-ahead log sits beside the `GeoPackage` could not be determined, so the file is
+    /// not opened.
+    #[cfg(feature = "geopackage")]
+    #[error("cannot determine whether a write-ahead log sits beside the GeoPackage '{}'", .database.display())]
+    WriteAheadLogUnverified {
+        database: PathBuf,
+        #[source]
+        source: io::Error,
+    },
 
     /// `gpkg_contents` lists no `features` or `attributes` table, so the file holds no records.
     #[error("the GeoPackage holds no features or attributes table")]

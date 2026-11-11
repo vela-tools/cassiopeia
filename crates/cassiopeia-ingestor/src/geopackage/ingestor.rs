@@ -8,6 +8,7 @@ use crate::{
     geopackage::{
         record::feature_to_record,
         table::{RecordTable, record_tables},
+        write_ahead_log::canonical_path_without_write_ahead_log,
     },
     record_batches::RecordBatches,
 };
@@ -51,19 +52,23 @@ impl GeoPackageIngestor {
     ///
     /// The file is opened leniently, so a `GeoPackage` 1.0 or 1.1 file declaring the legacy `GP10` or
     /// `GP11` `application_id` reads like a current one; anything the reader tolerated while opening is
-    /// logged at debug level.
+    /// logged at debug level. SQLite is handed the file's canonical path, and a file with a write-ahead
+    /// log beside that path is refused before SQLite opens it, as
+    /// [`canonical_path_without_write_ahead_log`] describes.
     ///
     /// # Errors
     ///
-    /// Returns [`IngestorError`] when the payload is an in-memory byte buffer rather than a file, or the
-    /// file cannot be opened as a `GeoPackage`.
+    /// Returns [`IngestorError`] when the payload is an in-memory byte buffer rather than a file, a
+    /// write-ahead log sits beside the file or cannot be ruled out, or the file cannot be opened as a
+    /// `GeoPackage`.
     pub fn from_payload(payload: ProfiledPayload, batch_size: usize, selection: Arc<GeoPackageTableSelection>) -> Result<GeoPackageIngestor, IngestorError> {
         let (path, source) = match payload.into_payload() {
             CollectedPayload::File(file) => file.into_path_and_source(),
             CollectedPayload::Bytes(_) => return Err(GeoPackageIngestError::RequiresFile.into()),
         };
 
-        let geopackage = GeoPackage::open_read_only_lenient(&path).map_err(GeoPackageIngestError::from)?;
+        let database = canonical_path_without_write_ahead_log(&path)?;
+        let geopackage = GeoPackage::open_read_only_lenient(&database).map_err(GeoPackageIngestError::from)?;
         for warning in geopackage.open_warnings() {
             tracing::debug!(geopackage = %path.display(), ?warning, "GeoPackage opened with a tolerated irregularity");
         }
@@ -708,6 +713,19 @@ mod tests {
             .err()
             .unwrap();
         assert!(matches!(error, IngestorError::GeoPackage(GeoPackageIngestError::Read(_))));
+    }
+
+    #[test]
+    fn a_geopackage_with_a_write_ahead_log_beside_it_is_refused_before_sqlite_opens_it() {
+        let dir = TempDir::new().unwrap();
+        let path = stations(dir.path());
+        fs::write(dir.path().join("stations.gpkg-wal"), b"not a write-ahead log").unwrap();
+
+        let error = GeoPackageIngestor::from_payload(payload(&path), 2, Arc::new(GeoPackageTableSelection::Every))
+            .err()
+            .unwrap();
+        let log = fs::canonicalize(dir.path()).unwrap().join("stations.gpkg-wal");
+        assert!(matches!(&error, IngestorError::GeoPackage(GeoPackageIngestError::WriteAheadLog { log: refused }) if *refused == log));
     }
 
     #[test]

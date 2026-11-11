@@ -615,6 +615,12 @@ A view is the common case of the last. `gpkg_contents` may list a view as well a
 
 The run fails when none of the tables it reads can be read, with an error naming the first one and why. A row that cannot be read or converted, such as one holding a curved geometry, still fails the run, because the records before it have already been sent.
 
+### Write-ahead logs
+
+Cassiopeia refuses a GeoPackage that has a SQLite write-ahead log beside it: a file named like the GeoPackage with `-wal` appended, such as `stations.gpkg-wal`. The input fails with an error naming the log, before SQLite opens the GeoPackage. The SQLite that Cassiopeia bundles predates the fix for [RUSTSEC-2026-0459](https://rustsec.org/advisories/RUSTSEC-2026-0459) (CVE-2026-119375): a crafted log whose page size differs from the GeoPackage's makes ordinary queries return leftover bytes of Cassiopeia's memory, which would then travel into the emitted entities. SQLite reads a log whenever one sits beside the database, whatever the database declares, so the presence of the log is what Cassiopeia refuses. Cassiopeia hands SQLite the GeoPackage's resolved absolute path, with every symbolic link followed, and looks for the log beside that path, which is where SQLite would read it.
+
+A log is usually left by a program that still has the GeoPackage open, such as QGIS. Close that program, which merges the log back into the GeoPackage and removes it, then run Cassiopeia again. Do not merge a log that came with a GeoPackage from a source you do not trust using another SQLite tool, which can be affected by the same flaw; ask the source for the GeoPackage without its log instead.
+
 ## GRIB
 
 GRIB is a binary format for gridded meteorological and climate data. Cassiopeia supports GRIB1 and GRIB2 through the single `grib` source format and reads the edition from the file header.

@@ -10,3 +10,5 @@ pub mod table_selection;
 pub mod unreadable_table;
 #[cfg(feature = "geopackage")]
 pub mod value;
+#[cfg(feature = "geopackage")]
+pub mod write_ahead_log;
