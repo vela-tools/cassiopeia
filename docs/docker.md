@@ -26,6 +26,8 @@ Unlike the prebuilt release binaries, the image is a **default build**. Its runt
 
 The runtime layer is based on the distroless `gcr.io/distroless/cc-debian13` image, which carries the Debian 13 C and C++ runtime libraries and the CA certificates but no shell, no package manager, and no system SQLite. Cassiopeia is the only program in it, so `docker exec` into a shell is not possible; run `cassiopeia` subcommands through `docker run` instead.
 
+The image's binary is built with [`cargo auditable`](https://github.com/rust-secure-code/cargo-auditable), which embeds the list of Rust crates compiled into it, so `cargo audit bin` and container scanners such as Trivy and Grype can check those crates against the RustSec advisory database. Such a scan reports RUSTSEC-2026-0459 against the `libsqlite3-sys` crate: the advisory covers the SQLite that crate bundles, and the image does not use that copy but the SQLite 3.54.1 described above, which carries the fix. The image build runs `cargo audit bin` on the binary and fails when it finds any other vulnerability.
+
 ## Verifying the image
 
 Every published image is signed with [cosign](https://docs.sigstore.dev/) using keyless signing, so there is no public key to distribute. The signature carries a short-lived certificate that names the repository, the workflow, and the git ref the image was built from, and cosign records it in the public Sigstore transparency log. Install cosign, then verify a release:

@@ -3,7 +3,7 @@ FROM rust:1.99.1-trixie AS chef
 RUN apt-get update \
     && apt-get install -y --no-install-recommends cmake g++ git libclang-dev libopenjp2-7-dev \
     && rm -rf /var/lib/apt/lists/*
-RUN cargo install cargo-chef --locked --version 0.1.78
+RUN cargo install --locked cargo-audit@0.23.0 cargo-auditable@0.7.7 cargo-chef@0.1.78
 WORKDIR /cassiopeia
 
 FROM chef AS planner
@@ -46,11 +46,12 @@ COPY --from=sqlite /opt/sqlite /opt/sqlite
 COPY --from=planner /cassiopeia/recipe.json recipe.json
 RUN cargo chef cook --release --locked --no-default-features --features geopackage,grib1,grib2-full --recipe-path recipe.json
 COPY . .
-RUN cargo build --release --locked --no-default-features --features geopackage,grib1,grib2-full --bin cassiopeia
+RUN cargo auditable build --release --locked --no-default-features --features geopackage,grib1,grib2-full --bin cassiopeia
 RUN features="$(target/release/cassiopeia --version | grep '^features ')" \
     && echo "$features" \
     && case " $features " in *" +geopackage "*" -geopackage-bundled "*" +grib1 "*" +grib2-full "*) ;; *) exit 1 ;; esac \
     && ! ldd target/release/cassiopeia | grep -F libsqlite3
+RUN cargo audit --ignore RUSTSEC-2026-0459 bin target/release/cassiopeia
 
 FROM chef AS rootfs
 
