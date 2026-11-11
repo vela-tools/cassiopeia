@@ -8,7 +8,7 @@ The guides below form a suggested path. Each one builds on the last: install the
 
 ## The guides
 
-1. [Getting started](getting-started.md): install Cassiopeia from a prebuilt release binary or from source, including the optional GRIB1 system dependency.
+1. [Getting started](getting-started.md): install Cassiopeia from a prebuilt release binary or from source, including the build tools a source build with GRIB1 needs.
 2. [Concepts](concepts.md): learn what Cassiopeia produces, how a mapping differs from a manifest, and how a record moves through the pipeline. Read this before the how-to guides.
 3. [Source formats](source-formats.md): learn the record shape Cassiopeia produces for CSV, JSON, GeoJSON, KML/KMZ, XML, Shapefiles, GeoPackages, GRIB, and NetCDF, along with its format detection. This comes before mapping because mappings use the record, not the raw file.
 4. [Write a mapping](mapping.md): turn a record into an entity by defining its identity, scope, attributes, templates, transformations, nested values, relationships, metadata, and synthetic entities.

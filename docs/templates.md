@@ -101,7 +101,7 @@ A filter transforms a value inside a template and follows a pipe: `{{ value | fi
 | `length` | The length of a string or list. |
 | `truncate(length=...)` | Shorten a string to a maximum length. |
 
-For string, number, date, and collection filters not listed here, see the [Tera filter documentation](https://keats.github.io/tera/docs/#built-in-filters).
+For string, number, date, and collection filters not listed here, see the [Tera filter documentation](https://keats.github.io/tera/#built-in-filters).
 
 ## Cassiopeia filters
 
@@ -176,7 +176,7 @@ Functions: `get_random`, `now`.
 
 Tests, used in a condition as `{% if value is <test> %}`: `after`, `before`, `matching`.
 
-The [Tera documentation](https://keats.github.io/tera/docs/) describes each of these in detail.
+Tera's [contributed set](https://github.com/Keats/tera/tree/master/tera-contrib) describes each of these in detail.
 
 ## When a computation has no answer
 
@@ -254,4 +254,4 @@ A guard that skips the expression gives no value, so the attribute is omitted wi
 
 - [Choosing a data model](data-models.md): choose the entity type and `@context` your mapping targets.
 - [Write a mapping](mapping.md#more-filters-and-functions): see where these expressions are used.
-- [Tera documentation](https://keats.github.io/tera/docs/): read the base template language documentation.
+- [Tera documentation](https://keats.github.io/tera/): read the base template language documentation.
