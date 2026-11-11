@@ -61,7 +61,7 @@ grib1 = ["cassiopeia-pipeline/grib1", "dep:bindman-utils", "dep:eccodes-sys"]
 grib2-full = ["cassiopeia-pipeline/grib2-full", "dep:bindman-utils", "dep:eccodes-sys"]
 
 [package.metadata.cargo-machete]
-ignored = ["eccodes-sys"]
+ignored = ["bindman-utils", "eccodes-sys"]
 
 [profile.release]
 lto = "fat"

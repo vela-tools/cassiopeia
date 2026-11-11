@@ -791,7 +791,6 @@ dependencies = [
  "cassiopeia-ngsi-ld",
  "cassiopeia-unreadable-timestamps",
  "cassiopeia-unresolved-templates",
- "chrono",
  "compact_str 0.10.0",
  "derive_more",
  "iri-rs",
@@ -2785,9 +2784,9 @@ dependencies = [
 
 [[package]]
 name = "geopackage"
-version = "0.14.3"
+version = "0.14.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8ff5dd62b729dc4a78e162c027317a756945f279ccbb995dd63929b71dc3e7f9"
+checksum = "52135b00c1cb41cc238cea0405b0d2bf77f73cb6422a873d057cca3ea9c2a98f"
 dependencies = [
  "epsg-utils",
  "geo-traits",
@@ -2799,9 +2798,9 @@ dependencies = [
 
 [[package]]
 name = "geopackage-core"
-version = "0.14.3"
+version = "0.14.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2564d405c85c3415750abc50322eec904857a5ae0079884a2f30101ee4e1b1f3"
+checksum = "1ec67b1448bc0e6b48377c2f6189a7bb72c587bc1df196bc0c58b146073ce227"
 dependencies = [
  "geo-traits",
  "geo-types",
@@ -6289,9 +6288,9 @@ dependencies = [
 
 [[package]]
 name = "rustls-pki-types"
-version = "1.15.1"
+version = "1.16.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2f4925028c7eb5d1fcdaf196971378ed9d2c1c4efc7dc5d011256f76c99c0a96"
+checksum = "102f35f7de7b06d8c61f1cff6592f5253e0dea431c74867aad5dfd70f44663fb"
 dependencies = [
  "web-time",
  "zeroize",
@@ -8039,9 +8038,9 @@ dependencies = [
 
 [[package]]
 name = "webpki-root-certs"
-version = "1.0.11"
+version = "1.0.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e49d0e65abc00c142e8f9428da991da9f1a250c39be97459901eb12b9b49f62a"
+checksum = "293198dcebfb821155b5092ab94b5a82ff180eddd7241df3bd6e66a4ffd1a585"
 dependencies = [
  "rustls-pki-types",
 ]
@@ -8615,9 +8614,9 @@ dependencies = [
 
 [[package]]
 name = "zip"
-version = "9.5.0"
+version = "9.5.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0700e6c427aff64acdbf02e85fbfd946c2ee12319d1af013092f3a2178914ff8"
+checksum = "e3476fd497ac8af5b1ec7b51acab7bef380f7e8dd8e0487595bafd839417a302"
 dependencies = [
  "bzip2",
  "constant_time_eq",
