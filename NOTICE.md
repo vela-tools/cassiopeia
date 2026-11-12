@@ -19,3 +19,7 @@ Any other use of the marks needs written permission, which you can request at in
 ## Third-party material
 
 The embedded NGSI-LD v1.9 core `@context`, as ETSI publishes it at `https://uri.etsi.org/ngsi-ld/v1/ngsi-ld-core-context-v1.9.jsonld`. It is copyright ETSI and distributed under the [BSD 3-Clause licence](crates/cassiopeia-value-type-expansion/contexts/LICENSE).
+
+The QUDT unit table in `crates/cassiopeia-unit-notation/src/qudt/generated.rs` is adapted from QUDT, Quantities, Units, Dimensions and Types, by QUDT.org (<https://qudt.org>), release 3.5.3, licensed under [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/). It keeps only the units that carry a `qudt:uneceCommonCode`, with their codes, symbols, and English labels, and composes those texts to Unicode Normalization Form C. Cassiopeia reads some of the codes differently from QUDT, as `crates/cassiopeia-unit-notation/src/qudt/correction.rs` lists.
+
+The UCUM codes in that table, the `qudt:ucumCode` values, are copyright Regenstrief Institute, Inc., and used under the [UCUM License](https://ucum.org/license), which disclaims all warranties.

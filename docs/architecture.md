@@ -138,6 +138,8 @@ Every template is compiled when the mapping is loaded, before any record is read
 
 Mappings can clean values, perform calculations, work with time, and construct geometry. A non-finite calculation removes the affected attribute. A template that fails to render for one record removes its attribute with a warning, and a template that names an entity, such as its identity, skips the record with a warning. The rest of the run continues in each case.
 
+Knowledge of unit notations lives in a crate of its own, so the `cefact_unit` filter and any later component read units the same way. It resolves a QUDT unit IRI, a symbol, a UCUM or UDUNITS code, or a unit name to the UN/CEFACT code `unitCode` holds. Its notations come from Recommendation No. 20 itself and from a table generated from a QUDT release by a separate generator crate. The hand-kept part is limited to corrections of QUDT units whose published code is wrong, rulings for notations that name more than one unit, and a few notations in common use that no source lists, and tests fail when a source update makes any of them stale.
+
 ## Manifests, configuration, and scheduling
 
 A manifest describes a job. It lists the inputs, chooses their mappings, selects the destination, and can set validation, failure, scheduling, and memory policies. Separating the manifest from the mapping makes the transformation reusable across sources and destinations. See the [manifest guide](manifest.md) for the document structure and field definitions.

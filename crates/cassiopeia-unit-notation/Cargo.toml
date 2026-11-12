@@ -1,0 +1,19 @@
+[package]
+name = "cassiopeia-unit-notation"
+description = "Unit notations (symbols, UCUM and UDUNITS codes, QUDT unit IRIs, and unit names) resolved to UN/CEFACT Recommendation No. 20 codes"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+cefact-units = "1.0.0"
+unicode-normalization = "0.1.26"
+url = "2.5.8"
+
+[dev-dependencies]
+pretty_assertions = "1.4.1"
+
+[lints]
+workspace = true
