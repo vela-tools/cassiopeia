@@ -14,11 +14,11 @@ This policy does not put any restriction on what is already here. Everything in 
 
 Everything that is not a code change, and all of it is genuinely useful.
 
-**Bugs.** Open a [bug report](../../issues/new?template=bug-report.yaml). Include what you ran, what you expected, what happened instead, and the version from `cassiopeia --version`. A source file and mapping that reproduce the problem are worth more than a description of them.
+**Bugs.** Open a [bug report](../../issues/new?template=bug-report.yaml). Include what you ran, what you expected, what happened instead, and the output of `cassiopeia bugreport`. A source file and mapping that reproduce the problem are worth more than a description of them. If the NGSI-LD specification or the source format's specification decides what should have happened, open a [conformance report](../../issues/new?template=conformance-report.yaml) instead.
 
 **Features.** Open a [feature request](../../issues/new?template=feature-request.yaml) describing the problem you need solved rather than the solution you have in mind.
 
-**Documentation.** The [documentation](docs/index.md) is part of the product. If a guide is wrong, unclear, or silent on the case you hit, say so in an [issue](../../issues/new?template=help.yaml).
+**Documentation.** The [documentation](docs/index.md) is part of the product. If a guide is wrong, unclear, or silent on the case you hit, say so in a [documentation correction](../../issues/new?template=documentation-correction.yaml).
 
 ## Security
 
