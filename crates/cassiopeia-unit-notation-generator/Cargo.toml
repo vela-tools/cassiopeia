@@ -1,0 +1,23 @@
+[package]
+name = "cassiopeia-unit-notation-generator"
+description = "Generates the QUDT unit table of cassiopeia-unit-notation from a release of the QUDT unit vocabulary"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[dependencies]
+cefact-units = "1.0.0"
+clap = { version = "4.6.7", features = ["derive"] }
+derive_more = { version = "2.1.1", features = ["display"] }
+hex = "0.4.3"
+oxrdf = "0.3.5"
+oxttl = "0.2.5"
+sha2 = "0.10.9"
+thiserror = "2.0.21"
+unicode-normalization = "0.1.26"
+
+[lints]
+workspace = true

@@ -1,3 +1,4 @@
+pub mod cefact_unit;
 pub mod clean;
 pub mod elementary;
 pub mod get;
@@ -19,6 +20,7 @@ pub fn register(registrar: &mut Registrar) {
     registrar.filter("clean", clean);
     registrar.filter("get", get);
     registrar.filter("date_subtract_seconds", date_subtract_seconds);
+    cefact_unit::register(registrar);
     elementary::register(registrar);
     json_decode::register(registrar);
     rounding::register(registrar);
@@ -38,6 +40,11 @@ mod tests {
         tera.add_raw_template("t", template).unwrap();
 
         tera.render("t", &Context::new()).unwrap()
+    }
+
+    #[test]
+    fn the_cefact_unit_filter_is_registered() {
+        assert_eq!(render(r#"{{ "ug/m3" | cefact_unit }}"#), "GQ");
     }
 
     #[test]

@@ -6,3 +6,6 @@ absolute-paths-allowed-crates = ["core", "typed_builder"]
 allow-expect-in-tests = true
 allow-panic-in-tests = true
 allow-unwrap-in-tests = true
+
+# SensorThings is the name of an OGC standard, not an identifier; `..` keeps clippy's default list.
+doc-valid-idents = ["SensorThings", ".."]

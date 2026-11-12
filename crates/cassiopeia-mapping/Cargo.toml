@@ -11,7 +11,9 @@ repository.workspace = true
 cassiopeia-common.workspace = true
 cassiopeia-geometry.workspace = true
 cassiopeia-ngsi-ld.workspace = true
+cassiopeia-unit-notation.workspace = true
 cassiopeia-value-type-expansion.workspace = true
+cefact-units = "1.0.0"
 chrono = { version = "0.4.45", features = ["serde"] }
 derive_more = { version = "2.1.1", features = ["deref", "display", "into"] }
 geohash = "0.13.2"

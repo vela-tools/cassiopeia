@@ -116,8 +116,8 @@ cassiopeia-extractor = { path = "crates/cassiopeia-extractor" }
 cassiopeia-geometry = { path = "crates/cassiopeia-geometry" }
 cassiopeia-ingestor = { path = "crates/cassiopeia-ingestor", default-features = false }
 cassiopeia-ir = { path = "crates/cassiopeia-ir" }
-cassiopeia-mapping = { path = "crates/cassiopeia-mapping" }
 cassiopeia-manifest = { path = "crates/cassiopeia-manifest" }
+cassiopeia-mapping = { path = "crates/cassiopeia-mapping" }
 cassiopeia-ngsi-ld = { path = "crates/cassiopeia-ngsi-ld" }
 cassiopeia-pipeline = { path = "crates/cassiopeia-pipeline", default-features = false }
 cassiopeia-profiler = { path = "crates/cassiopeia-profiler" }
@@ -128,6 +128,7 @@ cassiopeia-smart-data-models = { path = "crates/cassiopeia-smart-data-models" }
 cassiopeia-terminal-style = { path = "crates/cassiopeia-terminal-style" }
 cassiopeia-transformer = { path = "crates/cassiopeia-transformer" }
 cassiopeia-tui = { path = "crates/cassiopeia-tui" }
+cassiopeia-unit-notation = { path = "crates/cassiopeia-unit-notation" }
 cassiopeia-unreadable-timestamps = { path = "crates/cassiopeia-unreadable-timestamps" }
 cassiopeia-unresolved-templates = { path = "crates/cassiopeia-unresolved-templates" }
 cassiopeia-validator = { path = "crates/cassiopeia-validator" }

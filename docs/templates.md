@@ -109,10 +109,26 @@ Cassiopeia adds these filters to the built-in set.
 
 | Filter | Effect |
 | --- | --- |
+| `cefact_unit` | Translate a unit notation into the UN/CEFACT code that `unitCode` holds. `unitCode: { source: "{{ unit \| cefact_unit }}" }`. A text such as `µg/m³`, `ug/m3`, `https://qudt.org/vocab/unit/MicroGM-PER-M3`, or `microgram per cubic metre` becomes `GQ`. A SensorThings `unitOfMeasurement` object is read through its `definition`, then its `symbol`, then its `name`, and the first that resolves gives the code. A text that resolves to no code is written unchanged, and so is an object's `symbol`, else its `name`, else its `definition`, when none of them resolves. Null yields nothing. A number, boolean, or array fails the template. See [Unit codes](#unit-codes). |
 | `clean` | Fold every run of whitespace to a single space and trim the ends. `{{ name \| clean }}`. |
 | `get(key=..., default=...)` | Read `key` from a map value. It returns the entry, `default` if given, or nothing when the key is absent. Unlike Tera's built-in `get`, a missing key does not cause an error. |
 | `json_decode` | Parse a JSON string into a structured value the template can index and iterate, the decode counterpart of `json_encode`. `{{ cast \| json_decode \| first \| get(key='id') }}`. As the whole expression, it gives the decoded value itself, which `transformation: "object"` or `"array"` keeps, as do a `ListProperty` and a `JsonProperty` with no transformation. To read a whole field that holds JSON text, name the `json`, `object`, or `array` transformation instead. A non-string passes through unchanged, and empty text yields nothing. A non-empty, malformed string fails the template, so the attribute is dropped with a warning. |
 | `date_subtract_seconds(seconds=..., format=...)` | Shift a timestamp backwards by `seconds` and format it. `seconds` defaults to 0, and `format` defaults to `%Y-%m-%dT%H:%M:%SZ`. The input may be an epoch number or a textual date-time. |
+
+### Unit codes
+
+NGSI-LD records the unit of a `Property` value as a UN/CEFACT Recommendation No. 20 common code in `unitCode` (ETSI GS CIM 009 v1.9.1 clause 4.5.2): `GQ` for microgram per cubic metre, `CEL` for degree Celsius. Sources rarely send one, so `cefact_unit` reads the notation a source does send and tries it, in order, as:
+
+1. a QUDT unit IRI, over `http` or `https`, with or without a trailing `/`;
+2. a symbol, UCUM code, or UDUNITS code, such as `µg/m³`, `ug.m-3`, or `degC`;
+3. a unit name, such as `microgram per cubic metre` or `Degree Celsius`;
+4. a Recommendation No. 20 code, such as `GQ`.
+
+Symbols and codes are case-sensitive, since `Mm` is the megametre and `mm` the millimetre. Spellings that differ only in characters with no meaning of their own are one notation: the micro sign, the Greek mu, and the `u` UCUM writes; `m³`, `m^3`, and `m3`; a middle dot and the `.` UCUM multiplies with. Names ignore ASCII case, and surrounding whitespace is ignored.
+
+The notations come from Recommendation No. 20 itself, which gives a name to every code and a symbol to most, and from the QUDT unit vocabulary, which gives the IRI, symbols, UCUM and UDUNITS codes, and English labels of each unit that carries a Recommendation No. 20 code. Where QUDT gives a unit the code of a different unit, Cassiopeia reads it with the right code or with none. A notation that names more than one unit in common use, such as `kt` (knot or kilotonne) or `st` (stere or stone), resolves to no code rather than to a guess. A code current in the latest revision of Recommendation No. 20 is preferred. A deprecated code, which the recommendation still lists but not for new data, is written only for a unit that has no current code, such as the hectare (`HAR`) or the millimetre of mercury (`HN`). A deleted code is never written.
+
+A notation that resolves to no code reaches `unitCode` unchanged.
 
 ### Math filters
 
