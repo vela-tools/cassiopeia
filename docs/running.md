@@ -184,6 +184,7 @@ Problems that depend on one record's data, on the rows and header of one CSV fil
 | `ingest-table-unreadable` | A GeoPackage table failed before Cassiopeia read its first row, such as a view, which has no row id to read its rows by, so Cassiopeia skipped it and read the other tables. One warning per table names the table and the file, and gives the reason. See [GeoPackage](source-formats.md#tables-that-cannot-be-read). |
 | `transform-expires-at-unreadable` | An attribute's `expiresAt` could not be read as a date and time, so the attribute is written without it. |
 | `transform-observed-at-unreadable` | An `observedAt` declared without a transformation could not be read as a date and time, so the attribute is written without it. |
+| `transform-unit-code-unknown` | An attribute's `unitCode` is not a UN/CEFACT Recommendation No. 20 code, such as the symbol `ug/m3` or the typo `GQQ`, so the attribute is written without it. One warning per attribute and text names both and counts the records that carried them. A `unitCode` that is not text, such as a number, is named by its JSON text. The [`cefact_unit`](templates.md#unit-codes) filter translates a unit symbol, name, UCUM code, or QUDT unit IRI into its code. |
 
 The run's warning count adds one for each renamed column of an `ingest-columns-renamed` warning, one for each date of an `ingest-dates-nonexistent` warning, and one for each skipped row of an `ingest-rows-misshapen` warning.
 

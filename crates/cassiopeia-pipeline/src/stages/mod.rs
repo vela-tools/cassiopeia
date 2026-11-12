@@ -29,6 +29,7 @@ pub(crate) mod skipped_records;
 pub(crate) mod stage_env;
 pub(crate) mod stream_outcome;
 pub(crate) mod transformer;
+pub(crate) mod unknown_unit_code_report;
 pub(crate) mod unreadable_expiry_report;
 pub(crate) mod unreadable_tables_report;
 pub(crate) mod unreadable_timestamp_report;

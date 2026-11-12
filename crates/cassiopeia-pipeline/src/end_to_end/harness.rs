@@ -89,25 +89,46 @@ pub(crate) fn run_failing_end_to_end(store: StoreKind, inputs: &[RunInput], enti
     (error, outcome)
 }
 
+/// Runs a one-shot pipeline over one CSV document bound as `binding`, writing files, on `store`, and
+/// collects what it reported and wrote.
+///
+/// The output attaches no `@context`.
+pub(crate) fn run_csv_end_to_end(store: StoreKind, csv: &str, binding: &RunBinding, entity_types: &[&str]) -> RunOutcome {
+    let directory = TempDir::new().unwrap();
+    let root = directory.path();
+    let data = root.join("data-0.csv");
+    fs::write(&data, csv).unwrap();
+
+    let (result, outcome) = run_declared(store, root, &[declare_input(root, 0, &data, binding)], entity_types, "");
+    result.unwrap();
+    outcome
+}
+
 /// Runs a one-shot pipeline over `inputs` and returns how the run ended with what it reported and
 /// wrote.
 fn attempt_end_to_end(store: StoreKind, inputs: &[RunInput], entity_types: &[&str], output_extra: &str) -> (Result<(), PipelineError>, RunOutcome) {
     let directory = TempDir::new().unwrap();
     let root = directory.path();
-    let schemas = root.join("schemas");
-    write_permissive_schemas(&schemas, entity_types);
-    let output = root.join("out");
-
     let declared: Vec<String> = inputs
         .iter()
         .enumerate()
         .map(|(index, input)| {
             let data = root.join(format!("data-{index}.json"));
             fs::write(&data, input.records.to_string()).unwrap();
-            let binding = declare_binding(root, index, &input.binding);
-            format!(r#"{{ source: "{}", {binding} }}"#, data.display())
+            declare_input(root, index, &data, &input.binding)
         })
         .collect();
+
+    run_declared(store, root, &declared, entity_types, output_extra)
+}
+
+/// Runs a one-shot pipeline over the `declared` manifest inputs, with its schemas and output under
+/// `root`, and returns how the run ended with what it reported and wrote.
+fn run_declared(store: StoreKind, root: &Path, declared: &[String], entity_types: &[&str], output_extra: &str) -> (Result<(), PipelineError>, RunOutcome) {
+    let schemas = root.join("schemas");
+    write_permissive_schemas(&schemas, entity_types);
+    let output = root.join("out");
+
     let document = format!(
         r#"{{ version: "v1", inputs: [{}], output: {{ target: "file", directory: "{}"{output_extra} }} }}"#,
         declared.join(", "),
@@ -166,6 +187,13 @@ fn written_entities(output: &Path) -> Vec<Value> {
         entities.extend(written);
     }
     entities
+}
+
+/// Declares the input at `index`, reading `data`, as a manifest input, writing its mapping documents
+/// into `root`.
+fn declare_input(root: &Path, index: usize, data: &Path, binding: &RunBinding) -> String {
+    let binding = declare_binding(root, index, binding);
+    format!(r#"{{ source: "{}", {binding} }}"#, data.display())
 }
 
 /// Writes the mapping documents of the input at `index` into `root` and declares them as the input's

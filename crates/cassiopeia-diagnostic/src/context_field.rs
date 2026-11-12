@@ -1,4 +1,4 @@
-use crate::{detail::Detail, json_pointer::JsonPointer, schema_keyword::SchemaKeyword};
+use crate::{detail::Detail, json_pointer::JsonPointer, schema_keyword::SchemaKeyword, unit_text::UnitText};
 use cassiopeia_common::{captured_body::CapturedBody, input::Input, masked_url::MaskedUrl};
 use cassiopeia_csv_column::renamed_column::RenamedColumn;
 use cassiopeia_ngsi_ld::entity::{attribute_path::AttributePath, name::NameBuf};
@@ -39,6 +39,9 @@ pub enum ContextField {
     /// A CSV column read by a key other than the one its header asks for, because another column
     /// already holds that key.
     RenamedColumn(RenamedColumn),
+    /// The text given as an attribute's `unitCode` that is no UN/CEFACT Recommendation No. 20 code
+    /// (ETSI GS CIM 009 v1.9.1 clause 4.5.2).
+    UnitText(UnitText),
     /// The entities a diagnostic covers: the first one named, the rest counted.
     Entities {
         /// The first entity's identifier.

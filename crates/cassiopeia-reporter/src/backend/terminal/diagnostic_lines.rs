@@ -90,6 +90,7 @@ fn qualifier(field: &ContextField) -> Option<String> {
         | ContextField::Keyword(_)
         | ContextField::Detail(_)
         | ContextField::RenamedColumn(_)
+        | ContextField::UnitText(_)
         | ContextField::Entities { .. }
         | ContextField::Source(_)
         | ContextField::Attempt { .. }
@@ -113,6 +114,7 @@ const fn explanation(field: &ContextField) -> Option<&str> {
         | ContextField::SchemaPath(_)
         | ContextField::Keyword(_)
         | ContextField::RenamedColumn(_)
+        | ContextField::UnitText(_)
         | ContextField::Entities { .. }
         | ContextField::Source(_)
         | ContextField::Attempt { .. }
@@ -174,6 +176,7 @@ fn field_row(field: &ContextField) -> (&'static str, String) {
         ContextField::Keyword(keyword) => ("keyword", keyword.to_string()),
         ContextField::Detail(detail) => ("detail", detail.as_str().to_owned()),
         ContextField::RenamedColumn(renamed) => ("renamed", renamed.to_string()),
+        ContextField::UnitText(text) => ("unit code", text.as_str().to_owned()),
         ContextField::Entities { first, additional } => (
             "entities",
             if *additional == 0 {
@@ -209,12 +212,13 @@ mod tests {
     use cassiopeia_common::masked_url::MaskedUrl;
     use cassiopeia_csv_column::{column_key::ColumnKey, column_number::ColumnNumber, renamed_column::RenamedColumn};
     use cassiopeia_diagnostic::{
-        code::{broker_code::BrokerCode, diagnostic_code::DiagnosticCode, ingest_code::IngestCode, schema_code::SchemaCode},
+        code::{broker_code::BrokerCode, diagnostic_code::DiagnosticCode, ingest_code::IngestCode, schema_code::SchemaCode, transform_code::TransformCode},
         context_field::ContextField,
         detail::Detail,
         diagnostic::Diagnostic,
         diagnostic_builder::DiagnosticBuilder,
         severity::Severity,
+        unit_text::UnitText,
         verbosity::Verbosity,
     };
     use cassiopeia_terminal_style::rendering::Rendering;
@@ -328,6 +332,23 @@ mod tests {
                 "! The header of `/data/values.csv` gives more than one column the same record key".to_owned(),
                 "  \u{2570}\u{2500} renamed     column 3 `value` is read as `value@3`, as column 2 keeps `value`".to_owned(),
             ]
+        );
+    }
+
+    #[test]
+    fn an_unknown_unit_code_is_listed_only_in_the_verbose_form() {
+        let diagnostic = DiagnosticBuilder::new(
+            Severity::Warning,
+            DiagnosticCode::Transform(TransformCode::UnitCodeUnknown),
+            "Attribute `pm10` is emitted without `unitCode`: `ug/m3` is not a UN/CEFACT Recommendation 20 code",
+        )
+        .with_context(ContextField::UnitText(UnitText::new("ug/m3")))
+        .build();
+
+        assert_eq!(diagnostic_lines(&diagnostic, Verbosity::Concise, Rendering::Plain).len(), 1);
+        assert_eq!(
+            diagnostic_lines(&diagnostic, Verbosity::Full, Rendering::Plain)[1],
+            "  \u{2570}\u{2500} unit code   ug/m3"
         );
     }
 

@@ -8,6 +8,7 @@ license.workspace = true
 repository.workspace = true
 
 [dependencies]
+cassiopeia-batch-sink.workspace = true
 cassiopeia-common.workspace = true
 cassiopeia-geometry.workspace = true
 cassiopeia-ir.workspace = true
@@ -16,6 +17,7 @@ cassiopeia-ngsi-ld.workspace = true
 cassiopeia-unreadable-timestamps.workspace = true
 cefact-units = "1.0.0"
 chrono = "0.4.45"
+derive_more = { version = "2.1.1", features = ["deref", "into"] }
 indexmap = { version = "2.14.2", features = ["serde"] }
 iri-rs = "4.1.1"
 rayon = "1.12.0"
@@ -23,7 +25,6 @@ thiserror = "2.0.21"
 urn-rs = "0.9.2"
 
 [dev-dependencies]
-cassiopeia-batch-sink.workspace = true
 langtag = "1.1.0"
 pretty_assertions = "1.4.1"
 serde_json = { version = "1.0.154", features = ["preserve_order"] }
