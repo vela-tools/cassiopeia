@@ -1,24 +1,42 @@
 name: Feature request
-description: Suggest a new capability, a new source format, or an improvement.
-title: "[Feature]: "
-labels: ["enhancement"]
+description: A capability Cassiopeia lacks, such as a source format, a mapping key, a template filter, a setting or a command.
+labels: [feature]
 body:
   - type: markdown
     attributes:
       value: |
-        Thanks for the suggestion. Please search the existing issues first, in case it is already proposed.
-  - type: textarea
-    id: problem
+        Do not use this form to report a security vulnerability. Follow the [Cassiopeia security policy](https://github.com/vela-tools/cassiopeia/security/policy) instead.
+
+        Fill in what you know now. Every field becomes a heading, so the body is edited in place as understanding grows. Triage adds one or more `area:` labels.
+  - type: dropdown
+    id: origin
     attributes:
-      label: Problem or motivation
-      description: What are you trying to do, and what is missing or awkward today? Describe the need, not just the fix.
+      label: Origin
+      description: Where the capability belongs.
+      options:
+        - Reading a source (a format, a remote source, detection)
+        - The mapping or its templates
+        - Geometry and coordinates
+        - Combining records into entities
+        - The entities written, or their delivery to files or a broker
+        - Validation and Smart Data Models
+        - Manifests, configuration, scheduling or the command line
+        - Warnings, errors and the run summary
+        - The schema explorer or the mapping wizard
     validations:
       required: true
   - type: textarea
-    id: solution
+    id: need
     attributes:
-      label: Proposed solution
-      description: What should Cassiopeia do? If it affects a pipeline stage, the mapping or manifest format, or the CLI, say where.
+      label: Need
+      description: What you are trying to do with your source data, and what Cassiopeia cannot do today. Describe the need, not just the fix.
+    validations:
+      required: true
+  - type: textarea
+    id: behaviour
+    attributes:
+      label: Behaviour
+      description: "The visible contract: mapping and manifest keys and their values, command-line options, record and entity shapes, defaults, and the clause or format specification if one defines it."
     validations:
       required: true
   - type: textarea
@@ -29,19 +47,18 @@ body:
     validations:
       required: false
   - type: textarea
-    id: references
+    id: scope
     attributes:
-      label: Specification or format references
-      description: >-
-        Anything that pins down the expected shape: an ETSI GS CIM 009 v1.9.1 clause, a source-format
-        specification (GTFS, GBFS, GeoJSON, and so on), or a specific Smart Data Model.
+      label: Out of scope
+      description: What this issue deliberately does not cover.
     validations:
       required: false
   - type: textarea
-    id: context
+    id: acceptance
     attributes:
-      label: Additional context
-      description: Sample data, links, or anything else that helps.
+      label: Acceptance
+      description: "Optional; triage completes it. One checkbox per observable check: the input or situation, and the result that must hold."
+      value: "- [ ] "
     validations:
       required: false
   - type: checkboxes

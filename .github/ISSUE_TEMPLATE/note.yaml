@@ -1,0 +1,23 @@
+name: Note
+description: Capture something to look into later. Triage turns it into a real issue or closes it.
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Do not use this form to report a security vulnerability. Follow the [Cassiopeia security policy](https://github.com/vela-tools/cassiopeia/security/policy) instead.
+
+        A note has no kind yet. Triage gives it a kind and its areas and rewrites the body to that kind's sections, or closes it as not planned.
+  - type: textarea
+    id: context
+    attributes:
+      label: Context
+      description: "Whatever you know now: links, a hunch, where you saw it."
+    validations:
+      required: false
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Before submitting
+      options:
+        - label: I searched the existing issues and this is not a duplicate.
+          required: true

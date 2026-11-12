@@ -1,57 +1,73 @@
 name: Bug report
-description: Report incorrect behaviour, a crash, or NGSI-LD output that does not match the specification.
-title: "[Bug]: "
-labels: ["bug"]
+description: Cassiopeia is broken on its own terms, with no specification clause at stake.
+labels: [bug]
 body:
   - type: markdown
     attributes:
       value: |
-        Thanks for taking the time to file a bug. Please search the existing issues first, in case it is already reported.
+        Do not use this form to report a security vulnerability. A crafted source that crashes, hangs or exhausts a run, a read or write outside the paths Cassiopeia was given, or a broker credential in a log, a report or an output file is a vulnerability. Follow the [Cassiopeia security policy](https://github.com/vela-tools/cassiopeia/security/policy) instead.
 
-        Do not use this form to report a security vulnerability. Follow the [Cassiopeia security policy](https://github.com/vela-tools/cassiopeia/security/policy) instead.
+        Fill in what you know now. Every field becomes a heading, so the body is edited in place as understanding grows. Triage adds one or more `area:` labels.
   - type: textarea
-    id: summary
+    id: observed
     attributes:
-      label: What happened?
-      description: A clear description of the incorrect behaviour, including the exact error message if there was one.
-      placeholder: Cassiopeia exited with ..., or produced an entity where ...
+      label: Observed
+      description: What happened (a crash, a run that fails or hangs, an entity or attribute that is wrong or missing, a warning that is wrong or missing), with the error message or the run summary lines that show it.
+      placeholder: Cassiopeia exited with ..., or wrote `temperature` as ...
     validations:
       required: true
   - type: textarea
-    id: expected
+    id: reproduction
     attributes:
-      label: What did you expect to happen?
-      description: >-
-        Describe the correct behaviour. If this is a spec-compliance issue, cite the ETSI GS CIM 009
-        v1.9.1 clause, or the source-format specification (GTFS, GBFS, GeoJSON, and so on) it violates.
-    validations:
-      required: true
-  - type: textarea
-    id: reproduce
-    attributes:
-      label: Steps to reproduce
-      description: The exact command you ran, plus the smallest input sample and mapping or manifest that triggers it.
+      label: Reproduction
+      description: The command you ran, and the smallest source sample, mapping and manifest that trigger it. Say how often it reproduces.
       placeholder: |
         1. cassiopeia map -i sample.csv -m mapping.json5 ...
         2. ...
     validations:
       required: true
   - type: textarea
-    id: diagnostics
+    id: expected
     attributes:
-      label: Diagnostic report
-      description: >-
-        Run `cassiopeia bugreport` and paste the full output here. It records the exact version, the
-        commit and build features, the host, and where Cassiopeia looked for its inputs. Review it
-        before pasting; it never includes file contents, but it does show your command line.
+      label: Expected
+      description: "What should have happened and what says so: Cassiopeia's documentation or an invariant. If an ETSI GS CIM 009 clause or a source format's specification decides it, use the Conformance report form instead."
     validations:
       required: true
   - type: textarea
-    id: inputs
+    id: diagnostics
     attributes:
-      label: Sample input, mapping, or manifest
-      description: A minimal sample that reproduces the problem. Remove any broker credentials, tokens, or private data first.
-      render: shell
+      label: Diagnostic report
+      description: Run `cassiopeia bugreport` and paste its output. It records the version, the commit and build features, the host, and where Cassiopeia looked for its inputs. Review it first; it never includes file contents, but it shows your command line.
+    validations:
+      required: true
+  - type: input
+    id: broker
+    attributes:
+      label: Context broker
+      description: The broker and the version it reports, if the run writes to one.
+      placeholder: Orion-LD, with the version it reports
+    validations:
+      required: false
+  - type: textarea
+    id: samples
+    attributes:
+      label: Samples and logs
+      description: Source samples, mappings, manifests and log lines that did not fit in Reproduction, each in its own code block. Remove broker credentials, tokens and private data first.
+    validations:
+      required: false
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance
+      description: "Optional; triage completes it. One checkbox per observable check: the input or situation, and the result that must hold. A reviewer can verify each one without reading the code."
+      value: "- [ ] "
+    validations:
+      required: false
+  - type: textarea
+    id: leads
+    attributes:
+      label: Leads
+      description: Suspected cause or where to look. A hypothesis, not a plan.
     validations:
       required: false
   - type: checkboxes

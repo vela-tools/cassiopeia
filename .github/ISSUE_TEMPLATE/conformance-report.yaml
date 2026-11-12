@@ -1,0 +1,75 @@
+name: Conformance report
+description: Cassiopeia writes what ETSI GS CIM 009 v1.9.1 does not allow, or misreads a source that its format's specification defines.
+labels: [conformance]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Do not use this form to report a security vulnerability. Follow the [Cassiopeia security policy](https://github.com/vela-tools/cassiopeia/security/policy) instead.
+
+        This form is for output or input that a specification decides: an entity, an attribute or a broker request that ETSI GS CIM 009 v1.9.1 does not allow, or a source read differently from what its format's specification defines. Fill in what you know now. Every field becomes a heading, so the body is edited in place as understanding grows. Triage adds one or more `area:` labels.
+  - type: textarea
+    id: input
+    attributes:
+      label: Input
+      description: The command you ran, and the smallest source sample and mapping that show the deviation.
+      placeholder: |
+        cassiopeia map -i sample.csv -m mapping.json5 ...
+    validations:
+      required: true
+  - type: textarea
+    id: output
+    attributes:
+      label: Output
+      description: What Cassiopeia wrote, trimmed to what shows the deviation, or the broker's answer if it refused the request.
+    validations:
+      required: true
+  - type: textarea
+    id: clause
+    attributes:
+      label: Clause
+      description: "The clause that decides the expected result, by number, and what it requires: ETSI GS CIM 009 v1.9.1, or the source format's specification (RFC 4180, RFC 7946, the CF conventions, OGC SensorThings API, and so on). Quote the sentence when the reading is not obvious."
+      placeholder: ETSI GS CIM 009 v1.9.1 clause 4.6.3 ...
+    validations:
+      required: true
+  - type: textarea
+    id: diagnostics
+    attributes:
+      label: Diagnostic report
+      description: Run `cassiopeia bugreport` and paste its output. Review it first; it never includes file contents, but it shows your command line.
+    validations:
+      required: true
+  - type: input
+    id: broker
+    attributes:
+      label: Context broker
+      description: The broker and the version it reports, if the run writes to one.
+      placeholder: Orion-LD, with the version it reports
+    validations:
+      required: false
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance
+      description: "Optional; triage completes it. One checkbox per observable check: the input or situation, and the result that must hold."
+      value: "- [ ] "
+    validations:
+      required: false
+  - type: textarea
+    id: leads
+    attributes:
+      label: Leads
+      description: Suspected cause or where to look. A hypothesis, not a plan.
+    validations:
+      required: false
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Before submitting
+      options:
+        - label: "This is not a security vulnerability. Vulnerabilities are reported privately, following the [Cassiopeia security policy](https://github.com/vela-tools/cassiopeia/security/policy)."
+          required: true
+        - label: I searched the existing issues and this is not a duplicate.
+          required: true
+        - label: I removed any credentials or private data from the report and samples above.
+          required: true

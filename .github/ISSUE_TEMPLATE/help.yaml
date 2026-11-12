@@ -1,12 +1,11 @@
 name: Help and questions
 description: Ask how to accomplish something with Cassiopeia.
 title: "[Help]: "
-labels: ["question"]
 body:
   - type: markdown
     attributes:
       value: |
-        Have a look at the [documentation and examples](https://github.com/vela-tools/cassiopeia/tree/main/docs) first.
+        Have a look at the [documentation](https://github.com/vela-tools/cassiopeia/tree/main/docs) first.
         Use this form for usage questions; if something is actually broken, use the Bug report form instead.
   - type: textarea
     id: goal
@@ -19,7 +18,7 @@ body:
     id: tried
     attributes:
       label: What have you tried?
-      description: The command, mapping, manifest, or configuration you are working with, and what happened.
+      description: The command, mapping, manifest or configuration you are working with, and what happened. Remove credentials first.
       render: shell
     validations:
       required: false
@@ -28,7 +27,7 @@ body:
     attributes:
       label: Version
       description: The output of `cassiopeia --version`.
-      placeholder: 0.1.0
+      placeholder: 1.2.0
     validations:
       required: false
   - type: checkboxes

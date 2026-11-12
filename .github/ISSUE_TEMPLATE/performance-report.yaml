@@ -1,0 +1,55 @@
+name: Performance report
+description: Cassiopeia gives the right result, but too slowly or using too much memory.
+labels: [performance]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Do not use this form to report a security vulnerability. A small crafted source that makes a run hang or exhaust its memory is a vulnerability: follow the [Cassiopeia security policy](https://github.com/vela-tools/cassiopeia/security/policy) instead. This form is for ordinary workloads.
+
+        Fill in what you know now. Every field becomes a heading, so the body is edited in place as understanding grows. Triage adds one or more `area:` labels.
+  - type: textarea
+    id: workload
+    attributes:
+      label: Workload
+      description: "What ran: the source formats and sizes, the number of inputs, the mapping's shape, the output, the memory profile and storage settings, and the host (cores, memory, and whether it was shared)."
+    validations:
+      required: true
+  - type: textarea
+    id: measurement
+    attributes:
+      label: Measurement
+      description: "The figures: wall time, peak memory, throughput, and the stage timings and channel pressure from the run summary or telemetry."
+    validations:
+      required: true
+  - type: textarea
+    id: target
+    attributes:
+      label: Target
+      description: Optional; triage completes it. One checkbox per figure that counts as fixed, with the conditions it holds under.
+      value: "- [ ] "
+    validations:
+      required: false
+  - type: textarea
+    id: diagnostics
+    attributes:
+      label: Diagnostic report
+      description: Run `cassiopeia bugreport` and paste its output. Review it first; it never includes file contents, but it shows your command line.
+    validations:
+      required: true
+  - type: textarea
+    id: leads
+    attributes:
+      label: Leads
+      description: Suspected cause or where to look. A hypothesis, not a plan.
+    validations:
+      required: false
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Before submitting
+      options:
+        - label: "This is not a security vulnerability. Vulnerabilities are reported privately, following the [Cassiopeia security policy](https://github.com/vela-tools/cassiopeia/security/policy)."
+          required: true
+        - label: I searched the existing issues and this is not a duplicate.
+          required: true
