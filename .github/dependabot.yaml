@@ -6,6 +6,8 @@ updates:
     schedule:
       interval: "daily"
     rebase-strategy: "auto"
+    labels:
+      - "build"
     open-pull-requests-limit: 50
     groups:
       docker-minor:
@@ -21,6 +23,8 @@ updates:
     schedule:
       interval: "daily"
     rebase-strategy: "auto"
+    labels:
+      - "build"
     allow:
       - dependency-type: "all"
     open-pull-requests-limit: 50
@@ -38,6 +42,8 @@ updates:
     schedule:
       interval: "daily"
     rebase-strategy: "auto"
+    labels:
+      - "build"
     open-pull-requests-limit: 50
     groups:
       github-actions-minor:
@@ -53,3 +59,5 @@ updates:
     schedule:
       interval: "daily"
     rebase-strategy: "auto"
+    labels:
+      - "build"
