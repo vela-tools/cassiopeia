@@ -112,8 +112,7 @@ mod tests {
         fragment_sink::FragmentSink,
         relationship_store::dashmap_store::DashMapRelationshipStore,
     };
-    use cassiopeia_transformer::{ngsi_ld_transformer::NgsiLdTransformer, transformer::Transformer};
-    use cassiopeia_unreadable_timestamps::unreadable_timestamps::UnreadableTimestamps;
+    use cassiopeia_transformer::{ngsi_ld_transformer::NgsiLdTransformer, qualifier_losses::QualifierLosses, transformer::Transformer};
     use chrono::{TimeZone, Utc};
     use pretty_assertions::assert_eq;
     use serde_json::{Value, json};
@@ -203,7 +202,7 @@ mod tests {
         assert_eq!(units.len(), 1);
 
         let extracted = EntityExtractor::new(resolver).extract(units.remove(0), &DroppedAttributes::new()).unwrap();
-        NgsiLdTransformer::new().transform(extracted, &UnreadableTimestamps::new()).unwrap()
+        NgsiLdTransformer::new().transform(extracted, &QualifierLosses::new()).unwrap()
     }
 
     /// Every `ListRelationship` instance of `attribute`, as its object list and its `datasetId`.

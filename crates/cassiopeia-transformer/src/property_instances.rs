@@ -2,6 +2,7 @@ use crate::{
     attribute_builder::build_sub_attribute,
     metadata::{MetadataSummary, transform_metadata},
     qualifier_cache::QualifierCache,
+    qualifier_losses::QualifierLosses,
 };
 use cassiopeia_ir::{attribute_content::AttributeContent, entity::AttributeValues, metadata::EntityMetadata, resolved_attribute::ResolvedAttribute};
 use cassiopeia_mapping::attribute::Attribute;
@@ -9,7 +10,6 @@ use cassiopeia_ngsi_ld::entity::{
     attribute::{NgsiLdAttribute, NgsiLdAttributeKind, NgsiLdAttributeWrapper},
     name::NameBuf,
 };
-use cassiopeia_unreadable_timestamps::unreadable_timestamps::UnreadableTimestamps;
 
 /// Builds a Property-family attribute as several instances that differ by `datasetId`.
 ///
@@ -24,7 +24,7 @@ pub(crate) fn build_multi_instance_attribute(
     values: &mut AttributeValues,
     metadata: Option<&EntityMetadata>,
     cache: &mut QualifierCache<'_>,
-    unreadable: &UnreadableTimestamps,
+    losses: &QualifierLosses,
 ) -> Option<NgsiLdAttributeWrapper> {
     let items = match values.swap_remove(name.as_str())? {
         ResolvedAttribute::Instances(items) => items,
@@ -43,7 +43,7 @@ pub(crate) fn build_multi_instance_attribute(
                 .and_then(|instances| instances.get(index))
                 .and_then(|instance| config.instance_value_type(instance))
                 .cloned();
-            let meta = transform_metadata(metadata, name, Some(index), cache, unreadable).with_value_type(value_type);
+            let meta = transform_metadata(metadata, name, Some(index), cache, losses).with_value_type(value_type);
             build_property_instance(*config.kind(), content, meta)
         })
         .collect::<Vec<NgsiLdAttribute>>();

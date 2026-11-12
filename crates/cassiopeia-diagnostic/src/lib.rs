@@ -12,10 +12,10 @@
 //!
 //! One concept per module: [`severity`] how serious, [`code`] the closed name vocabulary,
 //! [`context_field`] the typed facts, [`field_role`] which of them define the failure,
-//! [`json_pointer`]/[`detail`]/[`cause`]/[`schema_keyword`] the value types those facts carry,
-//! [`diagnostic_identity`] the dedup and grouping key, [`diagnostic`] the reported failure,
-//! [`diagnostic_builder`] how one is assembled, [`verbosity`] how much of it is rendered, and
-//! [`reason`]/[`reason_tally`] the run-level fold.
+//! [`json_pointer`]/[`detail`]/[`cause`]/[`schema_keyword`]/[`unit_text`] the value types those
+//! facts carry, [`diagnostic_identity`] the dedup and grouping key, [`diagnostic`] the reported
+//! failure, [`diagnostic_builder`] how one is assembled, [`verbosity`] how much of it is rendered,
+//! and [`reason`]/[`reason_tally`] the run-level fold.
 
 pub mod cause;
 pub mod code;
@@ -30,4 +30,5 @@ pub mod reason;
 pub mod reason_tally;
 pub mod schema_keyword;
 pub mod severity;
+pub mod unit_text;
 pub mod verbosity;

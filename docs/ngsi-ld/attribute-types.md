@@ -295,7 +295,7 @@ Within one mapping, the member follows the record Cassiopeia keeps for the entit
 
 ### unitCode
 
-`unitCode` records the unit of a `Property` value, and it is valid only on `Property`. The value is a UN/CEFACT Common Code, not the printed unit symbol: `CEL` means degree Celsius, `MTS` metre per second, and `A97` hectopascal. The temperature in example 14 carries `"unitCode": "CEL"`. When a unit has no Common Code, Cassiopeia leaves `unitCode` out instead of inventing one. [Example 20](https://github.com/vela-tools/cassiopeia-examples/blob/main/examples/20-csv-at-context/example.md) uses that rule for radius in Earth radii.
+`unitCode` records the unit of a `Property` value, and it is valid only on `Property`. The value is a UN/CEFACT Common Code, not the printed unit symbol: `CEL` means degree Celsius, `MTS` metre per second, and `A97` hectopascal. The temperature in example 14 carries `"unitCode": "CEL"`. When a unit has no Common Code, Cassiopeia leaves `unitCode` out instead of inventing one. A mapping that gives `unitCode` any other text, such as the symbol `ug/m3`, gets the attribute without `unitCode` and a `transform-unit-code-unknown` warning; the [`cefact_unit`](../templates.md#unit-codes) filter translates such a notation into its code. [Example 20](https://github.com/vela-tools/cassiopeia-examples/blob/main/examples/20-csv-at-context/example.md) uses that rule for radius in Earth radii.
 
 ### datasetId and multi-attributes
 

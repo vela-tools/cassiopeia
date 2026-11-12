@@ -4,6 +4,7 @@ use crate::{
     error::Result,
     instant_cache::InstantCache,
     qualifier_cache::QualifierCache,
+    qualifier_losses::QualifierLosses,
     transformer::Transformer,
     unit_code_cache::UnitCodeCache,
 };
@@ -13,7 +14,6 @@ use cassiopeia_ir::{
     mapped::Mapped,
 };
 use cassiopeia_ngsi_ld::entity::{NgsiLdEntity, builder::NgsiLdEntityBuilder};
-use cassiopeia_unreadable_timestamps::unreadable_timestamps::UnreadableTimestamps;
 use rayon::prelude::*;
 
 /// The standard [`Transformer`]: assembles an [`NgsiLdEntity`] from an extracted entity.
@@ -44,7 +44,7 @@ impl NgsiLdTransformer {
 /// Taking the cache as an argument is what lets a batch keep one per rayon worker: a `unitCode` is a
 /// mapping literal drawn from a fixed set, so resolving it once per entity still paid a full
 /// UN/CEFACT list match on the first attribute of every record. The result is identical either way.
-fn transform_entity(mapped: Mapped<Entity>, unit_codes: &mut UnitCodeCache, unreadable: &UnreadableTimestamps) -> NgsiLdEntity {
+fn transform_entity(mapped: Mapped<Entity>, unit_codes: &mut UnitCodeCache, losses: &QualifierLosses) -> NgsiLdEntity {
     let (entity, mappings) = mapped.into_mappings();
     // Nested relationships were folded into `metadata` as sub-attributes by the extractor, so the
     // transformer reads them from there and ignores the raw nested-relationship map here.
@@ -93,7 +93,7 @@ fn transform_entity(mapped: Mapped<Entity>, unit_codes: &mut UnitCodeCache, unre
     // their own value or objects from the shared maps, building every attribute exactly once.
     for mapping in &mappings {
         for (name, config) in mapping.attributes() {
-            if let Some(wrapper) = build_attribute(name, config, &mut store, &mut cache, unreadable) {
+            if let Some(wrapper) = build_attribute(name, config, &mut store, &mut cache, losses) {
                 builder = builder.attribute(name.clone(), wrapper);
             }
         }
@@ -103,23 +103,23 @@ fn transform_entity(mapped: Mapped<Entity>, unit_codes: &mut UnitCodeCache, unre
 }
 
 impl Transformer for NgsiLdTransformer {
-    fn transform(&self, mapped: Mapped<Entity>, unreadable: &UnreadableTimestamps) -> Result<NgsiLdEntity> {
-        Ok(transform_entity(mapped, &mut UnitCodeCache::new(), unreadable))
+    fn transform(&self, mapped: Mapped<Entity>, losses: &QualifierLosses) -> Result<NgsiLdEntity> {
+        Ok(transform_entity(mapped, &mut UnitCodeCache::new(), losses))
     }
 
-    fn transform_batch(&self, entities: Vec<Mapped<Entity>>, unreadable: &UnreadableTimestamps) -> Vec<Result<NgsiLdEntity>> {
+    fn transform_batch(&self, entities: Vec<Mapped<Entity>>, losses: &QualifierLosses) -> Vec<Result<NgsiLdEntity>> {
         match self.parallelism {
             // `map_init` hands each rayon worker one cache for the whole batch, so a run's distinct
             // unit codes are resolved once per worker rather than once per record.
             Parallelism::Parallel => entities
                 .into_par_iter()
-                .map_init(UnitCodeCache::new, |unit_codes, entity| Ok(transform_entity(entity, unit_codes, unreadable)))
+                .map_init(UnitCodeCache::new, |unit_codes, entity| Ok(transform_entity(entity, unit_codes, losses)))
                 .collect(),
             Parallelism::Sequential => {
                 let mut unit_codes = UnitCodeCache::new();
                 entities
                     .into_iter()
-                    .map(|entity| Ok(transform_entity(entity, &mut unit_codes, unreadable)))
+                    .map(|entity| Ok(transform_entity(entity, &mut unit_codes, losses)))
                     .collect()
             }
         }
@@ -128,8 +128,8 @@ impl Transformer for NgsiLdTransformer {
 
 #[cfg(test)]
 mod tests {
-    use crate::{ngsi_ld_transformer::NgsiLdTransformer, transformer::Transformer};
-    use cassiopeia_batch_sink::batch_sink::BatchSink;
+    use crate::{ngsi_ld_transformer::NgsiLdTransformer, qualifier_losses::QualifierLosses, transformer::Transformer};
+    use cassiopeia_batch_sink::{batch_sink::BatchSink, recurring::Recurring};
     use cassiopeia_common::parallelism::Parallelism;
     use cassiopeia_geometry::geometry::NgsiLdGeometry;
     use cassiopeia_ir::{
@@ -163,7 +163,7 @@ mod tests {
             types::{Number, Value},
         },
     };
-    use cassiopeia_unreadable_timestamps::{attribute_loss::AttributeLoss, timestamp_loss::TimestampLoss, unreadable_timestamps::UnreadableTimestamps};
+    use cassiopeia_unreadable_timestamps::{attribute_loss::AttributeLoss, timestamp_loss::TimestampLoss};
     use cefact_units::UnitCode;
     use chrono::{DateTime, TimeZone, Utc};
     use indexmap::IndexMap;
@@ -242,7 +242,7 @@ mod tests {
         let entity = Entity::new(urn("urn:ngsi-ld:WeatherObserved:1"), json!({}), None, None, IndexMap::default(), None);
 
         let result = NgsiLdTransformer::new()
-            .transform(Mapped::new(entity, mapping), &UnreadableTimestamps::new())
+            .transform(Mapped::new(entity, mapping), &QualifierLosses::new())
             .unwrap();
 
         assert_eq!(result.entity_type.as_str(), "WeatherObserved");
@@ -267,7 +267,7 @@ mod tests {
         ])));
 
         let result = NgsiLdTransformer::new()
-            .transform(Mapped::new(entity, mapping), &UnreadableTimestamps::new())
+            .transform(Mapped::new(entity, mapping), &QualifierLosses::new())
             .unwrap();
 
         assert_eq!(
@@ -285,7 +285,7 @@ mod tests {
         let entity = Entity::new(urn("urn:ngsi-ld:Sensor:1"), json!({}), None, None, IndexMap::default(), Some(value_map));
 
         let result = NgsiLdTransformer::new()
-            .transform(Mapped::new(entity, mapping), &UnreadableTimestamps::new())
+            .transform(Mapped::new(entity, mapping), &QualifierLosses::new())
             .unwrap();
 
         let Some(NgsiLdAttributeWrapper::Single(attr)) = result.attributes.get(&name("temperature")) else {
@@ -306,7 +306,7 @@ mod tests {
         let entity = Entity::new(urn("urn:ngsi-ld:Place:1"), json!({}), None, None, IndexMap::default(), Some(value_map));
 
         let result = NgsiLdTransformer::new()
-            .transform(Mapped::new(entity, mapping), &UnreadableTimestamps::new())
+            .transform(Mapped::new(entity, mapping), &QualifierLosses::new())
             .unwrap();
 
         let Some(NgsiLdAttributeWrapper::Single(attr)) = result.attributes.get(&name("address")) else {
@@ -341,7 +341,7 @@ mod tests {
         let entity = Entity::new(urn("urn:ngsi-ld:Place:1"), json!({}), None, None, IndexMap::default(), Some(value_map));
 
         let result = NgsiLdTransformer::new()
-            .transform(Mapped::new(entity, mapping), &UnreadableTimestamps::new())
+            .transform(Mapped::new(entity, mapping), &QualifierLosses::new())
             .unwrap();
 
         let Some(NgsiLdAttributeWrapper::Multi(instances)) = result.attributes.get(&name("address")) else {
@@ -366,7 +366,7 @@ mod tests {
         let entity = Entity::new(urn("urn:ngsi-ld:Sensor:1"), json!({}), None, None, IndexMap::default(), Some(value_map));
 
         let result = NgsiLdTransformer::new()
-            .transform(Mapped::new(entity, mapping), &UnreadableTimestamps::new())
+            .transform(Mapped::new(entity, mapping), &QualifierLosses::new())
             .unwrap();
 
         assert!(result.attributes.is_empty());
@@ -382,7 +382,7 @@ mod tests {
         let entity = Entity::new(urn("urn:ngsi-ld:Device:1"), json!({}), None, None, relationships, None);
 
         let result = NgsiLdTransformer::new()
-            .transform(Mapped::new(entity, mapping), &UnreadableTimestamps::new())
+            .transform(Mapped::new(entity, mapping), &QualifierLosses::new())
             .unwrap();
 
         let Some(NgsiLdAttributeWrapper::Single(attr)) = result.attributes.get(&name("controlledAsset")) else {
@@ -405,7 +405,7 @@ mod tests {
         let entity = Entity::new(urn("urn:ngsi-ld:Device:1"), json!({}), None, None, relationships, None);
 
         let result = NgsiLdTransformer::new()
-            .transform(Mapped::new(entity, mapping), &UnreadableTimestamps::new())
+            .transform(Mapped::new(entity, mapping), &QualifierLosses::new())
             .unwrap();
 
         let Some(NgsiLdAttributeWrapper::Single(attr)) = result.attributes.get(&name("assets")) else {
@@ -432,7 +432,7 @@ mod tests {
         entity.set_metadata(Some(metadata));
 
         let result = NgsiLdTransformer::new()
-            .transform(Mapped::new(entity, mapping), &UnreadableTimestamps::new())
+            .transform(Mapped::new(entity, mapping), &QualifierLosses::new())
             .unwrap();
 
         let Some(NgsiLdAttributeWrapper::Single(attr)) = result.attributes.get(&name("temperature")) else {
@@ -512,13 +512,13 @@ mod tests {
             "2026-03-01 11:04:35",
             "2026-03-01 13:04:35+02:00",
         ] {
-            let unreadable = UnreadableTimestamps::new();
+            let losses = QualifierLosses::new();
             let (entity, mapping) = entity_observed_at(spelling);
 
-            let result = NgsiLdTransformer::new().transform(Mapped::new(entity, mapping), &unreadable).unwrap();
+            let result = NgsiLdTransformer::new().transform(Mapped::new(entity, mapping), &losses).unwrap();
 
             assert_eq!(observed_at_of(&result), Some(expected), "mismatch for {spelling:?}");
-            assert!(unreadable.is_empty(), "{spelling:?} was recorded as unreadable");
+            assert!(losses.timestamps.is_empty(), "{spelling:?} was recorded as unreadable");
         }
     }
 
@@ -527,7 +527,7 @@ mod tests {
         let (entity, mapping) = entity_expires_at("2026-10-25T13:00:00Z");
 
         let result = NgsiLdTransformer::new()
-            .transform(Mapped::new(entity, mapping), &UnreadableTimestamps::new())
+            .transform(Mapped::new(entity, mapping), &QualifierLosses::new())
             .unwrap();
 
         assert_eq!(expires_at_of(&result), Some(Utc.with_ymd_and_hms(2026, 10, 25, 13, 0, 0).unwrap()));
@@ -541,7 +541,7 @@ mod tests {
         let entity = Entity::new(urn("urn:ngsi-ld:Sensor:1"), json!({}), scope, Some(expires_at), IndexMap::default(), None);
 
         let result = NgsiLdTransformer::new()
-            .transform(Mapped::new(entity, mapping), &UnreadableTimestamps::new())
+            .transform(Mapped::new(entity, mapping), &QualifierLosses::new())
             .unwrap();
 
         assert_eq!(result.expires_at, Some(expires_at));
@@ -550,13 +550,13 @@ mod tests {
 
     #[test]
     fn an_unreadable_expires_at_is_recorded_and_the_attribute_publishes_without_it() {
-        let unreadable = UnreadableTimestamps::new();
+        let losses = QualifierLosses::new();
         let (entity, mapping) = entity_expires_at("the day after tomorrow");
 
-        let result = NgsiLdTransformer::new().transform(Mapped::new(entity, mapping), &unreadable).unwrap();
+        let result = NgsiLdTransformer::new().transform(Mapped::new(entity, mapping), &losses).unwrap();
 
         assert_eq!(expires_at_of(&result), None);
-        let entries = BatchSink::from(unreadable).into_entries().collect::<Vec<_>>();
+        let entries = BatchSink::from(losses.timestamps).into_entries().collect::<Vec<_>>();
         assert_eq!(entries.len(), 1);
         assert_eq!(
             entries[0].0,
@@ -570,17 +570,17 @@ mod tests {
 
     #[test]
     fn an_unreadable_observed_at_is_recorded_against_the_attribute_that_still_publishes() {
-        let unreadable = UnreadableTimestamps::new();
+        let losses = QualifierLosses::new();
         let (entity, mapping) = entity_observed_at("the third of March");
 
-        let result = NgsiLdTransformer::new().transform(Mapped::new(entity, mapping), &unreadable).unwrap();
+        let result = NgsiLdTransformer::new().transform(Mapped::new(entity, mapping), &losses).unwrap();
 
         // The attribute publishes without the qualifier, which is exactly why the loss has to be
         // named: nothing in the emitted entity says the qualifier was ever meant to be there.
         assert!(result.attributes.contains_key(&name("temperature")));
         assert_eq!(observed_at_of(&result), None);
 
-        let entries = BatchSink::from(unreadable).into_entries().collect::<Vec<_>>();
+        let entries = BatchSink::from(losses.timestamps).into_entries().collect::<Vec<_>>();
         assert_eq!(entries.len(), 1);
         assert_eq!(
             entries[0].0,
@@ -594,13 +594,13 @@ mod tests {
 
     #[test]
     fn a_blank_observed_at_is_an_absent_qualifier_rather_than_an_unreadable_one() {
-        let unreadable = UnreadableTimestamps::new();
+        let losses = QualifierLosses::new();
         let (entity, mapping) = entity_observed_at("   ");
 
-        let result = NgsiLdTransformer::new().transform(Mapped::new(entity, mapping), &unreadable).unwrap();
+        let result = NgsiLdTransformer::new().transform(Mapped::new(entity, mapping), &losses).unwrap();
 
         assert_eq!(observed_at_of(&result), None);
-        assert!(unreadable.is_empty());
+        assert!(losses.timestamps.is_empty());
     }
 
     #[test]
@@ -650,7 +650,7 @@ mod tests {
         entity.set_metadata(Some(per_item));
 
         let result = NgsiLdTransformer::new()
-            .transform(Mapped::new(entity, mapping), &UnreadableTimestamps::new())
+            .transform(Mapped::new(entity, mapping), &QualifierLosses::new())
             .unwrap();
 
         let Some(NgsiLdAttributeWrapper::Multi(instances)) = result.attributes.get(&name("temperature")) else {
@@ -704,7 +704,7 @@ mod tests {
         )));
 
         let result = NgsiLdTransformer::new()
-            .transform(Mapped::new(entity, mapping), &UnreadableTimestamps::new())
+            .transform(Mapped::new(entity, mapping), &QualifierLosses::new())
             .unwrap();
 
         let Some(NgsiLdAttributeWrapper::Multi(instances)) = result.attributes.get(&name("servesAirport")) else {
@@ -761,7 +761,7 @@ mod tests {
         )));
 
         let result = NgsiLdTransformer::new()
-            .transform(Mapped::new(entity, mapping), &UnreadableTimestamps::new())
+            .transform(Mapped::new(entity, mapping), &QualifierLosses::new())
             .unwrap();
 
         let Some(NgsiLdAttributeWrapper::Multi(instances)) = result.attributes.get(&name("servesAirport")) else {
@@ -808,7 +808,7 @@ mod tests {
         )));
 
         let result = NgsiLdTransformer::new()
-            .transform(Mapped::new(entity, mapping), &UnreadableTimestamps::new())
+            .transform(Mapped::new(entity, mapping), &QualifierLosses::new())
             .unwrap();
 
         let Some(NgsiLdAttributeWrapper::Multi(instances)) = result.attributes.get(&name("servesAirports")) else {
@@ -868,7 +868,7 @@ mod tests {
         )));
 
         let result = NgsiLdTransformer::new()
-            .transform(Mapped::new(entity, mapping), &UnreadableTimestamps::new())
+            .transform(Mapped::new(entity, mapping), &QualifierLosses::new())
             .unwrap();
 
         let Some(NgsiLdAttributeWrapper::Multi(instances)) = result.attributes.get(&name("servesAirports")) else {
@@ -916,7 +916,7 @@ mod tests {
         entity.set_metadata(Some(metadata));
 
         let result = NgsiLdTransformer::new()
-            .transform(Mapped::new(entity, mapping), &UnreadableTimestamps::new())
+            .transform(Mapped::new(entity, mapping), &QualifierLosses::new())
             .unwrap();
 
         let Some(NgsiLdAttributeWrapper::Multi(instances)) = result.attributes.get(&name("location")) else {
@@ -960,7 +960,7 @@ mod tests {
         entity.set_metadata(Some(metadata));
 
         let result = NgsiLdTransformer::new()
-            .transform(Mapped::new(entity, mapping), &UnreadableTimestamps::new())
+            .transform(Mapped::new(entity, mapping), &QualifierLosses::new())
             .unwrap();
 
         let Some(NgsiLdAttributeWrapper::Multi(instances)) = result.attributes.get(&name("category")) else {
@@ -1026,7 +1026,7 @@ mod tests {
             entity.set_metadata(Some(metadata));
 
             let result = NgsiLdTransformer::new()
-                .transform(Mapped::new(entity, mapping), &UnreadableTimestamps::new())
+                .transform(Mapped::new(entity, mapping), &QualifierLosses::new())
                 .unwrap();
 
             let Some(NgsiLdAttributeWrapper::Multi(instances)) = result.attributes.get(&name(key)) else {
@@ -1059,7 +1059,7 @@ mod tests {
         entity.set_metadata(Some(metadata));
 
         let result = NgsiLdTransformer::new()
-            .transform(Mapped::new(entity, mapping), &UnreadableTimestamps::new())
+            .transform(Mapped::new(entity, mapping), &QualifierLosses::new())
             .unwrap();
 
         let Some(NgsiLdAttributeWrapper::Single(attr)) = result.attributes.get(&name("hasLeadActor")) else {
@@ -1094,7 +1094,7 @@ mod tests {
         entity.set_metadata(Some(metadata));
 
         let result = NgsiLdTransformer::new()
-            .transform(Mapped::new(entity, mapping), &UnreadableTimestamps::new())
+            .transform(Mapped::new(entity, mapping), &QualifierLosses::new())
             .unwrap();
 
         let Some(NgsiLdAttributeWrapper::Single(attr)) = result.attributes.get(&name("hasCast")) else {
@@ -1123,7 +1123,7 @@ mod tests {
 
         let results = NgsiLdTransformer::new()
             .with_parallelism(Parallelism::Sequential)
-            .transform_batch(batch, &UnreadableTimestamps::new());
+            .transform_batch(batch, &QualifierLosses::new());
 
         assert_eq!(results.len(), 2);
         assert!(results.iter().all(Result::is_ok));
@@ -1145,7 +1145,7 @@ mod tests {
 
         let results = NgsiLdTransformer::new()
             .with_parallelism(Parallelism::Parallel)
-            .transform_batch(batch, &UnreadableTimestamps::new());
+            .transform_batch(batch, &QualifierLosses::new());
 
         assert_eq!(results.len(), 2);
         assert!(results.iter().all(Result::is_ok));
@@ -1192,13 +1192,13 @@ mod tests {
         let alone = NgsiLdTransformer::new()
             .transform(
                 Mapped::new(qualified_entity("urn:ngsi-ld:Sensor:1", "2026-04-03T22:00:20Z", "CEL"), Arc::clone(&mapping)),
-                &UnreadableTimestamps::new(),
+                &QualifierLosses::new(),
             )
             .unwrap();
 
         let results = NgsiLdTransformer::new()
             .with_parallelism(Parallelism::Parallel)
-            .transform_batch(batch, &UnreadableTimestamps::new());
+            .transform_batch(batch, &QualifierLosses::new());
 
         assert_eq!(results.len(), 2);
         for result in &results {
@@ -1219,12 +1219,34 @@ mod tests {
 
         let results = NgsiLdTransformer::new()
             .with_parallelism(Parallelism::Sequential)
-            .transform_batch(batch, &UnreadableTimestamps::new())
+            .transform_batch(batch, &QualifierLosses::new())
             .into_iter()
             .map(|result| temperature(&result.expect("transformed")).unit_code)
             .collect::<Vec<Option<UnitCode>>>();
 
         assert_eq!(results, vec![Some(UnitCode::Cel), Some(UnitCode::Kwh), None]);
+    }
+
+    #[test]
+    fn a_repeated_unknown_unit_code_is_counted_once_per_text() {
+        let mapping = qualified_mapping();
+        let batch = vec![
+            Mapped::new(qualified_entity("urn:ngsi-ld:Sensor:1", "2026-04-03T22:00:20Z", "ug/m3x"), Arc::clone(&mapping)),
+            Mapped::new(qualified_entity("urn:ngsi-ld:Sensor:2", "2026-04-03T22:00:20Z", "ug/m3x"), Arc::clone(&mapping)),
+            Mapped::new(qualified_entity("urn:ngsi-ld:Sensor:3", "2026-04-03T22:00:20Z", "ug/m3x"), mapping),
+        ];
+        let losses = QualifierLosses::new();
+
+        let results = NgsiLdTransformer::new().with_parallelism(Parallelism::Parallel).transform_batch(batch, &losses);
+
+        for result in &results {
+            assert_eq!(temperature(result.as_ref().expect("transformed")).unit_code, None);
+        }
+        let entries = BatchSink::from(losses.unit_codes)
+            .into_entries()
+            .map(|(key, record)| (key.attribute.to_string(), key.text.into_string(), record.occurrences().get()))
+            .collect::<Vec<(String, String, u64)>>();
+        assert_eq!(entries, [("temperature".to_owned(), "ug/m3x".to_owned(), 3)]);
     }
 
     #[test]
@@ -1237,7 +1259,7 @@ mod tests {
 
         let observed = NgsiLdTransformer::new()
             .with_parallelism(Parallelism::Sequential)
-            .transform_batch(batch, &UnreadableTimestamps::new())
+            .transform_batch(batch, &QualifierLosses::new())
             .into_iter()
             .map(|result| temperature(&result.expect("transformed")).observed_at)
             .collect::<Vec<Option<DateTime<Utc>>>>();

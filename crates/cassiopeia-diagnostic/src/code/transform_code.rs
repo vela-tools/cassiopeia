@@ -13,11 +13,15 @@ pub enum TransformCode {
     /// so the attribute was emitted without the qualifier, whose value must be an NGSI-LD
     /// `DateTime` (ETSI GS CIM 009 v1.9.1 clauses 4.22 and 4.6.3).
     ExpiresAtUnreadable,
+    /// An attribute's `unitCode` carried text that is no UN/CEFACT Recommendation No. 20 common
+    /// code, the only kind of `unitCode` NGSI-LD admits, so the attribute was emitted without the
+    /// qualifier (ETSI GS CIM 009 v1.9.1 clause 4.5.2).
+    UnitCodeUnknown,
 }
 
 #[cfg(test)]
 mod tests {
-    use crate::code::transform_code::TransformCode;
+    use crate::code::{diagnostic_code::DiagnosticCode, transform_code::TransformCode};
     use pretty_assertions::assert_eq;
 
     #[test]
@@ -25,5 +29,13 @@ mod tests {
         assert_eq!(TransformCode::EntityUnbuildable.to_string(), "entity-unbuildable");
         assert_eq!(TransformCode::ObservedAtUnreadable.to_string(), "observed-at-unreadable");
         assert_eq!(TransformCode::ExpiresAtUnreadable.to_string(), "expires-at-unreadable");
+    }
+
+    #[test]
+    fn the_unit_code_unknown_code_renders_in_kebab_case() {
+        assert_eq!(
+            DiagnosticCode::Transform(TransformCode::UnitCodeUnknown).to_string(),
+            "transform-unit-code-unknown"
+        );
     }
 }

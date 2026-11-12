@@ -6,6 +6,7 @@ mod local_contexts;
 mod record_merges;
 mod relationships;
 mod station_mappings;
+mod unit_codes;
 mod unreadable_geometries;
 mod value_conversions;
 mod value_types;

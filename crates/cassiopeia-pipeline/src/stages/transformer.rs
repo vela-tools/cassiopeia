@@ -6,6 +6,7 @@ use crate::{
         pump::{BatchSender, PumpConfig, PumpProcessor, run_pump_stage},
         skipped_records::SkippedRecords,
         stage_env::StageEnv,
+        unknown_unit_code_report::unknown_unit_code_diagnostic,
         unreadable_timestamp_report::unreadable_timestamp_diagnostic,
     },
 };
@@ -22,8 +23,7 @@ use cassiopeia_diagnostic::severity::Severity;
 use cassiopeia_ir::{entity::Entity, mapped::Mapped};
 use cassiopeia_ngsi_ld::entity::NgsiLdEntity;
 use cassiopeia_reporter::{guard::StageGuard, reporter::Reporter};
-use cassiopeia_transformer::{error::TransformationError, ngsi_ld_transformer::NgsiLdTransformer, transformer::Transformer};
-use cassiopeia_unreadable_timestamps::unreadable_timestamps::UnreadableTimestamps;
+use cassiopeia_transformer::{error::TransformationError, ngsi_ld_transformer::NgsiLdTransformer, qualifier_losses::QualifierLosses, transformer::Transformer};
 use std::{ops::ControlFlow, sync::Arc};
 
 /// Builds each resolved entity into an [`NgsiLdEntity`].
@@ -32,10 +32,11 @@ use std::{ops::ControlFlow, sync::Arc};
 /// not abort the run. Failures are grouped by reason and each distinct one is reported once with a
 /// count, so a systematic mapping mistake reads as a named problem rather than as a number.
 ///
-/// An attribute whose `observedAt` or `expiresAt` reads as no instant is emitted without the
-/// qualifier rather than dropped, and the loss is named once per attribute and qualifier and counted
-/// as a warning: a value that publishes with nothing anchoring it in time, or with no bound on how
-/// long it holds, is exactly what nothing downstream can notice.
+/// An attribute whose `observedAt` or `expiresAt` reads as no instant, or whose `unitCode` is no
+/// UN/CEFACT code, is emitted without the qualifier rather than dropped, and the loss is named and
+/// counted as a warning: once per attribute and timestamp qualifier, and once per attribute and unit
+/// text. A value that publishes with nothing anchoring it in time, with no bound on how long it
+/// holds, or with no unit, is exactly what nothing downstream can notice.
 struct TransformerProcessor {
     /// The transformer that builds NGSI-LD entities, configured for the run's parallelism.
     transformer: NgsiLdTransformer,
@@ -53,10 +54,10 @@ impl PumpProcessor for TransformerProcessor {
     fn process(&mut self, batch: Batch<Mapped<Entity>>, stage: &StageGuard, tx: &BatchSender<NgsiLdEntity>) -> ControlFlow<()> {
         // The service span covers the transform only; the handoff downstream is output wait.
         let service = stage.service_span();
-        let unreadable = UnreadableTimestamps::new();
+        let losses = QualifierLosses::new();
         let mut transformed = Batch::with_capacity(batch.len());
         let mut skipped = SkippedRecords::<_, TransformationError>::new();
-        for result in self.transformer.transform_batch(Vec::from(batch), &unreadable) {
+        for result in self.transformer.transform_batch(Vec::from(batch), &losses) {
             match result {
                 Ok(entity) => transformed.push(entity),
                 Err(error) => skipped.record(error),
@@ -68,7 +69,10 @@ impl PumpProcessor for TransformerProcessor {
         if !skipped.is_empty() {
             skipped.report(self.reporter, Severity::Warning);
         }
-        let warnings = failed + report_sink(self.reporter, unreadable, unreadable_timestamp_diagnostic);
+        let QualifierLosses { timestamps, unit_codes } = losses;
+        let warnings = failed
+            + report_sink(self.reporter, timestamps, unreadable_timestamp_diagnostic)
+            + report_sink(self.reporter, unit_codes, unknown_unit_code_diagnostic);
         if warnings > 0 {
             stage.warn_inc_by(warnings);
             self.telemetry.add_warnings(warnings);

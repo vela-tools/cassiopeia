@@ -2,6 +2,7 @@ use crate::{
     attribute_builder::{build_list_relationship, build_relationship},
     metadata::{MetadataSummary, transform_metadata},
     qualifier_cache::QualifierCache,
+    qualifier_losses::QualifierLosses,
 };
 use cassiopeia_ir::{
     metadata::EntityMetadata,
@@ -13,7 +14,6 @@ use cassiopeia_ngsi_ld::entity::{
     builder::attribute::RelationshipBuilder,
     name::NameBuf,
 };
-use cassiopeia_unreadable_timestamps::unreadable_timestamps::UnreadableTimestamps;
 use urn_rs::Urn;
 
 /// The entity type a relationship's target points at, when the declaration names one.
@@ -31,14 +31,14 @@ pub(crate) fn build_single_relationship(
     relationships: &mut Relationships,
     metadata: Option<&EntityMetadata>,
     cache: &mut QualifierCache<'_>,
-    unreadable: &UnreadableTimestamps,
+    losses: &QualifierLosses,
 ) -> Option<NgsiLdAttributeWrapper> {
     let object = relationships.swap_remove(name.as_str())?.into_iter().next()?;
 
     Some(build_relationship(
         object,
         object_type(config),
-        transform_metadata(metadata, name, None, cache, unreadable),
+        transform_metadata(metadata, name, None, cache, losses),
     ))
 }
 
@@ -55,7 +55,7 @@ pub(crate) fn build_list_relationship_attribute(
     relationships: &mut Relationships,
     metadata: Option<&EntityMetadata>,
     cache: &mut QualifierCache<'_>,
-    unreadable: &UnreadableTimestamps,
+    losses: &QualifierLosses,
 ) -> Option<NgsiLdAttributeWrapper> {
     let objects = relationships.swap_remove(name.as_str())?;
     if objects.is_empty() {
@@ -65,7 +65,7 @@ pub(crate) fn build_list_relationship_attribute(
     Some(build_list_relationship(
         objects,
         object_type(config),
-        transform_metadata(metadata, name, None, cache, unreadable),
+        transform_metadata(metadata, name, None, cache, losses),
     ))
 }
 
@@ -105,7 +105,7 @@ pub(crate) fn build_multi_instance_relationship(
     instance_relationships: &mut InstanceRelationships,
     metadata: Option<&EntityMetadata>,
     cache: &mut QualifierCache<'_>,
-    unreadable: &UnreadableTimestamps,
+    losses: &QualifierLosses,
 ) -> Option<NgsiLdAttributeWrapper> {
     let per_instance = instance_relationships.swap_remove(name.as_str())?;
     let object_type = object_type(config);
@@ -113,7 +113,7 @@ pub(crate) fn build_multi_instance_relationship(
         .into_iter()
         .filter_map(|(index, objects)| {
             let object = objects.into_iter().next()?;
-            let meta = transform_metadata(metadata, name, Some(usize::from(index)), cache, unreadable);
+            let meta = transform_metadata(metadata, name, Some(usize::from(index)), cache, losses);
             Some(build_relationship_instance(object, object_type.as_ref(), meta))
         })
         .collect::<Vec<NgsiLdAttribute>>();
@@ -138,7 +138,7 @@ pub(crate) fn build_multi_instance_list_relationship(
     instance_relationships: &mut InstanceRelationships,
     metadata: Option<&EntityMetadata>,
     cache: &mut QualifierCache<'_>,
-    unreadable: &UnreadableTimestamps,
+    losses: &QualifierLosses,
 ) -> Option<NgsiLdAttributeWrapper> {
     let per_instance = instance_relationships.swap_remove(name.as_str())?;
     let object_type = object_type(config);
@@ -146,7 +146,7 @@ pub(crate) fn build_multi_instance_list_relationship(
         .into_iter()
         .filter(|(_, object_list)| !object_list.is_empty())
         .map(|(index, object_list)| {
-            let meta = transform_metadata(metadata, name, Some(usize::from(index)), cache, unreadable);
+            let meta = transform_metadata(metadata, name, Some(usize::from(index)), cache, losses);
             // The shared object type is cloned per instance; a struct literal keeps this an
             // initialization rather than a re-assignment over the `None` the constructor would set.
             NgsiLdAttribute::ListRelationship(NgsiLdListRelationship {

@@ -1,4 +1,4 @@
-use crate::{attribute_builder::build_sub_attribute, qualifier_cache::QualifierCache};
+use crate::{attribute_builder::build_sub_attribute, qualifier_cache::QualifierCache, qualifier_losses::QualifierLosses, unknown_unit_codes::UnknownUnitCodes};
 use cassiopeia_ir::{
     metadata::EntityMetadata,
     sub_attribute::{SubAttribute, SubAttributes},
@@ -50,14 +50,15 @@ impl MetadataSummary {
 /// when it is `None`, the attribute's shared metadata is read.
 ///
 /// `cache` carries the already-parsed `observedAt` texts and unit codes a mapping repeats across
-/// attributes, and `unreadable` gathers the `observedAt` texts that would not read at all.
+/// attributes, and `losses` gathers the qualifiers that had to be left off: an `observedAt` or
+/// `expiresAt` that would not read at all, and a `unitCode` that is no UN/CEFACT code.
 #[must_use]
 pub fn transform_metadata(
     metadata: Option<&EntityMetadata>,
     attr_name: &NameBuf,
     index: Option<usize>,
     cache: &mut QualifierCache<'_>,
-    unreadable: &UnreadableTimestamps,
+    losses: &QualifierLosses,
 ) -> MetadataSummary {
     let properties = metadata.and_then(|metadata| metadata.get(attr_name.as_str())).and_then(|storage| match index {
         Some(index) => storage.get_for_index(index),
@@ -65,7 +66,7 @@ pub fn transform_metadata(
     });
 
     match properties {
-        Some(properties) => summary_from(properties, attr_name, cache, unreadable),
+        Some(properties) => summary_from(properties, attr_name, cache, losses),
         None => empty_summary(),
     }
 }
@@ -82,6 +83,24 @@ fn record_unreadable(loss: TimestampLoss, attribute: &NameBuf, value: &Value, un
     if let Some(text) = value.reported_text() {
         unreadable.record(loss, attribute, text.as_ref());
     }
+}
+
+/// The UN/CEFACT code a `unitCode` qualifier carries, recording the qualifier as lost when it carries
+/// none.
+///
+/// ETSI GS CIM 009 v1.9.1 clause 4.5.2 admits only a Recommendation No. 20 common code as a
+/// `unitCode`, so any other text leaves the attribute without one; the attribute is still published,
+/// and the loss is recorded against `attribute` so the run can name the text. The code is looked up
+/// as the run would quote it, by the rule that tells a value "not carried" from one that is present
+/// ([`Value::reported_text`]): text without the whitespace around it, and any other value by its JSON
+/// rendering, so a source that holds the code `59` as a number still yields it.
+fn unit_code(value: &Value, attribute: &NameBuf, cache: &mut QualifierCache<'_>, unknown: &UnknownUnitCodes) -> Option<UnitCode> {
+    let text = value.reported_text()?;
+    let code = cache.unit_code(&text);
+    if code.is_none() {
+        unknown.record(attribute, &text);
+    }
+    code
 }
 
 /// The NGSI-LD Value a qualifier sub-attribute carries; a qualifier declared as raw JSON carries
@@ -110,25 +129,25 @@ fn empty_summary() -> MetadataSummary {
 /// sub-attribute whose builder rejects its value is dropped rather than emitted malformed.
 ///
 /// `attribute` names the attribute these properties qualify, so an `observedAt` or `expiresAt` that
-/// will not read is recorded against it, including one declared on a nested sub-attribute, which is
-/// a timestamp that same attribute lost.
-fn summary_from(props: &SubAttributes, attribute: &NameBuf, cache: &mut QualifierCache<'_>, unreadable: &UnreadableTimestamps) -> MetadataSummary {
+/// will not read, or a `unitCode` that is no code, is recorded against it, including one declared on
+/// a nested sub-attribute, which is a qualifier that same attribute lost.
+fn summary_from(props: &SubAttributes, attribute: &NameBuf, cache: &mut QualifierCache<'_>, losses: &QualifierLosses) -> MetadataSummary {
     let mut summary = empty_summary();
 
     if let Some(observed_at) = props.get("observedAt").and_then(qualifier) {
         match cache.instant(observed_at) {
             Some(datetime) => summary.observed_at = Some(datetime),
-            None => record_unreadable(TimestampLoss::ObservedAt, attribute, observed_at, unreadable),
+            None => record_unreadable(TimestampLoss::ObservedAt, attribute, observed_at, &losses.timestamps),
         }
     }
     if let Some(expires_at) = props.get("expiresAt").and_then(qualifier) {
         match cache.instant(expires_at) {
             Some(datetime) => summary.expires_at = Some(datetime),
-            None => record_unreadable(TimestampLoss::ExpiresAt, attribute, expires_at, unreadable),
+            None => record_unreadable(TimestampLoss::ExpiresAt, attribute, expires_at, &losses.timestamps),
         }
     }
-    if let Some(unit_code) = props.get("unitCode").and_then(qualifier).and_then(Value::as_str) {
-        summary.unit_code = cache.unit_code(unit_code);
+    if let Some(declared) = props.get("unitCode").and_then(qualifier) {
+        summary.unit_code = unit_code(declared, attribute, cache, &losses.unit_codes);
     }
     // An invalid `datasetId` is dropped rather than emitted malformed: the qualifier is optional
     // (NGSI-LD 4.5.5) and must be a URI.
@@ -142,7 +161,7 @@ fn summary_from(props: &SubAttributes, attribute: &NameBuf, cache: &mut Qualifie
         }
         // Shared metadata answers for every instance, so each sub-attribute takes its own copy of the
         // datatype its declaration named.
-        let sub_meta = summary_from(sub.metadata(), attribute, cache, unreadable).with_value_type(sub.value_type().clone());
+        let sub_meta = summary_from(sub.metadata(), attribute, cache, losses).with_value_type(sub.value_type().clone());
         // The metadata is borrowed rather than consumed because shared metadata answers for every
         // instance of a multi-instance attribute, so each sub-attribute built from it takes a copy.
         if let Some(wrapper) = build_sub_attribute(*sub.kind(), sub.value().clone(), sub.object_type().clone(), sub_meta) {
@@ -159,9 +178,10 @@ mod tests {
         instant_cache::InstantCache,
         metadata::{MetadataSummary, transform_metadata},
         qualifier_cache::QualifierCache,
+        qualifier_losses::QualifierLosses,
         unit_code_cache::UnitCodeCache,
     };
-    use cassiopeia_batch_sink::batch_sink::BatchSink;
+    use cassiopeia_batch_sink::{batch_sink::BatchSink, recurring::Recurring};
     use cassiopeia_geometry::geometry::NgsiLdGeometry;
     use cassiopeia_ir::{attribute_content::AttributeContent, metadata::MetadataStorage, sub_attribute::SubAttribute};
     use cassiopeia_ngsi_ld::{
@@ -172,7 +192,8 @@ mod tests {
         },
         value::types::{TemporalValue, Value},
     };
-    use cassiopeia_unreadable_timestamps::{attribute_loss::AttributeLoss, timestamp_loss::TimestampLoss, unreadable_timestamps::UnreadableTimestamps};
+    use cassiopeia_unreadable_timestamps::{attribute_loss::AttributeLoss, timestamp_loss::TimestampLoss};
+    use cefact_units::UnitCode;
     use chrono::{TimeZone, Utc};
     use indexmap::IndexMap;
     use iri_rs::IriBuf;
@@ -216,7 +237,7 @@ mod tests {
             &name("address"),
             None,
             &mut QualifierCache::new(&mut InstantCache::new(), &mut UnitCodeCache::new()),
-            &UnreadableTimestamps::new(),
+            &QualifierLosses::new(),
         );
 
         let NgsiLdAttribute::Property(formatted) = attribute(&summary, "formatted") else {
@@ -233,7 +254,7 @@ mod tests {
             &name("temperature"),
             None,
             &mut QualifierCache::new(&mut InstantCache::new(), &mut UnitCodeCache::new()),
-            &UnreadableTimestamps::new(),
+            &QualifierLosses::new(),
         );
 
         assert_eq!(summary.observed_at, None);
@@ -256,7 +277,7 @@ mod tests {
             &name("temperature"),
             None,
             &mut QualifierCache::new(&mut InstantCache::new(), &mut UnitCodeCache::new()),
-            &UnreadableTimestamps::new(),
+            &QualifierLosses::new(),
         );
 
         assert!(summary.observed_at.is_some());
@@ -266,7 +287,7 @@ mod tests {
     }
 
     /// The summary for a `temperature` whose only qualifier is the `observedAt` `value`.
-    fn summary_with_observed_at(value: Value, unreadable: &UnreadableTimestamps) -> MetadataSummary {
+    fn summary_with_observed_at(value: Value, losses: &QualifierLosses) -> MetadataSummary {
         let mut shared = IndexMap::default();
         shared.insert(
             name("observedAt"),
@@ -280,28 +301,28 @@ mod tests {
             &name("temperature"),
             None,
             &mut QualifierCache::new(&mut InstantCache::new(), &mut UnitCodeCache::new()),
-            unreadable,
+            losses,
         )
     }
 
     #[test]
     fn a_numeric_epoch_observed_at_is_lifted_as_an_instant() {
-        let unreadable = UnreadableTimestamps::new();
+        let losses = QualifierLosses::new();
 
-        let summary = summary_with_observed_at(Value::from(1_775_253_620_i64), &unreadable);
+        let summary = summary_with_observed_at(Value::from(1_775_253_620_i64), &losses);
 
         assert!(summary.observed_at.is_some());
-        assert!(unreadable.is_empty());
+        assert!(losses.timestamps.is_empty());
     }
 
     #[test]
     fn a_numeric_observed_at_that_is_no_epoch_is_recorded_rather_than_lost() {
-        let unreadable = UnreadableTimestamps::new();
+        let losses = QualifierLosses::new();
 
-        let summary = summary_with_observed_at(Value::from(2026_i64), &unreadable);
+        let summary = summary_with_observed_at(Value::from(2026_i64), &losses);
 
         assert_eq!(summary.observed_at, None);
-        let entries = BatchSink::from(unreadable).into_entries().collect::<Vec<_>>();
+        let entries = BatchSink::from(losses.timestamps).into_entries().collect::<Vec<_>>();
         assert_eq!(entries.len(), 1);
         assert_eq!(
             entries[0].0,
@@ -315,27 +336,27 @@ mod tests {
 
     #[test]
     fn an_observed_at_extraction_already_read_as_an_instant_is_lifted_as_that_instant() {
-        let unreadable = UnreadableTimestamps::new();
+        let losses = QualifierLosses::new();
         let instant = Utc.with_ymd_and_hms(2026, 4, 3, 22, 0, 20).unwrap();
 
-        let summary = summary_with_observed_at(Value::Temporal(TemporalValue::DateTime(instant)), &unreadable);
+        let summary = summary_with_observed_at(Value::Temporal(TemporalValue::DateTime(instant)), &losses);
 
         assert_eq!(summary.observed_at, Some(instant));
-        assert!(unreadable.is_empty());
+        assert!(losses.timestamps.is_empty());
     }
 
     #[test]
     fn a_blank_observed_at_is_absent_rather_than_unreadable() {
-        let unreadable = UnreadableTimestamps::new();
+        let losses = QualifierLosses::new();
 
-        let summary = summary_with_observed_at(Value::String("  ".into()), &unreadable);
+        let summary = summary_with_observed_at(Value::String("  ".into()), &losses);
 
         assert_eq!(summary.observed_at, None);
-        assert!(unreadable.is_empty());
+        assert!(losses.timestamps.is_empty());
     }
 
     /// The summary for a `temperature` whose only qualifier is the `expiresAt` `value`.
-    fn summary_with_expires_at(value: Value, unreadable: &UnreadableTimestamps) -> MetadataSummary {
+    fn summary_with_expires_at(value: Value, losses: &QualifierLosses) -> MetadataSummary {
         let mut shared = IndexMap::default();
         shared.insert(
             name("expiresAt"),
@@ -349,41 +370,41 @@ mod tests {
             &name("temperature"),
             None,
             &mut QualifierCache::new(&mut InstantCache::new(), &mut UnitCodeCache::new()),
-            unreadable,
+            losses,
         )
     }
 
     #[test]
     fn an_expires_at_is_lifted_as_an_instant_rather_than_left_a_sub_attribute() {
-        let unreadable = UnreadableTimestamps::new();
+        let losses = QualifierLosses::new();
 
-        let summary = summary_with_expires_at(Value::try_from(json!("2026-10-25T13:00:00Z")).unwrap(), &unreadable);
+        let summary = summary_with_expires_at(Value::try_from(json!("2026-10-25T13:00:00Z")).unwrap(), &losses);
 
         assert_eq!(summary.expires_at, Some(Utc.with_ymd_and_hms(2026, 10, 25, 13, 0, 0).unwrap()));
         assert!(summary.custom_attributes.is_empty());
-        assert!(unreadable.is_empty());
+        assert!(losses.timestamps.is_empty());
     }
 
     #[test]
     fn an_expires_at_extraction_already_read_as_an_instant_is_lifted_as_that_instant() {
-        let unreadable = UnreadableTimestamps::new();
+        let losses = QualifierLosses::new();
         let instant = Utc.with_ymd_and_hms(2026, 10, 25, 13, 0, 0).unwrap();
 
-        let summary = summary_with_expires_at(Value::Temporal(TemporalValue::DateTime(instant)), &unreadable);
+        let summary = summary_with_expires_at(Value::Temporal(TemporalValue::DateTime(instant)), &losses);
 
         assert_eq!(summary.expires_at, Some(instant));
-        assert!(unreadable.is_empty());
+        assert!(losses.timestamps.is_empty());
     }
 
     #[test]
     fn an_expires_at_that_reads_as_no_instant_is_recorded_under_its_own_loss() {
-        let unreadable = UnreadableTimestamps::new();
+        let losses = QualifierLosses::new();
 
-        let summary = summary_with_expires_at(Value::try_from(json!("tomorrow")).unwrap(), &unreadable);
+        let summary = summary_with_expires_at(Value::try_from(json!("tomorrow")).unwrap(), &losses);
 
         assert_eq!(summary.expires_at, None);
         assert!(summary.custom_attributes.is_empty());
-        let entries = BatchSink::from(unreadable).into_entries().collect::<Vec<_>>();
+        let entries = BatchSink::from(losses.timestamps).into_entries().collect::<Vec<_>>();
         assert_eq!(entries.len(), 1);
         assert_eq!(
             entries[0].0,
@@ -397,17 +418,17 @@ mod tests {
 
     #[test]
     fn a_blank_expires_at_is_absent_rather_than_unreadable() {
-        let unreadable = UnreadableTimestamps::new();
+        let losses = QualifierLosses::new();
 
-        let summary = summary_with_expires_at(Value::String("  ".into()), &unreadable);
+        let summary = summary_with_expires_at(Value::String("  ".into()), &losses);
 
         assert_eq!(summary.expires_at, None);
-        assert!(unreadable.is_empty());
+        assert!(losses.timestamps.is_empty());
     }
 
     #[test]
     fn one_attribute_losing_both_qualifiers_records_each_under_its_own_loss() {
-        let unreadable = UnreadableTimestamps::new();
+        let losses = QualifierLosses::new();
         let mut shared = IndexMap::default();
         shared.insert(name("observedAt"), sub(NgsiLdAttributeKind::Property, json!("nope")));
         shared.insert(name("expiresAt"), sub(NgsiLdAttributeKind::Property, json!("later")));
@@ -419,12 +440,12 @@ mod tests {
             &name("temperature"),
             None,
             &mut QualifierCache::new(&mut InstantCache::new(), &mut UnitCodeCache::new()),
-            &unreadable,
+            &losses,
         );
 
         assert_eq!(summary.observed_at, None);
         assert_eq!(summary.expires_at, None);
-        let entries = BatchSink::from(unreadable).into_entries().collect::<Vec<_>>();
+        let entries = BatchSink::from(losses.timestamps).into_entries().collect::<Vec<_>>();
         assert_eq!(entries.len(), 2);
         assert_eq!(
             entries[0].0,
@@ -442,6 +463,123 @@ mod tests {
         );
     }
 
+    /// The summary for a `pm10` whose only qualifier is the `unitCode` `value`.
+    fn summary_with_unit_code(value: JsonValue, losses: &QualifierLosses) -> MetadataSummary {
+        let mut shared = IndexMap::default();
+        shared.insert(name("unitCode"), sub(NgsiLdAttributeKind::Property, value));
+        let mut metadata = IndexMap::default();
+        metadata.insert(name("pm10"), MetadataStorage::shared(shared));
+
+        transform_metadata(
+            Some(&metadata),
+            &name("pm10"),
+            None,
+            &mut QualifierCache::new(&mut InstantCache::new(), &mut UnitCodeCache::new()),
+            losses,
+        )
+    }
+
+    /// Every unknown unit code `losses` recorded, as its attribute, its text, and how often it was met.
+    fn unknown_unit_codes(losses: QualifierLosses) -> Vec<(String, String, u64)> {
+        BatchSink::from(losses.unit_codes)
+            .into_entries()
+            .map(|(key, record)| (key.attribute.to_string(), key.text.into_string(), record.occurrences().get()))
+            .collect()
+    }
+
+    fn unknown(attribute: &str, text: &str, occurrences: u64) -> (String, String, u64) {
+        (attribute.to_owned(), text.to_owned(), occurrences)
+    }
+
+    #[test]
+    fn a_recommendation_20_unit_code_is_kept() {
+        let losses = QualifierLosses::new();
+
+        let summary = summary_with_unit_code(json!("GQ"), &losses);
+
+        assert_eq!(summary.unit_code, Some(UnitCode::Gq));
+        assert!(losses.unit_codes.is_empty());
+    }
+
+    #[test]
+    fn an_unknown_unit_code_is_left_out_and_recorded() {
+        let losses = QualifierLosses::new();
+
+        let summary = summary_with_unit_code(json!("ug/m3x"), &losses);
+
+        assert_eq!(summary.unit_code, None);
+        assert!(summary.custom_attributes.is_empty());
+        assert_eq!(unknown_unit_codes(losses), [unknown("pm10", "ug/m3x", 1)]);
+    }
+
+    #[test]
+    fn a_non_text_unit_code_is_recorded_by_its_json_text() {
+        let losses = QualifierLosses::new();
+
+        let summary = summary_with_unit_code(json!(5), &losses);
+
+        assert_eq!(summary.unit_code, None);
+        assert_eq!(unknown_unit_codes(losses), [unknown("pm10", "5", 1)]);
+    }
+
+    #[test]
+    fn a_numeric_unit_code_whose_json_text_is_a_code_is_kept() {
+        let losses = QualifierLosses::new();
+
+        let summary = summary_with_unit_code(json!(59), &losses);
+
+        assert_eq!(summary.unit_code, Some(UnitCode::Code59));
+        assert!(losses.unit_codes.is_empty());
+    }
+
+    #[test]
+    fn a_unit_code_is_read_without_the_whitespace_around_it() {
+        let losses = QualifierLosses::new();
+
+        let summary = summary_with_unit_code(json!(" GQ "), &losses);
+
+        assert_eq!(summary.unit_code, Some(UnitCode::Gq));
+        assert!(losses.unit_codes.is_empty());
+    }
+
+    #[test]
+    fn a_blank_unit_code_is_absent_rather_than_unknown() {
+        let losses = QualifierLosses::new();
+
+        let summary = summary_with_unit_code(json!("  "), &losses);
+
+        assert_eq!(summary.unit_code, None);
+        assert!(losses.unit_codes.is_empty());
+    }
+
+    #[test]
+    fn an_unknown_unit_code_on_a_sub_attribute_is_recorded_against_its_attribute() {
+        let losses = QualifierLosses::new();
+        let mut max = IndexMap::default();
+        max.insert(name("unitCode"), sub(NgsiLdAttributeKind::Property, json!("x")));
+        let mut shared = IndexMap::default();
+        shared.insert(
+            name("max"),
+            SubAttribute::new(NgsiLdAttributeKind::Property, AttributeContent::Value(Value::try_from(json!(30)).unwrap()), max),
+        );
+        let mut metadata = IndexMap::default();
+        metadata.insert(name("temperature"), MetadataStorage::shared(shared));
+
+        let summary = transform_metadata(
+            Some(&metadata),
+            &name("temperature"),
+            None,
+            &mut QualifierCache::new(&mut InstantCache::new(), &mut UnitCodeCache::new()),
+            &losses,
+        );
+
+        let NgsiLdAttribute::Property(max) = attribute(&summary, "max") else {
+            panic!("expected a property sub-attribute");
+        };
+        assert_eq!(max.unit_code, None);
+        assert_eq!(unknown_unit_codes(losses), [unknown("temperature", "x", 1)]);
+    }
+
     #[test]
     fn one_cache_shared_across_attributes_yields_the_same_summaries_as_fresh_ones() {
         let mut shared = IndexMap::default();
@@ -454,14 +592,14 @@ mod tests {
         let mut observed_at = InstantCache::new();
         let mut unit_codes = UnitCodeCache::new();
         let mut cache = QualifierCache::new(&mut observed_at, &mut unit_codes);
-        let first = transform_metadata(Some(&metadata), &name("import"), None, &mut cache, &UnreadableTimestamps::new());
-        let second = transform_metadata(Some(&metadata), &name("export"), None, &mut cache, &UnreadableTimestamps::new());
+        let first = transform_metadata(Some(&metadata), &name("import"), None, &mut cache, &QualifierLosses::new());
+        let second = transform_metadata(Some(&metadata), &name("export"), None, &mut cache, &QualifierLosses::new());
         let fresh = transform_metadata(
             Some(&metadata),
             &name("export"),
             None,
             &mut QualifierCache::new(&mut InstantCache::new(), &mut UnitCodeCache::new()),
-            &UnreadableTimestamps::new(),
+            &QualifierLosses::new(),
         );
 
         assert_eq!(first.observed_at, second.observed_at);
@@ -485,8 +623,8 @@ mod tests {
         let mut observed_at = InstantCache::new();
         let mut unit_codes = UnitCodeCache::new();
         let mut cache = QualifierCache::new(&mut observed_at, &mut unit_codes);
-        let energy = transform_metadata(Some(&metadata), &name("energy"), None, &mut cache, &UnreadableTimestamps::new());
-        let voltage = transform_metadata(Some(&metadata), &name("voltage"), None, &mut cache, &UnreadableTimestamps::new());
+        let energy = transform_metadata(Some(&metadata), &name("energy"), None, &mut cache, &QualifierLosses::new());
+        let voltage = transform_metadata(Some(&metadata), &name("voltage"), None, &mut cache, &QualifierLosses::new());
 
         assert!(energy.observed_at.is_some());
         assert!(voltage.observed_at.is_some());
@@ -499,7 +637,7 @@ mod tests {
                 &name("energy"),
                 None,
                 &mut QualifierCache::new(&mut InstantCache::new(), &mut UnitCodeCache::new()),
-                &UnreadableTimestamps::new(),
+                &QualifierLosses::new(),
             )
             .unit_code
         );
@@ -520,7 +658,7 @@ mod tests {
             &name("sugars"),
             None,
             &mut QualifierCache::new(&mut InstantCache::new(), &mut UnitCodeCache::new()),
-            &UnreadableTimestamps::new(),
+            &QualifierLosses::new(),
         );
 
         let NgsiLdAttribute::VocabProperty(property) = attribute(&summary, "level") else {
@@ -554,7 +692,7 @@ mod tests {
             &name("sugars"),
             None,
             &mut QualifierCache::new(&mut InstantCache::new(), &mut UnitCodeCache::new()),
-            &UnreadableTimestamps::new(),
+            &QualifierLosses::new(),
         );
 
         assert!(matches!(attribute(&summary, "tags"), NgsiLdAttribute::ListProperty(_)));
@@ -591,7 +729,7 @@ mod tests {
             &name("name"),
             None,
             &mut QualifierCache::new(&mut InstantCache::new(), &mut UnitCodeCache::new()),
-            &UnreadableTimestamps::new(),
+            &QualifierLosses::new(),
         );
 
         let NgsiLdAttribute::GeoProperty(footprint) = attribute(&summary, "footprint") else {
@@ -612,7 +750,7 @@ mod tests {
             &name("temperature"),
             None,
             &mut QualifierCache::new(&mut InstantCache::new(), &mut UnitCodeCache::new()),
-            &UnreadableTimestamps::new(),
+            &QualifierLosses::new(),
         );
 
         assert!(matches!(attribute(&summary, "accuracy"), NgsiLdAttribute::Property(_)));
@@ -638,7 +776,7 @@ mod tests {
             &name("hasLeadActor"),
             None,
             &mut QualifierCache::new(&mut InstantCache::new(), &mut UnitCodeCache::new()),
-            &UnreadableTimestamps::new(),
+            &QualifierLosses::new(),
         );
 
         let NgsiLdAttribute::Relationship(relationship) = attribute(&summary, "playsCharacter") else {
@@ -666,7 +804,7 @@ mod tests {
             &name("sugars"),
             None,
             &mut QualifierCache::new(&mut InstantCache::new(), &mut UnitCodeCache::new()),
-            &UnreadableTimestamps::new(),
+            &QualifierLosses::new(),
         );
 
         let NgsiLdAttribute::VocabProperty(property) = attribute(&summary, "level") else {

@@ -1167,6 +1167,7 @@ dependencies = [
  "cassiopeia-unreadable-timestamps",
  "cefact-units",
  "chrono",
+ "derive_more",
  "indexmap 2.14.2",
  "iri-rs",
  "langtag",

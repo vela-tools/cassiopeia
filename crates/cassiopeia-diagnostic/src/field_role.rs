@@ -31,6 +31,7 @@ impl ContextField {
             | ContextFieldKind::Keyword
             | ContextFieldKind::Detail
             | ContextFieldKind::RenamedColumn
+            | ContextFieldKind::UnitText
             | ContextFieldKind::Source => FieldRole::Defining,
             ContextFieldKind::Entities
             | ContextFieldKind::Attempt
@@ -50,6 +51,7 @@ mod tests {
         field_role::FieldRole,
         json_pointer::JsonPointer,
         schema_keyword::SchemaKeyword,
+        unit_text::UnitText,
     };
     use cassiopeia_common::{captured_body::CapturedBody, input::Input, masked_url::MaskedUrl};
     use cassiopeia_csv_column::{column_key::ColumnKey, column_number::ColumnNumber, renamed_column::RenamedColumn};
@@ -79,6 +81,7 @@ mod tests {
                 column: ColumnNumber::of_index(2),
                 key: ColumnKey::from("value@3".to_owned()),
             }),
+            ContextField::UnitText(UnitText::new("ug/m3")),
             ContextField::Entities {
                 first: IriBuf::new("urn:ngsi-ld:A:1".to_owned()).unwrap(),
                 additional: 99,

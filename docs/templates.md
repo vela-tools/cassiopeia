@@ -128,7 +128,7 @@ Symbols and codes are case-sensitive, since `Mm` is the megametre and `mm` the m
 
 The notations come from Recommendation No. 20 itself, which gives a name to every code and a symbol to most, and from the QUDT unit vocabulary, which gives the IRI, symbols, UCUM and UDUNITS codes, and English labels of each unit that carries a Recommendation No. 20 code. Where QUDT gives a unit the code of a different unit, Cassiopeia reads it with the right code or with none. A notation that names more than one unit in common use, such as `kt` (knot or kilotonne) or `st` (stere or stone), resolves to no code rather than to a guess. A code current in the latest revision of Recommendation No. 20 is preferred. A deprecated code, which the recommendation still lists but not for new data, is written only for a unit that has no current code, such as the hectare (`HAR`) or the millimetre of mercury (`HN`). A deleted code is never written.
 
-A notation that resolves to no code reaches `unitCode` unchanged.
+A notation that resolves to no code reaches `unitCode` unchanged. It is no code there either, so the attribute is written without `unitCode`, and the run warns under the `transform-unit-code-unknown` code, naming the attribute and the text.
 
 ### Math filters
 
