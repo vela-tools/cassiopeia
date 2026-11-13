@@ -5,6 +5,7 @@ use crate::cli::{
     mapping::MappingCommand,
     schema::SchemaCommand,
     sdm::SdmCommand,
+    sensorthings::SensorThingsCommand,
     version::{ABOUT, long_version, short_version},
 };
 use cassiopeia_cli::clap_theme::THEME;
@@ -24,6 +25,7 @@ pub mod output_format;
 pub mod schedule;
 pub mod schema;
 pub mod sdm;
+pub mod sensorthings;
 pub mod validator;
 pub mod version;
 pub mod writer;
@@ -107,6 +109,10 @@ pub enum Commands {
         /// The file to profile.
         file: PathBuf,
     },
+
+    /// SensorThings API server operations.
+    #[command(name = "sensorthings", arg_required_else_help = true)]
+    SensorThings(SensorThingsCommand),
 
     /// Print a diagnostic report to attach when filing a bug.
     Bugreport,

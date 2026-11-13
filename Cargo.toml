@@ -20,6 +20,7 @@ repository.workspace = true
 
 [dependencies]
 cassiopeia-cli.workspace = true
+cassiopeia-collector.workspace = true
 cassiopeia-common.workspace = true
 cassiopeia-configuration.workspace = true
 cassiopeia-diagnostic.workspace = true
@@ -27,6 +28,7 @@ cassiopeia-directories.workspace = true
 cassiopeia-manifest.workspace = true
 cassiopeia-pipeline.workspace = true
 cassiopeia-reporter.workspace = true
+cassiopeia-sensorthings.workspace = true
 cassiopeia-terminal-style.workspace = true
 bugreport = { version = "0.6.0", default-features = false, features = ["collector_operating_system", "format_markdown"] }
 clap = { version = "4.6.7", features = ["derive", "wrap_help"] }
@@ -44,7 +46,9 @@ url = "2.5.8"
 
 [dev-dependencies]
 cassiopeia-ngsi-ld.workspace = true
+mockito = { version = "1.7.2", default-features = false }
 pretty_assertions = "1.4.1"
+serde_json = "1.0.154"
 urn-rs = "0.9.2"
 
 [build-dependencies]

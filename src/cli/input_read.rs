@@ -1,4 +1,7 @@
-use cassiopeia_common::{format::DataFormat, request_header::RequestHeader};
+use cassiopeia_common::{
+    format::DataFormat,
+    request_header::{RequestHeader, RequestHeaders},
+};
 use clap::{ArgAction, Args};
 
 /// How a run reads its input: the headers a remote fetch sends and the format the content is parsed
@@ -8,11 +11,8 @@ use clap::{ArgAction, Args};
 /// apart.
 #[derive(Args, Debug, PartialEq, Eq)]
 pub struct InputReadArgs {
-    /// Extra HTTP header sent when fetching a remote input, written as `Name: Value`; repeat for
-    /// several. Typically carries an API key, e.g. `--input-header "X-Api-Key: <key>"`. Refused for a
-    /// local input.
-    #[arg(long = "input-header", action = ArgAction::Append, help_heading = "Input", value_name = "NAME: VALUE")]
-    pub input_headers: Vec<RequestHeader>,
+    #[command(flatten)]
+    pub headers: InputHeaderArgs,
 
     /// Data format of the input source.
     #[arg(
@@ -26,10 +26,40 @@ pub struct InputReadArgs {
     pub format_type: DataFormat,
 }
 
+/// The headers a remote fetch sends.
+///
+/// Shared by every command that reads a remote input, the `sensorthings` commands among them, so
+/// their `--input-header` flags cannot drift apart.
+#[derive(Args, Debug, PartialEq, Eq)]
+pub struct InputHeaderArgs {
+    /// Extra HTTP header sent when fetching a remote input, written as `Name: Value`; repeat for
+    /// several. Typically carries an API key, e.g. `--input-header "X-Api-Key: <key>"`. Refused for a
+    /// local input.
+    #[arg(long = "input-header", action = ArgAction::Append, help_heading = "Input", value_name = "NAME: VALUE")]
+    pub input_headers: Vec<RequestHeader>,
+}
+
+impl InputHeaderArgs {
+    /// The headers as the set every request to the input carries.
+    #[must_use]
+    pub fn request_headers(&self) -> RequestHeaders {
+        // The set owns its headers, while the parsed command line keeps its own.
+        RequestHeaders::new(self.input_headers.clone())
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use crate::cli::{Cli, Commands, input_read::InputReadArgs, manifest::ManifestSubcommand};
-    use cassiopeia_common::{format::DataFormat, request_header::RequestHeader};
+    use crate::cli::{
+        Cli,
+        Commands,
+        input_read::{InputHeaderArgs, InputReadArgs},
+        manifest::ManifestSubcommand,
+    };
+    use cassiopeia_common::{
+        format::DataFormat,
+        request_header::{RequestHeader, RequestHeaders},
+    };
     use clap::Parser;
     use pretty_assertions::assert_eq;
     use std::str::FromStr;
@@ -56,7 +86,9 @@ mod tests {
     #[test]
     fn map_and_generate_read_the_same_input_flags_into_the_same_values() {
         let expected = InputReadArgs {
-            input_headers: vec![RequestHeader::from_str("X-Api-Key: k").unwrap()],
+            headers: InputHeaderArgs {
+                input_headers: vec![RequestHeader::from_str("X-Api-Key: k").unwrap()],
+            },
             format_type: DataFormat::Csv,
         };
 
@@ -67,11 +99,24 @@ mod tests {
     #[test]
     fn absent_input_flags_send_no_header_and_detect_the_format_on_both_commands() {
         let expected = InputReadArgs {
-            input_headers: Vec::new(),
+            headers: InputHeaderArgs { input_headers: Vec::new() },
             format_type: DataFormat::Auto,
         };
 
         assert_eq!(map_input_read(&[]), expected);
         assert_eq!(generate_input_read(&[]), expected);
+    }
+
+    #[test]
+    fn the_input_headers_become_the_set_every_request_carries_in_order() {
+        let headers = map_input_read(&["--input-header", "X-Api-Key: k", "--input-header", "Authorization: Bearer t"]).headers;
+
+        assert_eq!(
+            headers.request_headers(),
+            RequestHeaders::new(vec![
+                RequestHeader::from_str("X-Api-Key: k").unwrap(),
+                RequestHeader::from_str("Authorization: Bearer t").unwrap(),
+            ])
+        );
     }
 }

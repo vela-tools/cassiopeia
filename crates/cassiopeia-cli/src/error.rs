@@ -1,5 +1,7 @@
+use cassiopeia_collector::error::CollectorError;
 use cassiopeia_data_profiler::error::DataProfilerError;
 use cassiopeia_ngsi_ld::data_model::DataModel;
+use cassiopeia_sensorthings::offered_readings::error::OfferedReadingError;
 use cassiopeia_smart_data_models::{error::SdmError, schema_id::SchemaIdError};
 use cassiopeia_tui::error::TuiError;
 use std::{io, path::PathBuf, result, str::Utf8Error};
@@ -84,6 +86,14 @@ pub enum CliError {
 
     #[error("The data profiler failed")]
     Profiler(#[from] DataProfilerError),
+
+    /// Reading a SensorThings server failed, as a run's read of it would.
+    #[error(transparent)]
+    SensorThingsRead(#[from] CollectorError),
+
+    /// A SensorThings server served a Datastream that names no reading.
+    #[error(transparent)]
+    OfferedReading(#[from] OfferedReadingError),
 }
 
 pub type Result<T, E = CliError> = result::Result<T, E>;

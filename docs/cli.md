@@ -22,6 +22,8 @@ This document contains the help content for the `cassiopeia` command-line progra
 * [`cassiopeia explorer`↴](#cassiopeia-explorer)
 * [`cassiopeia wizard`↴](#cassiopeia-wizard)
 * [`cassiopeia profile`↴](#cassiopeia-profile)
+* [`cassiopeia sensorthings`↴](#cassiopeia-sensorthings)
+* [`cassiopeia sensorthings readings`↴](#cassiopeia-sensorthings-readings)
 * [`cassiopeia bugreport`↴](#cassiopeia-bugreport)
 
 ## `cassiopeia`
@@ -41,6 +43,7 @@ Map and transform source data into standards-compliant NGSI-LD entities.
 * `explorer` — Browse a Smart Data Model schema tree in the terminal
 * `wizard` — Author a mapping against a schema in the terminal
 * `profile` — Detect the source format of a data file
+* `sensorthings` — SensorThings API server operations
 * `bugreport` — Print a diagnostic report to attach when filing a bug
 
 ###### **Options:**
@@ -596,6 +599,37 @@ Detect the source format of a data file
 ###### **Arguments:**
 
 * `<FILE>` — The file to profile
+
+
+
+## `cassiopeia sensorthings`
+
+SensorThings API server operations
+
+**Usage:** `cassiopeia sensorthings <COMMAND>`
+
+###### **Subcommands:**
+
+* `readings` — List the readings a SensorThings API server offers
+
+
+
+## `cassiopeia sensorthings readings`
+
+List the readings a SensorThings API server offers.
+
+Prints one row per ObservedProperty name, the name a mapping reads as `readings.<name>`, with the units of its data streams, the UN/CEFACT codes `cefact_unit` resolves them to (`unknown` for one it does not resolve), the number of its data streams, and the number of Things that hold more than one of them.
+
+**Usage:** `cassiopeia sensorthings readings [OPTIONS] <SERVICE_ROOT>`
+
+###### **Arguments:**
+
+* `<SERVICE_ROOT>` — The server's service root, ending with the version it serves, such as `https://api-samenmeten.rivm.nl/v1.0`. It carries no credentials: send them with `--input-header`
+
+###### **Options:**
+
+* `--datastreams <EXPRESSION>` — An OData `$filter` over Datastreams that selects the data streams listed, such as `ObservedProperty/name eq 'pm10'`; every data stream when absent
+* `--input-header <NAME: VALUE>` — Extra HTTP header sent when fetching a remote input, written as `Name: Value`; repeat for several. Typically carries an API key, e.g. `--input-header "X-Api-Key: <key>"`. Refused for a local input
 
 
 

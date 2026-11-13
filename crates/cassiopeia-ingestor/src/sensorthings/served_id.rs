@@ -1,10 +1,9 @@
 use crate::sensorthings::error::{SensorThingsIngestError, StaEntity};
-use cassiopeia_sensorthings::{entity_id::EntityId, snapshot::line_number::LineNumber};
-use serde::Deserialize;
+use cassiopeia_sensorthings::{
+    entity_id::{EntityId, ID_MEMBER},
+    snapshot::line_number::LineNumber,
+};
 use serde_json::{Map, Value};
-
-/// The member a served entity carries its id in (OGC 18-088 section 8.1, Table 2).
-pub(super) const ID: &str = "@iot.id";
 
 /// The id of a served `entity`, read from its `@iot.id` on `line`.
 ///
@@ -13,10 +12,7 @@ pub(super) const ID: &str = "@iot.id";
 /// Returns [`SensorThingsIngestError::IdUnreadable`] when the entity has no id, or one that is
 /// neither an integer nor a text.
 pub(super) fn served_id(served: &Map<String, Value>, line: LineNumber, entity: StaEntity) -> Result<EntityId, SensorThingsIngestError> {
-    served
-        .get(ID)
-        .and_then(|id| EntityId::deserialize(id).ok())
-        .ok_or(SensorThingsIngestError::IdUnreadable { line, entity })
+    EntityId::of(served).ok_or(SensorThingsIngestError::IdUnreadable { line, entity })
 }
 
 /// The id of a served `entity` that may leave its id out, read from its `@iot.id` on `line`.
@@ -26,7 +22,7 @@ pub(super) fn served_id(served: &Map<String, Value>, line: LineNumber, entity: S
 /// Returns [`SensorThingsIngestError::IdUnreadable`] when the entity has an id that is neither an
 /// integer nor a text.
 pub(super) fn optional_served_id(served: &Map<String, Value>, line: LineNumber, entity: StaEntity) -> Result<Option<EntityId>, SensorThingsIngestError> {
-    served.get(ID).map(|_| served_id(served, line, entity)).transpose()
+    served.get(ID_MEMBER).map(|_| served_id(served, line, entity)).transpose()
 }
 
 #[cfg(test)]

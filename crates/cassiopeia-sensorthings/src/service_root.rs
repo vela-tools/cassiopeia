@@ -1,8 +1,9 @@
 use crate::version::StaVersion;
 use derive_more::{Display, Into};
 use serde::{Deserialize, Serialize};
+use std::str::FromStr;
 use thiserror::Error;
-use url::Url;
+use url::{ParseError, Url};
 
 /// The service root of a SensorThings API server: the URL every resource of the server is addressed
 /// under, whose last path segment is the version it serves (OGC 18-088 section 9.1).
@@ -25,6 +26,10 @@ pub struct ServiceRoot {
 /// Why a URL is no SensorThings service root.
 #[derive(Debug, Error, PartialEq, Eq)]
 pub enum ServiceRootError {
+    /// The text is no absolute URL.
+    #[error("a service root is an absolute `http` or `https` URL: {0}")]
+    NotAUrl(ParseError),
+
     /// The URL's scheme is neither `http` nor `https`.
     #[error("a service root is an `http` or `https` URL, not a `{scheme}` one")]
     Scheme {
@@ -99,6 +104,16 @@ impl TryFrom<Url> for ServiceRoot {
     }
 }
 
+// A root is parsed as a URL and then checked as one, which no derive expresses.
+impl FromStr for ServiceRoot {
+    type Err = ServiceRootError;
+
+    /// Reads a service root written as text, such as on the command line.
+    fn from_str(text: &str) -> Result<ServiceRoot, ServiceRootError> {
+        ServiceRoot::try_from(Url::parse(text).map_err(ServiceRootError::NotAUrl)?)
+    }
+}
+
 /// The version a service root's last path segment names.
 fn version_of(segment: &str) -> Result<StaVersion, ServiceRootError> {
     if !is_version(segment) {
@@ -124,7 +139,7 @@ mod tests {
         version::StaVersion,
     };
     use pretty_assertions::assert_eq;
-    use url::Url;
+    use url::{ParseError, Url};
 
     fn root(text: &str) -> Result<ServiceRoot, ServiceRootError> {
         ServiceRoot::try_from(Url::parse(text).unwrap())
@@ -169,6 +184,19 @@ mod tests {
         assert_eq!(root("https://u:p@h.example/v1.1"), Err(ServiceRootError::Credentials));
         assert_eq!(root("https://h.example/v1.1#x"), Err(ServiceRootError::Fragment));
         assert_eq!(root("ftp://h.example/v1.1"), Err(ServiceRootError::Scheme { scheme: "ftp".into() }));
+    }
+
+    #[test]
+    fn a_service_root_written_as_text_is_parsed_and_checked() {
+        assert_eq!(
+            "https://iot.example.org/sta/v1.1/".parse::<ServiceRoot>().unwrap(),
+            root("https://iot.example.org/sta/v1.1").unwrap()
+        );
+        assert_eq!(
+            "iot.example.org/v1.1".parse::<ServiceRoot>(),
+            Err(ServiceRootError::NotAUrl(ParseError::RelativeUrlWithoutBase))
+        );
+        assert_eq!("https://h.example/api".parse::<ServiceRoot>(), Err(ServiceRootError::MissingVersion));
     }
 
     #[test]

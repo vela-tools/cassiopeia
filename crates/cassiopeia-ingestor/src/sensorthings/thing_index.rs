@@ -4,10 +4,10 @@ use crate::sensorthings::{
     location::{ThingLocation, thing_location},
     null_members::{move_member, present},
     reading_keys::{ReadingKey, RenamedReading, reading_keys},
-    served_id::{ID, optional_served_id, served_id},
+    served_id::{optional_served_id, served_id},
 };
 use cassiopeia_sensorthings::{
-    entity_id::EntityId,
+    entity_id::{EntityId, ID_MEMBER},
     snapshot::{line::DatastreamLine, line_number::LineNumber},
 };
 use indexmap::{IndexMap, map::Entry};
@@ -227,7 +227,7 @@ fn record_members(mut served: Map<String, Value>, id: Option<&EntityId>, keys: &
     if let Some(id) = id {
         members.insert("id".to_owned(), id.json());
     }
-    served.remove(ID);
+    served.remove(ID_MEMBER);
     for key in keys {
         move_member(&mut members, key, &mut served, key);
     }

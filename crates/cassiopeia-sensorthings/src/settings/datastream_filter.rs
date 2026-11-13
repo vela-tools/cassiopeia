@@ -1,5 +1,6 @@
 use derive_more::{Display, Into};
 use serde::{Deserialize, Serialize};
+use std::str::FromStr;
 use thiserror::Error;
 
 /// An `OData` `$filter` expression over Datastreams that selects what a read reads, such as
@@ -46,6 +47,17 @@ impl TryFrom<String> for DatastreamFilter {
     }
 }
 
+// The command line hands a filter over as borrowed text, and the check is the one `TryFrom<String>`
+// makes for a manifest, which no derive expresses.
+impl FromStr for DatastreamFilter {
+    type Err = DatastreamFilterError;
+
+    /// Reads a filter written as text, such as on the command line.
+    fn from_str(text: &str) -> Result<DatastreamFilter, DatastreamFilterError> {
+        DatastreamFilter::try_from(text.to_owned())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use crate::settings::datastream_filter::{DatastreamFilter, DatastreamFilterError};
@@ -61,6 +73,15 @@ mod tests {
         assert_eq!(filter("   "), Err(DatastreamFilterError::Blank));
         assert_eq!(filter("a\nb"), Err(DatastreamFilterError::ControlCharacter));
         assert_eq!(filter("ObservedProperty/name eq 'pm10'").unwrap().as_str(), "ObservedProperty/name eq 'pm10'");
+    }
+
+    #[test]
+    fn a_filter_written_as_text_is_checked_as_a_manifest_s() {
+        assert_eq!(
+            "startswith(name,'ILM_I68-')".parse::<DatastreamFilter>().unwrap().as_str(),
+            "startswith(name,'ILM_I68-')"
+        );
+        assert_eq!(" ".parse::<DatastreamFilter>(), Err(DatastreamFilterError::Blank));
     }
 
     #[test]

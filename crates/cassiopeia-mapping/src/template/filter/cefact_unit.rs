@@ -1,4 +1,5 @@
 use crate::template::registrar::Registrar;
+use cassiopeia_sensorthings::unit_of_measurement::UnitOfMeasurement;
 use cassiopeia_unit_notation::resolution::resolve;
 use cefact_units::UnitCode;
 use tera::{Error, Kwargs, Map, State, TeraResult, Value, value::Key};
@@ -11,24 +12,19 @@ use tera::{Error, Kwargs, Map, State, TeraResult, Value, value::Key};
 ///
 /// A text is resolved as a whole. A map is read as a SensorThings `unitOfMeasurement`, whose `name`,
 /// `symbol`, and `definition` members each describe the unit (OGC 18-088 section 8.2.4, Table 10), so the
-/// mapping need not choose which one a server fills in correctly. A null or absent value yields nothing.
+/// mapping need not choose which one a server fills in correctly: the first of `definition`, `symbol` and
+/// `name` that resolves gives the code, as [`UnitOfMeasurement::code`] reads it. A null or absent value
+/// yields nothing.
 ///
 /// A notation that resolves to no code passes through unchanged, on purpose: a filter can only return a
 /// value or fail its template, and a failing template drops the whole attribute, so the unresolved text
-/// is left to reach `unitCode`, where it can be reported by name instead of vanishing here.
+/// is left to reach `unitCode`, where it can be reported by name instead of vanishing here. Of a map, the
+/// text passed through is [`UnitOfMeasurement::text`], the one a reader recognises soonest.
 pub fn register(registrar: &mut Registrar) {
     registrar.filter("cefact_unit", |value: &Value, _kwargs: Kwargs, _state: &State| -> TeraResult<Value> {
         cefact_unit(value)
     });
 }
-
-/// The members of a `unitOfMeasurement` in the order one that resolves is preferred: the `definition`
-/// identifies the unit, while a `symbol` or `name` only spells it.
-const RESOLUTION_ORDER: [&str; 3] = ["definition", "symbol", "name"];
-
-/// The members of a `unitOfMeasurement` in the order one is passed through when none resolves: the
-/// `symbol` is what a reader of the unresolved output recognises soonest.
-const FALLBACK_ORDER: [&str; 3] = ["symbol", "name", "definition"];
 
 /// The code `value` denotes, or `value` itself when it denotes none.
 fn cefact_unit(value: &Value) -> TeraResult<Value> {
@@ -47,17 +43,11 @@ fn cefact_unit(value: &Value) -> TeraResult<Value> {
     )))
 }
 
-/// The code the first resolvable text member of `unit` denotes, else the text of its first text member
-/// in [`FALLBACK_ORDER`], else nothing.
+/// The code `unit` denotes, else its text, else nothing.
 fn unit_of_measurement(unit: &Map) -> Value {
-    let member = |name: &'static str| unit.get(&Key::Str(name)).and_then(Value::as_str);
+    let unit = UnitOfMeasurement::read(|member| unit.get(&Key::Str(member)).and_then(Value::as_str));
 
-    RESOLUTION_ORDER
-        .iter()
-        .find_map(|&name| member(name).and_then(resolve))
-        .map(code_value)
-        .or_else(|| FALLBACK_ORDER.iter().find_map(|&name| member(name)).map(Value::from))
-        .unwrap_or_else(Value::none)
+    unit.code().map(code_value).or_else(|| unit.text().map(Value::from)).unwrap_or_else(Value::none)
 }
 
 /// `code` as the text `unitCode` holds.

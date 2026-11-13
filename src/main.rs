@@ -7,6 +7,7 @@ mod failure_code;
 mod manifest_build;
 mod pipeline_config;
 mod pipeline_setup;
+mod readings_setup;
 mod reporter_setup;
 mod run;
 mod schedule_build;

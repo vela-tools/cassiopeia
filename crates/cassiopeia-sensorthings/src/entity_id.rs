@@ -1,6 +1,9 @@
 use derive_more::Display;
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
+use serde_json::{Map, Value};
+
+/// The member a served entity carries its id in (OGC 18-088 section 8.1, Table 2).
+pub const ID_MEMBER: &str = "@iot.id";
 
 /// The `@iot.id` of a SensorThings entity (OGC 18-088 section 8.1, Table 2).
 ///
@@ -23,6 +26,13 @@ pub enum EntityId {
 }
 
 impl EntityId {
+    /// The id `served` carries in its `@iot.id`, or `None` when it carries none, or one that is
+    /// neither an integer nor a text.
+    #[must_use]
+    pub fn of(served: &Map<String, Value>) -> Option<EntityId> {
+        served.get(ID_MEMBER).and_then(|id| EntityId::deserialize(id).ok())
+    }
+
     /// The id as the JSON value it was sent as.
     #[must_use]
     pub fn json(&self) -> Value {
@@ -38,7 +48,14 @@ mod tests {
     use crate::entity_id::EntityId;
     use pretty_assertions::assert_eq;
     use serde::Deserialize;
-    use serde_json::json;
+    use serde_json::{Map, Value, json};
+
+    fn object(value: Value) -> Map<String, Value> {
+        let Value::Object(members) = value else {
+            panic!("expected an object");
+        };
+        members
+    }
 
     #[test]
     fn entity_ids_keep_their_json_type() {
@@ -62,5 +79,13 @@ mod tests {
         assert_eq!(EntityId::Text("t-1".into()).to_string(), "t-1");
         assert_eq!(EntityId::Integer(12512).json(), json!(12512));
         assert_eq!(EntityId::Text("t-1".into()).json(), json!("t-1"));
+    }
+
+    #[test]
+    fn a_served_entity_s_id_is_read_from_its_iot_id() {
+        assert_eq!(EntityId::of(&object(json!({"@iot.id": 7, "name": "x"}))), Some(EntityId::Integer(7)));
+        assert_eq!(EntityId::of(&object(json!({"@iot.id": "t-1"}))), Some(EntityId::Text("t-1".into())));
+        assert_eq!(EntityId::of(&object(json!({"name": "x"}))), None);
+        assert_eq!(EntityId::of(&object(json!({"@iot.id": null}))), None);
     }
 }

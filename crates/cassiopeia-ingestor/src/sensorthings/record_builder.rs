@@ -2,10 +2,10 @@ use crate::sensorthings::{
     error::{SensorThingsIngestError, StaEntity},
     ingest_losses::SensorThingsLosses,
     null_members::move_member,
-    served_id::{ID, optional_served_id},
+    served_id::optional_served_id,
 };
 use cassiopeia_ir::record::Record;
-use cassiopeia_sensorthings::{phenomenon_time::PhenomenonTime, service_root::ServiceRoot, snapshot::line_number::LineNumber};
+use cassiopeia_sensorthings::{entity_id::ID_MEMBER, phenomenon_time::PhenomenonTime, service_root::ServiceRoot, snapshot::line_number::LineNumber};
 use serde_json::{Map, Value};
 
 /// The Observation members a reading carries as served, besides its id, result and times.
@@ -80,7 +80,7 @@ pub(super) fn reading(
     if let Some(id) = id {
         reading.insert("id".to_owned(), id.json());
     }
-    observation.remove(ID);
+    observation.remove(ID_MEMBER);
     move_member(&mut reading, "result", &mut observation, "result");
     reading.insert("time".to_owned(), Value::from(time.instant_text()));
     reading.insert("phenomenonTime".to_owned(), Value::String(text));

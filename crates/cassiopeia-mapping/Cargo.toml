@@ -11,6 +11,7 @@ repository.workspace = true
 cassiopeia-common.workspace = true
 cassiopeia-geometry.workspace = true
 cassiopeia-ngsi-ld.workspace = true
+cassiopeia-sensorthings.workspace = true
 cassiopeia-unit-notation.workspace = true
 cassiopeia-value-type-expansion.workspace = true
 cefact-units = "1.0.0"
