@@ -8,8 +8,7 @@ use serde::{Deserialize, Serialize};
 /// name that the manifest routes on. That name is kept **verbatim**: collection labels are arbitrary
 /// Unicode: folder and sheet names allow spaces, punctuation, CJK, and emoji (Excel forbids only
 /// `\ / ? * [ ] :`), none of which the NGSI-LD name grammar permits. Routing is therefore exact
-/// string equality on the raw label, never a grammar-validated
-/// [`NameBuf`](cassiopeia_ngsi_ld::entity::name::NameBuf).
+/// string equality on the raw label, never a grammar-validated NGSI-LD `NameBuf`.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, Display, From, Into)]
 #[serde(transparent)]
 pub struct CollectionName(String);

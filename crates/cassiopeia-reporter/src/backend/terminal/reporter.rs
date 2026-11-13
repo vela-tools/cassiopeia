@@ -29,7 +29,7 @@ const TICK_INTERVAL: Duration = Duration::from_millis(80);
 /// Terminal reporter with indicatif progress bars.
 ///
 /// The reporter itself owns only the message lines, the diagnostics, and the one-off progress
-/// indicator; the multi-stage display lives in its [`StageRegistry`].
+/// indicator; the multi-stage display lives in its crate-private `StageRegistry`.
 ///
 /// Both the styling and the verbosity are fixed at construction. Nothing downstream threads a level
 /// through a call graph or consults a global to decide how much to print.

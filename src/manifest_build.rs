@@ -49,9 +49,9 @@ pub fn manifest_from_map_args(args: &MapArgs) -> Result<Manifest> {
     let input = ManifestInput::builder()
         .source(source)
         .mapping_binding(MappingBinding::Single { mapping })
-        .format(args.format_type.to_option())
+        .format(args.input_read.format_type.to_option())
         .build()
-        .with_headers(RequestHeaders::new(args.input_headers.clone()))?;
+        .with_headers(RequestHeaders::new(args.input_read.input_headers.clone()))?;
     let inputs = Inputs::new(vec![input])?;
 
     let context = args.context.resolve()?;
@@ -67,7 +67,7 @@ pub fn manifest_from_map_args(args: &MapArgs) -> Result<Manifest> {
         .inputs(inputs)
         .output(Some(output))
         .schedule(schedule)
-        .on_failure(args.on_failure)
+        .on_failure(args.failure.on_failure)
         .vars((!vars.is_empty()).then_some(vars))
         .build())
 }
@@ -77,9 +77,9 @@ pub fn manifest_from_gen_args(args: &ManifestGenArgs) -> Result<Manifest> {
     let input = ManifestInput::builder()
         .source(args.input.clone())
         .mapping_binding(MappingBinding::Single { mapping: args.mapping.clone() })
-        .format(args.format_type.to_option())
+        .format(args.input_read.format_type.to_option())
         .build()
-        .with_headers(RequestHeaders::new(args.input_headers.clone()))?;
+        .with_headers(RequestHeaders::new(args.input_read.input_headers.clone()))?;
     let inputs = Inputs::new(vec![input])?;
 
     let output = build_gen_output(args)?;
@@ -90,7 +90,7 @@ pub fn manifest_from_gen_args(args: &ManifestGenArgs) -> Result<Manifest> {
         .inputs(inputs)
         .output(output)
         .schedule(schedule)
-        .on_failure(args.on_failure)
+        .on_failure(args.failure.on_failure)
         .build())
 }
 
@@ -100,10 +100,10 @@ fn build_output(writer: &WriterArgs, context: Option<AtContextMode>) -> Result<M
 
     Ok(ManifestOutput::builder()
         .destination(destination)
-        .representation(writer.writer_representation)
+        .representation(writer.format.writer_representation)
         .context(context)
         // Opt-in: the flag's absence leaves `temporal` off the manifest, like the other output flags.
-        .temporal(temporal_output(writer.temporal_representation))
+        .temporal(temporal_output(writer.format.temporal_representation))
         .build())
 }
 
@@ -114,7 +114,7 @@ fn temporal_output(representation: Option<TemporalRepresentation>) -> Option<Man
 
 /// Builds the destination from the `map` command's writer arguments.
 fn build_destination(writer: &WriterArgs) -> Result<Destination> {
-    destination(writer.writer_type, writer.output.clone(), writer.framing, &writer.broker)
+    destination(writer.writer_type, writer.output.clone(), writer.format.framing, &writer.broker)
 }
 
 /// Builds a destination from a resolved writer kind, file-output settings, and the broker flags.
@@ -157,16 +157,16 @@ fn build_gen_output(args: &ManifestGenArgs) -> Result<Option<ManifestOutput>> {
     };
 
     let context = args.context.resolve()?;
-    let destination = destination(target, args.output.clone(), args.framing, &args.broker)?;
+    let destination = destination(target, args.output.clone(), args.format.framing, &args.broker)?;
 
     Ok(Some(
         ManifestOutput::builder()
             .destination(destination)
-            .representation(args.writer_representation)
+            .representation(args.format.writer_representation)
             .context(context)
             .validation(validation_from_args(&args.validator))
             // Opt-in: the flag's absence leaves `temporal` off the manifest, like the other output flags.
-            .temporal(temporal_output(args.temporal_representation))
+            .temporal(temporal_output(args.format.temporal_representation))
             .build(),
     ))
 }
@@ -203,6 +203,7 @@ mod tests {
         broker_atomicity::BrokerAtomicity,
         broker_operation::BrokerOperationKind,
         file_framing::FileFraming,
+        representation::NgsiLdRepresentation,
         request_header::RequestHeaders,
         schema_source::SchemaSource,
         upsert_mode::UpsertMode,
@@ -461,7 +462,7 @@ mod tests {
             "map.json5",
             "--writer",
             "file",
-            "--directory",
+            "--output",
             "out",
             "--framing",
             "line-delimited",
@@ -532,7 +533,7 @@ mod tests {
             "map.json5",
             "--writer",
             "file",
-            "--directory",
+            "--output",
             "out",
             "--validation-mode",
             "fail",
@@ -555,7 +556,7 @@ mod tests {
             "map.json5",
             "--writer",
             "file",
-            "--directory",
+            "--output",
             "out",
             "--validation-schema",
             "exoplanet.schema.json",
@@ -796,7 +797,7 @@ mod tests {
             "map.json5",
             "--writer",
             "file",
-            "--directory",
+            "--output",
             "out",
             "--temporal-representation",
             "series",
@@ -882,6 +883,78 @@ mod tests {
         assert!(help.contains("--output-header"), "{help}");
         assert!(help.contains("--input-header"), "{help}");
         assert!(!help.contains("--header"), "{help}");
+    }
+
+    #[test]
+    fn the_hidden_directory_alias_still_sets_the_generated_output_directory() {
+        let args = gen_args(&[
+            "cassiopeia",
+            "manifest",
+            "generate",
+            "-i",
+            "data.csv",
+            "-m",
+            "map.json5",
+            "--writer",
+            "file",
+            "--directory",
+            "out",
+        ]);
+
+        let output = build_gen_output(&args).unwrap().unwrap();
+
+        assert_eq!(output.destination(), &Destination::file(Some(PathBuf::from("out")), FileFraming::Array));
+    }
+
+    #[test]
+    fn the_hidden_representation_alias_still_sets_the_generated_writer_representation() {
+        let args = gen_args(&[
+            "cassiopeia",
+            "manifest",
+            "generate",
+            "-i",
+            "data.csv",
+            "-m",
+            "map.json5",
+            "--writer",
+            "file",
+            "--output",
+            "out",
+            "--representation",
+            "concise",
+        ]);
+
+        let output = build_gen_output(&args).unwrap().unwrap();
+
+        assert_eq!(output.representation(), &Some(NgsiLdRepresentation::Concise));
+    }
+
+    #[test]
+    fn the_representation_alias_belongs_to_the_generate_command_alone() {
+        let result = Cli::try_parse_from([
+            "cassiopeia",
+            "map",
+            "-i",
+            "data.csv",
+            "-m",
+            "map.json5",
+            "-o",
+            "out",
+            "--representation",
+            "concise",
+        ]);
+
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn the_retired_generate_spellings_are_hidden_from_the_help() {
+        let help = Cli::try_parse_from(["cassiopeia", "manifest", "generate", "--help"]).unwrap_err().to_string();
+
+        assert!(help.contains("--output <DIRECTORY>"), "{help}");
+        assert!(help.contains("--writer-representation"), "{help}");
+        assert!(!help.contains("--directory"), "{help}");
+        assert!(!help.contains(" --representation"), "{help}");
     }
 
     #[test]

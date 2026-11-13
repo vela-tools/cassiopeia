@@ -24,7 +24,7 @@ use tokio::{runtime::Builder, sync::mpsc::unbounded_channel};
 ///
 /// # Errors
 ///
-/// Returns [`CliError`](crate::error::CliError) when the async runtime cannot be built or the
+/// Returns [`CliError`] when the async runtime cannot be built or the
 /// download fails.
 pub fn download_schemas(config: &CliConfig, reporter: &'static dyn Reporter) -> Result<PathBuf> {
     let store = FileSystemStore::new(&config.schemas_folder)?;
@@ -103,7 +103,7 @@ fn report_event(reporter: &dyn Reporter, event: ProgressEvent) {
 ///
 /// # Errors
 ///
-/// Returns [`CliError`](crate::error::CliError) when the catalog store cannot be read.
+/// Returns [`CliError`] when the catalog store cannot be read.
 pub fn list_schemas(config: &CliConfig) -> Result<Vec<String>> {
     let store = FileSystemStore::new(&config.schemas_folder)?;
     let catalog = Catalog::new(store, Caching::Disabled);
@@ -114,7 +114,7 @@ pub fn list_schemas(config: &CliConfig) -> Result<Vec<String>> {
 ///
 /// # Errors
 ///
-/// Returns [`CliError`](crate::error::CliError) when the catalog store cannot be read.
+/// Returns [`CliError`] when the catalog store cannot be read.
 pub fn search_schemas(config: &CliConfig, query: &str) -> Result<Vec<String>> {
     let store = FileSystemStore::new(&config.schemas_folder)?;
     let catalog = Catalog::new(store, Caching::Disabled);

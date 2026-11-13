@@ -18,7 +18,7 @@ use serde_json::{Map, Value};
 /// carries metadata.
 ///
 /// Parameterised over [`Rendering`] so both the coloured and plain forms are testable without a
-/// terminal. New formats extend only [`metadata_line`]; the identity and format lines are shared by
+/// terminal. New formats extend only the private `metadata_line`; the identity and format lines are shared by
 /// every format.
 ///
 /// # Errors

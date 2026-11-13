@@ -2,7 +2,7 @@
 //!
 //! Every determinate/indeterminate builder wires the live [`column`](crate::backend::terminal::column)
 //! trackers into indicatif's custom keys so the elapsed, rate, warning, and latency columns render
-//! from shared state. Every template string is validated once via [`validate`] at reporter-build
+//! from shared state. Every template string is validated once via the private `validate` at reporter-build
 //! time, so the per-call builders never panic on a malformed template.
 
 use crate::{

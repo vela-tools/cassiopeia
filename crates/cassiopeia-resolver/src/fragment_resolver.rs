@@ -176,8 +176,7 @@ impl FragmentResolver {
     /// values, encoding data, or waiting for a writer before its commit call.
     ///
     /// The coalesced path splits each fragment into the side-effects to commit
-    /// ([`prepare_fragments`](FragmentResolver::prepare_fragments), in
-    /// [`coalesced_batch`](crate::coalesced_batch)), then flushes the relationship and
+    /// (the private `prepare_fragments`, in [`coalesced_batch`](crate::coalesced_batch)), then flushes the relationship and
     /// entity stores once each. This turns an O(N) disk-backed run into O(batches) round-trips without
     /// changing single-fragment semantics.
     #[must_use]

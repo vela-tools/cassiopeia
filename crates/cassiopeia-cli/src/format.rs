@@ -69,7 +69,7 @@ fn format_document(parsed_document: &ParsedDocument, options: FormatOptions, rep
 ///
 /// # Errors
 ///
-/// Returns [`CliError`](crate::error::CliError) when the document cannot be parsed, formatted, or
+/// Returns [`CliError`] when the document cannot be parsed, formatted, or
 /// written back.
 pub fn format_mapping(mapping: &Path, replace: bool) -> Result<FormatOutcome> {
     let parsed_document = parse_mapping(mapping.to_path_buf())?;

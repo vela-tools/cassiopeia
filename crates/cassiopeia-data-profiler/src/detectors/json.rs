@@ -38,8 +38,8 @@ struct TypePeek {
 /// Detection is streaming: the document is parsed for validity without building a
 /// `serde_json::Value` tree, so peak memory stays proportional to the input buffer rather than to
 /// the far larger node-per-value DOM the buffer would expand into. A top-level object is matched in
-/// a single pass through [`TypePeek`], which walks the whole document but keeps only its `"type"`
-/// member; a top-level array or scalar (a valid JSON shape [`TypePeek`] cannot represent) is
+/// a single pass through the private `TypePeek`, which walks the whole document but keeps only its
+/// `"type"` member; a top-level array or scalar (a valid JSON shape `TypePeek` cannot represent) is
 /// confirmed with one further validity-only pass. `GeoJSON` is routed by its `"type"` member alone
 /// (RFC 7946 section 1.4): full structural validation of geometries and features is the ingest
 /// stage's concern, not the profiler's.

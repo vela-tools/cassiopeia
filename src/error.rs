@@ -38,5 +38,5 @@ pub enum Error {
     CtrlC(#[from] ctrlc::Error),
 }
 
-/// The result type every command-line handler returns, fixing the error type to [`Error`].
+/// The result type every command-line handler returns, fixing the error type to [`Error`](enum@Error).
 pub type Result<T> = result::Result<T, Error>;

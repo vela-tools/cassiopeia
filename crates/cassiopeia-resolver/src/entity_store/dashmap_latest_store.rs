@@ -305,7 +305,9 @@ mod tests {
     fn a_temporal_mapping_keeps_only_the_latest_record() {
         let store = DashMapLatestEntityStore::new();
         let id = urn("urn:ngsi-ld:Camera:1");
-        let first = json!({"on": false, "ts": "2026-04-03T22:00:20Z"});
+        // Only the superseded record carries `battery`, so a merge rather than a replacement would
+        // leave it in the retained record.
+        let first = json!({"on": false, "battery": 80, "ts": "2026-04-03T22:00:20Z"});
         let middle = json!({"on": true, "ts": "2026-04-03T22:10:20Z"});
         let last = json!({"on": false, "ts": "2026-04-03T22:05:20Z"});
 

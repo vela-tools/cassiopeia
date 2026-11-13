@@ -103,11 +103,11 @@ A `null` nested inside a source value is left out of it, because NGSI-LD admits 
 
 ## Temporal output
 
-Temporality is a property of attributes, not of the entity (ETSI GS CIM 009 v1.9.1 clause 4.5.5). A record marks an attribute as an observation by giving it an `observedAt`; every observation of one base ID accumulates onto that entity. The `temporal` setting chooses what is written:
+Temporality is a property of attributes, not of the entity (ETSI GS CIM 009 v1.9.1 clause 4.5.5). A record marks an attribute as an observation by giving it an `observedAt`; every observation of one base ID is an observation of that one entity, not an entity of its own. The `temporal` setting chooses which of them are written:
 
 | Setting | Meaning |
 | --- | --- |
-| absent | Current-state: one entity per ID, each attribute keeping its latest observation (ranked by `observedAt`, which is retained as a qualifier). The default. |
+| absent | Current-state, the default: one entity per ID, holding, per mapping, the record with the latest `observedAt`, which is retained as a qualifier. Only the latest observation is written, and an attribute that only an older record carries is not written either. A Context Broker destination with `operation: "temporal"` instead sends each observation to the temporal endpoint on its own (see [Operations](#operations)). |
 | `representation: "series"` | Fold every observation of one ID into a single NGSI-LD EntityTemporal (clause 5.2.20): the entity appears once and each temporal attribute is a time-ordered array of instances. |
 
 ~~~json5

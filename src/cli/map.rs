@@ -1,19 +1,12 @@
 use crate::cli::{
     context::{CliValidationError, ContextArgs},
+    failure::FailureArgs,
+    input_read::InputReadArgs,
     schedule::ScheduleArgs,
     validator::ValidatorArgs,
     writer::WriterArgs,
 };
-use cassiopeia_common::{
-    channel::ChannelPolicy,
-    format::DataFormat,
-    input::Input,
-    pipeline_mode::PipelineMode,
-    request_header::RequestHeader,
-    run_var::RunVar,
-    store_kind::StoreKind,
-};
-use cassiopeia_manifest::failure_policy::FailurePolicy;
+use cassiopeia_common::{channel::ChannelPolicy, input::Input, pipeline_mode::PipelineMode, run_var::RunVar, store_kind::StoreKind};
 use clap::{ArgAction, Args};
 use std::{num::NonZeroUsize, path::PathBuf, str::FromStr};
 
@@ -95,26 +88,12 @@ pub struct MapArgs {
     #[arg(short, long, value_parser = Input::from_str, required_unless_present = "manifest", help_heading = "Input")]
     pub input: Option<Input>,
 
-    /// Extra HTTP header sent when fetching a remote input, written as `Name: Value`; repeat for
-    /// several. Typically carries an API key, e.g. `--input-header "X-Api-Key: <key>"`. Refused for a
-    /// local input.
-    #[arg(long = "input-header", action = ArgAction::Append, help_heading = "Input", value_name = "NAME: VALUE")]
-    pub input_headers: Vec<RequestHeader>,
-
     /// JSON5 mapping file defining the transformation rules.
     #[arg(short, long, required_unless_present = "manifest", help_heading = "Input", value_name = "FILE")]
     pub mapping: Option<PathBuf>,
 
-    /// Data format of the input source.
-    #[arg(
-        short = 't',
-        long = "type",
-        value_enum,
-        help_heading = "Input",
-        value_name = "FORMAT",
-        default_value_t = DataFormat::Auto,
-    )]
-    pub format_type: DataFormat,
+    #[command(flatten)]
+    pub input_read: InputReadArgs,
 
     /// A run-level variable, written as `KEY=VALUE`; repeat for several. Every mapping in the run can
     /// read it as `{{ vars.KEY }}`. Valid alongside `--manifest`, where it overrides a manifest global
@@ -122,11 +101,8 @@ pub struct MapArgs {
     #[arg(long = "var", action = ArgAction::Append, help_heading = "Input", value_name = "KEY=VALUE")]
     pub var: Vec<RunVar>,
 
-    /// How the run reacts to a failed cycle and what it exits with: abort (stop and exit non-zero),
-    /// continue (run the rest, still exit non-zero), or ignore (run the rest, exit zero). Defaults to
-    /// abort.
-    #[arg(long = "on-failure", help_heading = "Behavior", value_name = "MODE")]
-    pub on_failure: Option<FailurePolicy>,
+    #[command(flatten)]
+    pub failure: FailureArgs,
 
     /// Pipeline processing mode: batch (buffered parallel) or single (immediate per-item).
     #[arg(long, value_enum, help_heading = "Behavior", default_value_t = PipelineMode::Batch)]

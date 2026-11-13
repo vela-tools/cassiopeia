@@ -10,7 +10,7 @@
 //! - a name with a non-ASCII letter such as `čas`, which Tera's lexer, accepting only ASCII
 //!   identifiers, rejects as an unexpected character.
 //!
-//! Both are found by walking the [`Lexer`]'s lexemes, so string literals, comments, raw blocks, and
+//! Both are found by walking the template lexer's lexemes, so string literals, comments, raw blocks, and
 //! literal text outside the delimiters are never inspected.
 
 use crate::template::lexer::{Lexeme, LexemeKind, Lexer};

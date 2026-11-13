@@ -15,7 +15,7 @@ use std::{
 ///
 /// # Errors
 ///
-/// Returns [`CliError`](crate::error::CliError) when the schema is missing or cannot be
+/// Returns [`CliError`] when the schema is missing or cannot be
 /// dereferenced.
 pub fn dereference_schema(schema: &Path) -> Result<()> {
     if metadata(schema).is_err() {

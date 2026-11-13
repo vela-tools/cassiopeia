@@ -6,8 +6,8 @@ use std::path::{Path, PathBuf};
 /// One collection's mapping in a multi-collection source binding.
 ///
 /// Pairs a source collection label (a KML folder name, an Excel sheet name) with the mapping applied
-/// to the records read from it. The label is matched verbatim against a record's
-/// [`collection`](cassiopeia_ir::record::Record::collection).
+/// to the records read from it. The label is matched verbatim against the collection an ingested
+/// record names.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Getters)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 #[getset(get = "pub")]

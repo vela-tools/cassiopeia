@@ -14,7 +14,7 @@ pub type EntityMetadata = IndexMap<NameBuf, MetadataStorage, RandomState>;
 /// Metadata for one attribute, either shared across all its values or supplied per item.
 ///
 /// Keys are attribute member names such as `observedAt`, `unitCode`, or `datasetId` (ETSI GS CIM 009
-/// v1.9.1), and each entry is a [`SubAttribute`] carrying the NGSI-LD kind it was declared as, so a
+/// v1.9.1), and each entry is a [`SubAttribute`](crate::sub_attribute::SubAttribute) carrying the NGSI-LD kind it was declared as, so a
 /// nested Property subclass keeps its kind (clause 4.5.2.2). The reserved qualifiers are stored as
 /// plain-Property sub-attributes and lifted by name downstream.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, SmartDefault)]

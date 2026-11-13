@@ -17,7 +17,7 @@ use typed_builder::TypedBuilder;
 
 /// Where a run's entities go and in what shape they are written.
 ///
-/// It is read through [`ManifestOutputRaw`], because serde's `flatten`, which places the destination's
+/// It is read through `ManifestOutputRaw`, because serde's `flatten`, which places the destination's
 /// settings beside the output's own, cannot be combined with `deny_unknown_fields`: the raw struct
 /// hands every key the output does not define to the destination, which refuses any it does not
 /// define either, so a misspelt or retired key is an error rather than silently ignored.
@@ -48,8 +48,8 @@ pub struct ManifestOutput {
     #[getset(get = "pub")]
     validation: Option<ManifestValidation>,
 
-    /// The temporal output shape (ETSI GS CIM 009 v1.9.1 clause 5.2.20). Absent means current-state:
-    /// each id written once, carrying the latest observation of every attribute.
+    /// The temporal output shape (ETSI GS CIM 009 v1.9.1 clause 5.2.20). Absent means current-state,
+    /// as [`ManifestTemporal`] describes.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[builder(default = None)]
     #[getset(get = "pub")]

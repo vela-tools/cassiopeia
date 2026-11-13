@@ -119,7 +119,7 @@ pub struct Attribute {
     ///
     /// A synthetic entity is an entity body without its own document `version`; it shares the
     /// parent document's version and is lifted into a full [`Mapping`] at load time (see
-    /// [`deserialize_synthetic_entity`]). Mutable access exists so the expansion stage can compile
+    /// the private `deserialize_synthetic_entity`). Mutable access exists so the expansion stage can compile
     /// the synthetic mapping in place.
     #[serde(
         default,

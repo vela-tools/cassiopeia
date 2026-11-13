@@ -4,9 +4,10 @@ use typed_builder::TypedBuilder;
 
 /// The temporal output shape (ETSI GS CIM 009 v1.9.1 clause 5.2.20).
 ///
-/// Absent from the output section means current-state: each id is written once, carrying the latest
-/// observation of every attribute with `observedAt` kept as a qualifier. A present block selects a
-/// richer temporal shape. A key the block does not define is refused, so a misspelt one is an error
+/// Absent from the output section means current-state: each id is written once, holding per mapping
+/// the record with the latest `observedAt`, kept as a qualifier, unless a Context Broker destination's
+/// `temporal` operation sends each observation on its own. A present block selects a richer temporal
+/// shape. A key the block does not define is refused, so a misspelt one is an error
 /// rather than silently ignored.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Getters, TypedBuilder)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]

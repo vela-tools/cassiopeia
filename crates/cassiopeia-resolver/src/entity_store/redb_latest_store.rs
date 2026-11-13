@@ -384,7 +384,9 @@ mod tests {
     fn a_temporal_mapping_keeps_the_max_observed_at_record_across_batches() {
         let store = RedbLatestEntityStore::new().unwrap();
         let id = urn("urn:ngsi-ld:Camera:1");
-        let early = json!({"on": false});
+        // Only the superseded record carries `battery`, so a merge rather than a replacement would
+        // leave it in the retained record.
+        let early = json!({"on": false, "battery": 80});
         let late = json!({"on": true});
         let middle = json!({"on": false});
 

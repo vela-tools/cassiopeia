@@ -91,7 +91,7 @@ impl FileWriter {
     /// Builds a file writer, creating the output directory if it does not yet exist.
     ///
     /// # Errors
-    /// Returns a [`WriterError`] when the output path exists but is not a directory, or when the
+    /// Returns a [`WriterError`](crate::error::WriterError) when the output path exists but is not a directory, or when the
     /// directory cannot be created.
     pub fn new(config: FileWriterConfig) -> Result<FileWriter> {
         if !config.output_dir.exists() {
