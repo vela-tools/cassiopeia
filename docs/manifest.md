@@ -219,10 +219,10 @@ inputs: [
 | Field | Value |
 | --- | --- |
 | `datastreams` | An OData `$filter` expression over Datastreams that selects what is read, such as `ObservedProperty/name eq 'pm10'` or `endswith(name,'-pm10')`. It is sent to the server as written, and must be one line with text on it. When omitted, every data stream is read. |
-| `read` | `"latest"`, the default: the newest reading of every selected data stream. Or `{ range: { ... } }`: every reading of a time range, below. |
+| `read` | `"latest"`, the default: the newest reading of every selected data stream. Or `{ range: { ... } }`: every reading of a time range. Or `{ incremental: { ... } }`: every reading gained since the last successful cycle. Both are below. |
 | `pageSize` | The `$top` of every request, 1 to 10000. The default is 1000. A server may serve fewer items a page. |
-| `limits.pages` | The most pages one request is followed for, at least 1. The default is 1000. A latest read sends one request; a range read sends one for its discovery and one for each data stream. |
-| `limits.observations` | The most Observations one cycle writes, at least 1. The default is 500000. A range read stops when it has written this many. A latest read collects at most one Observation per data stream, so `limits.pages` alone bounds it. |
+| `limits.pages` | The most pages one request is followed for, at least 1. The default is 1000. A latest read sends one request; a range or incremental read sends one for its discovery and one for each data stream. |
+| `limits.observations` | The most Observations one cycle writes, at least 1. The default is 500000. A range or incremental read stops when it has written this many. A latest read collects at most one Observation per data stream, so `limits.pages` alone bounds it. |
 | `delay` | A wait between consecutive requests, such as `"200ms"`, at most `"60s"`. The default is none. |
 
 A range read takes one of two forms:
@@ -240,6 +240,21 @@ read: { range: { from: "2026-11-01T00:00:00Z", to: "2026-11-02T00:00:00Z" } },
 
 A range states `last` or `from`, never both. [Reading a time range](source-formats.md#reading-a-time-range) describes the bounds, the requests, and what each cycle sends.
 
+An incremental read names the cursor that keeps how far it has read each data stream:
+
+~~~json5
+read: { incremental: { cursor: "rivm-air" } },
+read: { incremental: { cursor: "rivm-air", initial: "2026-11-01T00:00:00Z", lookback: "2h" } },
+~~~
+
+| Field | Value |
+| --- | --- |
+| `incremental.cursor` | The cursor's name: 1 to 64 characters of `a-z`, `0-9` and `-`, neither starting nor ending with `-`. It names the cursor's store, `<cursor>.redb` in the cursors folder. |
+| `incremental.initial` | Where a data stream the cursor holds no position for starts: an RFC 3339 date and time with a UTC offset, or a span before the cycle start, such as `"7d"`, longer than zero. Any text that is no RFC 3339 instant is read as a span. The default is `"24h"`. |
+| `incremental.lookback` | How far behind its high-water mark each data stream is read again, to find readings a server uploads late, such as `"1h"`. At most `"7d"`. The default is `"1h"`. |
+
+[Reading new readings](source-formats.md#reading-new-readings) describes the positions a cursor keeps, when they move, and what each destination receives.
+
 Without a `sensorthings` block, a remote SensorThings input reads every data stream with the defaults. An unknown key in the block is refused. Credentials for a server go in [`headers`](#per-input-headers). [Reading a server](source-formats.md#reading-a-server) describes the requests, the paging, and how servers differ.
 
 These are refused when the manifest loads:
@@ -248,9 +263,11 @@ These are refused when the manifest loads:
 - a `sensorthings` block on a local snapshot, which is read as it was collected;
 - a remote `source` with `format: "sensorthings"` that is no service root: one without a version as its last path segment, with a version other than `v1.0` or `v1.1`, with a user name or password, a query, or a fragment, or with a scheme other than `http` or `https`;
 - a service root that reads an environment variable (`${NAME}`), so that no URL a read requests, logs, or writes carries a secret;
-- a `range` without `last` or `from`, with both, with `to` beside `last` or alone, with a `last` of zero, or with a `from` that is not before its `to`.
+- a `range` without `last` or `from`, with both, with `to` beside `last` or alone, with a `last` of zero, or with a `from` that is not before its `to`;
+- an `incremental` read without a `cursor`, with a cursor name outside its characters or length, with an unknown key, with an `initial` that is neither an RFC 3339 instant nor a span, or a span of zero, or with a `lookback` longer than `"7d"`;
+- two inputs whose incremental reads name the same cursor, because each would move the positions the other resumes from. The error names the cursor.
 
-A range read without `output.temporal.representation: "series"` is refused when the run is built, before any request. It gives one record per Observation, and current-state output keeps one record per entity, so it would keep one reading of each Thing. A scheduled `read: "latest"` into a broker with `operation: "temporal"` is refused when the run is built. Every cycle would send the newest reading of every data stream again, and the temporal API would store each unchanged reading once more. A one-shot latest read into the temporal API is allowed, and so is a scheduled latest read into a broker with `operation: "upsert"`.
+A range or incremental read without `output.temporal.representation: "series"` is refused when the run is built, before any request. It gives one record per Observation, and current-state output keeps one record per entity, so it would keep one reading of each Thing. A scheduled `read: "latest"` into a broker with `operation: "temporal"` is refused when the run is built. Every cycle would send the newest reading of every data stream again, and the temporal API would store each unchanged reading once more. A one-shot latest read into the temporal API is allowed, and so is a scheduled latest read into a broker with `operation: "upsert"`.
 
 ## Output
 
@@ -430,7 +447,7 @@ retry: {
 
 ## What makes a manifest invalid
 
-Cassiopeia rejects a manifest when `inputs` is empty, an input has both or neither of `mapping` and `mappings`, `mappings` is empty or names the same collection twice, `mappings` is used with a format that does not support collections, `dialect` is used on an input that does not declare `format: "csv"`, `headers` is used on an input with a local `source`, a `sensorthings` block or a SensorThings `source` breaks a rule of [SensorThings settings](#sensorthings-settings), a `${NAME}` is malformed or names a variable that is not set, a local `source` reads an environment variable, or any field has a value outside its accepted set. Because the top level, `output`, `output.validation`, and `output.temporal` reject unknown keys, a stray or misspelled field there is also an error, and so is a setting of the other destination, such as `directory` on a `context-broker` output.
+Cassiopeia rejects a manifest when `inputs` is empty, an input has both or neither of `mapping` and `mappings`, `mappings` is empty or names the same collection twice, `mappings` is used with a format that does not support collections, `dialect` is used on an input that does not declare `format: "csv"`, `headers` is used on an input with a local `source`, a `sensorthings` block or a SensorThings `source` breaks a rule of [SensorThings settings](#sensorthings-settings), two inputs read through the same cursor, a `${NAME}` is malformed or names a variable that is not set, a local `source` reads an environment variable, or any field has a value outside its accepted set. Because the top level, `output`, `output.validation`, and `output.temporal` reject unknown keys, a stray or misspelled field there is also an error, and so is a setting of the other destination, such as `directory` on a `context-broker` output.
 
 ## Next steps
 

@@ -3,6 +3,7 @@
 
 pub mod collect_limits;
 pub mod datastream_filter;
+pub mod incremental_read;
 pub mod page_size;
 pub mod read_mode;
 pub mod request_delay;

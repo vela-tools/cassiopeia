@@ -28,10 +28,10 @@ const RIVM_THINGS: [&str; 2] = [
 const RIVM_LATEST_TIME: &str = "2026-11-13T07:00:00Z";
 
 /// The output settings of a run that keeps every observation.
-const SERIES_OUTPUT: &str = r#", temporal: { representation: "series" }"#;
+pub(crate) const SERIES_OUTPUT: &str = r#", temporal: { representation: "series" }"#;
 
 /// The fixture `name` of the SensorThings snapshot tests.
-fn fixture(name: &str) -> PathBuf {
+pub(crate) fn fixture(name: &str) -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/sensorthings").join(name)
 }
 
@@ -49,12 +49,12 @@ fn run_snapshot(store: StoreKind, snapshot: &Path, output_extra: &str) -> (Resul
 }
 
 /// The written entity `id`.
-fn entity<'a>(outcome: &'a RunOutcome, id: &str) -> &'a Value {
+pub(crate) fn entity<'a>(outcome: &'a RunOutcome, id: &str) -> &'a Value {
     outcome.entities.iter().find(|entity| entity["id"] == id).expect("the entity is written")
 }
 
 /// The `observedAt` of every instance of a series attribute, in the order written.
-fn instant_times(attribute: &Value) -> Vec<&str> {
+pub(crate) fn instant_times(attribute: &Value) -> Vec<&str> {
     attribute
         .as_array()
         .expect("a series attribute is an array of instances")
@@ -256,7 +256,7 @@ fn an_incremental_snapshot_into_current_state_output_is_refused() {
 const RANGE_METADATA: &str = "/v1.0/Datastreams?$expand=Thing/Locations,ObservedProperty&$orderby=id%20asc&$top=1000";
 
 /// The one Thing the RIVM range fixture holds, as its entity is named when read from the mock server.
-const MOCK_RANGE_THING: &str = "urn:ngsi-ld:AirQualityObserved:sta-127001-12512";
+pub(crate) const MOCK_RANGE_THING: &str = "urn:ngsi-ld:AirQualityObserved:sta-127001-12512";
 
 /// The path and query of every observations request a mock server answered, in the order it
 /// answered them.

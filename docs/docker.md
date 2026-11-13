@@ -81,6 +81,7 @@ Inside a container, Cassiopeia switches from its per-user host directories to th
 | Configuration file | `/etc/cassiopeia/config.toml` | Auto-discovered on every run |
 | Named mappings | `/etc/cassiopeia/mappings` | User-authored configuration |
 | Smart Data Models catalog | `/var/lib/cassiopeia/schemas` | Downloaded application data |
+| Cursor stores | `/var/lib/cassiopeia/cursors` | Read positions a later run resumes from |
 | Log files | `/var/log/cassiopeia/logs` | Volatile run state |
 
 Cassiopeia detects the container from the markers provided by Docker. If the runtime is not recognised, it falls back to the host-style layout under `/root`. You can also set these paths explicitly in configuration or through the environment, as described in [Configuration and environment](#configuration-and-environment).
@@ -117,6 +118,21 @@ docker run --rm \
 ```
 
 The catalog is optional. You do not need it when a run uses only a custom schema or skips validation. The terminal interfaces (`explorer`, `wizard`) and examples that use a published Smart Data Model do expect it to be present.
+
+## Persisting cursors
+
+An incremental SensorThings read keeps how far it has read each data stream in a cursor store at `/var/lib/cassiopeia/cursors`, and the next run resumes from there. A container started with `--rm` loses that directory with it, so its next run would read every data stream from its initial point again. Mount a named volume at the cursors directory instead:
+
+```bash
+docker run --rm \
+    -v "$PWD:/data:ro" \
+    -v cassiopeia-schemas:/var/lib/cassiopeia/schemas \
+    -v cassiopeia-cursors:/var/lib/cassiopeia/cursors \
+    ghcr.io/vela-tools/cassiopeia:latest \
+    map --manifest /data/rivm-air.json5
+```
+
+A running job holds each cursor it reads through, so a second container that reads through the same cursor in the same volume is refused before it sends any request. See [Reading new readings](source-formats.md#reading-new-readings).
 
 ## A full run with volumes
 
@@ -185,6 +201,7 @@ Every configuration setting also has an environment variable. Build its name fro
 | --- | --- |
 | `CASSIOPEIA_SCHEMAS__FOLDER` | Where the catalog is read and written |
 | `CASSIOPEIA_MAPPINGS__FOLDER` | Where named mappings are resolved |
+| `CASSIOPEIA_CURSORS__FOLDER` | Where cursor stores are kept |
 | `CASSIOPEIA_PIPELINE__BATCH_SIZE` | Records per batch |
 
 To store the catalog at another path, point the variable at a mounted directory and mount the volume there:
@@ -200,7 +217,7 @@ The [manifest guide](manifest.md) and [running guide](running.md) describe the s
 
 ## File ownership
 
-The container runs as `root` by default, so files written to a mounted host directory belong to `root`. To use your own user, pass `--user "$(id -u):$(id -g)"`. Make sure that user can write to every output and schema directory. If the run downloads the catalog, point `CASSIOPEIA_SCHEMAS__FOLDER` at a writable directory because the image's `/var/lib/cassiopeia/schemas` directory belongs to `root`.
+The container runs as `root` by default, so files written to a mounted host directory belong to `root`. To use your own user, pass `--user "$(id -u):$(id -g)"`. Make sure that user can write to every output and schema directory. If the run downloads the catalog, point `CASSIOPEIA_SCHEMAS__FOLDER` at a writable directory because the image's `/var/lib/cassiopeia/schemas` directory belongs to `root`. An incremental read writes its cursors, so point `CASSIOPEIA_CURSORS__FOLDER` at a writable directory for the same reason.
 
 ## A scheduled container
 

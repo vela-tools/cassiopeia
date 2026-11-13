@@ -39,6 +39,7 @@ impl From<&PipelineError> for DiagnosticCode {
             | PipelineError::SnapshotNeedsSeries { .. }
             | PipelineError::RemoteReadNeedsSeries { .. }
             | PipelineError::ScheduledLatestIntoTemporal { .. } => RunCode::Misconfigured.into(),
+            PipelineError::Cursor(_) => RunCode::CursorUnusable.into(),
             PipelineError::LocalContext(error) => local_context_code(error).into(),
             // A mapping whose `valueType` declarations cannot be checked cannot be used either.
             PipelineError::Mapping(_) | PipelineError::ValueTypeExpander(_) => RunCode::MappingUnusable.into(),
@@ -51,13 +52,15 @@ impl From<&PipelineError> for DiagnosticCode {
 const fn collector_code(error: &CollectorError) -> IngestCode {
     match error {
         CollectorError::ChannelClosed => IngestCode::StreamClosed,
-        // A stopped run, a link that loops or leaves the server, and a page that is no collection all
-        // leave the source as unread as a refused download does.
+        // A stopped run, an incremental read without its cursor, a link that loops or leaves the
+        // server, and a page that is no collection all leave the source as unread as a refused
+        // download does.
         CollectorError::ClientInit { .. }
         | CollectorError::Http { .. }
         | CollectorError::HttpStatus { .. }
         | CollectorError::Io { .. }
         | CollectorError::Interrupted { .. }
+        | CollectorError::CursorWithheld { .. }
         | CollectorError::LinkLoop { .. }
         | CollectorError::NextLink { .. }
         | CollectorError::PageUnreadable { .. }

@@ -3,6 +3,8 @@ use std::path::PathBuf;
 
 /// The leaf name of the schema store within the data directory.
 const SCHEMAS_LEAF: &str = "schemas";
+/// The leaf name of the cursor stores within the data directory.
+const CURSORS_LEAF: &str = "cursors";
 /// The leaf name of the mapping folder within the config directory.
 const MAPPINGS_LEAF: &str = "mappings";
 /// The leaf name of the log directory within the state directory.
@@ -16,6 +18,15 @@ const CONFIG_FILE_NAME: &str = "config.toml";
 #[must_use]
 pub fn schemas_dir() -> PathBuf {
     data_dir().join(SCHEMAS_LEAF)
+}
+
+/// Where the cursor stores of incremental reads are kept.
+///
+/// A cursor store holds what a run has read so far, which the next run resumes from, so it is
+/// application data that has to persist, and belongs under the data directory.
+#[must_use]
+pub fn cursors_dir() -> PathBuf {
+    data_dir().join(CURSORS_LEAF)
 }
 
 /// Where the mapping documents a run refers to by name are kept.
@@ -47,13 +58,19 @@ pub fn config_file() -> PathBuf {
 mod tests {
     use crate::{
         base::{config_dir, data_dir},
-        locations::{config_file, log_dir, mappings_dir, schemas_dir},
+        locations::{config_file, cursors_dir, log_dir, mappings_dir, schemas_dir},
     };
 
     #[test]
     fn schemas_are_classified_under_the_data_directory() {
         assert!(schemas_dir().starts_with(data_dir()));
         assert!(schemas_dir().ends_with("schemas"));
+    }
+
+    #[test]
+    fn cursors_are_classified_under_the_data_directory() {
+        assert!(cursors_dir().starts_with(data_dir()));
+        assert!(cursors_dir().ends_with("cursors"));
     }
 
     #[test]

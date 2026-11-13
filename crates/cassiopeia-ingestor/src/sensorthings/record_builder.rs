@@ -5,7 +5,12 @@ use crate::sensorthings::{
     served_id::optional_served_id,
 };
 use cassiopeia_ir::record::Record;
-use cassiopeia_sensorthings::{entity_id::ID_MEMBER, phenomenon_time::PhenomenonTime, service_root::ServiceRoot, snapshot::line_number::LineNumber};
+use cassiopeia_sensorthings::{
+    entity_id::ID_MEMBER,
+    phenomenon_time::{PHENOMENON_TIME_MEMBER, PhenomenonTime},
+    service_root::ServiceRoot,
+    snapshot::line_number::LineNumber,
+};
 use serde_json::{Map, Value};
 
 /// The Observation members a reading carries as served, besides its id, result and times.
@@ -61,7 +66,7 @@ pub(super) fn reading(
     losses: &mut SensorThingsLosses,
 ) -> Result<Option<Value>, SensorThingsIngestError> {
     let id = optional_served_id(&observation, line, StaEntity::Observation)?;
-    let (text, time) = match observation.remove("phenomenonTime") {
+    let (text, time) = match observation.remove(PHENOMENON_TIME_MEMBER) {
         Some(Value::String(text)) => match text.parse::<PhenomenonTime>() {
             Ok(time) => (text, time),
             Err(unreadable) => {
@@ -83,7 +88,7 @@ pub(super) fn reading(
     observation.remove(ID_MEMBER);
     move_member(&mut reading, "result", &mut observation, "result");
     reading.insert("time".to_owned(), Value::from(time.instant_text()));
-    reading.insert("phenomenonTime".to_owned(), Value::String(text));
+    reading.insert(PHENOMENON_TIME_MEMBER.to_owned(), Value::String(text));
     for member in OBSERVATION_MEMBERS {
         move_member(&mut reading, member, &mut observation, member);
     }

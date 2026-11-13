@@ -15,8 +15,8 @@ use cassiopeia_sensorthings::{read_kind::SnapshotRecords, service::SensorThingsS
 /// - A series run against a Context Broker needs `operation: "temporal"`: a folded `EntityTemporal`
 ///   only belongs at the broker's `/temporal/entities` endpoint (ETSI GS CIM 009 v1.9.1 clause
 ///   5.6.11).
-/// - A SensorThings read that gives one record per Observation, as a range read does, needs series
-///   output. A current-state store keeps one record per entity and mapping, the one with the latest
+/// - A SensorThings read that gives one record per Observation, as a range or an incremental read
+///   does, needs series output. A current-state store keeps one record per entity and mapping, the one with the latest
 ///   `observedAt` (clause 4.8), so it would keep one reading of each Thing and discard the rest.
 /// - A scheduled latest SensorThings read cannot write to the temporal API. Every cycle would send the
 ///   newest reading of every data stream again, and the temporal API would store each unchanged
@@ -64,7 +64,7 @@ fn latest_read(source: &LaneSource) -> Option<&SensorThingsService> {
     match source {
         LaneSource::SensorThings(service) => match service.settings().read() {
             ReadMode::Latest => Some(service),
-            ReadMode::Range(_) => None,
+            ReadMode::Range(_) | ReadMode::Incremental(_) => None,
         },
         LaneSource::Files(_) => None,
     }
@@ -181,6 +181,29 @@ mod tests {
         let message = error.to_string();
         assert!(message.contains("`range` read"), "{message}");
         assert!(message.contains(r#"output.temporal.representation: "series""#), "{message}");
+    }
+
+    /// A lane that reads the readings of a SensorThings server gained since its cursor's positions.
+    fn incremental_lane() -> InputConfig {
+        lane(
+            r#"{"source": "https://h.example/v1.1", "format": "sensorthings", "mapping": "m.json5", "sensorthings": {"read": {"incremental": {"cursor": "rivm-air"}}}}"#,
+        )
+    }
+
+    #[test]
+    fn an_incremental_read_without_series_is_refused() {
+        let error = check_run_compatibility(&[incremental_lane()], &broker("upsert"), None, None).unwrap_err();
+
+        assert!(
+            matches!(&error, PipelineError::RemoteReadNeedsSeries { read: ReadKind::Incremental, root } if root.url().as_str() == "https://h.example/v1.1"),
+            "{error:?}"
+        );
+        assert!(error.to_string().contains("`incremental` read"), "{error}");
+    }
+
+    #[test]
+    fn a_scheduled_incremental_read_into_the_temporal_api_is_allowed() {
+        check_run_compatibility(&[incremental_lane()], &broker("temporal"), SERIES, Some(&every_five_minutes())).unwrap();
     }
 
     #[test]

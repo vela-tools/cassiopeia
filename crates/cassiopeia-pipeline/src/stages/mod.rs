@@ -20,6 +20,7 @@ pub(crate) mod ingestor_factories;
 pub(crate) mod limits_reached_report;
 pub(crate) mod merged_records_report;
 pub(crate) mod misshapen_rows_report;
+pub(crate) mod missing_datastreams_report;
 pub(crate) mod nonconformant_types;
 pub(crate) mod nonexistent_dates_report;
 pub(crate) mod out_of_range_geometry_report;

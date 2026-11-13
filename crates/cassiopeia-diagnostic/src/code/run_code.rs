@@ -25,6 +25,8 @@ pub enum RunCode {
     ReportUnwritable,
     /// The run's settings contradict each other.
     Misconfigured,
+    /// A cursor store could not be opened, read or committed.
+    CursorUnusable,
 }
 
 #[cfg(test)]
@@ -36,5 +38,6 @@ mod tests {
     fn a_run_code_renders_a_kebab_case_token() {
         assert_eq!(RunCode::CycleRetrying.to_string(), "cycle-retrying");
         assert_eq!(RunCode::StagePanic.to_string(), "stage-panic");
+        assert_eq!(RunCode::CursorUnusable.to_string(), "cursor-unusable");
     }
 }

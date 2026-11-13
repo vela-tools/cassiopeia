@@ -22,6 +22,7 @@ pub fn pipeline_config(config: &Config, default_user_agent: UserAgent) -> Pipeli
         entity_store: config.resolver.entity_store,
         relationship_store: config.resolver.relationship_store,
         schemas_folder: config.schemas.folder.clone(),
+        cursors_folder: config.cursors.folder.clone(),
         context_mode: AtContextMode::None,
         default_user_agent,
         channel_policy: match config.pipeline.channel_capacity {
@@ -47,7 +48,7 @@ mod tests {
     use cassiopeia_configuration::{config::Config, pipeline::ExtractionMode};
     use cassiopeia_pipeline::pipeline_config::ExtractionParallelism;
     use pretty_assertions::assert_eq;
-    use std::num::NonZeroUsize;
+    use std::{num::NonZeroUsize, path::PathBuf};
 
     #[test]
     fn parallel_extraction_maps_to_the_parallel_variant() {
@@ -76,6 +77,14 @@ mod tests {
         let config = Config::default();
 
         assert_eq!(pipeline_config(&config, user_agent()).default_user_agent, user_agent());
+    }
+
+    #[test]
+    fn the_cursors_folder_is_the_configured_one() {
+        let mut config = Config::default();
+        config.cursors.folder = PathBuf::from("/srv/cursors");
+
+        assert_eq!(pipeline_config(&config, user_agent()).cursors_folder, PathBuf::from("/srv/cursors"));
     }
 
     #[test]

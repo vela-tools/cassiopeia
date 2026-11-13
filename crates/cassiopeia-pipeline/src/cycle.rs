@@ -1,10 +1,12 @@
 use crate::{
     context_resolution::resolve_context_source,
     controller::{AtomicBoolController, RunController},
+    cursor_stores::CycleCursors,
     error::{PipelineError, Result},
     input_config::InputConfig,
     memory_sampler::MemorySampler,
     observer::{PipelineProgress, PipelineResult},
+    phase1::CycleLane,
     pipeline::Pipeline,
     pipeline_stage::PipelineStage,
     scheduled_run::ScheduledRun,
@@ -35,8 +37,11 @@ impl Pipeline {
     /// # Errors
     ///
     /// Returns [`PipelineError`](crate::error::PipelineError) when a mapping fails to load, the
-    /// resolver reports a failure, or a validation abort or writer failure tears the output phase
-    /// down.
+    /// resolver reports a failure, a validation abort or writer failure tears the output phase down,
+    /// or a cursor's positions cannot be read before the cycle or committed after it.
+    ///
+    /// The cursors of incremental inputs advance only once the whole cycle has succeeded and was not
+    /// cancelled; otherwise the next cycle reads from where this one did.
     pub(crate) fn run_cycle(&self, run: &ScheduledRun) -> Result<()> {
         let mut runner = TemplateRunner::new();
 
@@ -91,7 +96,16 @@ impl Pipeline {
         // the peak and average are complete when the summary reads them.
         let memory_sampler = MemorySampler::start(Arc::clone(&telemetry));
 
-        let resolved_count = self.run_phase1(loaded, &template_resolver, &fragment_resolver, run, &controller, Arc::clone(&telemetry))?;
+        let mut cursors = self.cursors.start_cycle()?;
+        let lanes = loaded
+            .into_iter()
+            .map(|(input, router)| CycleLane {
+                input,
+                router,
+                cursor: cursors.claim(&input.source),
+            })
+            .collect();
+        let resolved_count = self.run_phase1(lanes, &template_resolver, &fragment_resolver, run, &controller, Arc::clone(&telemetry))?;
         telemetry.set_unique_entities(resolved_count);
         self.context.observer.on_progress(&PipelineProgress {
             stage: PipelineStage::ResolverSink,
@@ -106,9 +120,10 @@ impl Pipeline {
             resolved_count,
             validator,
             writer,
-            controller,
+            Arc::clone(&controller),
             Arc::clone(&telemetry),
         );
+        let cycle_result = phase2_result.and_then(|()| self.advance_cursors(cursors, controller.as_ref()));
         drop(memory_sampler);
         let telemetry_snapshot = telemetry.snapshot();
         // The reasons a run's failures grouped under are the reporter's own tally; the pipeline
@@ -125,14 +140,23 @@ impl Pipeline {
             output_entities: telemetry_snapshot.counters.entities_written,
             // A fatal phase-2 abort emits no per-entity counter, so the completion result reflects it
             // even when the stage counted no failing entity.
-            errors: telemetry_snapshot.counters.errors.max(u64::from(phase2_result.is_err())),
+            errors: telemetry_snapshot.counters.errors.max(u64::from(cycle_result.is_err())),
             warnings: telemetry_snapshot.counters.warnings,
             telemetry: telemetry_snapshot,
         });
 
         // The summary above is reported first, then the typed error propagates so the run's exit
         // status records the failure.
-        phase2_result
+        cycle_result
+    }
+
+    /// Commits the cursor updates of a cycle that succeeded, unless it was cancelled: a cancelled
+    /// cycle may have stopped any stage early, so what it read is read again by the next cycle.
+    fn advance_cursors(&self, cursors: CycleCursors, controller: &dyn RunController) -> Result<()> {
+        if controller.should_cancel() {
+            return Ok(());
+        }
+        self.cursors.commit(cursors)
     }
 }
 

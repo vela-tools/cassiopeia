@@ -2,8 +2,7 @@ use crate::{
     collection_warnings::CollectionWarnings,
     error::CollectorError,
     sensorthings::{
-        limit_reached::CollectLimit,
-        observation_budget::ObservationBudget,
+        observation_read::{ObservationSink, next_stream, read_observations},
         page_reader::PageReader,
         range_empty::RangeEmpty,
         snapshot_failure::unwritable,
@@ -12,28 +11,14 @@ use crate::{
 };
 use cassiopeia_common::cycle_start::CycleStart;
 use cassiopeia_sensorthings::{
-    entity_id::EntityId,
     range_datastreams::RangeDatastreams,
     request::{discovery_request::metadata_discovery_request, observations_request::observations_request},
     service::SensorThingsService,
-    settings::{collect_limits::PageLimit, time_range::TimeRange},
-    snapshot::{
-        line::{DatastreamLine, ObservationLine},
-        writer::{ObservationWriter, SnapshotWriter},
-    },
+    settings::time_range::TimeRange,
+    snapshot::{line::DatastreamLine, writer::SnapshotWriter},
 };
-use std::{collections::HashSet, io::Write, ops::ControlFlow, path::Path};
-use url::Url;
-
-/// Where a range read writes its Observations, and how many more it may write.
-struct ObservationSink<'a, W> {
-    /// The snapshot, past its datastream lines.
-    lines: ObservationWriter<W>,
-    /// How many more Observations the cycle may write.
-    budget: ObservationBudget,
-    /// Where the snapshot is written, which a write failure names.
-    path: &'a Path,
-}
+use cassiopeia_sensorthings_cursor::seen_observations::SeenObservations;
+use std::{io::Write, ops::ControlFlow, path::Path};
 
 /// Reads every reading of `range` in the cycle that started at `cycle_start` from the data streams
 /// `service` selects into `snapshot`, after its header, and returns what the read met that the cycle
@@ -82,52 +67,18 @@ pub(crate) fn read_range<W: Write>(
     if let TraversalEnd::LimitReached(limit) = discovery {
         warnings.limit_reached(limit);
     }
-    let mut sink = ObservationSink {
-        lines: snapshot.into_observations(),
-        budget: ObservationBudget::new(settings.limits().observations()),
-        path,
-    };
+    let mut sink = ObservationSink::new(snapshot.into_observations(), settings.limits().observations(), path);
+    // A range read keeps nothing between cycles, so no Observation is seen before it is read.
+    let unseen = SeenObservations::default();
     for datastream in datastreams.into_ids() {
         let request = observations_request(service.root(), &datastream, window, settings.page_size());
-        if let TraversalEnd::LimitReached(limit) = read_observations(reader, request, settings.limits().pages(), &datastream, &mut sink)? {
-            let stopped_by = limit.limit();
-            warnings.limit_reached(limit);
-            match stopped_by {
-                CollectLimit::Pages(_) => {}
-                CollectLimit::Observations(_) => break,
-            }
+        let end = read_observations(reader, request, settings.limits().pages(), &datastream, &unseen, &mut sink, |_, _| {})?;
+        if next_stream(end, &mut warnings).is_break() {
+            break;
         }
     }
-    sink.lines.finish().map_err(unwritable(path))?;
+    sink.finish()?;
     Ok(warnings)
-}
-
-/// Writes the Observations `request` serves of the data stream `datastream` into `sink`, each once,
-/// as long as its budget allows, following at most `pages` pages.
-fn read_observations<W: Write>(
-    reader: &mut PageReader,
-    request: Url,
-    pages: PageLimit,
-    datastream: &EntityId,
-    sink: &mut ObservationSink<'_, W>,
-) -> Result<TraversalEnd, CollectorError> {
-    // A `$skip`-built page repeats an item when the server gains rows between pages, so an
-    // Observation this traversal already wrote is dropped. One without an id cannot be told apart
-    // and is written.
-    let mut written: HashSet<EntityId> = HashSet::new();
-    traverse(reader, request, pages, |observation| {
-        if EntityId::of(&observation).is_some_and(|id| !written.insert(id)) {
-            return Ok(ControlFlow::Continue(()));
-        }
-        if let ControlFlow::Break(limit) = sink.budget.spend() {
-            return Ok(ControlFlow::Break(limit));
-        }
-        // Each line owns the id of its data stream, while the read keeps it for the next one.
-        sink.lines
-            .observation(&ObservationLine::new(observation, datastream.clone()))
-            .map_err(unwritable(sink.path))?;
-        Ok(ControlFlow::Continue(()))
-    })
 }
 
 #[cfg(test)]

@@ -1,13 +1,13 @@
 use crate::{
     input_config::LaneSource,
-    stages::{empty_ranges_report::report_empty_ranges, limits_reached_report::report_limits_reached},
+    stages::{empty_ranges_report::report_empty_ranges, limits_reached_report::report_limits_reached, missing_datastreams_report::report_missing_datastreams},
 };
 use cassiopeia_collector::{
     collector::Collector,
     downloader::Downloader,
     error::CollectorError,
     generic::GenericCollector,
-    sensorthings::collector::SensorThingsCollector,
+    sensorthings::{collector::SensorThingsCollector, cursor_cycle::CursorCycle},
 };
 use cassiopeia_common::{
     channel::{ChannelPolicy, ChannelReceiver, channel_with_telemetry},
@@ -28,9 +28,10 @@ use std::{
 ///
 /// Files are read as they are, tagged with the lane's declared format. A SensorThings server is read
 /// into a snapshot built from `cycle_start`, so every attempt at one scheduled run asks the server for
-/// the same thing; both stop once `shutdown` is set.
+/// the same thing, and an incremental read resumes from `cursor`; both stop once `shutdown` is set.
 pub(crate) fn lane_collector(
     source: &LaneSource,
+    cursor: Option<CursorCycle>,
     format_override: Option<DataFormat>,
     cycle_start: CycleStart,
     downloader: Downloader,
@@ -39,7 +40,7 @@ pub(crate) fn lane_collector(
     match source {
         // The lane configuration is borrowed and reused every cycle, so each collector owns a copy.
         LaneSource::Files(files) => Box::new(GenericCollector::new(files.clone(), format_override, downloader)),
-        LaneSource::SensorThings(service) => Box::new(SensorThingsCollector::new(service.clone(), cycle_start, downloader, shutdown)),
+        LaneSource::SensorThings(service) => Box::new(SensorThingsCollector::new(service.clone(), cursor, cycle_start, downloader, shutdown)),
     }
 }
 
@@ -71,7 +72,8 @@ pub(crate) fn spawn_collector_thread(
 
         let service = stage.service_span();
         match collector.collect(tx.clone()) {
-            Ok(warnings) => telemetry.add_warnings(report_limits_reached(sink, &warnings) + report_empty_ranges(sink, &warnings)),
+            Ok(warnings) => telemetry
+                .add_warnings(report_limits_reached(sink, &warnings) + report_empty_ranges(sink, &warnings) + report_missing_datastreams(sink, &warnings)),
             Err(error) => {
                 stage.failed(1);
                 telemetry.add_errors(1);

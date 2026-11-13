@@ -1,4 +1,5 @@
 use crate::{
+    cursor_stores::CursorStores,
     error::Result,
     input_config::{InputConfig, build_input_config},
     observer::RunObserver,
@@ -26,6 +27,8 @@ use std::{
 pub struct Pipeline {
     /// The input lanes resolved from the manifest.
     pub(crate) inputs: Vec<InputConfig>,
+    /// The cursor stores of the incremental inputs, held for the whole run.
+    pub(crate) cursors: CursorStores,
     /// Where and how entities are written.
     pub(crate) output: OutputConfig,
     /// The engine knobs: batching, stores, channels, and representations.
@@ -109,8 +112,9 @@ impl Pipeline {
     ///
     /// # Errors
     ///
-    /// Returns [`PipelineError`](crate::error::PipelineError) when an input's file extension is invalid, or when the run's inputs,
-    /// destination, temporal output and schedule contradict each other.
+    /// Returns [`PipelineError`](crate::error::PipelineError) when an input's file extension is invalid, when the run's inputs,
+    /// destination, temporal output and schedule contradict each other, or when the cursor store of
+    /// an incremental input cannot be opened.
     pub fn from_manifest(
         manifest: &Manifest,
         validation: ValidationOverrides,
@@ -151,6 +155,8 @@ impl Pipeline {
         let representation = output.and_then(|output| *output.representation());
         let temporal = output.and_then(|output| output.temporal().as_ref()).map(|temporal| *temporal.representation());
         check_run_compatibility(&inputs, &destination, temporal, manifest.schedule().as_ref())?;
+        // Opened once the run is known to be coherent, so a refused run creates no store.
+        let cursors = CursorStores::open(&inputs, &config.cursors_folder)?;
         let global_context_mode = output
             .and_then(|output| output.context().clone())
             .unwrap_or_else(|| config.context_mode.clone());
@@ -181,6 +187,7 @@ impl Pipeline {
 
         Ok(Pipeline {
             inputs,
+            cursors,
             output: OutputConfig {
                 destination,
                 representation,

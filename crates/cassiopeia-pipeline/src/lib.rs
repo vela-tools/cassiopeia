@@ -11,6 +11,7 @@
 mod completion;
 mod context_resolution;
 pub mod controller;
+mod cursor_stores;
 mod cycle;
 #[cfg(test)]
 mod end_to_end;

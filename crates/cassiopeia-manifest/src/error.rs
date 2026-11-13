@@ -1,5 +1,5 @@
 use cassiopeia_common::{collection::CollectionName, error::io::IoError, format::DataFormat, masked_url::MaskedUrl};
-use cassiopeia_sensorthings::service_root::ServiceRootError;
+use cassiopeia_sensorthings::{cursor_name::CursorName, service_root::ServiceRootError};
 use std::{path::PathBuf, result, string::FromUtf8Error};
 use thiserror::Error;
 
@@ -86,6 +86,11 @@ pub enum ManifestError {
         /// The source, masked. Boxed so a URL does not enlarge every `Result` in the crate.
         url: Box<MaskedUrl>,
     },
+
+    /// Two inputs read incrementally through one cursor, so each would move the positions the other
+    /// resumes from.
+    #[error("The cursor '{0}' is named by more than one input; each incremental input keeps its positions in a cursor of its own")]
+    DuplicateCursor(CursorName),
 
     /// The output's destination settings could not be read: no known `target`, a missing setting,
     /// or a key neither the output nor its destination defines.

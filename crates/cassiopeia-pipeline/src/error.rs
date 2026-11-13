@@ -9,6 +9,7 @@ use cassiopeia_ngsi_ld::entity::name::NameBuf;
 use cassiopeia_profiler::error::ProfilerError;
 use cassiopeia_resolver::{entity_store::error::EntityStoreError, error::ResolverError, relationship_store::error::RelationshipStoreError};
 use cassiopeia_sensorthings::{read_kind::ReadKind, service_root::ServiceRoot};
+use cassiopeia_sensorthings_cursor::cursor_store_error::CursorStoreError;
 use cassiopeia_transformer::error::TransformationError;
 use cassiopeia_validator::error::ValidatorError;
 use cassiopeia_value_type_expansion::error::ExpansionError;
@@ -128,6 +129,11 @@ pub enum PipelineError {
         /// not enlarge every `Result` in the crate past the large-error threshold.
         root: Box<ServiceRoot>,
     },
+
+    /// A cursor store could not be opened when the run was built, or its positions could not be
+    /// read before a cycle or committed after one.
+    #[error(transparent)]
+    Cursor(#[from] CursorStoreError),
 
     /// A remote custom validation schema could not be fetched at run setup.
     #[error("Failed to fetch the custom validation schema from '{url}'")]

@@ -19,6 +19,17 @@ pub struct CursorUpdate {
     lookback: Duration,
     /// The Observations the cycle wrote, by listed data stream.
     listed: BTreeMap<EntityId, SeenObservations>,
+    /// Whether discovery listed every data stream the server serves.
+    listing: Listing,
+}
+
+/// How far a cycle's discovery listed the data streams a server serves.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Listing {
+    /// Discovery read its last page, so a data stream it did not list is no longer served.
+    Complete,
+    /// A collection limit stopped discovery, so a data stream it did not list may still be served.
+    CutShort,
 }
 
 impl CursorUpdate {
@@ -30,7 +41,20 @@ impl CursorUpdate {
             cycle_start,
             lookback,
             listed: BTreeMap::new(),
+            listing: Listing::Complete,
         }
+    }
+
+    /// Records that a collection limit stopped discovery before it listed every data stream, so no
+    /// position is marked missing for not being listed.
+    pub const fn listing_cut_short(&mut self) {
+        self.listing = Listing::CutShort;
+    }
+
+    /// The positions of `committed` this update marks missing, by ascending data stream id: those
+    /// whose data stream discovery did not list, unless it was cut short.
+    pub fn missing<'a>(&self, committed: &'a Positions) -> impl Iterator<Item = (&'a EntityId, &'a Position)> {
+        committed.iter().filter(|(datastream, _)| self.marks_missing(datastream))
     }
 
     /// Records that discovery listed `datastream` and that the cycle wrote `written` for it, which
@@ -43,12 +67,13 @@ impl CursorUpdate {
     ///
     /// A listed data stream moves past what the cycle wrote, and gets a first position only when the
     /// cycle wrote for it. A held position whose data stream was not listed keeps its high-water mark
-    /// and seen Observations, and is marked missing.
-    pub(crate) fn apply(self, committed: Positions) -> Positions {
+    /// and seen Observations, and is marked missing unless discovery was cut short.
+    #[must_use]
+    pub fn apply(self, committed: Positions) -> Positions {
         let mut positions = BTreeMap::from(committed);
         positions
             .iter_mut()
-            .filter(|(datastream, _)| !self.listed.contains_key(*datastream))
+            .filter(|(datastream, _)| self.marks_missing(datastream))
             .for_each(|(_, position)| position.miss(self.cycle_start));
         for (datastream, written) in self.listed {
             match positions.entry(datastream) {
@@ -61,6 +86,14 @@ impl CursorUpdate {
             }
         }
         Positions::from(positions)
+    }
+
+    /// Whether this update marks the position of `datastream` missing.
+    fn marks_missing(&self, datastream: &EntityId) -> bool {
+        match self.listing {
+            Listing::Complete => !self.listed.contains_key(datastream),
+            Listing::CutShort => false,
+        }
     }
 }
 
@@ -142,6 +175,30 @@ mod tests {
 
         assert_eq!(listed.get(&EntityId::Integer(5)).unwrap().missing_since(), None);
         assert_eq!(listed.get(&EntityId::Integer(5)).unwrap().last_listed(), at("11:00"));
+    }
+
+    #[test]
+    fn a_cut_short_listing_marks_no_stream_missing() {
+        let committed = after(Positions::default(), "09:00", vec![(5, seen(&[(1, "08:50")])), (9, seen(&[(2, "08:55")]))]);
+        let mut update = CursorUpdate::new(at("10:00"), LOOKBACK);
+        update.record(EntityId::Integer(5), SeenObservations::default());
+        update.listing_cut_short();
+
+        assert_eq!(update.missing(&committed).count(), 0);
+        let positions = update.apply(committed);
+        assert_eq!(positions.get(&EntityId::Integer(9)).unwrap().missing_since(), None);
+        assert_eq!(positions.get(&EntityId::Integer(9)).unwrap().last_listed(), at("09:00"));
+    }
+
+    #[test]
+    fn the_positions_an_update_marks_missing_are_the_unlisted_ones() {
+        let committed = after(Positions::default(), "09:00", vec![(5, seen(&[(1, "08:50")])), (9, seen(&[(2, "08:55")]))]);
+        let mut update = CursorUpdate::new(at("10:00"), LOOKBACK);
+        update.record(EntityId::Integer(9), SeenObservations::default());
+
+        let missing: Vec<&EntityId> = update.missing(&committed).map(|(datastream, _)| datastream).collect();
+
+        assert_eq!(missing, [&EntityId::Integer(5)]);
     }
 
     #[test]

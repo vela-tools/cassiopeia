@@ -25,7 +25,7 @@ pub struct SensorThingsSettings {
 
     /// What the read collects.
     #[serde(default)]
-    #[getset(get_copy = "pub")]
+    #[getset(get = "pub")]
     #[builder(default)]
     read: ReadMode,
 
@@ -62,7 +62,7 @@ mod tests {
     fn settings_default_to_a_latest_read_of_every_data_stream() {
         let settings = settings("{}").unwrap();
 
-        assert_eq!(settings.read(), ReadMode::Latest);
+        assert_eq!(settings.read(), &ReadMode::Latest);
         assert_eq!(settings.page_size().get(), 1000);
         assert_eq!(settings.limits().pages().get(), 1000);
         assert_eq!(settings.limits().observations().get(), 500_000);
@@ -77,7 +77,7 @@ mod tests {
             settings(r#"{"read": "latest", "pageSize": 200, "datastreams": "x eq 1", "delay": "200ms", "limits": {"pages": 10, "observations": 1000}}"#)
                 .unwrap();
 
-        assert_eq!(settings.read(), ReadMode::Latest);
+        assert_eq!(settings.read(), &ReadMode::Latest);
         assert_eq!(settings.page_size().get(), 200);
         assert_eq!(settings.datastreams().as_ref().map(DatastreamFilter::as_str), Some("x eq 1"));
         assert_eq!(settings.delay().map(RequestDelay::get), Some(Duration::from_millis(200)));

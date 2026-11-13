@@ -9,11 +9,13 @@
 //! 9.3), entity ids and their order, a Datastream's unit of measurement (section 8.2.4), the readings
 //! a server offers, the instant a `phenomenonTime` stands for (section 8.2.7), the read modes, the
 //! window a range read covers and the data streams it requests, the names of the cursors an
-//! incremental read keeps its positions in, and the snapshot file that is the boundary between
-//! transport and format.
+//! incremental read keeps its positions in and the data streams it requests, stalest first, and the
+//! snapshot file that is the boundary between transport and format.
 
 pub mod cursor_name;
+pub mod datastream_span;
 pub mod entity_id;
+pub mod incremental_datastreams;
 pub mod instant_text;
 pub mod observed_property_name;
 pub mod offered_readings;

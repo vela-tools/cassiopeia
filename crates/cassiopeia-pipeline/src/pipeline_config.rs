@@ -40,6 +40,8 @@ pub struct PipelineConfig {
     pub relationship_store: StoreKind,
     /// Where JSON Schema files and the Smart Data Models catalog live.
     pub schemas_folder: PathBuf,
+    /// Where the cursor stores of incremental reads are kept.
+    pub cursors_folder: PathBuf,
     /// How the `@context` is resolved, when the manifest output does not state its own mode.
     pub context_mode: AtContextMode,
     /// The `User-Agent` a remote source is fetched with, and the one the broker writer sends when
@@ -105,6 +107,7 @@ mod tests {
             entity_store: StoreKind::DashMap,
             relationship_store: StoreKind::DashMap,
             schemas_folder: PathBuf::from("schemas"),
+            cursors_folder: PathBuf::from("cursors"),
             context_mode: AtContextMode::Default,
             default_user_agent: UserAgent::from("test".to_owned()),
             channel_policy: ChannelPolicy::Bounded(NonZeroUsize::new(64).unwrap()),

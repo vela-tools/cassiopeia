@@ -1,6 +1,7 @@
 mod geo_properties;
 mod geojson_collections;
 mod harness;
+mod incremental_reads;
 mod json_collections;
 mod local_contexts;
 mod record_merges;

@@ -1,7 +1,12 @@
 use crate::instant_text::instant_text;
 use chrono::{DateTime, SubsecRound, Utc};
+use serde_json::{Map, Value};
 use std::str::FromStr;
 use thiserror::Error;
+
+/// The member a served Observation carries its `phenomenonTime` in (OGC 18-088 section 8.2.7, Table
+/// 18), and a served Datastream the span of its Observations' (section 8.2.4, Table 10).
+pub const PHENOMENON_TIME_MEMBER: &str = "phenomenonTime";
 
 /// How many fractional digits of a second an instant keeps: NGSI-LD times are precise to the
 /// microsecond (ETSI GS CIM 009 v1.9.1 clause 4.6.3).
@@ -44,6 +49,13 @@ impl UnreadablePhenomenonTime {
 }
 
 impl PhenomenonTime {
+    /// The `phenomenonTime` `served` carries, or `None` when it carries none, or one that is no text
+    /// or names no instant.
+    #[must_use]
+    pub fn of(served: &Map<String, Value>) -> Option<PhenomenonTime> {
+        served.get(PHENOMENON_TIME_MEMBER)?.as_str()?.parse().ok()
+    }
+
     /// The text the server sent.
     #[must_use]
     pub const fn text(&self) -> &str {
@@ -88,6 +100,7 @@ fn instant(text: &str) -> Option<DateTime<Utc>> {
 mod tests {
     use crate::phenomenon_time::{PhenomenonTime, UnreadablePhenomenonTime};
     use pretty_assertions::assert_eq;
+    use serde_json::{Map, Value, json};
 
     fn instant_of(text: &str) -> String {
         text.parse::<PhenomenonTime>().unwrap().instant_text()
@@ -117,6 +130,19 @@ mod tests {
     #[test]
     fn a_zero_fraction_is_left_out() {
         assert_eq!(instant_of("2026-11-12T11:00:00.000Z"), "2026-11-12T11:00:00Z");
+    }
+
+    #[test]
+    fn a_served_entity_s_phenomenon_time_is_read_from_its_member() {
+        let served = |value: Value| -> Map<String, Value> { Map::from_iter([("phenomenonTime".to_owned(), value)]) };
+
+        assert_eq!(
+            PhenomenonTime::of(&served(json!("2026-11-12T09:00:00Z/2026-11-12T10:00:00Z"))).map(|time| time.instant_text()),
+            Some("2026-11-12T10:00:00Z".to_owned())
+        );
+        assert_eq!(PhenomenonTime::of(&served(json!("soon"))), None);
+        assert_eq!(PhenomenonTime::of(&served(json!(null))), None);
+        assert_eq!(PhenomenonTime::of(&Map::new()), None);
     }
 
     #[test]

@@ -1,10 +1,6 @@
-use crate::{entity_id::EntityId, phenomenon_time::PhenomenonTime, read_window::ReadWindow};
+use crate::{datastream_span::ended_before, entity_id::EntityId, read_window::ReadWindow};
 use serde_json::{Map, Value};
 use std::collections::{BTreeSet, btree_set};
-
-/// The member of a Datastream that holds the interval its Observations cover (OGC 18-088 section
-/// 8.2.4, Table 10).
-const PHENOMENON_TIME: &str = "phenomenonTime";
 
 /// The data streams a range read requests the Observations of, gathered one served Datastream at a
 /// time from its metadata discovery.
@@ -25,7 +21,7 @@ impl RangeDatastreams {
     /// `window`.
     pub fn add(&mut self, datastream: &Map<String, Value>, window: ReadWindow) {
         if let Some(id) = EntityId::of(datastream)
-            && !ended_before(datastream, window)
+            && !ended_before(datastream, window.from())
         {
             self.ids.insert(id);
         }
@@ -36,15 +32,6 @@ impl RangeDatastreams {
     pub fn into_ids(self) -> btree_set::IntoIter<EntityId> {
         self.ids.into_iter()
     }
-}
-
-/// Whether `datastream` states a `phenomenonTime` that ends before `window` starts.
-fn ended_before(datastream: &Map<String, Value>, window: ReadWindow) -> bool {
-    datastream
-        .get(PHENOMENON_TIME)
-        .and_then(Value::as_str)
-        .and_then(|time| time.parse::<PhenomenonTime>().ok())
-        .is_some_and(|time| time.instant() < window.from())
 }
 
 #[cfg(test)]

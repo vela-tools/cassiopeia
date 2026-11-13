@@ -4,7 +4,10 @@ use cassiopeia_common::{context::mode::AtContextMode, format::DataFormat, reques
 use cassiopeia_csv_dialect::statement::DialectStatement;
 use cassiopeia_manifest::{input::ManifestInput, mapping_binding::MappingBinding};
 use cassiopeia_mapping::template::run_variables::RunVariables;
-use cassiopeia_sensorthings::service::SensorThingsService;
+use cassiopeia_sensorthings::{
+    service::SensorThingsService,
+    settings::{incremental_read::IncrementalRead, read_mode::ReadMode},
+};
 use serde_json::{Map, Value};
 
 /// The extension used to name a downloaded source whose format is not declared.
@@ -46,6 +49,19 @@ pub(crate) enum LaneSource {
     Files(CollectorSource),
     /// A SensorThings API server, read into a snapshot file every cycle.
     SensorThings(SensorThingsService),
+}
+
+impl LaneSource {
+    /// The SensorThings server this lane reads incrementally, with how it reads it, if it does.
+    pub(crate) fn incremental_read(&self) -> Option<(&SensorThingsService, &IncrementalRead)> {
+        match self {
+            LaneSource::SensorThings(service) => match service.settings().read() {
+                ReadMode::Incremental(read) => Some((service, read)),
+                ReadMode::Latest | ReadMode::Range(_) => None,
+            },
+            LaneSource::Files(_) => None,
+        }
+    }
 }
 
 /// Builds a lane configuration from one manifest input.
@@ -210,6 +226,21 @@ mod tests {
 
         assert_eq!(config.source, LaneSource::SensorThings(input.sensorthings().clone().unwrap()));
         assert_eq!(config.format_override, Some(DataFormat::SensorThings));
+    }
+
+    #[test]
+    fn only_an_incremental_read_is_one() {
+        let lane = |json: &str| build_input_config(&serde_json::from_str::<ManifestInput>(json).unwrap(), &Map::new()).unwrap();
+        let incremental = lane(
+            r#"{"source": "https://h.example/v1.1", "format": "sensorthings", "mapping": "m.json5", "sensorthings": {"read": {"incremental": {"cursor": "rivm-air"}}}}"#,
+        );
+        let latest = lane(r#"{"source": "https://h.example/v1.1", "format": "sensorthings", "mapping": "m.json5"}"#);
+        let snapshot = lane(r#"{"source": "rivm.jsonl", "format": "sensorthings", "mapping": "m.json5"}"#);
+
+        let (service, read) = incremental.source.incremental_read().unwrap();
+        assert_eq!((service.root().url().as_str(), read.cursor().as_str()), ("https://h.example/v1.1", "rivm-air"));
+        assert!(latest.source.incremental_read().is_none());
+        assert!(snapshot.source.incremental_read().is_none());
     }
 
     #[test]
