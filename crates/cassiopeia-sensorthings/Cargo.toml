@@ -1,0 +1,24 @@
+[package]
+name = "cassiopeia-sensorthings"
+description = "The OGC SensorThings API vocabulary Cassiopeia shares across its stages: service roots, entity ids, phenomenon times and the snapshot file"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+chrono = { version = "0.4.45", features = ["serde"] }
+derive_more = { version = "2.1.1", features = ["display", "into"] }
+getset = "0.1.7"
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.154"
+strum = { version = "0.28.0", features = ["derive"] }
+thiserror = "2.0.21"
+url = { version = "2.5.8", features = ["serde"] }
+
+[dev-dependencies]
+pretty_assertions = "1.4.1"
+
+[lints]
+workspace = true

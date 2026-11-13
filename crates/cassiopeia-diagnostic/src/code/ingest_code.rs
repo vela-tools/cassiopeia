@@ -16,6 +16,14 @@ pub enum IngestCode {
     /// A time variable in a model calendar held dates the Gregorian calendar does not have, such as
     /// `360_day` February 30, which name no instant, so the records keep them as they are labelled.
     DatesNonexistent,
+    /// Data streams of one SensorThings Thing observe the same property, so each but the one with the
+    /// lowest id is read by a generated reading key instead of the property's name.
+    ReadingsRenamed,
+    /// SensorThings Things hold a Location that is no `GeoJSON`, so their records have no `location`.
+    LocationsUnreadable,
+    /// SensorThings Observations hold a `phenomenonTime` that names no instant, so their readings
+    /// were dropped.
+    PhenomenonTimesUnreadable,
     /// The source could not be fetched or opened.
     SourceUnavailable,
     /// The payload's format could not be determined from its content.
@@ -40,5 +48,8 @@ mod tests {
         assert_eq!(IngestCode::RowsMisshapen.to_string(), "rows-misshapen");
         assert_eq!(IngestCode::TableUnreadable.to_string(), "table-unreadable");
         assert_eq!(IngestCode::DatesNonexistent.to_string(), "dates-nonexistent");
+        assert_eq!(IngestCode::ReadingsRenamed.to_string(), "readings-renamed");
+        assert_eq!(IngestCode::LocationsUnreadable.to_string(), "locations-unreadable");
+        assert_eq!(IngestCode::PhenomenonTimesUnreadable.to_string(), "phenomenon-times-unreadable");
     }
 }

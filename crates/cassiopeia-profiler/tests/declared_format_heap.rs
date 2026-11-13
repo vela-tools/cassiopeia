@@ -52,6 +52,19 @@ fn a_declared_format_never_copies_its_file_onto_the_heap() {
     writer.flush().unwrap();
     drop(writer);
 
+    // A snapshot's header must end within its first 4 KiB, so its inspector reads no further, while
+    // the rest of the file is the sparse one's length.
+    let snapshot = directory.path().join("rivm.jsonl");
+    let mut writer = BufWriter::new(File::create(&snapshot).unwrap());
+    writeln!(
+        writer,
+        r#"{{"sensorthingsSnapshot":1,"serviceRoot":"https://h.example/v1.1","version":"v1.1","read":"latest","collectedAt":"2026-11-12T10:00:00Z"}}"#
+    )
+    .unwrap();
+    writer.flush().unwrap();
+    drop(writer);
+    File::options().write(true).open(&snapshot).unwrap().set_len(SPARSE_LENGTH).unwrap();
+
     let declarations = [
         (DataFormat::Csv, &csv),
         (DataFormat::Grib, &sparse),
@@ -63,6 +76,7 @@ fn a_declared_format_never_copies_its_file_onto_the_heap() {
         (DataFormat::Shapefile, &sparse),
         (DataFormat::GeoPackage, &sparse),
         (DataFormat::NetCdf, &sparse),
+        (DataFormat::SensorThings, &snapshot),
     ];
 
     let baseline = ALLOCATOR.current_usage();

@@ -369,6 +369,31 @@ mod tests {
     }
 
     #[test]
+    fn a_local_snapshot_loads_without_settings() {
+        let input = parse(r#"{"source": "rivm.jsonl", "format": "sensorthings", "mapping": "air-quality-observed.json5"}"#).unwrap();
+
+        assert_eq!(input.format(), &Some(DataFormat::SensorThings));
+        assert_eq!(input.source(), &Input::Local(PathBuf::from("rivm.jsonl")));
+    }
+
+    #[test]
+    fn the_kebab_case_spelling_is_accepted() {
+        let input = parse(r#"{"source": "rivm.jsonl", "format": "sensor-things", "mapping": "air-quality-observed.json5"}"#).unwrap();
+
+        assert_eq!(input.format(), &Some(DataFormat::SensorThings));
+    }
+
+    #[test]
+    fn a_sensorthings_input_with_collections_is_refused() {
+        let error = parse(r#"{"source": "rivm.jsonl", "format": "sensorthings", "mappings": [{"collection": "A", "mapping": "a.json5"}]}"#).unwrap_err();
+
+        assert!(
+            error.to_string().contains("The format 'SensorThings' does not support multiple collections"),
+            "{error}"
+        );
+    }
+
+    #[test]
     fn collections_with_an_omitted_format_defer_to_the_runtime_router() {
         assert!(parse(r#"{"source": "a.kml", "mappings": [{"collection": "A", "mapping": "a.json5"}]}"#).is_ok());
     }

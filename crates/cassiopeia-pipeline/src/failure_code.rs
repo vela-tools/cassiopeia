@@ -35,7 +35,7 @@ impl From<&PipelineError> for DiagnosticCode {
             PipelineError::Validation(error) => validator_code(error).into(),
             PipelineError::ValidationSchemaMissing { .. } => SchemaCode::Absent.into(),
             PipelineError::SchemaFetch { .. } => SchemaCode::FetchFailed.into(),
-            PipelineError::SeriesRequiresTemporalOperation => RunCode::Misconfigured.into(),
+            PipelineError::SeriesRequiresTemporalOperation | PipelineError::SnapshotNeedsSeries { .. } => RunCode::Misconfigured.into(),
             PipelineError::LocalContext(error) => local_context_code(error).into(),
             // A mapping whose `valueType` declarations cannot be checked cannot be used either.
             PipelineError::Mapping(_) | PipelineError::ValueTypeExpander(_) => RunCode::MappingUnusable.into(),
@@ -78,6 +78,7 @@ const fn ingestor_code(error: &IngestorError) -> IngestCode {
         | IngestorError::Json(_)
         | IngestorError::Kml(_)
         | IngestorError::NetCdf(_)
+        | IngestorError::SensorThings(_)
         | IngestorError::Shapefile(_)
         | IngestorError::Xml(_) => IngestCode::RecordsUnreadable,
     }

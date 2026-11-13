@@ -13,7 +13,7 @@ use serde_json::Value;
 use std::{
     fs,
     io::ErrorKind,
-    path::Path,
+    path::{Path, PathBuf},
     sync::{Arc, Mutex, PoisonError},
 };
 use temp_dir::TempDir;
@@ -24,6 +24,15 @@ pub(crate) enum RunBinding {
     Mapping(&'static str),
     /// One mapping document per collection label, declared as `mappings`.
     Collections(&'static [(&'static str, &'static str)]),
+}
+
+/// The schemas an end-to-end run validates its entities against.
+pub(crate) enum RunSchemas<'a> {
+    /// An accept-anything schema for each of these entity types, so the only warnings left are the
+    /// ones under test.
+    Permissive(&'a [&'a str]),
+    /// The schemas of this folder, laid out as the validator looks them up.
+    Folder(&'a Path),
 }
 
 /// One input of an end-to-end run: how it binds mappings and the document it reads, whose format
@@ -60,12 +69,18 @@ impl RunObserver for WarningTotals {
     }
 }
 
-/// Writes an accept-anything schema for each entity type into `folder`, so the run validates every
-/// entity and the only warnings left are the ones under test.
-fn write_permissive_schemas(folder: &Path, entity_types: &[&str]) {
-    fs::create_dir_all(folder).unwrap();
-    for entity_type in entity_types {
-        fs::write(folder.join(format!("{entity_type}.json")), r#"{"type": "object"}"#).unwrap();
+/// The folder holding the run's `schemas`, written under `root` when they are permissive ones.
+fn schemas_folder(root: &Path, schemas: &RunSchemas<'_>) -> PathBuf {
+    match schemas {
+        RunSchemas::Permissive(entity_types) => {
+            let folder = root.join("schemas");
+            fs::create_dir_all(&folder).unwrap();
+            for entity_type in *entity_types {
+                fs::write(folder.join(format!("{entity_type}.json")), r#"{"type": "object"}"#).unwrap();
+            }
+            folder
+        }
+        RunSchemas::Folder(folder) => folder.to_path_buf(),
     }
 }
 
@@ -99,9 +114,33 @@ pub(crate) fn run_csv_end_to_end(store: StoreKind, csv: &str, binding: &RunBindi
     let data = root.join("data-0.csv");
     fs::write(&data, csv).unwrap();
 
-    let (result, outcome) = run_declared(store, root, &[declare_input(root, 0, &data, binding)], entity_types, "");
+    let (result, outcome) = run_declared(
+        store,
+        root,
+        &[declare_input(root, 0, &data, binding)],
+        &RunSchemas::Permissive(entity_types),
+        "",
+    );
     result.unwrap();
     outcome
+}
+
+/// Runs a one-shot pipeline over the local file `source`, mapped by the mapping document at
+/// `mapping`, writing files, on `store`, validating against `schemas`, with `output_extra` spliced
+/// into the manifest's `output` object, and returns how the run ended with what it reported and
+/// wrote.
+///
+/// The input declares no format, so the file's format is detected.
+pub(crate) fn attempt_file_end_to_end(
+    store: StoreKind,
+    source: &Path,
+    mapping: &Path,
+    schemas: &RunSchemas<'_>,
+    output_extra: &str,
+) -> (Result<(), PipelineError>, RunOutcome) {
+    let directory = TempDir::new().unwrap();
+    let declared = format!(r#"{{ source: "{}", mapping: "{}" }}"#, source.display(), mapping.display());
+    run_declared(store, directory.path(), &[declared], schemas, output_extra)
 }
 
 /// Runs a one-shot pipeline over `inputs` and returns how the run ended with what it reported and
@@ -119,14 +158,13 @@ fn attempt_end_to_end(store: StoreKind, inputs: &[RunInput], entity_types: &[&st
         })
         .collect();
 
-    run_declared(store, root, &declared, entity_types, output_extra)
+    run_declared(store, root, &declared, &RunSchemas::Permissive(entity_types), output_extra)
 }
 
 /// Runs a one-shot pipeline over the `declared` manifest inputs, with its schemas and output under
 /// `root`, and returns how the run ended with what it reported and wrote.
-fn run_declared(store: StoreKind, root: &Path, declared: &[String], entity_types: &[&str], output_extra: &str) -> (Result<(), PipelineError>, RunOutcome) {
-    let schemas = root.join("schemas");
-    write_permissive_schemas(&schemas, entity_types);
+fn run_declared(store: StoreKind, root: &Path, declared: &[String], schemas: &RunSchemas<'_>, output_extra: &str) -> (Result<(), PipelineError>, RunOutcome) {
+    let schemas_folder = schemas_folder(root, schemas);
     let output = root.join("out");
 
     let document = format!(
@@ -143,7 +181,7 @@ fn run_declared(store: StoreKind, root: &Path, declared: &[String], entity_types
     engine.entity_store = store;
     engine.relationship_store = store;
     engine.context_mode = AtContextMode::None;
-    engine.schemas_folder = schemas;
+    engine.schemas_folder = schemas_folder;
     let mut pipeline = Pipeline::from_manifest(
         &manifest,
         ValidationOverrides {

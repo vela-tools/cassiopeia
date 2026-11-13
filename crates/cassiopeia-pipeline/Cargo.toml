@@ -27,6 +27,7 @@ cassiopeia-profiler.workspace = true
 cassiopeia-reporter.workspace = true
 cassiopeia-resolver.workspace = true
 cassiopeia-scheduler.workspace = true
+cassiopeia-sensorthings.workspace = true
 cassiopeia-smart-data-models.workspace = true
 cassiopeia-transformer.workspace = true
 cassiopeia-unreadable-timestamps.workspace = true

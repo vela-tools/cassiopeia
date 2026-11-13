@@ -7,6 +7,7 @@ use crate::{
         json::JsonDetector,
         kml::KmlDetector,
         netcdf::NetCdfDetector,
+        sensorthings_snapshot::SensorThingsSnapshotDetector,
         shapefile::ShapefileDetector,
         xml::XmlDetector,
     },
@@ -19,6 +20,7 @@ pub mod grib;
 pub mod json;
 pub mod kml;
 pub mod netcdf;
+pub mod sensorthings_snapshot;
 pub mod shapefile;
 pub mod xml;
 
@@ -37,10 +39,11 @@ pub trait Detector: Send + Sync {
 /// Order is significant: the cheapest and most specific check runs first. GRIB is an unambiguous
 /// four-octet binary magic, so it leads; then the `GeoPackage` (the SQLite header and its `application_id`),
 /// then `NetCDF` (the classic `CDF` magic, or the HDF5 signature at its user-block offsets), then the
-/// shapefile (its own four-octet file code, or a `.shp` zip member), then KML and the JSON family. KML is itself XML, so the specific KML check must precede
-/// the permissive generic-XML detector; that generic-XML detector in turn precedes the CSV detector,
-/// which would otherwise accept many delimited text files. The slice is `'static`: no per-call
-/// allocation occurs.
+/// shapefile (its own four-octet file code, or a `.shp` zip member), then KML, the SensorThings
+/// snapshot and the JSON family. KML is itself XML, so the specific KML check must precede the
+/// permissive generic-XML detector, which in turn precedes the CSV detector, which would otherwise
+/// accept many delimited text files. A snapshot's header line is a JSON object, so the snapshot check
+/// must precede the JSON detector. The slice is `'static`: no per-call allocation occurs.
 #[must_use]
 pub const fn default_detectors() -> &'static [&'static dyn Detector] {
     &[
@@ -49,6 +52,7 @@ pub const fn default_detectors() -> &'static [&'static dyn Detector] {
         &NetCdfDetector,
         &ShapefileDetector,
         &KmlDetector,
+        &SensorThingsSnapshotDetector,
         &JsonDetector,
         &XmlDetector,
         &CsvDetector,
@@ -79,8 +83,8 @@ mod tests {
     }
 
     #[test]
-    fn there_are_exactly_eight_detectors() {
-        assert_eq!(default_detectors().len(), 8);
+    fn there_are_exactly_nine_detectors() {
+        assert_eq!(default_detectors().len(), 9);
     }
 
     #[test]

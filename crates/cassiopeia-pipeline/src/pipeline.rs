@@ -47,10 +47,9 @@ pub(crate) struct OutputConfig {
     pub(crate) destination: Destination,
     /// The NGSI-LD representation for written entities, when the manifest sets one.
     pub(crate) representation: Option<NgsiLdRepresentation>,
-    /// Whether the run emits the full temporal series (`temporal.representation == "series"`), which
-    /// selects the series store and inserts the fold stage. Absent temporal output leaves this false,
-    /// the current-state default.
-    pub(crate) series_representation: bool,
+    /// The temporal output shape: `series` selects the series store and inserts the fold stage, and
+    /// absent temporal output is the current-state default.
+    pub(crate) temporal: Option<TemporalRepresentation>,
     /// The `@context` mode applied to every input that does not override it.
     pub(crate) global_context_mode: AtContextMode,
     /// Where a JSON validation report is written, when requested.
@@ -62,6 +61,13 @@ pub(crate) struct OutputConfig {
     pub(crate) global_validation_schema: Option<SchemaSource>,
     /// The representation the validator serializes entities in, resolved CLI-over-manifest-over-default.
     pub(crate) validation_representation: NgsiLdRepresentation,
+}
+
+impl OutputConfig {
+    /// Whether the run emits the full temporal series of every id rather than its current state.
+    pub(crate) const fn is_series(&self) -> bool {
+        matches!(self.temporal, Some(TemporalRepresentation::Series))
+    }
 }
 
 /// The validation settings a run supplies from the command line, each overriding the manifest.
@@ -148,12 +154,10 @@ impl Pipeline {
         let output = manifest.output().as_ref();
         let destination = output.map_or_else(|| Destination::file(None, FileFraming::default()), |output| output.destination().clone());
         let representation = output.and_then(|output| *output.representation());
-        let series_representation = output
-            .and_then(|output| output.temporal().as_ref())
-            .is_some_and(|temporal| *temporal.representation() == TemporalRepresentation::Series);
+        let temporal = output.and_then(|output| output.temporal().as_ref()).map(|temporal| *temporal.representation());
         // A folded EntityTemporal only belongs at the broker's temporal endpoint, so a series run
         // against a Context Broker requires `operation: "temporal"`.
-        if series_representation
+        if temporal == Some(TemporalRepresentation::Series)
             && let Destination::ContextBroker { operation, .. } = &destination
             && *operation != BrokerOperationKind::Temporal
         {
@@ -192,7 +196,7 @@ impl Pipeline {
             output: OutputConfig {
                 destination,
                 representation,
-                series_representation,
+                temporal,
                 global_context_mode,
                 validation_report_path,
                 validation_mode,

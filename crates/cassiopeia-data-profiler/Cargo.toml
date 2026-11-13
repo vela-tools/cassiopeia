@@ -12,6 +12,7 @@ bytecount = "0.6.9"
 cassiopeia-common.workspace = true
 cassiopeia-csv-dialect.workspace = true
 cassiopeia-encoding-detection.workspace = true
+cassiopeia-sensorthings.workspace = true
 csv = "1.4.0"
 encoding_rs = { version = "0.8.44", features = ["alloc"] }
 getset = "0.1.7"

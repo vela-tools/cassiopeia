@@ -1,5 +1,6 @@
 use crate::{local_context_error::LocalContextError, pipeline_stage::PipelineStage};
 use cassiopeia_collector::error::CollectorError;
+use cassiopeia_common::input::Input;
 use cassiopeia_expander::error::ExpanderError;
 use cassiopeia_extractor::error::ExtractionError;
 use cassiopeia_ingestor::error::IngestorError;
@@ -7,6 +8,7 @@ use cassiopeia_mapping::error::MappingError;
 use cassiopeia_ngsi_ld::entity::name::NameBuf;
 use cassiopeia_profiler::error::ProfilerError;
 use cassiopeia_resolver::{entity_store::error::EntityStoreError, error::ResolverError, relationship_store::error::RelationshipStoreError};
+use cassiopeia_sensorthings::read_kind::ReadKind;
 use cassiopeia_transformer::error::TransformationError;
 use cassiopeia_validator::error::ValidatorError;
 use cassiopeia_value_type_expansion::error::ExpansionError;
@@ -87,6 +89,20 @@ pub enum PipelineError {
     /// endpoint (ETSI GS CIM 009 v1.9.1 clause 5.6.11).
     #[error("output.temporal.representation \"series\" against a Context Broker requires operation \"temporal\"")]
     SeriesRequiresTemporalOperation,
+
+    /// A SensorThings snapshot of a range or incremental read, one record per Observation, was given
+    /// to a run without series output, which would keep one reading of each Thing (ETSI GS CIM 009
+    /// v1.9.1 clause 5.2.20).
+    #[error(
+        "The SensorThings snapshot `{snapshot}` holds a `{read}` read, one record per Observation, so it is read only into series output, set by output.temporal.representation: \"series\" or --temporal-representation series: current-state output would keep one reading of each Thing"
+    )]
+    SnapshotNeedsSeries {
+        /// The read the snapshot's header states.
+        read: ReadKind,
+        /// The snapshot. Boxed so this variant does not enlarge every `Result` in the crate past the
+        /// large-error threshold.
+        snapshot: Box<Input>,
+    },
 
     /// A remote custom validation schema could not be fetched at run setup.
     #[error("Failed to fetch the custom validation schema from '{url}'")]

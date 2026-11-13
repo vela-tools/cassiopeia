@@ -10,6 +10,7 @@ pub mod location_record;
 pub mod lone_array;
 pub mod netcdf;
 pub mod record_batches;
+pub mod sensorthings;
 pub mod shapefile;
 pub mod single_precision;
 pub mod wgs84_geometry;
