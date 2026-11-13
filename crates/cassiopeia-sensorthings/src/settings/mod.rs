@@ -7,3 +7,4 @@ pub mod page_size;
 pub mod read_mode;
 pub mod request_delay;
 pub mod sensorthings_settings;
+pub mod time_range;

@@ -8,7 +8,7 @@ use crate::{
 };
 use cassiopeia_sensorthings::{request::discovery_request::metadata_discovery_request, service::SensorThingsService};
 use serde_json::{Map, Value};
-use std::sync::atomic::AtomicBool;
+use std::{ops::ControlFlow, sync::atomic::AtomicBool};
 
 /// Reads every Datastream `service` selects, with its Thing, the Thing's Locations and its
 /// `ObservedProperty`, and hands each to `datastream` in the order the server sent them.
@@ -27,7 +27,7 @@ pub fn discover_metadata<E: From<CollectorError>>(
     service: &SensorThingsService,
     downloader: Downloader,
     shutdown: &'static AtomicBool,
-    datastream: impl FnMut(Map<String, Value>) -> Result<(), E>,
+    mut datastream: impl FnMut(Map<String, Value>) -> Result<(), E>,
 ) -> Result<TraversalEnd, E> {
     let settings = service.settings();
     // The reader names the root in its failures, while the service keeps its own.
@@ -36,7 +36,7 @@ pub fn discover_metadata<E: From<CollectorError>>(
         &mut reader,
         metadata_discovery_request(service.root(), settings),
         settings.limits().pages(),
-        datastream,
+        |served| datastream(served).map(|()| ControlFlow::Continue(())),
     )
 }
 

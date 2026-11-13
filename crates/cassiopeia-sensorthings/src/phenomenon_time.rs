@@ -1,4 +1,5 @@
-use chrono::{DateTime, SecondsFormat, SubsecRound, Utc};
+use crate::instant_text::instant_text;
+use chrono::{DateTime, SubsecRound, Utc};
 use std::str::FromStr;
 use thiserror::Error;
 
@@ -55,11 +56,10 @@ impl PhenomenonTime {
         self.instant
     }
 
-    /// The instant the time stands for, written in RFC 3339 with a `Z` and only the fractional
-    /// digits it holds.
+    /// The instant the time stands for, written as [`instant_text`] writes an instant.
     #[must_use]
     pub fn instant_text(&self) -> String {
-        self.instant.to_rfc3339_opts(SecondsFormat::AutoSi, true)
+        instant_text(self.instant)
     }
 }
 

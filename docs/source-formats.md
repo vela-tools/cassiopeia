@@ -378,7 +378,7 @@ A remote input whose `format` is `sensorthings` and whose `source` is a service 
 }
 ~~~
 
-The service root is the URL every resource of the server is addressed under, and it ends with the version the server serves, such as `/v1.0` or `/v1.1`. The `sensorthings` block selects the data streams and limits the read. [SensorThings settings](manifest.md#sensorthings-settings) lists its members and the rules a manifest must keep. `read: "latest"`, the default, reads the newest reading of every selected data stream, which gives one record per Thing.
+The service root is the URL every resource of the server is addressed under, and it ends with the version the server serves, such as `/v1.0` or `/v1.1`. The `sensorthings` block selects the data streams and limits the read. [SensorThings settings](manifest.md#sensorthings-settings) lists its members and the rules a manifest must keep. `read: "latest"`, the default, reads the newest reading of every selected data stream, which gives one record per Thing. `read: { range: { ... } }` reads every reading of a time range, which gives one record per Observation (see [Reading a time range](#reading-a-time-range)).
 
 Each cycle writes what it read into a snapshot whose `serviceRoot` is the root and whose `collectedAt` is the instant the cycle started. The snapshot is then profiled and read as a local one would be, so the [records](#sensorthings-records) are the same. Every attempt at one scheduled run starts from the same instant, so a retried attempt sends the same requests and records the same time.
 
@@ -397,12 +397,45 @@ It selects every data stream with its Thing, the Thing's Locations, its Observed
 
 A body that is not a page of a collection, a JSON object with a `value` array, fails the input, and the error names the URL and what the body is not. Pages are retried as any remote source is (see [Retried requests](manifest.md#retried-requests)). `delay` spaces the requests of one cycle. Stopping the run with CTRL+C ends collection before its next request.
 
-**Limits.** A read follows at most `limits.pages` pages. At the limit, it keeps what it read and the cycle carries on. One `collect-limit-reached` warning names the server, the limit, and the next link the read did not follow. Raise the limit, or select fewer data streams with `datastreams`.
+**Limits.** A read follows each request it sends for at most `limits.pages` pages. At the limit, it keeps what it read and the cycle carries on. One `collect-limit-reached` warning per server and limit names the server, the limit, and the next link the read did not follow. Raise the limit, or select fewer data streams with `datastreams`. A range read also stops at `limits.observations` (see [Reading a time range](#reading-a-time-range)).
 
 **Servers differ.** Servers answer the same request in different ways:
 
 - FROST-Server applies every filter, serves up to 10000 items a page by default, and answers the request as written.
 - RIVM Samen Meten (`https://api-samenmeten.rivm.nl/v1.0`) applies a `datastreams` filter only to a Datastream's own properties, such as `endswith(name,'-pm10')` or `startswith(name,'ILM_')`. A filter on `ObservedProperty` or `Thing`, such as `ObservedProperty/name eq 'pm10'`, gives one data stream, every data stream, or none, without an error. RIVM also ignores the parentheses of a filter: it reads `(a or b) and c` as `a or b and c`, so write a filter that needs none, such as conditions joined by `or`. RIVM serves at most 200 items a page. Finding the newest Observation of each data stream takes it up to half a second, so a latest page of 200 times out. Set `pageSize: 10` for a latest read of RIVM. It holds tens of thousands of data streams, so select them by name, and set a `delay` to spare the public service.
+
+### Reading a time range
+
+A range read reads every reading of a time range from each selected data stream:
+
+~~~json5
+sensorthings: {
+    datastreams: "startswith(name,'ILM_I68-')",
+    read: { range: { last: "24h" } },
+},
+~~~
+
+**Bounds.** The read covers `phenomenonTime` from its start, included, to its end, excluded, computed from the instant the cycle started:
+
+- `last: "24h"` reads the 24 hours before the cycle start.
+- `from` and `to` read from `from` to `to`, as written.
+- `from` alone reads from `from` to the cycle start.
+
+Every attempt at one scheduled run starts from the same instant, so a retried attempt reads the same range, and each later run reads from its own start. When the start is not before the end, as for a `from` after the cycle start, the read requests nothing, its snapshot holds its header alone, and one `collect-range-empty` warning names the range.
+
+**The requests.** The read first sends the request [Listing a server's readings](#listing-a-servers-readings) sends, with the input's `datastreams` and `pageSize`. It lists every selected Datastream with its Thing, the Thing's Locations, and its ObservedProperty, without Observations, and the read writes each Datastream into the snapshot. Then it reads the Observations of each data stream with a request of its own:
+
+~~~text
+{root}/Datastreams({id})/Observations?$filter=phenomenonTime%20ge%20{from}%20and%20phenomenonTime%20lt%20{to}&$orderby=phenomenonTime%20asc,id%20asc&$top={pageSize}
+~~~
+
+The bounds are written in UTC with a `Z`, with a fraction only when they have one, such as `2026-11-11T10:00:00Z` or `2026-11-11T10:00:00.250Z`. A data stream's id is written as `(56776)` for an integer id, or as `('o''neil')` for a text id: in single quotes, with each `'` doubled, percent-encoded where a path cannot hold a character. Each request is followed page by page under the rules of [Reading a server](#reading-a-server).
+
+**What is read.** The data streams are read one after the other, by ascending id, whatever order the server listed them in. A Datastream's `phenomenonTime` covers all of its Observations, so a data stream whose `phenomenonTime` ends before the range is not requested. One without a `phenomenonTime` is requested. The Observations of each data stream come oldest first, then by id, and each is written once: when a page repeats an Observation the read already wrote, because the server gained rows between pages, the repeat is dropped. The read stops once it has written `limits.observations` Observations in a cycle, keeps what it wrote, and reports `collect-limit-reached` with the page that holds the first Observation it did not write. `limits.pages` stops one data stream's request, and the read goes on with the next one.
+
+**Series output.** A range read gives one record per Observation, so it runs only into output with `output.temporal.representation: "series"`. A run without it is refused with `run-misconfigured` when it is built, before any request (see [Records per read](#records-per-read)).
+
+**Delivery.** Each cycle sends every reading of its range once. Ranges that overlap, or a range read again, send their readings again: a run every hour with `last: "2h"` sends each reading twice, and a broker with `operation: "temporal"` stores it twice. Nothing is kept from one run to the next, so a run that starts late leaves the readings between two ranges unread. Match `last` to the schedule's interval to read each reading about once.
 
 ### The snapshot file
 
@@ -480,7 +513,7 @@ Ids keep the JSON type the server sent: an integer id stays a number and a text 
 
 The snapshot is read as a stream: the Datastreams are indexed, and each Observation becomes a record without being held, so a snapshot of any length is read in bounded memory.
 
-A record of a `range` or `incremental` read holds one reading, so several records describe one Thing. Without a `temporal` setting, the output keeps one record per entity and mapping, so all but one reading of each Thing would be lost. Such a snapshot is therefore read only into output with `output.temporal.representation: "series"`, which keeps every reading of each Thing as one temporal entity (see [Temporal output](output.md#temporal-output)). Without it, the run fails with `run-misconfigured` before the snapshot's first record is read, and the error names the snapshot, its read, and the setting it needs. A `latest` snapshot is read into every output.
+A record of a `range` or `incremental` read holds one reading, so several records describe one Thing. Without a `temporal` setting, the output keeps one record per entity and mapping, so all but one reading of each Thing would be lost. Such a snapshot is therefore read only into output with `output.temporal.representation: "series"`, which keeps every reading of each Thing as one temporal entity (see [Temporal output](output.md#temporal-output)). Without it, the run fails with `run-misconfigured` before the snapshot's first record is read, and the error names the snapshot, its read, and the setting it needs. A range read of a server without it fails when the run is built, before any request, and the error names the service root. A `latest` snapshot is read into every output.
 
 ### Reading keys
 

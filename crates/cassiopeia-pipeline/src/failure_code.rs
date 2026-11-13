@@ -35,9 +35,10 @@ impl From<&PipelineError> for DiagnosticCode {
             PipelineError::Validation(error) => validator_code(error).into(),
             PipelineError::ValidationSchemaMissing { .. } => SchemaCode::Absent.into(),
             PipelineError::SchemaFetch { .. } => SchemaCode::FetchFailed.into(),
-            PipelineError::SeriesRequiresTemporalOperation | PipelineError::SnapshotNeedsSeries { .. } | PipelineError::ScheduledLatestIntoTemporal { .. } => {
-                RunCode::Misconfigured.into()
-            }
+            PipelineError::SeriesRequiresTemporalOperation
+            | PipelineError::SnapshotNeedsSeries { .. }
+            | PipelineError::RemoteReadNeedsSeries { .. }
+            | PipelineError::ScheduledLatestIntoTemporal { .. } => RunCode::Misconfigured.into(),
             PipelineError::LocalContext(error) => local_context_code(error).into(),
             // A mapping whose `valueType` declarations cannot be checked cannot be used either.
             PipelineError::Mapping(_) | PipelineError::ValueTypeExpander(_) => RunCode::MappingUnusable.into(),
