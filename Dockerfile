@@ -59,7 +59,7 @@ RUN mkdir -p /rootfs/etc/cassiopeia/mappings /rootfs/var/lib/cassiopeia/schemas 
     && dpkg -L libopenjp2-7 | grep -E '\.so|/copyright$' | xargs cp -a --parents -t /rootfs \
     && dpkg-query -s libopenjp2-7 > /rootfs/var/lib/dpkg/status.d/libopenjp2-7
 
-FROM gcr.io/distroless/cc-debian13:latest@sha256:e1f5543d45a2cd7c02a5b43dda5f0ff30729b4832113759d01ed39b0b152cddb AS runtime
+FROM gcr.io/distroless/cc-debian13:latest@sha256:809d04afa1be033c441f76bb0051878c342fb76d0ea236bc6dc94b655fa0fbd6 AS runtime
 
 COPY --from=rootfs /rootfs/ /
 COPY --from=builder /usr/local/lib/cassiopeia /usr/local/lib/cassiopeia
