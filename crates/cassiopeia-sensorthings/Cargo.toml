@@ -1,6 +1,6 @@
 [package]
 name = "cassiopeia-sensorthings"
-description = "The OGC SensorThings API vocabulary Cassiopeia shares across its stages: service roots, read settings, requests and pages, entity ids, units of measurement, phenomenon times, the readings a server offers and the snapshot file"
+description = "The OGC SensorThings API vocabulary Cassiopeia shares across its stages: service roots, read settings, requests and pages, entity ids, cursor names, units of measurement, phenomenon times, the readings a server offers and the snapshot file"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true

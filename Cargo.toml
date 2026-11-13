@@ -129,6 +129,7 @@ cassiopeia-reporter = { path = "crates/cassiopeia-reporter" }
 cassiopeia-resolver = { path = "crates/cassiopeia-resolver" }
 cassiopeia-scheduler = { path = "crates/cassiopeia-scheduler" }
 cassiopeia-sensorthings = { path = "crates/cassiopeia-sensorthings" }
+cassiopeia-sensorthings-cursor = { path = "crates/cassiopeia-sensorthings-cursor" }
 cassiopeia-smart-data-models = { path = "crates/cassiopeia-smart-data-models" }
 cassiopeia-terminal-style = { path = "crates/cassiopeia-terminal-style" }
 cassiopeia-transformer = { path = "crates/cassiopeia-transformer" }
