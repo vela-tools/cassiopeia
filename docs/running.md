@@ -225,6 +225,7 @@ Repeated problems are collapsed whether or not the flag is given: an identical f
 
 - `cassiopeia sdm download` fetches the published Smart Data Models catalog. `cassiopeia sdm list` and `cassiopeia sdm search <query>` inspect what it holds. The catalog supplies the schemas used by validation. See the [validation guide](validation.md#where-schemas-come-from).
 - `cassiopeia profile <file>` detects and reports a data file's source format without running a pipeline. It is the quickest way to see what `auto` detection will decide. See the [source-format guide](source-formats.md).
+- `cassiopeia sensorthings readings <service root>` lists the readings an OGC SensorThings API server offers, with their units and unit codes, so a mapping can be written without browsing the server's JSON. See [Listing a server's readings](source-formats.md#listing-a-servers-readings).
 - `cassiopeia explorer` opens a terminal browser for a Smart Data Model schema, and `cassiopeia wizard` guides you through authoring a mapping against one. Both take `--light` for a light theme. See the [terminal-interface guide](tui.md).
 - `cassiopeia mapping format <file>` pretty-prints a JSON5 mapping, with `--replace` to rewrite it in place. `cassiopeia mapping convert <file> --output <file>` converts a mapping to plain JSON.
 - `cassiopeia schema dereference <file>` inlines a JSON Schema's external references into a single self-contained schema.

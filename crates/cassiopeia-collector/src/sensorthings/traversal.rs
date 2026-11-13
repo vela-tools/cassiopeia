@@ -12,7 +12,7 @@ use url::Url;
 
 /// How a traversal ended.
 #[derive(Debug, PartialEq, Eq)]
-pub(crate) enum TraversalEnd {
+pub enum TraversalEnd {
     /// The server's last page was read.
     LastPage,
     /// A collection limit stopped the traversal before the last page; what it read is kept.
@@ -29,23 +29,23 @@ pub(crate) enum TraversalEnd {
 ///
 /// # Errors
 ///
-/// Returns [`CollectorError::Interrupted`] once the run is being stopped,
+/// Returns, as `E`, [`CollectorError::Interrupted`] once the run is being stopped,
 /// [`CollectorError::LinkLoop`] for a link back to a page already read, [`CollectorError::NextLink`]
-/// for a next link that is not followed, every error [`PageReader::read`] returns, and every error
+/// for a next link that is not followed and every error [`PageReader::read`] returns; and every error
 /// `item` returns.
-pub(crate) fn traverse(
+pub(crate) fn traverse<E: From<CollectorError>>(
     reader: &mut PageReader,
     first: Url,
     pages: PageLimit,
-    mut item: impl FnMut(Map<String, Value>) -> Result<(), CollectorError>,
-) -> Result<TraversalEnd, CollectorError> {
+    mut item: impl FnMut(Map<String, Value>) -> Result<(), E>,
+) -> Result<TraversalEnd, E> {
     let mut visited: HashSet<Url> = HashSet::new();
     let mut next = first;
     let mut read: u32 = 0;
     loop {
         reader.ensure_running()?;
         if visited.contains(&next) {
-            return Err(CollectorError::LinkLoop { link: Box::new(next) });
+            return Err(CollectorError::LinkLoop { link: Box::new(next) }.into());
         }
         if read == pages.get() {
             // The warning names the root, while the reader keeps its own.

@@ -130,6 +130,8 @@ The notations come from Recommendation No. 20 itself, which gives a name to ever
 
 A notation that resolves to no code reaches `unitCode` unchanged. It is no code there either, so the attribute is written without `unitCode`, and the run warns under the `transform-unit-code-unknown` code, naming the attribute and the text.
 
+`cassiopeia sensorthings readings` shows the code the filter gives each unit a SensorThings server uses, before a mapping is written (see [Listing a server's readings](source-formats.md#listing-a-servers-readings)).
+
 ### Math filters
 
 Cassiopeia adds mathematical filters for deriving a target quantity from the numbers a source stores. Each filter takes the one piped value, which may be a number or the numeric string carried by a text source:

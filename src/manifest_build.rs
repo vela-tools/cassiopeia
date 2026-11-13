@@ -51,7 +51,7 @@ pub fn manifest_from_map_args(args: &MapArgs) -> Result<Manifest> {
         .mapping_binding(MappingBinding::Single { mapping })
         .format(args.input_read.format_type.to_option())
         .build()
-        .with_headers(RequestHeaders::new(args.input_read.input_headers.clone()))?;
+        .with_headers(args.input_read.headers.request_headers())?;
     let inputs = Inputs::new(vec![input])?;
 
     let context = args.context.resolve()?;
@@ -79,7 +79,7 @@ pub fn manifest_from_gen_args(args: &ManifestGenArgs) -> Result<Manifest> {
         .mapping_binding(MappingBinding::Single { mapping: args.mapping.clone() })
         .format(args.input_read.format_type.to_option())
         .build()
-        .with_headers(RequestHeaders::new(args.input_read.input_headers.clone()))?;
+        .with_headers(args.input_read.headers.request_headers())?;
     let inputs = Inputs::new(vec![input])?;
 
     let output = build_gen_output(args)?;

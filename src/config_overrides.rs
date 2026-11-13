@@ -26,6 +26,7 @@ pub fn overrides_from_cli(command: &Commands) -> Vec<ConfigOverride> {
         | Commands::Explorer { .. }
         | Commands::Wizard { .. }
         | Commands::Profile { .. }
+        | Commands::SensorThings(_)
         | Commands::Bugreport
         | Commands::Markdown => Vec::new(),
     }

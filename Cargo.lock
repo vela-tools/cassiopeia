@@ -519,6 +519,7 @@ dependencies = [
  "bindman-utils",
  "bugreport",
  "cassiopeia-cli",
+ "cassiopeia-collector",
  "cassiopeia-common",
  "cassiopeia-configuration",
  "cassiopeia-diagnostic",
@@ -527,6 +528,7 @@ dependencies = [
  "cassiopeia-ngsi-ld",
  "cassiopeia-pipeline",
  "cassiopeia-reporter",
+ "cassiopeia-sensorthings",
  "cassiopeia-terminal-style",
  "clap",
  "cron",
@@ -536,8 +538,10 @@ dependencies = [
  "human-panic",
  "humantime",
  "mimalloc",
+ "mockito",
  "pretty_assertions",
  "rayon",
+ "serde_json",
  "shadow-rs",
  "thiserror 2.0.21",
  "url",
@@ -572,6 +576,8 @@ name = "cassiopeia-cli"
 version = "1.2.0"
 dependencies = [
  "anstyle",
+ "cassiopeia-collector",
+ "cassiopeia-common",
  "cassiopeia-configuration",
  "cassiopeia-csv-dialect",
  "cassiopeia-data-profiler",
@@ -580,13 +586,17 @@ dependencies = [
  "cassiopeia-mapping",
  "cassiopeia-ngsi-ld",
  "cassiopeia-reporter",
+ "cassiopeia-sensorthings",
  "cassiopeia-smart-data-models",
  "cassiopeia-terminal-style",
  "cassiopeia-tui",
+ "cefact-units",
  "clap",
  "clap-markdown",
  "encoding_rs",
+ "getset",
  "json5format",
+ "mockito",
  "pretty_assertions",
  "serde_json",
  "serde_json5",
@@ -595,6 +605,7 @@ dependencies = [
  "thiserror 2.0.21",
  "tokio",
  "toml",
+ "url",
 ]
 
 [[package]]
@@ -940,6 +951,7 @@ dependencies = [
  "cassiopeia-common",
  "cassiopeia-geometry",
  "cassiopeia-ngsi-ld",
+ "cassiopeia-sensorthings",
  "cassiopeia-unit-notation",
  "cassiopeia-value-type-expansion",
  "cefact-units",
@@ -1135,6 +1147,8 @@ dependencies = [
 name = "cassiopeia-sensorthings"
 version = "1.2.0"
 dependencies = [
+ "cassiopeia-unit-notation",
+ "cefact-units",
  "chrono",
  "derive_more",
  "getset",
@@ -1147,6 +1161,7 @@ dependencies = [
  "smart-default",
  "strum",
  "thiserror 2.0.21",
+ "typed-builder",
  "url",
 ]
 

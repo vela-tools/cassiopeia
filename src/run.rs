@@ -1,10 +1,20 @@
 use crate::{
     bug_report,
-    cli::{Cli, Commands, config::ConfigSubcommand, manifest::ManifestSubcommand, mapping::MappingSubcommand, schema::SchemaSubcommand, sdm::SdmSubcommand},
+    cli::{
+        Cli,
+        Commands,
+        config::ConfigSubcommand,
+        manifest::ManifestSubcommand,
+        mapping::MappingSubcommand,
+        schema::SchemaSubcommand,
+        sdm::SdmSubcommand,
+        sensorthings::SensorThingsSubcommand,
+    },
     config_overrides::overrides_from_cli,
     error::{Error, Result},
     manifest_build::manifest_from_gen_args,
     pipeline_setup::run_mapping,
+    readings_setup::list_server_readings,
     reporter_setup::init_terminal_reporter,
     shutdown,
     worker_threads::worker_thread_count,
@@ -19,6 +29,7 @@ use cassiopeia_cli::{
     markdown,
     outcome_report::{Outcome, render_outcome},
     profiler,
+    readings_table::{render_limit_note, render_readings},
     schema_listing::{ListingSource, render_schema_listing},
     sdm,
     theme_choice::ThemeChoice,
@@ -115,6 +126,7 @@ fn dispatch(command: &Commands, config: &Config, cli_config: &CliConfig, reporte
             profiler::profile_file(file)?;
             Ok(())
         }
+        Commands::SensorThings(command) => dispatch_sensorthings(&command.command),
         Commands::Bugreport => {
             bug_report::print_report();
             Ok(())
@@ -159,6 +171,21 @@ fn dispatch_sdm(command: &SdmSubcommand, cli_config: &CliConfig, reporter: &'sta
                 "{}",
                 render_schema_listing(ListingSource::Query(query), &names, detect_rendering(Stream::Stdout))
             );
+        }
+    }
+    Ok(())
+}
+
+/// Dispatches a `sensorthings` subcommand. `readings` writes its table to stdout, so a pipe sees it,
+/// and a note on a read a limit cut short to stderr.
+fn dispatch_sensorthings(command: &SensorThingsSubcommand) -> Result<()> {
+    match command {
+        SensorThingsSubcommand::Readings(args) => {
+            let listing = list_server_readings(args)?;
+            println!("{}", render_readings(listing.readings()));
+            if let Some(limit) = listing.limit_reached() {
+                eprintln!("{}", render_limit_note(limit));
+            }
         }
     }
     Ok(())

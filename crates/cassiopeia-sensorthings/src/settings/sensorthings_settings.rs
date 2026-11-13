@@ -7,37 +7,44 @@ use crate::settings::{
 };
 use getset::{CopyGetters, Getters};
 use serde::{Deserialize, Serialize};
+use typed_builder::TypedBuilder;
 
 /// How a remote SensorThings input is read: the `sensorthings` block of a manifest input.
 ///
 /// Every member is optional. Without one, every data stream is read with `read: "latest"`, in pages
-/// of 1000, up to the default limits and without a wait between requests.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Default, Serialize, Deserialize, Getters, CopyGetters)]
+/// of 1000, up to the default limits and without a wait between requests. A command that reads a
+/// server builds the settings it reads with, each member it does not state at that default.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Default, Serialize, Deserialize, Getters, CopyGetters, TypedBuilder)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct SensorThingsSettings {
     /// The data streams read, selected by an `OData` `$filter`; every data stream when `None`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[getset(get = "pub")]
+    #[builder(default)]
     datastreams: Option<DatastreamFilter>,
 
     /// What the read collects.
     #[serde(default)]
     #[getset(get_copy = "pub")]
+    #[builder(default)]
     read: ReadMode,
 
     /// The `$top` of every request.
     #[serde(default)]
     #[getset(get_copy = "pub")]
+    #[builder(default)]
     page_size: PageSize,
 
     /// How far one cycle goes.
     #[serde(default)]
     #[getset(get_copy = "pub")]
+    #[builder(default)]
     limits: CollectLimits,
 
     /// The wait between consecutive requests; none when `None`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[getset(get_copy = "pub")]
+    #[builder(default)]
     delay: Option<RequestDelay>,
 }
 
@@ -89,6 +96,16 @@ mod tests {
         ] {
             assert!(settings(json).is_err(), "{json}");
         }
+    }
+
+    #[test]
+    fn built_settings_default_every_member_they_do_not_state() {
+        let filter = DatastreamFilter::try_from("endswith(name,'-pm10')".to_owned()).unwrap();
+
+        let built = SensorThingsSettings::builder().datastreams(Some(filter)).build();
+
+        assert_eq!(built, settings(r#"{"datastreams": "endswith(name,'-pm10')"}"#).unwrap());
+        assert_eq!(SensorThingsSettings::builder().build(), SensorThingsSettings::default());
     }
 
     #[test]

@@ -486,7 +486,7 @@ A record of a `range` or `incremental` read holds one reading, so several record
 
 A reading's key is its ObservedProperty's `name`. When several data streams of one Thing observe a property of the same name, the data stream with the lowest id keeps the name and every other one is keyed `<name>@<data stream id>`, as CSV keys a repeated column `<name>@<column number>`. One `ingest-readings-renamed` warning per source names up to three such data streams and counts the rest. The keys come from the data streams alone, so a data stream has the same key in every read.
 
-A key that is not a plain name is read with brackets: `{{ readings['PM2.5'].result }}`, or `{{ readings['pm10@9'].result }}`.
+A key that is not a plain name is read with brackets: `{{ readings['PM2.5'].result }}`, or `{{ readings['pm10@9'].result }}`. [Listing a server's readings](#listing-a-servers-readings) counts, for each name, the Things whose data streams are keyed this way.
 
 ### Locations
 
@@ -499,6 +499,39 @@ GeoJSON is the only Location encoding the SensorThings API defines. A Location i
 `time` is the instant a reading's `phenomenonTime` stands for, written in UTC: the instant itself, or the end of a `start/end` interval, when the reading was complete. It keeps at most six fractional digits, the microsecond precision NGSI-LD uses, and leaves out a fraction of zero, so `2026-11-12T11:00:00.000Z` becomes `2026-11-12T11:00:00Z` and `2026-11-12T12:00:00+02:00` becomes `2026-11-12T10:00:00Z`. Use it as an attribute's `observedAt`.
 
 An instant needs a date, a time, and a UTC offset. A `phenomenonTime` that is neither an instant nor an interval of two instants, such as `2026-11-12` or `2026-11-12T09:00:00Z/PT1H`, cannot be an `observedAt`, so its reading is dropped. In a `range` or `incremental` read, the record of that Observation is dropped with it. One `ingest-phenomenon-times-unreadable` warning per source quotes the first such text and counts every dropped reading.
+
+### Listing a server's readings
+
+Before writing a mapping, list the readings a server offers:
+
+~~~sh
+cassiopeia sensorthings readings https://iot.example.org/sta/v1.1
+~~~
+
+The command prints one row per ObservedProperty name, sorted by name, with the columns aligned:
+
+~~~text
+reading  unit          unit code  data streams  things with repeats
+no2      ug/m3         GQ         96            0
+pm10     ug/m3, µg/m³  GQ         412           3
+status   none          none       12            0
+~~~
+
+| Column | Content |
+| --- | --- |
+| `reading` | The ObservedProperty name, which a mapping reads as `readings.<name>`. |
+| `unit` | The distinct texts of the data streams' units: each `unitOfMeasurement`'s `symbol`, else its `name`, else its `definition`, which is the text `cefact_unit` writes for a unit it does not resolve. `none` when no unit has a text, as for readings that have no unit. |
+| `unit code` | The UN/CEFACT codes [`cefact_unit`](templates.md#unit-codes) resolves those units to, or `unknown` for a unit it does not resolve. |
+| `data streams` | The number of data streams of the name. |
+| `things with repeats` | The number of Things that hold more than one data stream of the name. Their extra data streams are read under `<name>@<data stream id>` keys (see [Reading keys](#reading-keys)). |
+
+`--datastreams` selects the data streams listed with a filter, as `datastreams` does in an input's `sensorthings` block, and `--input-header` sends a header with every request, as an input's `headers` do. The service root carries no credentials. The command reads the server as a run does, with every other setting at its default: it follows one request page by page under the rules of [Paging](#reading-a-server) and fails with a run's errors. The request asks for each Datastream with its Thing, the Thing's Locations, and its ObservedProperty, without Observations:
+
+~~~text
+{root}/Datastreams?$filter={datastreams}&$expand=Thing/Locations,ObservedProperty&$orderby=id%20asc&$top=1000
+~~~
+
+When `limits.pages` stops the read, the table lists the data streams read before it, and a note on standard error names the next link that was not followed. A data stream without a Thing, or without an ObservedProperty with a `name`, fails the command and is named, as it fails a run. RIVM Samen Meten holds tens of thousands of data streams, so select them by name there, as for a read.
 
 ### Mapping a SensorThings record
 
