@@ -1,5 +1,6 @@
 use crate::inspectors::csv::error::CsvInspectError;
 use cassiopeia_common::error::io::IoError;
+use cassiopeia_sensorthings::snapshot::error::SnapshotError;
 use std::{path::PathBuf, result};
 use thiserror::Error;
 
@@ -13,6 +14,10 @@ pub enum DataProfilerError {
     /// A CSV dialect could not be inspected from a declared CSV payload.
     #[error(transparent)]
     CsvInspect(#[from] CsvInspectError),
+
+    /// A declared SensorThings snapshot has no header line Cassiopeia reads.
+    #[error(transparent)]
+    SensorThingsSnapshot(#[from] SnapshotError),
 
     /// The requested path does not exist on disk.
     #[error("File does not exist: {0}")]

@@ -55,7 +55,8 @@ impl KmlIngestor {
             | DataFormat::Shapefile
             | DataFormat::GeoPackage
             | DataFormat::NetCdf
-            | DataFormat::Xml => {
+            | DataFormat::Xml
+            | DataFormat::SensorThings => {
                 let file = File::open(&path).map_err(|e| IngestorError::Io { source: e, path })?;
                 KmlSource::Kml(BufReader::new(file))
             }

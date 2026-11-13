@@ -213,6 +213,8 @@ Generate a manifest file from command-line arguments
     `NetCDF`: the classic CDF-1, CDF-2 and CDF-5 formats and `NetCDF-4` on HDF5
   - `xml`:
     Generic XML
+  - `sensorthings`:
+    An OGC SensorThings API snapshot file: the readings one SensorThings read collected, as JSON Lines
 
 * `--on-failure <MODE>` — How the run reacts to a failed cycle and what it exits with: abort (stop and exit non-zero), continue (run the rest, still exit non-zero), or ignore (run the rest, exit zero). Defaults to abort
 * `-M`, `--manifest-output <FILE>` — Output path for the generated manifest
@@ -402,6 +404,8 @@ Map data to a Smart Data Model
     `NetCDF`: the classic CDF-1, CDF-2 and CDF-5 formats and `NetCDF-4` on HDF5
   - `xml`:
     Generic XML
+  - `sensorthings`:
+    An OGC SensorThings API snapshot file: the readings one SensorThings read collected, as JSON Lines
 
 * `--var <KEY=VALUE>` — A run-level variable, written as `KEY=VALUE`; repeat for several. Every mapping in the run can read it as `{{ vars.KEY }}`. Valid alongside `--manifest`, where it overrides a manifest global `vars` of the same name (a per-input `vars` still wins). A repeated key keeps the last value
 * `--on-failure <MODE>` — How the run reacts to a failed cycle and what it exits with: abort (stop and exit non-zero), continue (run the rest, still exit non-zero), or ignore (run the rest, exit zero). Defaults to abort

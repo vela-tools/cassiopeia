@@ -126,6 +126,8 @@ The difference is plainest in a file. Current-state writes one object per ID hol
 
 The series fold is a streaming stage between validation and writing, not a buffer over the whole run. It groups an ID's observations as they arrive and emits each folded entity as soon as the next ID begins, so it holds one ID's observations at a time rather than the run's whole output. Because a folded EntityTemporal only belongs at a broker's `/temporal/entities` endpoint, `representation: "series"` against a Context Broker requires `operation: "temporal"`.
 
+A SensorThings snapshot of a `range` or `incremental` read holds one record per Observation, so it is read only with `representation: "series"`; current-state output would keep one reading of each Thing, and the run fails instead (see [Records per read](source-formats.md#records-per-read)).
+
 ## Write to files
 
 File output is split by entity type. The file name combines the entity type with an extension determined by the framing and whether `@context` is embedded:

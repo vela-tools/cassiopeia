@@ -88,6 +88,17 @@ pub enum DataFormat {
     #[value(name = "xml")]
     #[strum(serialize = "XML")]
     Xml,
+
+    /// An OGC SensorThings API snapshot file: the readings one SensorThings read collected, as JSON
+    /// Lines.
+    ///
+    /// Its first line is a header that states where, how and when the readings were read, so it is
+    /// detected ahead of generic JSON, and its records are built from the Things, data streams and
+    /// Observations it holds rather than split from collections.
+    #[serde(alias = "sensorthings")]
+    #[value(name = "sensorthings")]
+    #[strum(serialize = "SensorThings")]
+    SensorThings,
 }
 
 impl DataFormat {
@@ -108,6 +119,7 @@ impl DataFormat {
             DataFormat::GeoPackage => "gpkg",
             DataFormat::NetCdf => "nc",
             DataFormat::Xml => "xml",
+            DataFormat::SensorThings => "jsonl",
         }
     }
 
@@ -117,7 +129,7 @@ impl DataFormat {
     /// `.shp` layers (each becoming one collection), a `GeoPackage` can hold several feature and
     /// attribute tables (each becoming one collection), and a JSON document can nest arrays of objects
     /// (each labelled by its member path), so one source can carry collections a manifest routes to
-    /// different entity types; CSV, `GeoJSON`, and XML are always a single collection.
+    /// different entity types; CSV, `GeoJSON`, XML and a SensorThings snapshot are always a single collection.
     /// GRIB and `NetCDF` are single-collection too: their parameters are pivoted into columns of one
     /// location record (like a CSV row), not split into separate collections. This is the static, format-stated
     /// guarantee used for an early manifest check; when the format is `Auto`/omitted the runtime router
@@ -126,7 +138,9 @@ impl DataFormat {
     pub const fn supports_collections(&self) -> bool {
         match self {
             DataFormat::Kml | DataFormat::Kmz | DataFormat::Shapefile | DataFormat::GeoPackage | DataFormat::Json => true,
-            DataFormat::Auto | DataFormat::Csv | DataFormat::GeoJson | DataFormat::Grib | DataFormat::NetCdf | DataFormat::Xml => false,
+            DataFormat::Auto | DataFormat::Csv | DataFormat::GeoJson | DataFormat::Grib | DataFormat::NetCdf | DataFormat::Xml | DataFormat::SensorThings => {
+                false
+            }
         }
     }
 
@@ -147,7 +161,8 @@ impl DataFormat {
             | DataFormat::Shapefile
             | DataFormat::GeoPackage
             | DataFormat::NetCdf
-            | DataFormat::Xml => Some(self),
+            | DataFormat::Xml
+            | DataFormat::SensorThings => Some(self),
         }
     }
 }
@@ -245,6 +260,20 @@ mod tests {
     fn xml_deserializes_from_its_lowercase_alias_and_displays_conventionally() {
         assert_eq!(serde_json::from_str::<DataFormat>(r#""xml""#).unwrap(), DataFormat::Xml);
         assert_eq!(DataFormat::Xml.to_string(), "XML");
+    }
+
+    #[test]
+    fn sensorthings_carries_the_json_lines_extension_is_single_collection_and_survives_to_option() {
+        assert_eq!(DataFormat::SensorThings.extension(), "jsonl");
+        assert!(!DataFormat::SensorThings.supports_collections());
+        assert_eq!(DataFormat::SensorThings.to_option(), Some(DataFormat::SensorThings));
+    }
+
+    #[test]
+    fn sensorthings_deserializes_from_both_spellings_and_displays_conventionally() {
+        assert_eq!(serde_json::from_str::<DataFormat>(r#""sensorthings""#).unwrap(), DataFormat::SensorThings);
+        assert_eq!(serde_json::from_str::<DataFormat>(r#""sensor-things""#).unwrap(), DataFormat::SensorThings);
+        assert_eq!(DataFormat::SensorThings.to_string(), "SensorThings");
     }
 
     #[test]

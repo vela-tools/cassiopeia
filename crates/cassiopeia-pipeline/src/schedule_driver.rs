@@ -50,7 +50,7 @@ impl Pipeline {
             // A series run folds observations into temporal entities between the validator and the
             // writer, so the aggregator bar sits just before the writer's; a current-state run has no
             // aggregator stage.
-            if self.output.series_representation
+            if self.output.is_series()
                 && let Some(position) = ordered.iter().position(|stage| *stage == PipelineStage::Writer)
             {
                 ordered.insert(position, PipelineStage::Aggregator);

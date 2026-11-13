@@ -40,7 +40,7 @@ impl Pipeline {
     ) -> Result<()> {
         let batch_size = self.config.handoff_size();
         let mode = self.config.mode;
-        let series = self.output.series_representation;
+        let series = self.output.is_series();
         // The extractor, transformer, and validator process N observations (emitted units); the fold
         // and writer emit M entities (one per id). For a current-state run the store has already
         // collapsed each id to one unit, so N == M.

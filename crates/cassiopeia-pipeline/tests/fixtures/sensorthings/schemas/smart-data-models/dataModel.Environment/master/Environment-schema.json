@@ -1,0 +1,41 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://smart-data-models.github.io/dataModel.Environment/Environment-schema.json",
+  "title": "Smart Data Models - Environment base schema",
+  "description": "Common NGSI-LD definitions for Environment data models",
+  "type": "object",
+  "definitions": {
+    "airQualityIndex": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Property. Air quality index corresponding to the air quality observed. Model:'https://schema.org/Number'"
+    },
+    "airQualityLevel": {
+      "type": "string",
+      "minLength": 2,
+      "description": "Property. Overall qualitative level of health concern corresponding to the air quality observed. Model:'https://schema.org/Text'"
+    },
+    "TimeSeriesAggregation": {
+      "type": "object",
+      "description": "Property. Object defining the temporal processing of a basic property during a period. It provides Maximum, minimum, instant value and average",
+      "properties": {
+        "instValue": {
+          "type": "number",
+          "description": "Property. Instant value of temporal processing"
+        },
+        "minOverTime": {
+          "type": "number",
+          "description": "Property. Minimum value of temporal processing over time"
+        },
+        "maxOverTime": {
+          "type": "number",
+          "description": "Property. Maximum value of temporal processing over time"
+        },
+        "averageValue": {
+          "type": "number",
+          "description": "Property. Average value of temporal processing over time"
+        }
+      }
+    }
+  }
+}

@@ -6,6 +6,7 @@ use crate::{
     json::error::JsonIngestError,
     kml::error::KmlIngestError,
     netcdf::error::NetCdfIngestError,
+    sensorthings::error::SensorThingsIngestError,
     shapefile::error::ShapefileIngestError,
     xml::error::XmlIngestError,
 };
@@ -58,6 +59,10 @@ pub enum IngestorError {
     /// A `NetCDF` ingestion error occurred.
     #[error(transparent)]
     NetCdf(#[from] NetCdfIngestError),
+
+    /// A SensorThings snapshot could not be read into records.
+    #[error(transparent)]
+    SensorThings(#[from] SensorThingsIngestError),
 
     /// A shapefile ingestion error occurred.
     #[error(transparent)]

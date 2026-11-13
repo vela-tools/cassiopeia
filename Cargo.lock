@@ -701,6 +701,7 @@ dependencies = [
  "cassiopeia-common",
  "cassiopeia-csv-dialect",
  "cassiopeia-encoding-detection",
+ "cassiopeia-sensorthings",
  "csv",
  "encoding_rs",
  "getset",
@@ -835,6 +836,7 @@ dependencies = [
  "cassiopeia-data-profiler",
  "cassiopeia-encoding-detection",
  "cassiopeia-ir",
+ "cassiopeia-sensorthings",
  "convert_case 0.12.0",
  "csv",
  "dbase",
@@ -1009,6 +1011,7 @@ dependencies = [
  "cassiopeia-reporter",
  "cassiopeia-resolver",
  "cassiopeia-scheduler",
+ "cassiopeia-sensorthings",
  "cassiopeia-smart-data-models",
  "cassiopeia-transformer",
  "cassiopeia-unreadable-timestamps",
@@ -1120,6 +1123,21 @@ dependencies = [
  "humantime",
  "pretty_assertions",
  "rand 0.10.3",
+]
+
+[[package]]
+name = "cassiopeia-sensorthings"
+version = "1.2.0"
+dependencies = [
+ "chrono",
+ "derive_more",
+ "getset",
+ "pretty_assertions",
+ "serde",
+ "serde_json",
+ "strum",
+ "thiserror 2.0.21",
+ "url",
 ]
 
 [[package]]

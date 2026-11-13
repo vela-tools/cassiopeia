@@ -38,7 +38,7 @@ impl Pipeline {
     /// Broker destination uses `operation: "temporal"`: each single-instance observation is then
     /// streamed to `/temporal/entities`, a minimal-memory per-observation path with no fold stage.
     pub(crate) const fn uses_series_store(&self) -> bool {
-        self.output.series_representation
+        self.output.is_series()
             || matches!(
                 &self.output.destination,
                 Destination::ContextBroker {

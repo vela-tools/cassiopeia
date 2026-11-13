@@ -4,7 +4,7 @@ Cassiopeia converts each supported source format into a sequence of records befo
 
 Most inputs can use automatic format detection. Cassiopeia inspects the source and selects the most specific supported format it recognizes. Declare the format when the source has no useful extension, its content is ambiguous, or you want the run configuration to make the choice explicit.
 
-The format can be set on a manifest input with `format`, or through the equivalent command-line option. The accepted values are `csv`, `json`, `geojson`, `kml`, `kmz`, `xml`, `shapefile`, `geopackage`, `grib`, and `netcdf`.
+The format can be set on a manifest input with `format`, or through the equivalent command-line option. The accepted values are `csv`, `json`, `geojson`, `kml`, `kmz`, `xml`, `shapefile`, `geopackage`, `grib`, `netcdf`, and `sensorthings`.
 
 ## At a glance
 
@@ -12,6 +12,7 @@ The format can be set on a manifest input with `format`, or through the equivale
 | --- | --- | --- | --- |
 | CSV | One record per data row | Column names become fields | No |
 | JSON | One record per object in a top-level array, or per item of a listed nested array | The object is used as-is | Nested arrays of objects become collections |
+| SensorThings API | One record per Thing of a latest read, or per Observation of a range or incremental read | `server`, `thing`, `location`, and `readings` | No |
 | GeoJSON | One record per feature | `id`, `properties`, `geometry`, `bbox`, and `featureCollection` | No |
 | KML or KMZ | One record per placemark | `properties` and `geometry` | Folders become collections |
 | XML | Determined by the repeated-child convention | Folded element tree with `@` and `#` keys | No |
@@ -24,7 +25,7 @@ The collection column matters when a source contains several logical groups that
 
 ## Automatic detection and explicit format
 
-Automatic detection uses the source content. A JSON document that is also valid GeoJSON is classified as GeoJSON rather than generic JSON. Cassiopeia checks for KML before generic XML and distinguishes a Shapefile archive from other ZIP files by its contents. It identifies GRIB from its binary marker and reads the edition from the header. It identifies NetCDF from the classic `CDF` marker and version byte, or from the HDF5 signature of a NetCDF-4 file, including one placed behind an HDF5 user block. It recognizes a GeoPackage from its SQLite header and the `application_id` it declares, including the `GP10` and `GP11` identifiers of GeoPackage 1.0 and 1.1, so a plain SQLite database is not mistaken for one.
+Automatic detection uses the source content. A JSON document that is also valid GeoJSON is classified as GeoJSON rather than generic JSON, and a SensorThings snapshot is recognized by its header line before the JSON check runs. Cassiopeia checks for KML before generic XML and distinguishes a Shapefile archive from other ZIP files by its contents. It identifies GRIB from its binary marker and reads the edition from the header. It identifies NetCDF from the classic `CDF` marker and version byte, or from the HDF5 signature of a NetCDF-4 file, including one placed behind an HDF5 user block. It recognizes a GeoPackage from its SQLite header and the `application_id` it declares, including the `GP10` and `GP11` identifiers of GeoPackage 1.0 and 1.1, so a plain SQLite database is not mistaken for one.
 
 Use an explicit format when detection does not have enough context. For example, a small or unusual delimited file may need to be declared as CSV. A source downloaded without a meaningful filename may also need an explicit format in the run configuration.
 
@@ -44,7 +45,7 @@ CSV · text/csv · 90% confidence
 delimiter "," · quote "\"" · skipRows 0 · headerRows 1 · terminator "crlf" · encoding "UTF-8"
 ~~~
 
-The report has at most three lines. The first names the file and gives its size. The second shows the detection result: the format, its media type, and a confidence score. The third appears only when the format has detectable parsing details. For CSV, it shows the dialect above: the delimiter, the quoting, the preamble, the header, the line terminator, and the character encoding. It uses the member names and value syntax of a manifest input's [`dialect`](manifest.md#csv-dialect), so a member that detection got wrong can be copied into a manifest and corrected there. For GRIB, it shows the edition. Formats that need no such parameters, including JSON, GeoJSON, KML, XML, Shapefile, GeoPackage, and NetCDF, print only the first two lines.
+The report has at most three lines. The first names the file and gives its size. The second shows the detection result: the format, its media type, and a confidence score. The third appears only when the format has detectable parsing details. For CSV, it shows the dialect above: the delimiter, the quoting, the preamble, the header, the line terminator, and the character encoding. It uses the member names and value syntax of a manifest input's [`dialect`](manifest.md#csv-dialect), so a member that detection got wrong can be copied into a manifest and corrected there. For GRIB, it shows the edition. Formats that need no such parameters, including JSON, GeoJSON, KML, XML, Shapefile, GeoPackage, NetCDF, and a SensorThings snapshot, print only the first two lines.
 
 ~~~text
 stations.geojson · 4.2 KiB
@@ -354,6 +355,146 @@ A lone object on a listed path counts as a collection of one item. JSON converte
 An object that is not on a listed path stays an ordinary field of the object that holds it.
 
 Listing both a collection and one nested in it yields records from both, in document order. A label that matches no collection yields no records. A top-level scalar is refused as it is under a single `mapping`.
+
+## SensorThings API
+
+Cassiopeia reads [OGC SensorThings API](https://www.ogc.org/standards/sensorthings/) data, versions 1.0 and 1.1, from a **snapshot file**: the Datastreams and Observations one read of a SensorThings server collected, written as JSON Lines. A server serves its readings as nested JSON whose shape changes with the request, so the snapshot keeps what the server sent and the ingestor joins each reading with its Thing, Location, data stream and ObservedProperty. A mapping then reads one record shape, whichever server the readings came from.
+
+### The snapshot file
+
+A snapshot is UTF-8 JSON Lines: one JSON object per line, each line ended by `\n`. Line 1 is the header:
+
+~~~json
+{"sensorthingsSnapshot":1,"serviceRoot":"https://api-samenmeten.rivm.nl/v1.0","version":"v1.0","read":"latest","collectedAt":"2026-11-12T10:00:00Z"}
+~~~
+
+| Member | Content |
+| --- | --- |
+| `sensorthingsSnapshot` | The snapshot format, `1`. |
+| `serviceRoot` | The server's service root: an `http` or `https` URL without user info, query, or fragment, whose last path segment is the version it serves, written without a trailing slash. |
+| `version` | The SensorThings API version the root serves, `v1.0` or `v1.1`. |
+| `read` | How the read chose its readings: `latest`, the newest reading of every data stream; `range`, every reading of a time range; or `incremental`, every reading since the last read. |
+| `collectedAt` | The instant the read started. |
+
+Every Datastream follows, one per line, as the server served it, with its Thing, the Thing's Locations, and its ObservedProperty. In a `latest` read, each one also carries its newest Observation:
+
+~~~json
+{"datastream":{"@iot.id":56776,"name":"ILM_I68-13-pm10","unitOfMeasurement":{"symbol":"ug/m3","definition":"https://qudt.org/vocab/unit/MicroGM-PER-M3"},"Thing":{"@iot.id":12512,"name":"ILM_I68","Locations":[{"@iot.id":36182,"encodingType":"application/vnd.geo+json","location":{"type":"Point","coordinates":[5.608,51.313]}}]},"ObservedProperty":{"@iot.id":1,"name":"pm10","definition":"https://www.eea.europa.eu/help/glossary/eea-glossary/pm10"},"Observations":[{"@iot.id":98765,"phenomenonTime":"2026-11-12T09:00:00Z/2026-11-12T10:00:00Z","result":21.4}]}}
+~~~
+
+In a `range` or `incremental` read, every Observation follows the Datastreams, one per line, with the id of its data stream, grouped by data stream:
+
+~~~json
+{"observation":{"@iot.id":98766,"phenomenonTime":"2026-11-12T10:00:00Z","resultTime":null,"result":19.8},"datastream":56776}
+~~~
+
+The source fails when its first line is no header, the header names another snapshot format or a version its service root does not end with, a line is no JSON object of these kinds, or a datastream line follows an observation line. The error names the line. A snapshot holds no request header or credential, so it can be shared or kept as a test fixture.
+
+A snapshot is detected from its header line, which must end within the file's first 4 KiB, so it needs no declared format. The snapshot check runs before the JSON check, and a SensorThings response such as `{"value":[...]}` has no header, so it is still read as JSON. A file declared `format: "sensorthings"` whose first line is no header fails, with an error that quotes a header.
+
+### SensorThings records
+
+Every record has this shape. The ids, names, units and definitions are RIVM Samen Meten's; the Observation's id, times, and result are illustrative:
+
+~~~json
+{
+    "server": { "url": "https://api-samenmeten.rivm.nl/v1.0", "host": "api-samenmeten.rivm.nl", "version": "v1.0" },
+    "thing": { "id": 12512, "name": "ILM_I68", "description": "ILM_I68" },
+    "location": { "type": "Point", "coordinates": [5.608, 51.313] },
+    "readings": {
+        "pm10": {
+            "id": 98765,
+            "result": 21.4,
+            "time": "2026-11-12T10:00:00Z",
+            "phenomenonTime": "2026-11-12T09:00:00Z/2026-11-12T10:00:00Z",
+            "unit": { "symbol": "ug/m3", "definition": "https://qudt.org/vocab/unit/MicroGM-PER-M3" },
+            "datastream": { "id": 56776, "name": "ILM_I68-13-pm10", "observationType": "http://www.opengis.net/def/observationType/OGC-OM/2.0/OM_Measurement" },
+            "observedProperty": { "id": 1, "name": "pm10", "definition": "https://www.eea.europa.eu/help/glossary/eea-glossary/pm10" }
+        }
+    }
+}
+~~~
+
+| Member | Content |
+| --- | --- |
+| `server.url`, `server.host`, `server.version` | The service root, its host without the port, and its version. |
+| `thing.id`, `.name`, `.description`, `.properties` | The Thing's members. |
+| `location` | The GeoJSON geometry of the Thing's Location with the lowest id. See [Locations](#locations). |
+| `readings.<key>` | One reading: an Observation with the data stream it belongs to. See [Reading keys](#reading-keys). |
+| `.id`, `.result`, `.phenomenonTime`, `.resultTime`, `.validTime`, `.resultQuality`, `.parameters` | The Observation's members, as served. |
+| `.time` | The instant `phenomenonTime` stands for, in UTC. See [Reading times](#reading-times). |
+| `.unit` | The data stream's `unitOfMeasurement`. |
+| `.datastream` | The data stream's `id`, `name`, `description`, `observationType`, and `properties`. |
+| `.observedProperty` | The ObservedProperty's `id`, `name`, `definition`, `description`, and `properties`. |
+
+Ids keep the JSON type the server sent: an integer id stays a number and a text id stays text. An id of any other type fails the source, naming its line. A member the server leaves out or sends as `null` is absent from the record, at any depth, because NGSI-LD allows no `null` and an absent field produces no attribute. A data stream without a Thing, or without an ObservedProperty with a `name`, fails the source, naming the data stream.
+
+### Records per read
+
+- `latest`: one record per Thing, in the order the snapshot first names it. Its `readings` hold one entry for each of its data streams with an Observation. A Thing whose data streams have none is a record without `readings`.
+- `range` and `incremental`: one record per Observation, with exactly one entry in `readings`.
+
+The snapshot is read as a stream: the Datastreams are indexed, and each Observation becomes a record without being held, so a snapshot of any length is read in bounded memory.
+
+A record of a `range` or `incremental` read holds one reading, so several records describe one Thing. Without a `temporal` setting, the output keeps one record per entity and mapping, so all but one reading of each Thing would be lost. Such a snapshot is therefore read only into output with `output.temporal.representation: "series"`, which keeps every reading of each Thing as one temporal entity (see [Temporal output](output.md#temporal-output)). Without it, the run fails with `run-misconfigured` before the snapshot's first record is read, and the error names the snapshot, its read, and the setting it needs. A `latest` snapshot is read into every output.
+
+### Reading keys
+
+A reading's key is its ObservedProperty's `name`. When several data streams of one Thing observe a property of the same name, the data stream with the lowest id keeps the name and every other one is keyed `<name>@<data stream id>`, as CSV keys a repeated column `<name>@<column number>`. One `ingest-readings-renamed` warning per source names up to three such data streams and counts the rest. The keys come from the data streams alone, so a data stream has the same key in every read.
+
+A key that is not a plain name is read with brackets: `{{ readings['PM2.5'].result }}`, or `{{ readings['pm10@9'].result }}`.
+
+### Locations
+
+`location` is the GeoJSON geometry of the Thing's Location with the lowest id. Integer ids come before text ids, integers by value and texts by their bytes. A Location whose `location` is a GeoJSON `Feature` gives the Feature's `geometry`.
+
+GeoJSON is the only Location encoding the SensorThings API defines. A Location is read when its `encodingType` is `application/geo+json` or the older `application/vnd.geo+json`, compared without regard to case or parameters. A Thing whose Location has another encoding, or none, has no `location`, and one `ingest-locations-unreadable` warning per source names the first such Thing and its `encodingType` and counts every one.
+
+### Reading times
+
+`time` is the instant a reading's `phenomenonTime` stands for, written in UTC: the instant itself, or the end of a `start/end` interval, when the reading was complete. It keeps at most six fractional digits, the microsecond precision NGSI-LD uses, and leaves out a fraction of zero, so `2026-11-12T11:00:00.000Z` becomes `2026-11-12T11:00:00Z` and `2026-11-12T12:00:00+02:00` becomes `2026-11-12T10:00:00Z`. Use it as an attribute's `observedAt`.
+
+An instant needs a date, a time, and a UTC offset. A `phenomenonTime` that is neither an instant nor an interval of two instants, such as `2026-11-12` or `2026-11-12T09:00:00Z/PT1H`, cannot be an `observedAt`, so its reading is dropped. In a `range` or `incremental` read, the record of that Observation is dropped with it. One `ingest-phenomenon-times-unreadable` warning per source quotes the first such text and counts every dropped reading.
+
+### Mapping a SensorThings record
+
+The same mapping serves every read:
+
+~~~json5
+{
+    version: "v4",
+    dataModel: "dataModel.Environment/AirQualityObserved",
+    identity: {
+        entityName: "sta-{{ server.host }}-{{ thing.id }}",
+    },
+    attributes: {
+        name: { source: "{{ thing.name }}" },
+        location: { type: "GeoProperty", source: "{{ location }}" },
+        dateObserved: {
+            source: "{% if readings.pm10 %}{{ readings.pm10.time }}{% elif readings.pm25_kal %}{{ readings.pm25_kal.time }}{% endif %}",
+            transformation: "datetime",
+        },
+        pm10: {
+            source: "{{ readings.pm10.result }}",
+            transformation: "float",
+            properties: {
+                observedAt: { source: "{{ readings.pm10.time }}", transformation: "datetime" },
+                unitCode: { source: "{% if readings.pm10 %}{{ readings.pm10.unit | cefact_unit }}{% endif %}" },
+            },
+        },
+        pm25: {
+            source: "{{ readings.pm25_kal.result }}",
+            transformation: "float",
+            properties: {
+                observedAt: { source: "{{ readings.pm25_kal.time }}", transformation: "datetime" },
+                unitCode: { source: "{% if readings.pm25_kal %}{{ readings.pm25_kal.unit | cefact_unit }}{% endif %}" },
+            },
+        },
+    },
+}
+~~~
+
+On a record without `readings.pm10`, the plain references resolve to nothing, so `pm10` is left out without a warning. Every [`cefact_unit`](templates.md#unit-codes) is guarded by an `if`, because a filter fails on a missing field and qualifiers are resolved even when their attribute's source is not. The filter turns RIVM's `ug/m3` into the UN/CEFACT code `GQ`. The identity cleaner keeps only letters, digits, `-`, and `_`, so the identity becomes `urn:ngsi-ld:AirQualityObserved:sta-api-samenmetenrivmnl-12512`.
 
 ## GeoJSON
 
@@ -853,7 +994,7 @@ An observation whose time is masked is padding and is skipped. A masked data val
 
 Start by looking at one profiled record, not at the original file alone. Then build the mapping around the fields Cassiopeia actually exposes:
 
-1. Identify the record boundary: row, JSON object, GeoJSON feature, placemark, XML repeated child, Shapefile feature, GeoPackage table row, grid cell, or station observation.
+1. Identify the record boundary: row, JSON object, GeoJSON feature, placemark, XML repeated child, Shapefile feature, GeoPackage table row, grid cell, station observation, or SensorThings Thing or Observation.
 2. Locate the values in the record shape, including containers such as `properties`, `geometry`, and XML `@` or `#` fields.
 3. Decide whether the source value already has the required JSON type or needs a transformation.
 4. For geometry, select `GeoProperty`. A complete GeoJSON geometry needs no transformation; coordinates need the geometry transformation that matches the type to build.
