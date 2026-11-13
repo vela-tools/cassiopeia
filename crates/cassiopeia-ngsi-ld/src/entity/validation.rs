@@ -20,7 +20,7 @@ pub trait Validate {
     /// Validates the value.
     ///
     /// # Errors
-    /// Returns [`NgsiLdError`](crate::entity::error::NgsiLdError) when a mandatory field is missing
+    /// Returns [`NgsiLdError`] when a mandatory field is missing
     /// or a nested attribute is invalid.
     fn validate(&self) -> Result<()>;
 }

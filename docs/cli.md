@@ -184,8 +184,8 @@ Generate a manifest file from command-line arguments
 ###### **Options:**
 
 * `-i`, `--input <INPUT>` — Data source file path or URL
-* `--input-header <NAME: VALUE>` — Extra HTTP header sent when fetching a remote input, written as `Name: Value`; repeat for several. Typically carries an API key, e.g. `--input-header "X-Api-Key: <key>"`. Refused for a local input. Recorded on the generated manifest as the input's `headers`
 * `-m`, `--mapping <FILE>` — JSON5 mapping file defining the transformation rules
+* `--input-header <NAME: VALUE>` — Extra HTTP header sent when fetching a remote input, written as `Name: Value`; repeat for several. Typically carries an API key, e.g. `--input-header "X-Api-Key: <key>"`. Refused for a local input
 * `-t`, `--type <FORMAT>` — Data format of the input source
 
   Default value: `auto`
@@ -214,11 +214,11 @@ Generate a manifest file from command-line arguments
   - `xml`:
     Generic XML
 
-* `--on-failure <MODE>` — How the run reacts to a failed cycle and what it exits with: abort (stop and exit non-zero), continue (run the rest, still exit non-zero), or ignore (run the rest, exit zero). Defaults to abort. Recorded on the generated manifest as `onFailure`
+* `--on-failure <MODE>` — How the run reacts to a failed cycle and what it exits with: abort (stop and exit non-zero), continue (run the rest, still exit non-zero), or ignore (run the rest, exit zero). Defaults to abort
 * `-M`, `--manifest-output <FILE>` — Output path for the generated manifest
 
   Default value: `manifest.json5`
-* `-w`, `--writer <TYPE>` — Where to write results: the file system or a Context Broker
+* `-w`, `--writer <WRITER>` — Where to write results: the file system or a Context Broker
 
   Possible values:
   - `file`:
@@ -226,7 +226,7 @@ Generate a manifest file from command-line arguments
   - `context-broker`:
     Send entities to an NGSI-LD context broker
 
-* `-o`, `--directory <DIRECTORY>` — Output directory (for the file writer)
+* `-o`, `--output <DIRECTORY>` — Output directory (for the file writer)
 * `--framing <FRAMING>` — File framing: a JSON array or line-delimited entities (file writer only)
 
   Default value: `array`
@@ -237,7 +237,7 @@ Generate a manifest file from command-line arguments
   - `line-delimited`:
     One compact entity per line, with no surrounding array: append-friendly and re-indent-free
 
-* `--representation <REPRESENTATION>` — NGSI-LD representation for written entities
+* `--writer-representation <REPRESENTATION>` — NGSI-LD representation for written entities
 
   Possible values:
   - `normalized`:
@@ -247,7 +247,7 @@ Generate a manifest file from command-line arguments
   - `simplified`:
     Flat key-value representation without metadata
 
-* `--temporal-representation <REPRESENTATION>` — Temporal output shape. `series` folds each id's observations into one temporal entity with instance arrays (ETSI GS CIM 009 v1.9.1 clause 5.2.20); absent writes current-state (one entity per id, latest per attribute). A general output shape, valid for the file writer and the broker
+* `--temporal-representation <REPRESENTATION>` — Temporal output shape. `series` folds each id's observations into one temporal entity with instance arrays (ETSI GS CIM 009 v1.9.1 clause 5.2.20); absent writes current-state (one entity per id, holding per mapping the record with the latest `observedAt`; `--broker-operation temporal` sends each observation on its own instead). A general output shape, valid for the file writer and the broker
 * `--validation-representation <REPRESENTATION>` — NGSI-LD representation the validator serializes entities in
 
   Possible values:
@@ -373,8 +373,8 @@ Map data to a Smart Data Model
 
    A manifest describes the whole run, so it is mutually exclusive with every inline run-shaping flag: input, mapping, and type, and every output, context, validation, schedule, and failure-policy flag. Engine knobs that are not part of a run's description (the pipeline mode, the store backends, the memory profile) remain valid alongside it.
 * `-i`, `--input <INPUT>` — Data source file path or URL
-* `--input-header <NAME: VALUE>` — Extra HTTP header sent when fetching a remote input, written as `Name: Value`; repeat for several. Typically carries an API key, e.g. `--input-header "X-Api-Key: <key>"`. Refused for a local input
 * `-m`, `--mapping <FILE>` — JSON5 mapping file defining the transformation rules
+* `--input-header <NAME: VALUE>` — Extra HTTP header sent when fetching a remote input, written as `Name: Value`; repeat for several. Typically carries an API key, e.g. `--input-header "X-Api-Key: <key>"`. Refused for a local input
 * `-t`, `--type <FORMAT>` — Data format of the input source
 
   Default value: `auto`
@@ -459,7 +459,7 @@ Map data to a Smart Data Model
   - `simplified`:
     Flat key-value representation without metadata
 
-* `--temporal-representation <REPRESENTATION>` — Temporal output shape. `series` folds each id's observations into one temporal entity with instance arrays (ETSI GS CIM 009 v1.9.1 clause 5.2.20); absent writes current-state (one entity per id, latest per attribute). A general output shape, valid for the file writer and the broker
+* `--temporal-representation <REPRESENTATION>` — Temporal output shape. `series` folds each id's observations into one temporal entity with instance arrays (ETSI GS CIM 009 v1.9.1 clause 5.2.20); absent writes current-state (one entity per id, holding per mapping the record with the latest `observedAt`; `--broker-operation temporal` sends each observation on its own instead). A general output shape, valid for the file writer and the broker
 * `-u`, `--broker-url <URL>` — Context Broker URL (required when --writer is context-broker)
 * `--broker-operation <OPERATION>` — Which NGSI-LD operation each request performs (context-broker writer only)
 

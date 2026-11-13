@@ -1,15 +1,28 @@
-use crate::cli::{broker::BrokerArgs, context::ContextArgs, schedule::ScheduleArgs, validator::ValidatorArgs};
-use cassiopeia_common::{
-    destination_kind::DestinationKind,
-    file_framing::FileFraming,
-    format::DataFormat,
-    input::Input,
-    representation::NgsiLdRepresentation,
-    request_header::RequestHeader,
+use crate::cli::{
+    broker::BrokerArgs,
+    context::ContextArgs,
+    failure::FailureArgs,
+    input_read::InputReadArgs,
+    output_format::OutputFormatArgs,
+    schedule::ScheduleArgs,
+    validator::ValidatorArgs,
 };
-use cassiopeia_manifest::{failure_policy::FailurePolicy, output::temporal::TemporalRepresentation};
-use clap::{ArgAction, Args, Parser, Subcommand};
+use cassiopeia_common::{destination_kind::DestinationKind, input::Input};
+use clap::{Arg, Args, Parser, Subcommand};
 use std::{path::PathBuf, str::FromStr};
+
+/// Gives the shared writer-representation flag the hidden `--representation` alias on this command
+/// alone: the spelling `manifest generate` used before it matched `map`, kept while scripts migrate.
+///
+/// Applied through `mut_args`, which keeps every argument in place, where `mut_arg` would move the
+/// flag to the end of the help.
+fn retired_representation_alias(arg: Arg) -> Arg {
+    if arg.get_id() == "writer_representation" {
+        arg.alias("representation")
+    } else {
+        arg
+    }
+}
 
 /// The `manifest` command group.
 #[derive(Parser, Debug)]
@@ -28,72 +41,46 @@ pub enum ManifestSubcommand {
 }
 
 /// Arguments for generating a manifest file.
+///
+/// Every run-shaping flag is spelled as on `map`, and the flags whose meaning is the same on both
+/// commands come from the argument structs they share. `--input`, `--mapping`, `--writer`, and
+/// `--output` stay declared per command: `map` may take them from `--manifest` instead and writes to
+/// a file unless told otherwise, while a generated manifest names its input outright and records an
+/// output section only when `--writer` is given.
 #[derive(Args, Debug)]
 #[command(next_line_help = true)]
+#[command(mut_args(retired_representation_alias))]
 pub struct ManifestGenArgs {
     /// Data source file path or URL.
     #[arg(short, long, value_parser = Input::from_str, help_heading = "Input")]
     pub input: Input,
 
-    /// Extra HTTP header sent when fetching a remote input, written as `Name: Value`; repeat for
-    /// several. Typically carries an API key, e.g. `--input-header "X-Api-Key: <key>"`. Refused for a
-    /// local input. Recorded on the generated manifest as the input's `headers`.
-    #[arg(long = "input-header", action = ArgAction::Append, help_heading = "Input", value_name = "NAME: VALUE")]
-    pub input_headers: Vec<RequestHeader>,
-
     /// JSON5 mapping file defining the transformation rules.
     #[arg(short, long, help_heading = "Input", value_name = "FILE")]
     pub mapping: PathBuf,
 
-    /// Data format of the input source.
-    #[arg(
-        short = 't',
-        long = "type",
-        value_enum,
-        help_heading = "Input",
-        value_name = "FORMAT",
-        default_value_t = DataFormat::Auto,
-    )]
-    pub format_type: DataFormat,
+    #[command(flatten)]
+    pub input_read: InputReadArgs,
 
-    /// How the run reacts to a failed cycle and what it exits with: abort (stop and exit non-zero),
-    /// continue (run the rest, still exit non-zero), or ignore (run the rest, exit zero). Defaults to
-    /// abort. Recorded on the generated manifest as `onFailure`.
-    #[arg(long = "on-failure", help_heading = "Behavior", value_name = "MODE")]
-    pub on_failure: Option<FailurePolicy>,
+    #[command(flatten)]
+    pub failure: FailureArgs,
 
     /// Output path for the generated manifest.
     #[arg(short = 'M', long, default_value = "manifest.json5", help_heading = "Behavior", value_name = "FILE")]
     pub manifest_output: PathBuf,
 
     /// Where to write results: the file system or a Context Broker.
-    #[arg(short, long = "writer", value_enum, help_heading = "Output", value_name = "TYPE")]
+    #[arg(short, long = "writer", value_enum, help_heading = "Output", value_name = "WRITER")]
     pub writer_type: Option<DestinationKind>,
 
     /// Output directory (for the file writer).
-    #[arg(short = 'o', long = "directory", help_heading = "Output", value_name = "DIRECTORY")]
+    // `--directory` is how this command spelled `--output` before it matched `map`; it stays a hidden
+    // alias while scripts migrate.
+    #[arg(short, long, alias = "directory", help_heading = "Output", value_name = "DIRECTORY")]
     pub output: Option<PathBuf>,
 
-    /// File framing: a JSON array or line-delimited entities (file writer only).
-    #[arg(
-        long,
-        value_enum,
-        default_value_t = FileFraming::Array,
-        conflicts_with = "broker_url",
-        help_heading = "Output",
-        value_name = "FRAMING"
-    )]
-    pub framing: FileFraming,
-
-    /// NGSI-LD representation for written entities.
-    #[arg(long = "representation", value_enum, help_heading = "Output", value_name = "REPRESENTATION")]
-    pub writer_representation: Option<NgsiLdRepresentation>,
-
-    /// Temporal output shape. `series` folds each id's observations into one temporal entity with
-    /// instance arrays (ETSI GS CIM 009 v1.9.1 clause 5.2.20); absent writes current-state (one entity
-    /// per id, latest per attribute). A general output shape, valid for the file writer and the broker.
-    #[arg(long = "temporal-representation", value_name = "REPRESENTATION", help_heading = "Output")]
-    pub temporal_representation: Option<TemporalRepresentation>,
+    #[command(flatten)]
+    pub format: OutputFormatArgs,
 
     #[command(flatten)]
     pub validator: ValidatorArgs,

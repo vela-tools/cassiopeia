@@ -56,8 +56,7 @@ impl RedbRelationshipStore {
     ///
     /// # Errors
     ///
-    /// Returns [`RelationshipStoreError`](crate::relationship_store::error::RelationshipStoreError)
-    /// when the temporary directory or the database file cannot be created.
+    /// Returns [`RelationshipStoreError`] when the temporary directory or the database file cannot be created.
     pub fn new() -> Result<RedbRelationshipStore> {
         let temp_dir = tempfile::tempdir().map_err(|source| RelationshipStoreError::CreateTempDirectory { source })?;
         let temp_dir_path = temp_dir.keep();

@@ -6,7 +6,7 @@
 //! wrote: Tera reports neither which name it could not read nor which delimiter is unclosed in a
 //! form a mapping author can act on. It is not a parser and does not validate anything Tera checks;
 //! it only has to agree with Tera on where expression bodies, string literals, and identifiers start
-//! and end. Identifiers follow [`identifier`](crate::template::identifier) rather than Tera's ASCII
+//! and end. Identifiers follow the crate-private `identifier` grammar rather than Tera's ASCII
 //! grammar, so a name Tera cannot read is still lexed whole and can be named.
 
 use crate::template::identifier::identifier_length;

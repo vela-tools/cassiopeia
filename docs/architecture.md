@@ -66,7 +66,7 @@ The Expander applies the selected mapping, derives entity identities, and create
 
 ### Resolution
 
-The resolver is the stateful centre of the pipeline. It groups contributions by entity identity, merges information from different inputs, and keeps relationship information until the input phase is complete. This is where duplicate contributions become one entity, and where an entity's repeated observations over time accumulate onto its attributes rather than fanning out into separate entities. Whether the store keeps only the latest observation per attribute or the whole series is chosen from the run's temporal output setting.
+The resolver is the stateful centre of the pipeline. It groups contributions by entity identity, merges information from different inputs, and keeps relationship information until the input phase is complete. This is where duplicate contributions become one entity, and where an entity's repeated observations over time accumulate onto its attributes rather than fanning out into separate entities. Whether the store keeps, per mapping, only the record with the latest observation or every observation is chosen from the run's temporal output setting and, for a Context Broker, its operation.
 
 The store can be memory backed for normal workloads or disk backed for datasets that exceed the available memory budget. Storage is a runtime choice controlled by configuration. It does not change the mapping or the shape of the final entity.
 

@@ -99,7 +99,7 @@ impl TemplateResolver {
 
     /// Resolves the templates of a list-form source, one value per template in order, or yields
     /// `None` when the list reads the record and every template that reads it resolves to an absent
-    /// value (see [`present`]).
+    /// value (see the private `present`).
     ///
     /// The values are what [`resolve`](Self::resolve) yields, absent ones included, for the
     /// declaration's conversion to merge: a source such as `["{{ street }}", " ", "{{ no }}"]` with

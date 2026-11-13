@@ -4,10 +4,10 @@
 //! type, a `Producer -> Consumer` queue name, a broker's own explanation) never shoves the following
 //! columns out of alignment. The layout adapts instead of relying on hand-tuned width constants.
 //!
-//! One concern per module: [`run_summary`] the whole report, [`counters_block`] the run totals,
-//! [`stages_table`] per-stage throughput, [`channels_table`] per-channel queue depth,
-//! [`reasons_table`] why the run's failures happened, [`table_layout`] the shared header styling,
-//! and [`thousands`] the digit-group separator.
+//! One concern per module: `run_summary` the whole report, `counters_block` the run totals,
+//! `stages_table` per-stage throughput, `channels_table` per-channel queue depth,
+//! `reasons_table` why the run's failures happened, `table_layout` the shared header styling,
+//! and `thousands` the digit-group separator.
 
 pub(crate) mod channels_table;
 pub(crate) mod counters_block;

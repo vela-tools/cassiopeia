@@ -17,7 +17,7 @@ pub enum SleepOutcome {
     Interrupted,
 }
 
-/// Sleeps for `duration`, waking every [`TICK`] to observe `shutdown` so a long wait still stops
+/// Sleeps for `duration`, waking every private `TICK` to observe `shutdown` so a long wait still stops
 /// promptly when the pipeline is asked to shut down.
 ///
 /// Public because the pipeline's retry backoff waits the same interruptible way between attempts,

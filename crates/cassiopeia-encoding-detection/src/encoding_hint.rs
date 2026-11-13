@@ -48,7 +48,7 @@ impl EncodingHint {
     /// so a UTF-16 file with a BOM is reported as the encoding it is read in. Otherwise a declared
     /// `charset` wins: the `Content-Type` parameter defines the encoding of a `text/csv` body
     /// (RFC 4180 clause 3, RFC 9110 clause 8.3.2). Content whose every other byte is mostly NUL is
-    /// UTF-16 without a BOM, in the byte order the NULs mark; see [`bomless_utf16`]. It is checked
+    /// UTF-16 without a BOM, in the byte order the NULs mark; see the private `bomless_utf16`. It is checked
     /// ahead of UTF-8, since NUL is valid UTF-8. Content that is valid UTF-8 throughout is UTF-8,
     /// pure ASCII included. Otherwise the encoding is detected from the content,
     /// with the top-level domain weighing the guess toward the encodings native to its region, as a
@@ -57,7 +57,7 @@ impl EncodingHint {
     ///
     /// The whole content is weighed, never a leading sample: a file whose first rows are plain ASCII
     /// often carries its only accented names further down, and a guess from the ASCII alone would
-    /// misread every one of them. The detector is fed the content's [`evidence_lines`], the lines
+    /// misread every one of them. The detector is fed the content's evidence lines, the lines
     /// holding a non-ASCII byte, drawn from across the whole file and capped, which keeps detection
     /// to well under a second however large the file.
     #[must_use]

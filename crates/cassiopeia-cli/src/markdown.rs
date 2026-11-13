@@ -7,7 +7,7 @@ use std::{fs::File, io::Write, path::PathBuf};
 ///
 /// # Errors
 ///
-/// Returns [`CliError`](crate::error::CliError) when the generated Markdown cannot be written to
+/// Returns [`CliError`] when the generated Markdown cannot be written to
 /// `output_path`.
 pub fn generate_markdown<T: CommandFactory>(output_path: &str) -> Result<PathBuf> {
     let markdown: String = clap_markdown::help_markdown::<T>();

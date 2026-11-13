@@ -108,7 +108,7 @@ impl Pipeline {
     ///
     /// # Errors
     ///
-    /// Returns [`PipelineError`](crate::error::PipelineError) when an input's file extension is
+    /// Returns [`PipelineError`] when an input's file extension is
     /// invalid.
     pub fn from_manifest(
         manifest: &Manifest,
@@ -213,7 +213,7 @@ impl Pipeline {
     ///
     /// # Errors
     ///
-    /// Returns [`PipelineError`](crate::error::PipelineError) when a run fails and the failure policy
+    /// Returns [`PipelineError`] when a run fails and the failure policy
     /// is [`FailurePolicy::Abort`].
     pub fn run(&mut self) -> Result<()> {
         let schedule = self.schedule.schedule.take();

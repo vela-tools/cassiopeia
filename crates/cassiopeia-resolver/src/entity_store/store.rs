@@ -59,7 +59,7 @@ pub struct AssembledFragment {
     /// and every record its mapping resolved to the id for a current-state slot.
     pub records: NonZeroU64,
     /// The earliest field on which the records folded into this fragment disagreed, so merging them
-    /// discarded a value (see [`deep_merge`](crate::entity_store::merge::deep_merge)). Always `None`
+    /// discarded a value (see the crate-private `deep_merge`). Always `None`
     /// for a series observation, which is never merged in the store.
     pub conflict: Option<FieldPath>,
     /// How many of the mapping's records whose `observedAt` template failed the slot discarded for a
@@ -98,8 +98,8 @@ pub struct AssembledFragments {
 /// (`Send + Sync`): fragments are stored concurrently from many resolver threads.
 ///
 /// Two memory models exist, chosen at construction from the run's temporal target: a current-state
-/// store retains only what latest-per-attribute needs (O(mappings) per id); a series store retains the
-/// full append-only series per id.
+/// store retains one fragment per mapping, a temporal mapping's latest record or a static mapping's
+/// merged records (O(mappings) per id); a series store retains the full append-only series per id.
 pub trait EntityStore: Debug + Send + Sync + 'static {
     /// The write pattern this backend is optimized for.
     fn write_strategy(&self) -> StoreWriteStrategy;

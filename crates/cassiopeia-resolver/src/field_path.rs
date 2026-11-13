@@ -5,8 +5,8 @@ use serde::{Deserialize, Serialize};
 ///
 /// The keys are the source format's own field names, so they are carried as written. The derived
 /// order compares key by key and puts a path before every path it is a prefix of, which is what lets
-/// a merge name the same field whichever order its records arrived in (see
-/// [`deep_merge`](crate::entity_store::merge::deep_merge)).
+/// a merge name the same field whichever order its records arrived in (see the crate-private
+/// `deep_merge`).
 #[derive(Debug, Clone, Display, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[display("{}", _0.join("."))]
 pub struct FieldPath(Vec<Box<str>>);

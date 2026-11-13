@@ -72,7 +72,8 @@ pub struct Entity {
     /// the same index its per-instance metadata sits at; `None` for the common case of an entity with
     /// no multi-attribute relationships, so a plain entity allocates no map.
     instance_relationships: Option<InstanceRelationships>,
-    /// Objects of relationships declared as sub-attributes, keyed by the [`RelationshipPath`] from the
+    /// Objects of relationships declared as sub-attributes, keyed by the
+    /// [`RelationshipPath`](crate::relationship_path::RelationshipPath) from the
     /// entity to the relationship (a nested relationship, ETSI GS CIM 009 v1.9.1 clause 4.5.2.2 with
     /// 4.5.3).
     ///

@@ -11,7 +11,7 @@ use std::{
 ///
 /// # Errors
 ///
-/// Returns [`CliError`](crate::error::CliError) when the input is missing, the output already
+/// Returns [`CliError`] when the input is missing, the output already
 /// exists, or the document cannot be parsed or written.
 pub fn convert_mapping(mapping: &Path, output: &Path) -> Result<PathBuf> {
     if metadata(mapping).is_err() {

@@ -4,7 +4,7 @@ use std::{num::NonZeroU32, time::Duration};
 use typed_builder::TypedBuilder;
 
 /// How long the scheduler waits before retrying a failed run when the manifest does not say.
-const DEFAULT_BACKOFF: Duration = Duration::from_secs(5);
+pub const DEFAULT_BACKOFF: Duration = Duration::from_secs(5);
 
 /// How a failed run is retried before the schedule gives up on it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Getters, TypedBuilder)]
