@@ -31,15 +31,15 @@ pub fn render_readings(readings: &[OfferedReading]) -> String {
     rows.iter().map(|row| line(row, &widths)).collect::<Vec<_>>().join("\n")
 }
 
-/// The note that `limit` stopped the read before the server's last page, so the listing covers only
-/// the data streams read before it.
+/// The note that `limit` stopped the read before it read every data stream, so the listing covers
+/// only the data streams read before it.
 #[must_use]
 pub fn render_limit_note(limit: &LimitReached) -> String {
     format!(
-        "{} stopped the read of `{}` before the server's last page, so the listing covers only the data streams read before it; the next link `{}` was not followed. Select fewer data streams with `--datastreams`.",
+        "{} stopped the read of `{}` before it read every data stream, so the listing covers only the data streams read before it; {}. Select fewer data streams with `--datastreams`.",
         limit.limit(),
         limit.root(),
-        limit.next()
+        limit.unread()
     )
 }
 
@@ -140,7 +140,7 @@ mod tests {
 
         assert_eq!(
             render_limit_note(&limit),
-            "`limits.pages: 1000` stopped the read of `https://h.example/v1.1` before the server's last page, so the listing covers only the data streams read before it; the next link `https://h.example/v1.1/Datastreams?$skip=1000` was not followed. Select fewer data streams with `--datastreams`."
+            "`limits.pages: 1000` stopped the read of `https://h.example/v1.1` before it read every data stream, so the listing covers only the data streams read before it; the next link `https://h.example/v1.1/Datastreams?$skip=1000` was not followed. Select fewer data streams with `--datastreams`."
         );
     }
 }

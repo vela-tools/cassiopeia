@@ -1,4 +1,7 @@
-use crate::{input_config::LaneSource, stages::limits_reached_report::report_limits_reached};
+use crate::{
+    input_config::LaneSource,
+    stages::{empty_ranges_report::report_empty_ranges, limits_reached_report::report_limits_reached},
+};
 use cassiopeia_collector::{
     collector::Collector,
     downloader::Downloader,
@@ -68,7 +71,7 @@ pub(crate) fn spawn_collector_thread(
 
         let service = stage.service_span();
         match collector.collect(tx.clone()) {
-            Ok(warnings) => telemetry.add_warnings(report_limits_reached(sink, &warnings)),
+            Ok(warnings) => telemetry.add_warnings(report_limits_reached(sink, &warnings) + report_empty_ranges(sink, &warnings)),
             Err(error) => {
                 stage.failed(1);
                 telemetry.add_errors(1);

@@ -5,6 +5,8 @@ use crate::{
     error::CollectorError,
     sensorthings::{
         page_reader::PageReader,
+        range_read::read_range,
+        snapshot_failure::unwritable,
         traversal::{TraversalEnd, traverse},
     },
 };
@@ -20,8 +22,9 @@ use cassiopeia_sensorthings::{
 use std::{
     env,
     fs::{self, File},
-    io::{self, BufWriter},
-    path::{Path, PathBuf},
+    io::{BufWriter, Write},
+    ops::ControlFlow,
+    path::Path,
     sync::atomic::AtomicBool,
 };
 use temp_dir::TempDir;
@@ -71,8 +74,8 @@ impl Collector for SensorThingsCollector {
         let directory = directory.dont_delete_on_drop();
         let path = directory.path().join(format!("snapshot.{}", DataFormat::SensorThings.extension()));
 
-        let end = match write_snapshot(&service, cycle_start, downloader, shutdown, &path) {
-            Ok(end) => end,
+        let warnings = match write_snapshot(&service, cycle_start, downloader, shutdown, &path) {
+            Ok(warnings) => warnings,
             Err(error) => {
                 // Nothing reads a snapshot whose read failed, so it does not outlive the collector.
                 if let Err(cleanup) = fs::remove_dir_all(directory.path()) {
@@ -81,10 +84,6 @@ impl Collector for SensorThingsCollector {
                 return Err(error);
             }
         };
-        let mut warnings = CollectionWarnings::default();
-        if let TraversalEnd::LimitReached(limit) = end {
-            warnings.limit_reached(limit);
-        }
 
         let source = MaskedUrl::plain(service.into_root().into());
         let payload = FilePayload::downloaded(path, source, Some(DataFormat::SensorThings), EncodingHint::NONE);
@@ -96,71 +95,74 @@ impl Collector for SensorThingsCollector {
 }
 
 /// Reads one cycle of `service` into a snapshot at `path`, recording `cycle_start` as its
-/// collection time, and returns how the read ended.
+/// collection time, and returns what the read met that the cycle carries on past.
 fn write_snapshot(
     service: &SensorThingsService,
     cycle_start: CycleStart,
     downloader: Downloader,
     shutdown: &'static AtomicBool,
     path: &Path,
-) -> Result<TraversalEnd, CollectorError> {
+) -> Result<CollectionWarnings, CollectorError> {
     let settings = service.settings();
     // The header and the reader each name the root, while the service keeps its own.
     let header = SnapshotHeader::new(service.root().clone(), settings.read().kind(), cycle_start.instant());
     let mut reader = PageReader::new(service.root().clone(), downloader, settings.delay(), shutdown);
     let file = File::create(path).map_err(unwritable(path))?;
-    let mut writer = SnapshotWriter::start(BufWriter::new(file), &header).map_err(unwritable(path))?;
-    let end = match settings.read() {
-        ReadMode::Latest => traverse(
-            &mut reader,
-            latest_discovery_request(service.root(), settings),
-            settings.limits().pages(),
-            |datastream| writer.datastream(&DatastreamLine::new(datastream)).map_err(unwritable(path)),
-        )?,
-    };
-    writer.finish().map_err(unwritable(path))?;
-    Ok(end)
+    let snapshot = SnapshotWriter::start(BufWriter::new(file), &header).map_err(unwritable(path))?;
+    match settings.read() {
+        ReadMode::Latest => read_latest(&mut reader, service, snapshot, path),
+        ReadMode::Range(range) => read_range(&mut reader, service, range, cycle_start, snapshot, path),
+    }
 }
 
-/// The failure of writing the snapshot at `path`.
-fn unwritable(path: &Path) -> impl Fn(io::Error) -> CollectorError + '_ {
-    move |source| CollectorError::Io {
-        source,
-        path: PathBuf::from(path),
+/// Reads the newest reading of every data stream `service` selects into `snapshot`, after its
+/// header, and returns the collection limit that stopped the read, if one did.
+fn read_latest<W: Write>(
+    reader: &mut PageReader,
+    service: &SensorThingsService,
+    mut snapshot: SnapshotWriter<W>,
+    path: &Path,
+) -> Result<CollectionWarnings, CollectorError> {
+    let settings = service.settings();
+    let end = traverse(
+        reader,
+        latest_discovery_request(service.root(), settings),
+        settings.limits().pages(),
+        |datastream| {
+            snapshot.datastream(&DatastreamLine::new(datastream)).map_err(unwritable(path))?;
+            Ok::<_, CollectorError>(ControlFlow::Continue(()))
+        },
+    )?;
+    snapshot.finish().map_err(unwritable(path))?;
+    let mut warnings = CollectionWarnings::default();
+    if let TraversalEnd::LimitReached(limit) = end {
+        warnings.limit_reached(limit);
     }
+    Ok(warnings)
 }
 
 #[cfg(test)]
 mod tests {
     use crate::{
         collection_warnings::CollectionWarnings,
-        collector::Collector,
-        downloader::Downloader,
         error::CollectorError,
         sensorthings::{
-            collector::SensorThingsCollector,
             limit_reached::{CollectLimit, LimitReached},
+            test_collection::{RUNNING, collect, collector, cycle_start, root, snapshot_lines},
         },
     };
     use cassiopeia_common::{
-        channel::{ChannelPolicy, channel},
-        cycle_start::CycleStart,
         format::DataFormat,
         input::Input,
         request_header::{RequestHeader, RequestHeaders},
-        signal::Signal,
-        user_agent::UserAgent,
     };
-    use cassiopeia_ir::payload::{CollectedPayload, FilePayload};
+    use cassiopeia_ir::payload::FilePayload;
     use cassiopeia_sensorthings::{
         paging::next_link::NextLinkError,
         read_kind::ReadKind,
-        service::SensorThingsService,
-        service_root::ServiceRoot,
         settings::collect_limits::PageLimit,
         snapshot::header::SnapshotHeader,
     };
-    use chrono::DateTime;
     use mockito::{Matcher, Mock, ServerGuard};
     use pretty_assertions::assert_eq;
     use serde_json::{Value, json};
@@ -175,51 +177,8 @@ mod tests {
     const LATEST: &str =
         "/v1.1/Datastreams?$expand=Thing/Locations,ObservedProperty,Observations($orderby=phenomenonTime%20desc;$top=1)&$orderby=id%20asc&$top=1000";
 
-    /// A shutdown flag never set, as in a run nobody stops.
-    static RUNNING: AtomicBool = AtomicBool::new(false);
-
     /// A shutdown flag the stop test sets once the first page is served.
     static STOPPED_AFTER_PAGE_ONE: AtomicBool = AtomicBool::new(false);
-
-    fn root(server: &ServerGuard) -> ServiceRoot {
-        ServiceRoot::try_from(Url::parse(&format!("{}/v1.1", server.url())).unwrap()).unwrap()
-    }
-
-    fn cycle_start() -> CycleStart {
-        CycleStart::at(DateTime::parse_from_rfc3339("2026-11-12T10:00:00Z").unwrap().to_utc())
-    }
-
-    /// A collector of the mock server's root with the settings `settings` and the request headers
-    /// `headers`, that stops once `shutdown` is set.
-    fn collector(server: &ServerGuard, settings: &str, headers: RequestHeaders, shutdown: &'static AtomicBool) -> Box<SensorThingsCollector> {
-        let downloader = Downloader::new(UserAgent::from("cassiopeia/test".to_owned()), headers, shutdown);
-        let service = SensorThingsService::new(root(server), serde_json::from_str(settings).unwrap());
-        Box::new(SensorThingsCollector::new(service, cycle_start(), downloader, shutdown))
-    }
-
-    /// Runs `collector`, returning what it returned and every payload it sent.
-    fn collect(collector: Box<SensorThingsCollector>) -> (Result<CollectionWarnings, CollectorError>, Vec<FilePayload>) {
-        let (sender, receiver) = channel(ChannelPolicy::Unbounded);
-        let result = collector.collect(sender);
-        let payloads = receiver
-            .iter()
-            .filter_map(|signal| match signal {
-                Signal::Data(CollectedPayload::File(payload)) => Some(payload),
-                Signal::Data(CollectedPayload::Bytes(_)) | Signal::Start | Signal::Stop | Signal::Error(_) | Signal::Meta(_) => None,
-            })
-            .collect();
-        (result, payloads)
-    }
-
-    /// The lines of the one snapshot `payloads` holds, each read as JSON, removing the snapshot once
-    /// it is read.
-    fn snapshot_lines(payloads: Vec<FilePayload>) -> Vec<Value> {
-        let [payload] = <[FilePayload; 1]>::try_from(payloads).unwrap();
-        let path = payload.into_path();
-        let text = fs::read_to_string(&path).unwrap();
-        fs::remove_dir_all(path.parent().unwrap()).unwrap();
-        text.lines().map(|line| serde_json::from_str(line).unwrap()).collect()
-    }
 
     /// The ids of the `datastream` lines of a snapshot, in file order.
     fn datastream_ids(lines: &[Value]) -> Vec<Value> {

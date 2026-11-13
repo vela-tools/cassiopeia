@@ -4,9 +4,11 @@ use strum::{Display, EnumCount, EnumIter};
 #[derive(Clone, Copy, Debug, Display, EnumCount, EnumIter, Eq, Hash, Ord, PartialEq, PartialOrd)]
 #[strum(serialize_all = "kebab-case")]
 pub enum CollectCode {
-    /// A collection limit stopped a read before the server's last page, so the cycle went on with
-    /// what it had collected.
+    /// A collection limit stopped a read before it collected all it was asked for, so the cycle went
+    /// on with what it had collected.
     LimitReached,
+    /// A range read's range held no reading in its cycle, so the read requested nothing.
+    RangeEmpty,
 }
 
 #[cfg(test)]
@@ -17,5 +19,6 @@ mod tests {
     #[test]
     fn a_collect_code_renders_a_kebab_case_token() {
         assert_eq!(CollectCode::LimitReached.to_string(), "limit-reached");
+        assert_eq!(CollectCode::RangeEmpty.to_string(), "range-empty");
     }
 }

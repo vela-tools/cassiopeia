@@ -122,6 +122,7 @@ mod tests {
         assert_eq!(DiagnosticCode::Broker(BrokerCode::EntityRejected).to_string(), "broker-entity-rejected");
         assert_eq!(DiagnosticCode::Schema(SchemaCode::Nonconformant).to_string(), "schema-nonconformant");
         assert_eq!(DiagnosticCode::Collect(CollectCode::LimitReached).to_string(), "collect-limit-reached");
+        assert_eq!(DiagnosticCode::Collect(CollectCode::RangeEmpty).to_string(), "collect-range-empty");
     }
 
     #[test]

@@ -219,11 +219,26 @@ inputs: [
 | Field | Value |
 | --- | --- |
 | `datastreams` | An OData `$filter` expression over Datastreams that selects what is read, such as `ObservedProperty/name eq 'pm10'` or `endswith(name,'-pm10')`. It is sent to the server as written, and must be one line with text on it. When omitted, every data stream is read. |
-| `read` | `"latest"`, the default: the newest reading of every selected data stream. |
+| `read` | `"latest"`, the default: the newest reading of every selected data stream. Or `{ range: { ... } }`: every reading of a time range, below. |
 | `pageSize` | The `$top` of every request, 1 to 10000. The default is 1000. A server may serve fewer items a page. |
-| `limits.pages` | The most pages one read follows, at least 1. The default is 1000. |
-| `limits.observations` | The most Observations one cycle collects, at least 1. The default is 500000. A latest read collects at most one Observation per data stream, so `limits.pages` alone bounds it. |
+| `limits.pages` | The most pages one request is followed for, at least 1. The default is 1000. A latest read sends one request; a range read sends one for its discovery and one for each data stream. |
+| `limits.observations` | The most Observations one cycle writes, at least 1. The default is 500000. A range read stops when it has written this many. A latest read collects at most one Observation per data stream, so `limits.pages` alone bounds it. |
 | `delay` | A wait between consecutive requests, such as `"200ms"`, at most `"60s"`. The default is none. |
+
+A range read takes one of two forms:
+
+~~~json5
+read: { range: { last: "24h" } },
+read: { range: { from: "2026-11-01T00:00:00Z", to: "2026-11-02T00:00:00Z" } },
+~~~
+
+| Field | Value |
+| --- | --- |
+| `range.last` | The span before the cycle start that is read, such as `"24h"` or `"7days"`, longer than zero. |
+| `range.from` | The first instant read, an RFC 3339 date and time with a UTC offset, such as `2026-11-01T00:00:00Z`. |
+| `range.to` | The first instant past the range, in the same form. Allowed only beside `from`. Without it, the range ends at the cycle start. |
+
+A range states `last` or `from`, never both. [Reading a time range](source-formats.md#reading-a-time-range) describes the bounds, the requests, and what each cycle sends.
 
 Without a `sensorthings` block, a remote SensorThings input reads every data stream with the defaults. An unknown key in the block is refused. Credentials for a server go in [`headers`](#per-input-headers). [Reading a server](source-formats.md#reading-a-server) describes the requests, the paging, and how servers differ.
 
@@ -232,9 +247,10 @@ These are refused when the manifest loads:
 - a `sensorthings` block on an input whose `format` is not `sensorthings`;
 - a `sensorthings` block on a local snapshot, which is read as it was collected;
 - a remote `source` with `format: "sensorthings"` that is no service root: one without a version as its last path segment, with a version other than `v1.0` or `v1.1`, with a user name or password, a query, or a fragment, or with a scheme other than `http` or `https`;
-- a service root that reads an environment variable (`${NAME}`), so that no URL a read requests, logs, or writes carries a secret.
+- a service root that reads an environment variable (`${NAME}`), so that no URL a read requests, logs, or writes carries a secret;
+- a `range` without `last` or `from`, with both, with `to` beside `last` or alone, with a `last` of zero, or with a `from` that is not before its `to`.
 
-A scheduled `read: "latest"` into a broker with `operation: "temporal"` is refused when the run is built. Every cycle would send the newest reading of every data stream again, and the temporal API would store each unchanged reading once more. A one-shot latest read into the temporal API is allowed, and so is a scheduled latest read into a broker with `operation: "upsert"`.
+A range read without `output.temporal.representation: "series"` is refused when the run is built, before any request. It gives one record per Observation, and current-state output keeps one record per entity, so it would keep one reading of each Thing. A scheduled `read: "latest"` into a broker with `operation: "temporal"` is refused when the run is built. Every cycle would send the newest reading of every data stream again, and the temporal API would store each unchanged reading once more. A one-shot latest read into the temporal API is allowed, and so is a scheduled latest read into a broker with `operation: "upsert"`.
 
 ## Output
 

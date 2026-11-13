@@ -120,6 +120,7 @@ pub(crate) fn run_csv_end_to_end(store: StoreKind, csv: &str, binding: &RunBindi
         &[declare_input(root, 0, &data, binding)],
         &RunSchemas::Permissive(entity_types),
         "",
+        None,
     );
     result.unwrap();
     outcome
@@ -152,7 +153,21 @@ pub(crate) fn attempt_declared_end_to_end(
     output_extra: &str,
 ) -> (Result<(), PipelineError>, RunOutcome) {
     let directory = TempDir::new().unwrap();
-    run_declared(store, directory.path(), &[declared.to_owned()], schemas, output_extra)
+    run_declared(store, directory.path(), &[declared.to_owned()], schemas, output_extra, None)
+}
+
+/// Runs a pipeline over the one manifest input `declared` on the manifest schedule `schedule`, written
+/// as a manifest writes it, and otherwise as [`attempt_declared_end_to_end`] does, and returns how the
+/// run ended with what it reported and wrote.
+pub(crate) fn attempt_scheduled_end_to_end(
+    store: StoreKind,
+    declared: &str,
+    schemas: &RunSchemas<'_>,
+    output_extra: &str,
+    schedule: &str,
+) -> (Result<(), PipelineError>, RunOutcome) {
+    let directory = TempDir::new().unwrap();
+    run_declared(store, directory.path(), &[declared.to_owned()], schemas, output_extra, Some(schedule))
 }
 
 /// Runs a one-shot pipeline over `inputs` and returns how the run ended with what it reported and
@@ -170,17 +185,26 @@ fn attempt_end_to_end(store: StoreKind, inputs: &[RunInput], entity_types: &[&st
         })
         .collect();
 
-    run_declared(store, root, &declared, &RunSchemas::Permissive(entity_types), output_extra)
+    run_declared(store, root, &declared, &RunSchemas::Permissive(entity_types), output_extra, None)
 }
 
-/// Runs a one-shot pipeline over the `declared` manifest inputs, with its schemas and output under
-/// `root`, and returns how the run ended with what it reported and wrote.
-fn run_declared(store: StoreKind, root: &Path, declared: &[String], schemas: &RunSchemas<'_>, output_extra: &str) -> (Result<(), PipelineError>, RunOutcome) {
+/// Runs a pipeline over the `declared` manifest inputs, with its schemas and output under `root`,
+/// once or on the manifest schedule `schedule`, and returns how the run ended with what it reported
+/// and wrote.
+fn run_declared(
+    store: StoreKind,
+    root: &Path,
+    declared: &[String],
+    schemas: &RunSchemas<'_>,
+    output_extra: &str,
+    schedule: Option<&str>,
+) -> (Result<(), PipelineError>, RunOutcome) {
     let schemas_folder = schemas_folder(root, schemas);
     let output = root.join("out");
 
+    let schedule = schedule.map(|schedule| format!(", schedule: {schedule}")).unwrap_or_default();
     let document = format!(
-        r#"{{ version: "v1", inputs: [{}], output: {{ target: "file", directory: "{}"{output_extra} }} }}"#,
+        r#"{{ version: "v1", inputs: [{}], output: {{ target: "file", directory: "{}"{output_extra} }}{schedule} }}"#,
         declared.join(", "),
         output.display()
     );

@@ -104,6 +104,20 @@ pub enum PipelineError {
         snapshot: Box<Input>,
     },
 
+    /// A SensorThings input reads one record per Observation, as a range read does, in a run without
+    /// series output, which would keep one reading of each Thing (ETSI GS CIM 009 v1.9.1 clause
+    /// 5.2.20).
+    #[error(
+        "The SensorThings input `{root}` makes a `{read}` read, one record per Observation, so it runs only into series output, set by output.temporal.representation: \"series\" or --temporal-representation series: current-state output would keep one reading of each Thing"
+    )]
+    RemoteReadNeedsSeries {
+        /// The read the input makes.
+        read: ReadKind,
+        /// The service root of the input. Boxed so this variant does not enlarge every `Result` in
+        /// the crate past the large-error threshold.
+        root: Box<ServiceRoot>,
+    },
+
     /// A scheduled run reads the latest readings of a SensorThings server into a broker's temporal API,
     /// where every cycle would store each unchanged reading again.
     #[error(

@@ -8,14 +8,14 @@ use cassiopeia_diagnostic::{
 };
 use cassiopeia_reporter::reporter::DiagnosticSink;
 
-/// The one-line summary: the server, the limit and its value, and the next link not followed, so a
+/// The one-line summary: the server, the limit and its value, and what the read left unread, so a
 /// reader can raise the limit or narrow the read.
 fn headline(limit: &LimitReached) -> String {
     format!(
-        "In `{}`, {} stopped the read before the server's last page, so this cycle carries on with what it collected; the next link `{}` was not followed",
+        "In `{}`, {} stopped the read before it collected all it was asked for, so this cycle carries on with what it collected; {}",
         limit.root(),
         limit.limit(),
-        limit.next()
+        limit.unread()
     )
 }
 
@@ -48,7 +48,10 @@ mod tests {
         code::{collect_code::CollectCode, diagnostic_code::DiagnosticCode},
         context_field::ContextField,
     };
-    use cassiopeia_sensorthings::{service_root::ServiceRoot, settings::collect_limits::PageLimit};
+    use cassiopeia_sensorthings::{
+        service_root::ServiceRoot,
+        settings::collect_limits::{ObservationLimit, PageLimit},
+    };
     use pretty_assertions::assert_eq;
     use url::Url;
 
@@ -81,8 +84,27 @@ mod tests {
         assert_eq!(reported[0].code.to_string(), "collect-limit-reached");
         assert_eq!(
             reported[0].headline,
-            "In `https://h.example/v1.1`, `limits.pages: 2` stopped the read before the server's last page, so this cycle carries on with what it collected; the next link `https://h.example/v1.1/Datastreams?$skip=2000` was not followed"
+            "In `https://h.example/v1.1`, `limits.pages: 2` stopped the read before it collected all it was asked for, so this cycle carries on with what it collected; the next link `https://h.example/v1.1/Datastreams?$skip=2000` was not followed"
         );
         assert_eq!(reported[0].defining, [ContextField::Source(Input::Remote(MaskedUrl::plain(root)))]);
+    }
+
+    #[test]
+    fn an_observation_limit_names_the_page_holding_the_first_observation_not_written() {
+        let sink = RecordingReporter::new();
+        let limit = LimitReached::new(
+            ServiceRoot::try_from(Url::parse("https://h.example/v1.1").unwrap()).unwrap(),
+            CollectLimit::Observations(ObservationLimit::try_from(5).unwrap()),
+            Url::parse("https://h.example/v1.1/Datastreams(2)/Observations").unwrap(),
+        );
+        let mut warnings = CollectionWarnings::default();
+        warnings.limit_reached(limit);
+
+        assert_eq!(report_limits_reached(&sink, &warnings), 1);
+
+        assert_eq!(
+            sink.diagnostics()[0].headline,
+            "In `https://h.example/v1.1`, `limits.observations: 5` stopped the read before it collected all it was asked for, so this cycle carries on with what it collected; `https://h.example/v1.1/Datastreams(2)/Observations` holds the first Observation the read did not write"
+        );
     }
 }

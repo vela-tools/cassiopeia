@@ -1,4 +1,8 @@
-use crate::{request::query_value::query_value, service_root::ServiceRoot, settings::sensorthings_settings::SensorThingsSettings};
+use crate::{
+    request::{query_value::query_value, resource_request::resource_request},
+    service_root::ServiceRoot,
+    settings::sensorthings_settings::SensorThingsSettings,
+};
 use url::Url;
 
 /// What a metadata discovery expands on every Datastream: its Thing with the Thing's Locations, and
@@ -44,12 +48,11 @@ fn discovery_request(root: &ServiceRoot, settings: &SensorThingsSettings, expand
         .as_ref()
         .map(|filter| format!("$filter={}&", query_value(filter.as_str())))
         .unwrap_or_default();
-    let query = format!("{filter}$expand={expand}&$orderby={BY_ID}&$top={}", settings.page_size());
-    // The request is a URL of its own, built on the root the service keeps.
-    let mut request = root.url().clone();
-    request.set_path(&format!("{}/Datastreams", root.url().path()));
-    request.set_query(Some(&query));
-    request
+    resource_request(
+        root,
+        "Datastreams",
+        &format!("{filter}$expand={expand}&$orderby={BY_ID}&$top={}", settings.page_size()),
+    )
 }
 
 #[cfg(test)]

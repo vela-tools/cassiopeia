@@ -12,6 +12,7 @@ pub(crate) mod collector;
 pub(crate) mod discarded_observation_report;
 pub(crate) mod dropped_geometry_report;
 pub(crate) mod dropped_null_report;
+pub(crate) mod empty_ranges_report;
 pub(crate) mod expander;
 pub(crate) mod extractor;
 pub(crate) mod ingestor;

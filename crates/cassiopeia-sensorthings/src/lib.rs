@@ -7,15 +7,19 @@
 //! to the snapshot file: service roots and their versions (OGC 18-088 section 9.1), the settings a
 //! remote input is read with, the requests a read sends and the pages it is answered with (section
 //! 9.3), entity ids and their order, a Datastream's unit of measurement (section 8.2.4), the readings
-//! a server offers, the instant a `phenomenonTime` stands for (section 8.2.7), the read modes, and the
-//! snapshot file that is the boundary between transport and format.
+//! a server offers, the instant a `phenomenonTime` stands for (section 8.2.7), the read modes, the
+//! window a range read covers and the data streams it requests, and the snapshot file that is the
+//! boundary between transport and format.
 
 pub mod entity_id;
+pub mod instant_text;
 pub mod observed_property_name;
 pub mod offered_readings;
 pub mod paging;
 pub mod phenomenon_time;
+pub mod range_datastreams;
 pub mod read_kind;
+pub mod read_window;
 pub mod request;
 pub mod service;
 pub mod service_root;

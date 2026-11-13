@@ -7,7 +7,7 @@ use crate::{
 };
 use cassiopeia_sensorthings::{paging::next_link::resolve_next_link, settings::collect_limits::PageLimit};
 use serde_json::{Map, Value};
-use std::{collections::HashSet, mem};
+use std::{collections::HashSet, mem, ops::ControlFlow};
 use url::Url;
 
 /// How a traversal ended.
@@ -15,7 +15,7 @@ use url::Url;
 pub enum TraversalEnd {
     /// The server's last page was read.
     LastPage,
-    /// A collection limit stopped the traversal before the last page; what it read is kept.
+    /// A collection limit stopped the traversal before it read everything; what it read is kept.
     LimitReached(LimitReached),
 }
 
@@ -25,7 +25,9 @@ pub enum TraversalEnd {
 /// Before each request the traversal fails once the run is being stopped, fails on a link to a page
 /// it already read, and stops, keeping what it read, once it has read `pages` pages. Each next link
 /// is resolved against the URL of the page it came from and must stay on the service root's origin
-/// (OGC 18-088 section 9.3.3.6, Req 32), so the input's headers never reach another server.
+/// (OGC 18-088 section 9.3.3.6, Req 32), so the input's headers never reach another server. `item`
+/// may stop the traversal with the collection limit it reached, which then names the page the item
+/// came from.
 ///
 /// # Errors
 ///
@@ -37,7 +39,7 @@ pub(crate) fn traverse<E: From<CollectorError>>(
     reader: &mut PageReader,
     first: Url,
     pages: PageLimit,
-    mut item: impl FnMut(Map<String, Value>) -> Result<(), E>,
+    mut item: impl FnMut(Map<String, Value>) -> Result<ControlFlow<CollectLimit>, E>,
 ) -> Result<TraversalEnd, E> {
     let mut visited: HashSet<Url> = HashSet::new();
     let mut next = first;
@@ -56,7 +58,12 @@ pub(crate) fn traverse<E: From<CollectorError>>(
             )));
         }
         let (items, link) = reader.read(&next)?.into_parts();
-        items.into_iter().try_for_each(&mut item)?;
+        for served in items {
+            if let ControlFlow::Break(limit) = item(served)? {
+                // The warning names the root, while the reader keeps its own.
+                return Ok(TraversalEnd::LimitReached(LimitReached::new(reader.root().clone(), limit, next)));
+            }
+        }
         read += 1;
         let Some(link) = link else {
             return Ok(TraversalEnd::LastPage);
