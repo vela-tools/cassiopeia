@@ -26,6 +26,7 @@ pub mod schedule;
 pub mod schema;
 pub mod sdm;
 pub mod sensorthings;
+pub mod sensorthings_cursor;
 pub mod validator;
 pub mod version;
 pub mod writer;

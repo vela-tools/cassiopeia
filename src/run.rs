@@ -9,6 +9,7 @@ use crate::{
         schema::SchemaSubcommand,
         sdm::SdmSubcommand,
         sensorthings::SensorThingsSubcommand,
+        sensorthings_cursor::CursorSubcommand,
     },
     config_overrides::overrides_from_cli,
     error::{Error, Result},
@@ -23,6 +24,7 @@ use cassiopeia_cli::{
     config::CliConfig,
     config_scaffold,
     convert,
+    cursors_table::{render_cursor_list, render_cursor_positions},
     dereference,
     explorer,
     format::{self, FormatOutcome},
@@ -32,6 +34,7 @@ use cassiopeia_cli::{
     readings_table::{render_limit_note, render_readings},
     schema_listing::{ListingSource, render_schema_listing},
     sdm,
+    sensorthings_cursors::{list_cursors, reset_cursor, show_cursor},
     theme_choice::ThemeChoice,
     wizard,
 };
@@ -126,7 +129,7 @@ fn dispatch(command: &Commands, config: &Config, cli_config: &CliConfig, reporte
             profiler::profile_file(file)?;
             Ok(())
         }
-        Commands::SensorThings(command) => dispatch_sensorthings(&command.command),
+        Commands::SensorThings(command) => dispatch_sensorthings(&command.command, &config.cursors.folder),
         Commands::Bugreport => {
             bug_report::print_report();
             Ok(())
@@ -176,9 +179,10 @@ fn dispatch_sdm(command: &SdmSubcommand, cli_config: &CliConfig, reporter: &'sta
     Ok(())
 }
 
-/// Dispatches a `sensorthings` subcommand. `readings` writes its table to stdout, so a pipe sees it,
-/// and a note on a read a limit cut short to stderr.
-fn dispatch_sensorthings(command: &SensorThingsSubcommand) -> Result<()> {
+/// Dispatches a `sensorthings` subcommand, the `cursor` ones over the cursors folder `cursors`.
+/// `readings` writes its table to stdout, so a pipe sees it, and a note on a read a limit cut short
+/// to stderr.
+fn dispatch_sensorthings(command: &SensorThingsSubcommand, cursors: &Path) -> Result<()> {
     match command {
         SensorThingsSubcommand::Readings(args) => {
             let listing = list_server_readings(args)?;
@@ -186,6 +190,22 @@ fn dispatch_sensorthings(command: &SensorThingsSubcommand) -> Result<()> {
             if let Some(limit) = listing.limit_reached() {
                 eprintln!("{}", render_limit_note(limit));
             }
+        }
+        SensorThingsSubcommand::Cursor(command) => dispatch_cursor(&command.command, cursors)?,
+    }
+    Ok(())
+}
+
+/// Dispatches a `sensorthings cursor` subcommand over the cursors folder `cursors`, the one runs keep
+/// their cursors in. `list` and `show` write their tables to stdout, so a pipe sees them, and `reset`
+/// reports the store it changed.
+fn dispatch_cursor(command: &CursorSubcommand, cursors: &Path) -> Result<()> {
+    match command {
+        CursorSubcommand::List => println!("{}", render_cursor_list(&list_cursors(cursors)?)),
+        CursorSubcommand::Show(args) => println!("{}", render_cursor_positions(&show_cursor(cursors, &args.cursor)?)),
+        CursorSubcommand::Reset(args) => {
+            let store = reset_cursor(cursors, &args.cursor.cursor, &args.scope(), args.to)?;
+            report_outcome(&Outcome::CursorReset { store });
         }
     }
     Ok(())

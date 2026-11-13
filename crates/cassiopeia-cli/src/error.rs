@@ -1,7 +1,8 @@
 use cassiopeia_collector::error::CollectorError;
 use cassiopeia_data_profiler::error::DataProfilerError;
 use cassiopeia_ngsi_ld::data_model::DataModel;
-use cassiopeia_sensorthings::offered_readings::error::OfferedReadingError;
+use cassiopeia_sensorthings::{offered_readings::error::OfferedReadingError, time_point::TimePoint};
+use cassiopeia_sensorthings_cursor::cursor_store_error::CursorStoreError;
 use cassiopeia_smart_data_models::{error::SdmError, schema_id::SchemaIdError};
 use cassiopeia_tui::error::TuiError;
 use std::{io, path::PathBuf, result, str::Utf8Error};
@@ -94,6 +95,17 @@ pub enum CliError {
     /// A SensorThings server served a Datastream that names no reading.
     #[error(transparent)]
     OfferedReading(#[from] OfferedReadingError),
+
+    /// A cursor of an incremental SensorThings read could not be listed, opened, read or reset.
+    #[error(transparent)]
+    Cursor(#[from] CursorStoreError),
+
+    /// A cursor reset names a target after the moment of the reset.
+    #[error("`--to {to}` is after now, and a data stream reset to it would skip every reading made before it")]
+    ResetTargetAfterNow {
+        /// The target, as the reset named it.
+        to: TimePoint,
+    },
 }
 
 pub type Result<T, E = CliError> = result::Result<T, E>;

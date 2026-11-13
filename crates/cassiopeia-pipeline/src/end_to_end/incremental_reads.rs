@@ -9,7 +9,13 @@ use crate::{
 use cassiopeia_common::store_kind::StoreKind;
 use cassiopeia_diagnostic::code::{diagnostic_code::DiagnosticCode, run_code::RunCode};
 use cassiopeia_sensorthings::{cursor_name::CursorName, entity_id::EntityId, service_root::ServiceRoot};
-use cassiopeia_sensorthings_cursor::{cursor_store::CursorStore, cursor_store_error::CursorStoreError, position::Position, positions::Positions};
+use cassiopeia_sensorthings_cursor::{
+    cursor_store::CursorStore,
+    cursor_store_error::CursorStoreError,
+    position::Position,
+    positions::Positions,
+    reset::{ResetScope, ResetTarget},
+};
 use chrono::{DateTime, Utc};
 use mockito::{Matcher, Mock, Request, ServerGuard};
 use pretty_assertions::assert_eq;
@@ -235,6 +241,13 @@ fn committed(server: &RivmServer, cursors: &Path) -> Positions {
     CursorStore::open(cursors, name, server.root()).unwrap().positions().unwrap()
 }
 
+/// Resets every position of the cursor `rivm-air` in `cursors` to `target`, as
+/// `cassiopeia sensorthings cursor reset` does once no run holds it.
+fn reset(cursors: &Path, target: ResetTarget) {
+    let name = CursorName::try_from("rivm-air".to_owned()).unwrap();
+    CursorStore::open_existing(cursors, name).unwrap().reset(&ResetScope::Store, target).unwrap();
+}
+
 /// The high-water mark of the PM10 data stream among `positions`, if it has one.
 fn pm10_high_water(positions: &Positions) -> Option<DateTime<Utc>> {
     positions.get(&EntityId::Integer(PM10)).map(Position::high_water)
@@ -394,6 +407,32 @@ fn a_late_upload_within_the_lookback_is_written_once_and_beyond_it_never() {
     assert_eq!(written_pm10(&second_outcome), ["2026-11-12T09:30:00Z"]);
     assert!(third_outcome.entities.is_empty(), "{:?}", third_outcome.entities);
     assert_eq!(server.lower_bounds(PM10)[1..], [at("09:00"), at("09:00")]);
+}
+
+#[test]
+fn a_reset_cursor_reads_again_from_the_chosen_point() {
+    let server = RivmServer::new(None);
+    for (id, time) in [(1, "06:00"), (2, "07:00"), (3, "08:00")] {
+        server.hold(PM10, 1, id, time, 30.0);
+    }
+    let cursors = TempDir::new().unwrap();
+    let initial = DateTime::parse_from_rfc3339("2026-01-01T00:00:00Z").unwrap().to_utc();
+
+    let (first, _) = run_into_files(&server, cursors.path());
+    reset(cursors.path(), ResetTarget::HighWater(at("07:30")));
+    let (rewound, rewound_outcome) = run_into_files(&server, cursors.path());
+    reset(cursors.path(), ResetTarget::InitialPoint);
+    let (restarted, restarted_outcome) = run_into_files(&server, cursors.path());
+
+    first.unwrap();
+    rewound.unwrap();
+    restarted.unwrap();
+    assert_eq!(server.lower_bounds(PM10), [initial, at("06:30"), initial]);
+    assert_eq!(written_pm10(&rewound_outcome), ["2026-11-12T07:00:00Z", "2026-11-12T08:00:00Z"]);
+    assert_eq!(
+        written_pm10(&restarted_outcome),
+        ["2026-11-12T06:00:00Z", "2026-11-12T07:00:00Z", "2026-11-12T08:00:00Z"]
+    );
 }
 
 #[test]

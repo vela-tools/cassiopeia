@@ -44,7 +44,9 @@ mod tests {
         let Commands::SensorThings(command) = Cli::try_parse_from(command_line).unwrap().command else {
             panic!("expected the sensorthings command");
         };
-        let SensorThingsSubcommand::Readings(args) = command.command;
+        let SensorThingsSubcommand::Readings(args) = command.command else {
+            panic!("expected the readings command");
+        };
         args
     }
 

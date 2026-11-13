@@ -23,6 +23,8 @@ pub enum Outcome {
     MappingFormatted { path: PathBuf },
     /// A JSON Schema was dereferenced; its expanded payload has already gone to stdout.
     SchemaDereferenced { schema: PathBuf },
+    /// The positions of a SensorThings cursor were reset in its store.
+    CursorReset { store: PathBuf },
 }
 
 impl Outcome {
@@ -36,6 +38,7 @@ impl Outcome {
             Outcome::MappingConverted { path, size } => (path, Some(*size), "converted", "JSON mapping"),
             Outcome::MappingFormatted { path } => (path, None, "formatted", "JSON5 mapping"),
             Outcome::SchemaDereferenced { schema } => (schema, None, "dereferenced", "JSON Schema"),
+            Outcome::CursorReset { store } => (store, None, "reset", "cursor positions"),
         }
     }
 }
@@ -142,6 +145,15 @@ mod tests {
         };
 
         assert_eq!(render_outcome(&outcome, Rendering::Plain), "Building.json\ndereferenced \u{b7} JSON Schema");
+    }
+
+    #[test]
+    fn a_reset_cursor_names_its_store() {
+        let outcome = Outcome::CursorReset {
+            store: PathBuf::from("cursors/rivm-air.redb"),
+        };
+
+        assert_eq!(render_outcome(&outcome, Rendering::Plain), "rivm-air.redb\nreset \u{b7} cursor positions");
     }
 
     #[test]

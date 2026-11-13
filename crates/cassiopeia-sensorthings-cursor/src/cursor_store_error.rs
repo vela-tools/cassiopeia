@@ -20,6 +20,16 @@ pub enum CursorStoreError {
         source: io::Error,
     },
 
+    /// The cursors folder cannot be read, as listing its stores reads it.
+    #[error("the cursors folder '{}' cannot be read", folder.display())]
+    ReadFolder {
+        /// The folder.
+        folder: PathBuf,
+        /// The failure the operating system reported.
+        #[source]
+        source: io::Error,
+    },
+
     /// Another handle holds the store, in this process or another.
     #[error("cursor '{cursor}' is in use by a running job")]
     InUse {

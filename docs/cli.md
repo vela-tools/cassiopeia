@@ -24,6 +24,10 @@ This document contains the help content for the `cassiopeia` command-line progra
 * [`cassiopeia profile`↴](#cassiopeia-profile)
 * [`cassiopeia sensorthings`↴](#cassiopeia-sensorthings)
 * [`cassiopeia sensorthings readings`↴](#cassiopeia-sensorthings-readings)
+* [`cassiopeia sensorthings cursor`↴](#cassiopeia-sensorthings-cursor)
+* [`cassiopeia sensorthings cursor list`↴](#cassiopeia-sensorthings-cursor-list)
+* [`cassiopeia sensorthings cursor show`↴](#cassiopeia-sensorthings-cursor-show)
+* [`cassiopeia sensorthings cursor reset`↴](#cassiopeia-sensorthings-cursor-reset)
 * [`cassiopeia bugreport`↴](#cassiopeia-bugreport)
 
 ## `cassiopeia`
@@ -611,6 +615,7 @@ SensorThings API server operations
 ###### **Subcommands:**
 
 * `readings` — List the readings a SensorThings API server offers
+* `cursor` — Inspect and reset the cursors of incremental reads
 
 
 
@@ -630,6 +635,63 @@ Prints one row per ObservedProperty name, the name a mapping reads as `readings.
 
 * `--datastreams <EXPRESSION>` — An OData `$filter` over Datastreams that selects the data streams listed, such as `ObservedProperty/name eq 'pm10'`; every data stream when absent
 * `--input-header <NAME: VALUE>` — Extra HTTP header sent when fetching a remote input, written as `Name: Value`; repeat for several. Typically carries an API key, e.g. `--input-header "X-Api-Key: <key>"`. Refused for a local input
+
+
+
+## `cassiopeia sensorthings cursor`
+
+Inspect and reset the cursors of incremental reads
+
+**Usage:** `cassiopeia sensorthings cursor <COMMAND>`
+
+###### **Subcommands:**
+
+* `list` — List the SensorThings cursors in the cursors folder
+* `show` — Show the position a cursor keeps for each data stream
+* `reset` — Reset a cursor, so the next cycle reads its data streams again from a chosen point
+
+
+
+## `cassiopeia sensorthings cursor list`
+
+List the SensorThings cursors in the cursors folder.
+
+Prints one row per cursor: its name, the service root its positions were read from, the number of data streams it holds a position for, and the oldest and newest of their high-water marks, `-` for a cursor without positions. A cursor of another kind of input is left out.
+
+**Usage:** `cassiopeia sensorthings cursor list`
+
+
+
+## `cassiopeia sensorthings cursor show`
+
+Show the position a cursor keeps for each data stream.
+
+Prints the service root, then one row per data stream: its id, its high-water mark, the number of Observations it has seen within the lookback, the start of the last cycle that listed it, and the start of the first cycle that no longer listed it, `-` while it is listed.
+
+**Usage:** `cassiopeia sensorthings cursor show <CURSOR>`
+
+###### **Arguments:**
+
+* `<CURSOR>` — The cursor, as an input's `read.incremental.cursor` names it, such as `rivm-air`
+
+
+
+## `cassiopeia sensorthings cursor reset`
+
+Reset a cursor, so the next cycle reads its data streams again from a chosen point.
+
+Without `--to`, removes the positions, so the next cycle starts each data stream at the input's `initial` point. With `--to`, sets their high-water marks to the target and forgets the Observations they have seen, so the next cycle reads each from the target minus the lookback.
+
+**Usage:** `cassiopeia sensorthings cursor reset [OPTIONS] <CURSOR>`
+
+###### **Arguments:**
+
+* `<CURSOR>` — The cursor, as an input's `read.incremental.cursor` names it, such as `rivm-air`
+
+###### **Options:**
+
+* `--datastream <ID>` — Reset only the data stream with this id, as `cursor show` prints it; every data stream when absent
+* `--to <INSTANT|DURATION>` — Set the high-water marks to this RFC 3339 instant, or to this span before now, such as `1h`; remove the positions when absent. A target after now is refused
 
 
 

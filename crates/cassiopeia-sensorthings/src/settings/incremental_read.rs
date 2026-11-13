@@ -1,8 +1,12 @@
-use crate::{cursor_name::CursorName, instant_text::instant_text, reach_back::reach_back};
+use crate::{
+    cursor_name::CursorName,
+    reach_back::reach_back,
+    time_point::{TimePoint, TimePointError},
+};
 use chrono::{DateTime, Utc};
 use derive_more::Display;
 use getset::{CopyGetters, Getters};
-use humantime::{format_duration, parse_duration};
+use humantime::format_duration;
 use humantime_serde::Serde;
 use serde::{Deserialize, Serialize};
 use smart_default::SmartDefault;
@@ -41,29 +45,21 @@ pub struct IncrementalRead {
     lookback: Lookback,
 }
 
-/// Where a data stream without a position starts: an instant, or a span before the cycle start.
+/// Where a data stream without a position starts: an instant, or a span longer than zero before the
+/// cycle start.
 ///
-/// Written as an RFC 3339 instant, such as `2026-01-01T00:00:00Z`, or as a span the way `humantime`
-/// reads it, such as `7d`. Any text that is no RFC 3339 instant is read as a span. The default is 24
-/// hours before the cycle start.
+/// Written as a [`TimePoint`] is, such as `2026-01-01T00:00:00Z` or `7d`. The default is 24 hours
+/// before the cycle start.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Display, SmartDefault, Serialize, Deserialize)]
 #[serde(try_from = "String", into = "String")]
-pub enum InitialPoint {
-    /// This instant.
-    #[display("{}", instant_text(*_0))]
-    Instant(DateTime<Utc>),
-    /// This span, longer than zero, before the cycle start.
-    #[default]
-    #[display("{}", format_duration(*_0))]
-    Before(#[default(DEFAULT_INITIAL)] Duration),
-}
+pub struct InitialPoint(#[default(TimePoint::Before(DEFAULT_INITIAL))] TimePoint);
 
 /// Why a text is no initial point.
 #[derive(Debug, Error, PartialEq, Eq)]
 pub enum InitialPointError {
-    /// The text is neither an RFC 3339 instant nor a span.
-    #[error("`initial` is an RFC 3339 instant or a span such as `24h`, not `{0}`")]
-    Unreadable(Box<str>),
+    /// The text is no point in time.
+    #[error("`initial` is {0}")]
+    Unreadable(#[from] TimePointError),
 
     /// The text is a span of zero.
     #[error("`initial` is a span longer than zero, not 0s")]
@@ -105,10 +101,7 @@ impl InitialPoint {
     /// instant there is when a span reaches back further.
     #[must_use]
     pub fn at(self, cycle_start: DateTime<Utc>) -> DateTime<Utc> {
-        match self {
-            InitialPoint::Instant(instant) => instant,
-            InitialPoint::Before(span) => reach_back(cycle_start, span),
-        }
+        self.0.at(cycle_start)
     }
 }
 
@@ -116,18 +109,15 @@ impl TryFrom<String> for InitialPoint {
     type Error = InitialPointError;
 
     fn try_from(text: String) -> Result<InitialPoint, InitialPointError> {
-        if let Ok(instant) = DateTime::parse_from_rfc3339(&text) {
-            return Ok(InitialPoint::Instant(instant.to_utc()));
+        let point: TimePoint = text.parse()?;
+        if point == TimePoint::Before(Duration::ZERO) {
+            return Err(InitialPointError::Empty);
         }
-        match parse_duration(&text) {
-            Ok(span) if span.is_zero() => Err(InitialPointError::Empty),
-            Ok(span) => Ok(InitialPoint::Before(span)),
-            Err(_) => Err(InitialPointError::Unreadable(text.into_boxed_str())),
-        }
+        Ok(InitialPoint(point))
     }
 }
 
-// Not derivable: each form is written in its own notation, which `Display` writes.
+// Not derivable: a point is written in the notation of its form, which `Display` writes.
 impl From<InitialPoint> for String {
     fn from(point: InitialPoint) -> String {
         point.to_string()
@@ -163,7 +153,10 @@ impl TryFrom<Serde<Duration>> for Lookback {
 
 #[cfg(test)]
 mod tests {
-    use crate::settings::incremental_read::{IncrementalRead, InitialPoint, InitialPointError, Lookback};
+    use crate::{
+        settings::incremental_read::{IncrementalRead, InitialPoint, InitialPointError, Lookback},
+        time_point::TimePoint,
+    };
     use chrono::{DateTime, Utc};
     use pretty_assertions::assert_eq;
     use std::time::Duration;
@@ -195,9 +188,9 @@ mod tests {
         let instant_point = read(r#"{"cursor": "a", "initial": "2026-01-01T00:00:00Z"}"#).unwrap().initial();
         let span = read(r#"{"cursor": "a", "initial": "7d"}"#).unwrap().initial();
 
-        assert_eq!(instant_point, InitialPoint::Instant(instant("2026-01-01T00:00:00Z")));
+        assert_eq!(instant_point, InitialPoint(TimePoint::Instant(instant("2026-01-01T00:00:00Z"))));
         assert_eq!(instant_point.at(cycle_start()), instant("2026-01-01T00:00:00Z"));
-        assert_eq!(span, InitialPoint::Before(Duration::from_hours(7 * 24)));
+        assert_eq!(span, InitialPoint(TimePoint::Before(Duration::from_hours(7 * 24))));
         assert_eq!(span.at(cycle_start()), instant("2026-11-05T10:00:00Z"));
     }
 
@@ -217,12 +210,16 @@ mod tests {
     #[test]
     fn an_unreadable_or_empty_initial_point_is_refused() {
         for (text, refusal) in [
-            ("soon", InitialPointError::Unreadable("soon".into())),
-            ("2026-01-01", InitialPointError::Unreadable("2026-01-01".into())),
+            ("soon", InitialPointError::Unreadable("soon".parse::<TimePoint>().unwrap_err())),
+            ("2026-01-01", InitialPointError::Unreadable("2026-01-01".parse::<TimePoint>().unwrap_err())),
             ("0s", InitialPointError::Empty),
         ] {
             assert_eq!(InitialPoint::try_from(text.to_owned()), Err(refusal), "{text}");
         }
+        assert_eq!(
+            InitialPoint::try_from("soon".to_owned()).unwrap_err().to_string(),
+            "`initial` is an RFC 3339 instant or a span such as `24h`, not `soon`"
+        );
     }
 
     #[test]
@@ -261,7 +258,7 @@ mod tests {
 
     #[test]
     fn the_defaults_are_a_day_back_and_an_hour_behind() {
-        assert_eq!(InitialPoint::default(), InitialPoint::Before(Duration::from_hours(24)));
+        assert_eq!(InitialPoint::default(), InitialPoint(TimePoint::Before(Duration::from_hours(24))));
         assert_eq!(Lookback::default().get(), Duration::from_hours(1));
     }
 }

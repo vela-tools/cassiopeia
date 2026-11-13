@@ -15,7 +15,7 @@ use std::{
 };
 
 /// The extension of a store's file.
-const STORE_EXTENSION: &str = "redb";
+pub(crate) const STORE_EXTENSION: &str = "redb";
 
 /// The cursor store of one SensorThings input: the read positions of its data streams, in one redb
 /// database, `<folder>/<cursor>.redb`.
@@ -31,6 +31,8 @@ pub struct CursorStore {
     cursor: CursorName,
     /// The service root the positions were read from.
     service_root: ServiceRoot,
+    /// The store's file.
+    path: PathBuf,
 }
 
 impl CursorStore {
@@ -67,6 +69,7 @@ impl CursorStore {
             database,
             cursor,
             service_root: root,
+            path,
         })
     }
 
@@ -97,6 +100,7 @@ impl CursorStore {
             database,
             cursor,
             service_root,
+            path,
         })
     }
 
@@ -110,6 +114,12 @@ impl CursorStore {
     #[must_use]
     pub const fn service_root(&self) -> &ServiceRoot {
         &self.service_root
+    }
+
+    /// The store's file, `<folder>/<cursor>.redb`.
+    #[must_use]
+    pub fn path(&self) -> &Path {
+        &self.path
     }
 
     /// The positions the store holds.
@@ -222,12 +232,13 @@ mod tests {
         reset::{IdText, ResetScope, ResetTarget},
         seen_observations::SeenObservations,
         store_metadata::{METADATA, MetadataKey},
+        test_metadata::rewrite_metadata,
     };
     use cassiopeia_sensorthings::{cursor_name::CursorName, entity_id::EntityId, service_root::ServiceRoot};
     use chrono::{DateTime, Utc};
     use pretty_assertions::assert_eq;
     use redb::{Database, ReadableDatabase, TableDefinition};
-    use std::{collections::BTreeMap, path::Path, time::Duration};
+    use std::{collections::BTreeMap, time::Duration};
     use tempfile::TempDir;
 
     const ROOT_A: &str = "https://api-samenmeten.rivm.nl/v1.0";
@@ -273,14 +284,6 @@ mod tests {
         update.record(EntityId::Integer(9), seen(&[(90, "09:40")]));
         store.commit(update).unwrap();
         store
-    }
-
-    /// Writes `value` under `key` in the metadata of the store `rivm-air` in `folder`.
-    fn rewrite_metadata(folder: &Path, key: MetadataKey, value: &str) {
-        let database = Database::open(folder.join("rivm-air.redb")).unwrap();
-        let transaction = database.begin_write().unwrap();
-        transaction.open_table(METADATA).unwrap().insert(<&str>::from(key), value).unwrap();
-        transaction.commit().unwrap();
     }
 
     #[test]
@@ -443,7 +446,7 @@ mod tests {
     fn a_store_of_another_kind_is_refused() {
         let folder = tempfile::tempdir().unwrap();
         drop(open(&folder).unwrap());
-        rewrite_metadata(folder.path(), MetadataKey::Kind, "other");
+        rewrite_metadata(&folder.path().join("rivm-air.redb"), MetadataKey::Kind, "other");
 
         assert_eq!(
             refusal(open(&folder)),
@@ -455,7 +458,7 @@ mod tests {
     fn an_unknown_store_format_is_refused() {
         let folder = tempfile::tempdir().unwrap();
         drop(open(&folder).unwrap());
-        rewrite_metadata(folder.path(), MetadataKey::Format, "2");
+        rewrite_metadata(&folder.path().join("rivm-air.redb"), MetadataKey::Format, "2");
 
         assert_eq!(
             refusal(open(&folder)),
@@ -501,5 +504,6 @@ mod tests {
 
         assert_eq!(store.service_root(), &root(ROOT_A));
         assert_eq!(store.cursor(), &cursor("rivm-air"));
+        assert_eq!(store.path(), folder.path().join("rivm-air.redb"));
     }
 }

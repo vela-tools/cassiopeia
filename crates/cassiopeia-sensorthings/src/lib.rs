@@ -9,8 +9,9 @@
 //! 9.3), entity ids and their order, a Datastream's unit of measurement (section 8.2.4), the readings
 //! a server offers, the instant a `phenomenonTime` stands for (section 8.2.7), the read modes, the
 //! window a range read covers and the data streams it requests, the names of the cursors an
-//! incremental read keeps its positions in and the data streams it requests, stalest first, and the
-//! snapshot file that is the boundary between transport and format.
+//! incremental read keeps its positions in and the data streams it requests, stalest first, the
+//! points in time a read starts at or a cursor is reset to, and the snapshot file that is the
+//! boundary between transport and format.
 
 pub mod cursor_name;
 pub mod datastream_span;
@@ -30,5 +31,6 @@ pub mod service;
 pub mod service_root;
 pub mod settings;
 pub mod snapshot;
+pub mod time_point;
 pub mod unit_of_measurement;
 pub mod version;
