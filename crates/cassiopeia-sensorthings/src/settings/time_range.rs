@@ -1,8 +1,9 @@
 use crate::{
     instant_text::instant_text,
+    reach_back::reach_back,
     read_window::{EmptyWindow, ReadWindow},
 };
-use chrono::{DateTime, TimeDelta, Utc};
+use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
 use thiserror::Error;
@@ -83,15 +84,6 @@ impl TimeRange {
             RangeForm::Since { from, to } => ReadWindow::new(from, to.unwrap_or(cycle_start)),
         }
     }
-}
-
-/// The instant `length` before `start`, or the earliest instant there is when `length` reaches back
-/// further.
-fn reach_back(start: DateTime<Utc>, length: Duration) -> DateTime<Utc> {
-    TimeDelta::from_std(length)
-        .ok()
-        .and_then(|length| start.checked_sub_signed(length))
-        .unwrap_or(DateTime::<Utc>::MIN_UTC)
 }
 
 impl TryFrom<RangeMembers> for TimeRange {

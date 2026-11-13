@@ -1166,6 +1166,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "cassiopeia-sensorthings-cursor"
+version = "1.2.0"
+dependencies = [
+ "cassiopeia-sensorthings",
+ "chrono",
+ "derive_more",
+ "getset",
+ "pretty_assertions",
+ "redb",
+ "rmp-serde",
+ "serde",
+ "strum",
+ "tempfile",
+ "thiserror 2.0.21",
+]
+
+[[package]]
 name = "cassiopeia-smart-data-models"
 version = "1.2.0"
 dependencies = [

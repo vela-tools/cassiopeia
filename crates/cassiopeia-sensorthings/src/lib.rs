@@ -8,9 +8,11 @@
 //! remote input is read with, the requests a read sends and the pages it is answered with (section
 //! 9.3), entity ids and their order, a Datastream's unit of measurement (section 8.2.4), the readings
 //! a server offers, the instant a `phenomenonTime` stands for (section 8.2.7), the read modes, the
-//! window a range read covers and the data streams it requests, and the snapshot file that is the
-//! boundary between transport and format.
+//! window a range read covers and the data streams it requests, the names of the cursors an
+//! incremental read keeps its positions in, and the snapshot file that is the boundary between
+//! transport and format.
 
+pub mod cursor_name;
 pub mod entity_id;
 pub mod instant_text;
 pub mod observed_property_name;
@@ -18,6 +20,7 @@ pub mod offered_readings;
 pub mod paging;
 pub mod phenomenon_time;
 pub mod range_datastreams;
+pub mod reach_back;
 pub mod read_kind;
 pub mod read_window;
 pub mod request;
