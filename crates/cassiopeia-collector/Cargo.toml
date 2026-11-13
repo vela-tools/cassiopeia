@@ -12,6 +12,8 @@ cassiopeia-common.workspace = true
 cassiopeia-encoding-detection.workspace = true
 cassiopeia-ir.workspace = true
 cassiopeia-sensorthings.workspace = true
+cassiopeia-sensorthings-cursor.workspace = true
+chrono = "0.4.45"
 derive_more = { version = "2.1.1", features = ["display"] }
 getset = "0.1.7"
 http = "1.5.0"
@@ -24,7 +26,6 @@ tracing = "0.1.44"
 url = "2.5.8"
 
 [dev-dependencies]
-chrono = "0.4.45"
 mockito = { version = "1.7.2", default-features = false }
 pretty_assertions = "1.4.1"
 secrecy = "0.10.3"

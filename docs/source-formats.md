@@ -378,7 +378,7 @@ A remote input whose `format` is `sensorthings` and whose `source` is a service 
 }
 ~~~
 
-The service root is the URL every resource of the server is addressed under, and it ends with the version the server serves, such as `/v1.0` or `/v1.1`. The `sensorthings` block selects the data streams and limits the read. [SensorThings settings](manifest.md#sensorthings-settings) lists its members and the rules a manifest must keep. `read: "latest"`, the default, reads the newest reading of every selected data stream, which gives one record per Thing. `read: { range: { ... } }` reads every reading of a time range, which gives one record per Observation (see [Reading a time range](#reading-a-time-range)).
+The service root is the URL every resource of the server is addressed under, and it ends with the version the server serves, such as `/v1.0` or `/v1.1`. The `sensorthings` block selects the data streams and limits the read. [SensorThings settings](manifest.md#sensorthings-settings) lists its members and the rules a manifest must keep. `read: "latest"`, the default, reads the newest reading of every selected data stream, which gives one record per Thing. `read: { range: { ... } }` reads every reading of a time range, which gives one record per Observation (see [Reading a time range](#reading-a-time-range)). `read: { incremental: { ... } }` reads every reading gained since the last successful cycle, also one record per Observation (see [Reading new readings](#reading-new-readings)).
 
 Each cycle writes what it read into a snapshot whose `serviceRoot` is the root and whose `collectedAt` is the instant the cycle started. The snapshot is then profiled and read as a local one would be, so the [records](#sensorthings-records) are the same. Every attempt at one scheduled run starts from the same instant, so a retried attempt sends the same requests and records the same time.
 
@@ -397,7 +397,7 @@ It selects every data stream with its Thing, the Thing's Locations, its Observed
 
 A body that is not a page of a collection, a JSON object with a `value` array, fails the input, and the error names the URL and what the body is not. Pages are retried as any remote source is (see [Retried requests](manifest.md#retried-requests)). `delay` spaces the requests of one cycle. Stopping the run with CTRL+C ends collection before its next request.
 
-**Limits.** A read follows each request it sends for at most `limits.pages` pages. At the limit, it keeps what it read and the cycle carries on. One `collect-limit-reached` warning per server and limit names the server, the limit, and the next link the read did not follow. Raise the limit, or select fewer data streams with `datastreams`. A range read also stops at `limits.observations` (see [Reading a time range](#reading-a-time-range)).
+**Limits.** A read follows each request it sends for at most `limits.pages` pages. At the limit, it keeps what it read and the cycle carries on. One `collect-limit-reached` warning per server and limit names the server, the limit, and the next link the read did not follow. Raise the limit, or select fewer data streams with `datastreams`. A range or incremental read also stops at `limits.observations` (see [Reading a time range](#reading-a-time-range)).
 
 **Servers differ.** Servers answer the same request in different ways:
 
@@ -435,7 +435,61 @@ The bounds are written in UTC with a `Z`, with a fraction only when they have on
 
 **Series output.** A range read gives one record per Observation, so it runs only into output with `output.temporal.representation: "series"`. A run without it is refused with `run-misconfigured` when it is built, before any request (see [Records per read](#records-per-read)).
 
-**Delivery.** Each cycle sends every reading of its range once. Ranges that overlap, or a range read again, send their readings again: a run every hour with `last: "2h"` sends each reading twice, and a broker with `operation: "temporal"` stores it twice. Nothing is kept from one run to the next, so a run that starts late leaves the readings between two ranges unread. Match `last` to the schedule's interval to read each reading about once.
+**Delivery.** Each cycle sends every reading of its range once. Ranges that overlap, or a range read again, send their readings again: a run every hour with `last: "2h"` sends each reading twice, and a broker with `operation: "temporal"` stores it twice. Nothing is kept from one run to the next, so a run that starts late leaves the readings between two ranges unread. Match `last` to the schedule's interval to read each reading about once, or read incrementally to read each reading once (see [Reading new readings](#reading-new-readings)).
+
+### Reading new readings
+
+An incremental read reads every reading each selected data stream gained since the last successful cycle. A scheduled job that keeps a broker's temporal API, or a set of files, up to date with a server then writes each reading once:
+
+~~~json5
+{
+    version: "v1",
+    schedule: { mode: "every", value: "5m" },
+    inputs: [
+        {
+            source: "https://api-samenmeten.rivm.nl/v1.0",
+            format: "sensorthings",
+            mapping: "air-quality-observed.json5",
+            sensorthings: {
+                datastreams: "endswith(name,'ILM_I68-13-pm10')",
+                read: { incremental: { cursor: "rivm-air", initial: "24h", lookback: "1h" } },
+                delay: "200ms",
+            },
+        },
+    ],
+    output: {
+        target: "context-broker",
+        url: "http://localhost:1026/",
+        operation: "temporal",
+        atomicity: "atomic",
+        temporal: { representation: "series" },
+    },
+}
+~~~
+
+`cursor` names the cursor that keeps how far the read has read each data stream, `initial` is where a data stream without a position starts, and `lookback` is how far behind its high-water mark each data stream is read again. [SensorThings settings](manifest.md#sensorthings-settings) lists their forms and defaults.
+
+**Positions.** A cursor keeps one position per data stream: its high-water mark, the latest reading time written for it, and the Observations written within the lookback behind that mark. A cursor is a store named `<cursor>.redb` in the cursors folder, and it records the server it was read from, so an input that reads another server through it is refused, and the error names both servers. Two inputs of one manifest that name one cursor are refused when the manifest loads.
+
+**The requests.** The read first lists the selected Datastreams, as a range read does, and writes each into the snapshot, whose header records `read: "incremental"`. Then it reads the Observations of each data stream with the request of [Reading a time range](#reading-a-time-range), from a lookback behind its high-water mark, or from `initial` when the cursor holds no position for it, to the cycle start. A reading stamped at or after the cycle start, a forecast among them, waits for a later cycle. The data streams furthest behind are read first: by ascending start, then by ascending id. A data stream whose Datastream `phenomenonTime` ends before its start is not requested. An Observation the position already holds, or one this read already wrote, is dropped. Every other one is written.
+
+**Advancing.** A cursor moves only once the whole cycle has succeeded: every reading was written and the run was not stopped. All positions of one cursor then move in one write. A cycle that fails or is stopped leaves its cursors where they were, so the next cycle reads its readings again, and a retried attempt reads from the positions as they were before it. A data stream's high-water mark becomes the latest reading time written for it. When `limits.observations` or `limits.pages` stops a data stream midway, its mark is the last reading it wrote, so the next cycle goes on from there, and each reading a limit left unread is read later, once. The data streams a limit left unread are the furthest behind, so the next cycle reads them first.
+
+**Late readings.** A reading uploaded within the lookback behind its data stream's high-water mark is read once. A reading uploaded later than that is never read: SensorThings gives no entity an insertion time (OGC 18-088 section 8.1), so such a reading cannot be told apart from one already read without reading the whole history again. Choose `lookback` from the server's usual upload delay. A longer lookback requests more Observations every cycle, and drops the ones it already wrote.
+
+**Missing data streams.** A data stream the cursor holds a position for that discovery no longer lists keeps its position, and resumes from it when it is listed again. One `collect-datastreams-missing` warning per server names up to three such data streams, counts them, and gives the earliest cycle start since which one is missing. When `limits.pages` stops discovery, no data stream is reported missing.
+
+**Delivery.** What an incremental read writes once depends on the destination:
+
+- A broker with `atomicity: "atomic"`: a failed or stopped cycle sends nothing and moves no cursor, so the next cycle sends its readings once. A reading is sent twice only when the replay of the spool is interrupted after the broker accepted part of it (see [Streaming and atomic delivery](output.md#streaming-and-atomic-delivery)), or when moving the cursor fails after delivery.
+- A broker with `atomicity: "streaming"`: a failed cycle may already have sent some readings, and the next cycle sends them again.
+- Files: each cycle replaces the files of the output directory with the readings of that cycle. Read the files after each successful cycle. After a failed cycle, the next cycle's files hold its readings again.
+
+**Series output.** An incremental read gives one record per Observation, so, like a range read, it runs only into output with `output.temporal.representation: "series"`, and a run without it is refused when it is built (see [Records per read](#records-per-read)).
+
+**One run at a time.** A run opens the store of every cursor it reads through when it is built and holds it until it ends, scheduled cycles included. A second run that reads through the same cursor is refused with `run-cursor-unusable` before it sends any request, and so is a run whose cursor records another server, another kind of input, or another store format, or whose cursors folder holds a file of the cursor's name that is no cursor store. When a cursor cannot be read before a cycle or moved after it, the cycle fails with the same code.
+
+**The cursors folder.** Cursors are kept in the folder of the `cursors.folder` setting, `CASSIOPEIA_CURSORS__FOLDER` in the environment. It defaults to `cursors` under Cassiopeia's data directory, which is `/var/lib/cassiopeia/cursors` in the container. Keep it on a volume a container outlives (see [Persisting cursors](docker.md#persisting-cursors)).
 
 ### The snapshot file
 
@@ -513,7 +567,7 @@ Ids keep the JSON type the server sent: an integer id stays a number and a text 
 
 The snapshot is read as a stream: the Datastreams are indexed, and each Observation becomes a record without being held, so a snapshot of any length is read in bounded memory.
 
-A record of a `range` or `incremental` read holds one reading, so several records describe one Thing. Without a `temporal` setting, the output keeps one record per entity and mapping, so all but one reading of each Thing would be lost. Such a snapshot is therefore read only into output with `output.temporal.representation: "series"`, which keeps every reading of each Thing as one temporal entity (see [Temporal output](output.md#temporal-output)). Without it, the run fails with `run-misconfigured` before the snapshot's first record is read, and the error names the snapshot, its read, and the setting it needs. A range read of a server without it fails when the run is built, before any request, and the error names the service root. A `latest` snapshot is read into every output.
+A record of a `range` or `incremental` read holds one reading, so several records describe one Thing. Without a `temporal` setting, the output keeps one record per entity and mapping, so all but one reading of each Thing would be lost. Such a snapshot is therefore read only into output with `output.temporal.representation: "series"`, which keeps every reading of each Thing as one temporal entity (see [Temporal output](output.md#temporal-output)). Without it, the run fails with `run-misconfigured` before the snapshot's first record is read, and the error names the snapshot, its read, and the setting it needs. A range or incremental read of a server without it fails when the run is built, before any request, and the error names the service root. A `latest` snapshot is read into every output.
 
 ### Reading keys
 

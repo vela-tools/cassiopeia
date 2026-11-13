@@ -4,6 +4,8 @@ use crate::{
     downloader::Downloader,
     error::CollectorError,
     sensorthings::{
+        cursor_cycle::CursorCycle,
+        incremental_read::read_incremental,
         page_reader::PageReader,
         range_read::read_range,
         snapshot_failure::unwritable,
@@ -38,6 +40,9 @@ use tracing::debug;
 pub struct SensorThingsCollector {
     /// The server and how it is read.
     service: SensorThingsService,
+    /// The cursor positions an incremental read resumes from and the slot it leaves its update in;
+    /// `None` for any other read.
+    cursor: Option<CursorCycle>,
     /// The instant the cycle started, which the snapshot records as its collection time.
     cycle_start: CycleStart,
     /// The downloader every page is fetched through, with the input's headers.
@@ -47,12 +52,19 @@ pub struct SensorThingsCollector {
 }
 
 impl SensorThingsCollector {
-    /// A collector of `service` for the cycle that started at `cycle_start`, fetching through
-    /// `downloader` and stopping once `shutdown` is set.
+    /// A collector of `service` for the cycle that started at `cycle_start`, resuming an incremental
+    /// read from `cursor`, fetching through `downloader` and stopping once `shutdown` is set.
     #[must_use]
-    pub const fn new(service: SensorThingsService, cycle_start: CycleStart, downloader: Downloader, shutdown: &'static AtomicBool) -> SensorThingsCollector {
+    pub const fn new(
+        service: SensorThingsService,
+        cursor: Option<CursorCycle>,
+        cycle_start: CycleStart,
+        downloader: Downloader,
+        shutdown: &'static AtomicBool,
+    ) -> SensorThingsCollector {
         SensorThingsCollector {
             service,
+            cursor,
             cycle_start,
             downloader,
             shutdown,
@@ -64,6 +76,7 @@ impl Collector for SensorThingsCollector {
     fn collect(self: Box<Self>, sender: ChannelSender<Signal<CollectedPayload, CollectorError>>) -> Result<CollectionWarnings, CollectorError> {
         let SensorThingsCollector {
             service,
+            cursor,
             cycle_start,
             downloader,
             shutdown,
@@ -74,7 +87,7 @@ impl Collector for SensorThingsCollector {
         let directory = directory.dont_delete_on_drop();
         let path = directory.path().join(format!("snapshot.{}", DataFormat::SensorThings.extension()));
 
-        let warnings = match write_snapshot(&service, cycle_start, downloader, shutdown, &path) {
+        let warnings = match write_snapshot(&service, cursor, cycle_start, downloader, shutdown, &path) {
             Ok(warnings) => warnings,
             Err(error) => {
                 // Nothing reads a snapshot whose read failed, so it does not outlive the collector.
@@ -95,9 +108,11 @@ impl Collector for SensorThingsCollector {
 }
 
 /// Reads one cycle of `service` into a snapshot at `path`, recording `cycle_start` as its
-/// collection time, and returns what the read met that the cycle carries on past.
+/// collection time, resuming an incremental read from `cursor`, and returns what the read met that
+/// the cycle carries on past.
 fn write_snapshot(
     service: &SensorThingsService,
+    cursor: Option<CursorCycle>,
     cycle_start: CycleStart,
     downloader: Downloader,
     shutdown: &'static AtomicBool,
@@ -109,9 +124,14 @@ fn write_snapshot(
     let mut reader = PageReader::new(service.root().clone(), downloader, settings.delay(), shutdown);
     let file = File::create(path).map_err(unwritable(path))?;
     let snapshot = SnapshotWriter::start(BufWriter::new(file), &header).map_err(unwritable(path))?;
-    match settings.read() {
-        ReadMode::Latest => read_latest(&mut reader, service, snapshot, path),
-        ReadMode::Range(range) => read_range(&mut reader, service, range, cycle_start, snapshot, path),
+    match (settings.read(), cursor) {
+        (ReadMode::Latest, _) => read_latest(&mut reader, service, snapshot, path),
+        (ReadMode::Range(range), _) => read_range(&mut reader, service, *range, cycle_start, snapshot, path),
+        (ReadMode::Incremental(incremental), Some(cursor)) => read_incremental(&mut reader, service, incremental, cursor, cycle_start, snapshot, path),
+        (ReadMode::Incremental(_), None) => Err(CollectorError::CursorWithheld {
+            // The error names the root, while the service keeps its own.
+            root: Box::new(service.root().clone()),
+        }),
     }
 }
 

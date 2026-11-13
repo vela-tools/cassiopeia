@@ -55,7 +55,7 @@ RUN cargo audit --ignore RUSTSEC-2026-0459 bin target/release/cassiopeia
 
 FROM chef AS rootfs
 
-RUN mkdir -p /rootfs/etc/cassiopeia/mappings /rootfs/var/lib/cassiopeia/schemas /rootfs/var/log/cassiopeia/logs /rootfs/var/lib/dpkg/status.d \
+RUN mkdir -p /rootfs/etc/cassiopeia/mappings /rootfs/var/lib/cassiopeia/schemas /rootfs/var/lib/cassiopeia/cursors /rootfs/var/log/cassiopeia/logs /rootfs/var/lib/dpkg/status.d \
     && dpkg -L libopenjp2-7 | grep -E '\.so|/copyright$' | xargs cp -a --parents -t /rootfs \
     && dpkg-query -s libopenjp2-7 > /rootfs/var/lib/dpkg/status.d/libopenjp2-7
 

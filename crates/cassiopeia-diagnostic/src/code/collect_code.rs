@@ -9,6 +9,9 @@ pub enum CollectCode {
     LimitReached,
     /// A range read's range held no reading in its cycle, so the read requested nothing.
     RangeEmpty,
+    /// A server no longer lists data streams an incremental read's cursor keeps a position for, so
+    /// the cycle read nothing of them and kept their positions.
+    DatastreamsMissing,
 }
 
 #[cfg(test)]
@@ -20,5 +23,6 @@ mod tests {
     fn a_collect_code_renders_a_kebab_case_token() {
         assert_eq!(CollectCode::LimitReached.to_string(), "limit-reached");
         assert_eq!(CollectCode::RangeEmpty.to_string(), "range-empty");
+        assert_eq!(CollectCode::DatastreamsMissing.to_string(), "datastreams-missing");
     }
 }

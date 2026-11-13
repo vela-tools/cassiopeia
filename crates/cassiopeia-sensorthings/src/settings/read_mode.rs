@@ -1,9 +1,12 @@
-use crate::{read_kind::ReadKind, settings::time_range::TimeRange};
+use crate::{
+    read_kind::ReadKind,
+    settings::{incremental_read::IncrementalRead, time_range::TimeRange},
+};
 use serde::{Deserialize, Serialize};
 use strum::Display;
 
 /// What a remote read collects from the server.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, Display, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Default, Display, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 #[strum(serialize_all = "kebab-case")]
 pub enum ReadMode {
@@ -13,15 +16,19 @@ pub enum ReadMode {
     /// Every reading of a time range of every selected data stream, one record per Observation,
     /// written `{ range: { ... } }`.
     Range(TimeRange),
+    /// Every reading every selected data stream gained since the last successful cycle, one record
+    /// per Observation, resumed from the positions a cursor keeps, written `{ incremental: { ... } }`.
+    Incremental(IncrementalRead),
 }
 
 impl ReadMode {
     /// The kind of read this mode is, as its snapshot's header states it.
     #[must_use]
-    pub const fn kind(self) -> ReadKind {
+    pub const fn kind(&self) -> ReadKind {
         match self {
             ReadMode::Latest => ReadKind::Latest,
             ReadMode::Range(_) => ReadKind::Range,
+            ReadMode::Incremental(_) => ReadKind::Incremental,
         }
     }
 }
@@ -41,7 +48,7 @@ mod tests {
     }
 
     /// The bounds of the window `read` covers in a cycle that started at 2026-11-12T10:00:00Z.
-    fn bounds(read: ReadMode) -> (DateTime<Utc>, DateTime<Utc>) {
+    fn bounds(read: &ReadMode) -> (DateTime<Utc>, DateTime<Utc>) {
         let ReadMode::Range(range) = read else {
             panic!("expected a range read");
         };
@@ -61,15 +68,15 @@ mod tests {
     #[test]
     fn range_settings_are_read() {
         assert_eq!(
-            bounds(read(r#"{"range": {"last": "24h"}}"#).unwrap()),
+            bounds(&read(r#"{"range": {"last": "24h"}}"#).unwrap()),
             (instant("2026-11-11T10:00:00Z"), instant("2026-11-12T10:00:00Z"))
         );
         assert_eq!(
-            bounds(read(r#"{"range": {"from": "2026-11-01T00:00:00Z", "to": "2026-11-02T00:00:00Z"}}"#).unwrap()),
+            bounds(&read(r#"{"range": {"from": "2026-11-01T00:00:00Z", "to": "2026-11-02T00:00:00Z"}}"#).unwrap()),
             (instant("2026-11-01T00:00:00Z"), instant("2026-11-02T00:00:00Z"))
         );
         assert_eq!(
-            bounds(read(r#"{"range": {"from": "2026-11-01T00:00:00Z"}}"#).unwrap()),
+            bounds(&read(r#"{"range": {"from": "2026-11-01T00:00:00Z"}}"#).unwrap()),
             (instant("2026-11-01T00:00:00Z"), instant("2026-11-12T10:00:00Z"))
         );
     }
@@ -81,6 +88,18 @@ mod tests {
         assert_eq!(read.kind(), ReadKind::Range);
         assert_eq!(read.to_string(), "range");
         assert_eq!(serde_json::to_string(&read).unwrap(), r#"{"range":{"last":"1h"}}"#);
+    }
+
+    #[test]
+    fn an_incremental_read_states_an_incremental_snapshot() {
+        let read = read(r#"{"incremental": {"cursor": "rivm-air"}}"#).unwrap();
+
+        let ReadMode::Incremental(incremental) = &read else {
+            panic!("expected an incremental read");
+        };
+        assert_eq!(incremental.cursor().as_str(), "rivm-air");
+        assert_eq!(read.kind(), ReadKind::Incremental);
+        assert_eq!(read.to_string(), "incremental");
     }
 
     #[test]
@@ -100,5 +119,7 @@ mod tests {
     fn an_unknown_read_is_refused() {
         assert!(read(r#""newest""#).is_err());
         assert!(read(r#""range""#).is_err());
+        assert!(read(r#""incremental""#).is_err());
+        assert!(read(r#"{"incremental": {}}"#).is_err());
     }
 }

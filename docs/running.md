@@ -159,7 +159,8 @@ Problems that depend on one record's data, on the rows and header of one CSV fil
 
 | Code | What happened |
 | --- | --- |
-| `collect-limit-reached` | A read of a SensorThings server reached `limits.pages` before the last page of a request, or a range read wrote `limits.observations` Observations, so Cassiopeia kept what it had read and the cycle carried on. One warning per server and limit names the limit and what it left unread: the next link the read did not follow, or the page that holds the first Observation it did not write. See [Reading a server](source-formats.md#reading-a-server). |
+| `collect-datastreams-missing` | An incremental read of a SensorThings server found data streams its cursor holds a position for that the server no longer lists. Cassiopeia kept their positions and read the rest, and a data stream listed again resumes where it stopped. One warning per server names the cursor, up to three such data streams and their count, and the earliest cycle start since which one is missing. See [Reading new readings](source-formats.md#reading-new-readings). |
+| `collect-limit-reached` | A read of a SensorThings server reached `limits.pages` before the last page of a request, or a range or incremental read wrote `limits.observations` Observations, so Cassiopeia kept what it had read and the cycle carried on. One warning per server and limit names the limit and what it left unread: the next link the read did not follow, or the page that holds the first Observation it did not write. See [Reading a server](source-formats.md#reading-a-server). |
 | `collect-range-empty` | A range read's range held no reading in its cycle, because its start was not before its end, as for a `from` after the cycle start. Cassiopeia requested nothing and the cycle carried on with no records from that server. One warning per server names the range. See [Reading a time range](source-formats.md#reading-a-time-range). |
 | `expander-urn-ungeneratable` | The record's identity resolved to nothing, or its `identity.entityName` or a `scope` template failed to render, so Cassiopeia skipped the record. An identity resolves to nothing when a field it reads is missing, null, or empty, or when its text has no letter or digit, such as `-`. A synthetic entity's `scope` that fails to render or is not a valid scope skips the record too. A scope or relationship target that resolves to nothing, rather than failing, is left out without a warning. |
 | `expander-expires-at-unreadable` | An entity `expiresAt` resolved to text Cassiopeia cannot read as a date and time, so the entity is written without it. One warning per entity type names the first entity that lost it, the text, and how many records did. |
@@ -194,6 +195,15 @@ Problems that depend on one record's data, on the rows and header of one CSV fil
 The run's warning count adds one for each renamed column of an `ingest-columns-renamed` warning, one for each date of an `ingest-dates-nonexistent` warning, one for each Thing of an `ingest-locations-unreadable` warning, one for each dropped reading of an `ingest-phenomenon-times-unreadable` warning, one for each renamed data stream of an `ingest-readings-renamed` warning, and one for each skipped row of an `ingest-rows-misshapen` warning.
 
 With `--verbose`, each of these also lists its causes, including Tera's own message when Tera reported one. For a template rejected at load time, that message gives the column where Tera stopped. The [templates reference](templates.md#when-a-template-fails) lists what fails at load time and how to guard a template against a missing field.
+
+### Cursor problems
+
+An incremental SensorThings read keeps its positions in a cursor (see [Reading new readings](source-formats.md#reading-new-readings)). A cursor that cannot be used fails with `run-cursor-unusable`:
+
+- When the run is built, before any request: another running job holds the cursor, the cursor records another server, another kind of input, or another store format, the cursors folder holds a file of the cursor's name that is no cursor store, or the cursors folder cannot be created.
+- In a cycle: the cursor's positions cannot be read before the cycle, or cannot be moved after it. A cycle whose cursor could not be moved has already written its readings, so the next cycle writes them again.
+
+Each error names the cursor. A refused second job is reported as `cursor 'rivm-air' is in use by a running job`. `--on-failure` decides what a failed cycle does to the run, as for any other failure.
 
 ## Control how the run behaves
 

@@ -1,4 +1,5 @@
 use crate::{
+    cursors::Cursors,
     download::Download,
     mappings::Mappings,
     pipeline::{ExtractionMode, Pipeline},
@@ -28,6 +29,9 @@ pub struct Config {
 
     /// Where JSON Schemas are kept.
     pub schemas: Schemas,
+
+    /// Where the cursor stores of incremental reads are kept.
+    pub cursors: Cursors,
 
     /// How records move between pipeline stages.
     pub pipeline: Pipeline,

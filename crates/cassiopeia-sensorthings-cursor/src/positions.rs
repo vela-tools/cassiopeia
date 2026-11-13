@@ -1,10 +1,11 @@
 use crate::position::Position;
 use cassiopeia_sensorthings::entity_id::EntityId;
-use derive_more::{From, Into};
-use std::collections::BTreeMap;
+use derive_more::{From, Into, IntoIterator};
+use std::collections::{BTreeMap, btree_map};
 
 /// The read positions a cursor keeps, one per data stream, by ascending data stream id.
-#[derive(Debug, Clone, PartialEq, Eq, Default, From, Into)]
+#[derive(Debug, Clone, PartialEq, Eq, Default, From, Into, IntoIterator)]
+#[into_iterator(ref)]
 pub struct Positions(BTreeMap<EntityId, Position>);
 
 impl Positions {
@@ -12,6 +13,11 @@ impl Positions {
     #[must_use]
     pub fn get(&self, datastream: &EntityId) -> Option<&Position> {
         self.0.get(datastream)
+    }
+
+    /// Every position with the id of its data stream, by ascending data stream id.
+    pub fn iter(&self) -> btree_map::Iter<'_, EntityId, Position> {
+        self.0.iter()
     }
 
     /// How many data streams the cursor keeps a position for.
@@ -45,6 +51,7 @@ mod tests {
         assert_eq!(positions.len(), 1);
         assert_eq!(positions.get(&EntityId::Integer(5)), Some(&first));
         assert_eq!(positions.get(&EntityId::Text("5".into())), None);
+        assert_eq!(positions.iter().collect::<Vec<_>>(), [(&EntityId::Integer(5), &first)]);
         assert!(Positions::default().is_empty());
     }
 }

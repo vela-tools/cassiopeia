@@ -1,4 +1,4 @@
-use crate::sensorthings::{limit_reached::LimitReached, range_empty::RangeEmpty};
+use crate::sensorthings::{datastreams_missing::DatastreamsMissing, limit_reached::LimitReached, range_empty::RangeEmpty};
 
 /// What collecting a lane's sources met that the run carries on past, for the run to report once
 /// collection has ended.
@@ -8,6 +8,9 @@ pub struct CollectionWarnings {
     limits_reached: Vec<LimitReached>,
     /// The range reads whose range held no reading.
     empty_ranges: Vec<RangeEmpty>,
+    /// The incremental reads whose server no longer lists data streams their cursor keeps a
+    /// position for.
+    missing_datastreams: Vec<DatastreamsMissing>,
 }
 
 impl CollectionWarnings {
@@ -21,6 +24,13 @@ impl CollectionWarnings {
     #[must_use]
     pub fn empty_ranges(&self) -> &[RangeEmpty] {
         &self.empty_ranges
+    }
+
+    /// The incremental reads whose server no longer lists data streams their cursor keeps a
+    /// position for.
+    #[must_use]
+    pub fn missing_datastreams(&self) -> &[DatastreamsMissing] {
+        &self.missing_datastreams
     }
 
     /// Records that a collection limit stopped a read, unless the same limit already stopped a read
@@ -39,6 +49,12 @@ impl CollectionWarnings {
     /// Records that a range read's range held no reading.
     pub fn range_empty(&mut self, range: RangeEmpty) {
         self.empty_ranges.push(range);
+    }
+
+    /// Records that an incremental read's server no longer lists data streams its cursor keeps a
+    /// position for.
+    pub fn datastreams_missing(&mut self, missing: DatastreamsMissing) {
+        self.missing_datastreams.push(missing);
     }
 }
 

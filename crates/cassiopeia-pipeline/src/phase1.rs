@@ -14,7 +14,7 @@ use crate::{
         stage_env::StageEnv,
     },
 };
-use cassiopeia_collector::downloader::Downloader;
+use cassiopeia_collector::{downloader::Downloader, sensorthings::cursor_cycle::CursorCycle};
 use cassiopeia_common::{
     signal::Signal,
     stage::Stage,
@@ -25,9 +25,23 @@ use cassiopeia_mapping::template::resolver::TemplateResolver;
 use cassiopeia_resolver::{entity_source::EntitySource, fragment_resolver::FragmentResolver};
 use std::sync::Arc;
 
+/// One input lane as a cycle runs it: its configuration, the router its records are expanded
+/// through, and, for an incremental read, the cursor it resumes from and leaves its update in.
+pub(crate) struct CycleLane<'a> {
+    /// The lane's configuration.
+    pub(crate) input: &'a InputConfig,
+    /// The router the lane's records are expanded through.
+    pub(crate) router: MappingRouter,
+    /// The cursor of an incremental read; `None` for any other lane.
+    pub(crate) cursor: Option<CursorCycle>,
+}
+
 impl Pipeline {
     /// Runs every input lane and merges its fragments into the store, returning the number of unique
     /// entities the store holds afterwards.
+    ///
+    /// The lane of an incremental input resumes from the positions of its cursor and leaves its
+    /// update in the cursor's slot.
     ///
     /// # Errors
     ///
@@ -35,7 +49,7 @@ impl Pipeline {
     /// reports a fragment could not be resolved.
     pub(crate) fn run_phase1(
         &self,
-        loaded: Vec<(&InputConfig, MappingRouter)>,
+        lanes: Vec<CycleLane<'_>>,
         template_resolver: &TemplateResolver,
         fragment_resolver: &FragmentResolver,
         run: &ScheduledRun,
@@ -44,7 +58,7 @@ impl Pipeline {
     ) -> Result<u64> {
         let batch_size = self.config.handoff_size();
         let channel_policy = self.config.channel_policy;
-        let num_inputs = loaded.len();
+        let num_inputs = lanes.len();
         let env = StageEnv {
             channel_policy,
             reporter: self.context.reporter,
@@ -57,7 +71,7 @@ impl Pipeline {
         let (shared_tx, shared_rx) = env.channel(Some(ChannelBoundary::between(Stage::Expander, Stage::Resolver)));
         let _ = shared_tx.send(Signal::Meta(run.meta.clone()));
 
-        for (input, router) in loaded {
+        for CycleLane { input, router, cursor } in lanes {
             let ingestor_bank = spawn_ingestor_bank(
                 &input.mapping_binding,
                 self.output.temporal,
@@ -73,7 +87,7 @@ impl Pipeline {
                 input.headers.clone(),
                 self.context.shutdown,
             );
-            let collector = lane_collector(&input.source, input.format_override, run.start, downloader, self.context.shutdown);
+            let collector = lane_collector(&input.source, cursor, input.format_override, run.start, downloader, self.context.shutdown);
             let collector_rx = spawn_collector_thread(collector, channel_policy, self.context.reporter, Arc::clone(&env.telemetry));
 
             let profiler = create_profiler(

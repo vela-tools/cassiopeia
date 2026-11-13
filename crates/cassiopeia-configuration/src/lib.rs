@@ -1,4 +1,5 @@
 pub mod config;
+pub mod cursors;
 pub mod download;
 pub mod error;
 pub mod loader;

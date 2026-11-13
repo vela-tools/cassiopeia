@@ -22,6 +22,7 @@ pub(crate) fn engine_config() -> PipelineConfig {
         entity_store: StoreKind::DashMap,
         relationship_store: StoreKind::DashMap,
         schemas_folder: PathBuf::from("schemas"),
+        cursors_folder: PathBuf::from("cursors"),
         context_mode: AtContextMode::Default,
         default_user_agent: UserAgent::from("test".to_owned()),
         channel_policy: ChannelPolicy::Bounded(NonZeroUsize::new(64).unwrap()),

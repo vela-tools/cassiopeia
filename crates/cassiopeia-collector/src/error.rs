@@ -72,6 +72,15 @@ pub enum CollectorError {
         root: Box<ServiceRoot>,
     },
 
+    /// An incremental read was started without the positions its cursor committed, so it could not
+    /// tell where to resume or keep what it read.
+    #[error("The incremental read of '{root}' was started without the positions of its cursor")]
+    CursorWithheld {
+        /// The service root of the read. Boxed so a root does not enlarge every `Result` in the
+        /// collector and every pipeline error that wraps one.
+        root: Box<ServiceRoot>,
+    },
+
     /// A page linked back to a page its traversal had already read, so following it would never end.
     #[error("'{link}' links back to a page already read, so it is not followed")]
     LinkLoop {

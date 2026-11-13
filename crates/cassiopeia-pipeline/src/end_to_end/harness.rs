@@ -14,7 +14,7 @@ use std::{
     fs,
     io::ErrorKind,
     path::{Path, PathBuf},
-    sync::{Arc, Mutex, PoisonError},
+    sync::{Arc, Mutex, PoisonError, atomic::AtomicBool},
 };
 use temp_dir::TempDir;
 
@@ -33,6 +33,42 @@ pub(crate) enum RunSchemas<'a> {
     Permissive(&'a [&'a str]),
     /// The schemas of this folder, laid out as the validator looks them up.
     Folder(&'a Path),
+}
+
+/// Where an end-to-end run writes its entities.
+pub(crate) enum RunOutput<'a> {
+    /// Files in the run's own folder, with these members spliced into the manifest's `output` object.
+    Files(&'a str),
+    /// The manifest's whole `output` object, as it is written, such as a broker's.
+    Declared(&'a str),
+}
+
+/// What an end-to-end run of declared inputs runs with besides its inputs.
+pub(crate) struct RunSetup<'a> {
+    /// The schemas its entities are validated against.
+    pub(crate) schemas: &'a RunSchemas<'a>,
+    /// Where it writes its entities.
+    pub(crate) output: RunOutput<'a>,
+    /// The manifest schedule, or `None` for one cycle.
+    pub(crate) schedule: Option<&'a str>,
+    /// The folder it keeps its cursors in, or `None` for one in the run's own folder.
+    pub(crate) cursors: Option<&'a Path>,
+    /// The flag that stops it.
+    pub(crate) shutdown: &'static AtomicBool,
+}
+
+impl<'a> RunSetup<'a> {
+    /// One cycle into files with `output_extra` spliced into the output, validated against
+    /// `schemas`, with cursors in the run's own folder, never stopped.
+    pub(crate) const fn files(schemas: &'a RunSchemas<'a>, output_extra: &'a str) -> RunSetup<'a> {
+        RunSetup {
+            schemas,
+            output: RunOutput::Files(output_extra),
+            schedule: None,
+            cursors: None,
+            shutdown: &SHUTDOWN,
+        }
+    }
 }
 
 /// One input of an end-to-end run: how it binds mappings and the document it reads, whose format
@@ -118,9 +154,7 @@ pub(crate) fn run_csv_end_to_end(store: StoreKind, csv: &str, binding: &RunBindi
         store,
         root,
         &[declare_input(root, 0, &data, binding)],
-        &RunSchemas::Permissive(entity_types),
-        "",
-        None,
+        &RunSetup::files(&RunSchemas::Permissive(entity_types), ""),
     );
     result.unwrap();
     outcome
@@ -153,7 +187,14 @@ pub(crate) fn attempt_declared_end_to_end(
     output_extra: &str,
 ) -> (Result<(), PipelineError>, RunOutcome) {
     let directory = TempDir::new().unwrap();
-    run_declared(store, directory.path(), &[declared.to_owned()], schemas, output_extra, None)
+    run_declared(store, directory.path(), &[declared.to_owned()], &RunSetup::files(schemas, output_extra))
+}
+
+/// Runs a pipeline over the one manifest input `declared`, written as a manifest writes it, on
+/// `store`, as `setup` says, and returns how the run ended with what it reported and wrote.
+pub(crate) fn attempt_setup_end_to_end(store: StoreKind, declared: &str, setup: &RunSetup<'_>) -> (Result<(), PipelineError>, RunOutcome) {
+    let directory = TempDir::new().unwrap();
+    run_declared(store, directory.path(), &[declared.to_owned()], setup)
 }
 
 /// Runs a pipeline over the one manifest input `declared` on the manifest schedule `schedule`, written
@@ -167,7 +208,11 @@ pub(crate) fn attempt_scheduled_end_to_end(
     schedule: &str,
 ) -> (Result<(), PipelineError>, RunOutcome) {
     let directory = TempDir::new().unwrap();
-    run_declared(store, directory.path(), &[declared.to_owned()], schemas, output_extra, Some(schedule))
+    let setup = RunSetup {
+        schedule: Some(schedule),
+        ..RunSetup::files(schemas, output_extra)
+    };
+    run_declared(store, directory.path(), &[declared.to_owned()], &setup)
 }
 
 /// Runs a one-shot pipeline over `inputs` and returns how the run ended with what it reported and
@@ -185,29 +230,21 @@ fn attempt_end_to_end(store: StoreKind, inputs: &[RunInput], entity_types: &[&st
         })
         .collect();
 
-    run_declared(store, root, &declared, &RunSchemas::Permissive(entity_types), output_extra, None)
+    run_declared(store, root, &declared, &RunSetup::files(&RunSchemas::Permissive(entity_types), output_extra))
 }
 
-/// Runs a pipeline over the `declared` manifest inputs, with its schemas and output under `root`,
-/// once or on the manifest schedule `schedule`, and returns how the run ended with what it reported
-/// and wrote.
-fn run_declared(
-    store: StoreKind,
-    root: &Path,
-    declared: &[String],
-    schemas: &RunSchemas<'_>,
-    output_extra: &str,
-    schedule: Option<&str>,
-) -> (Result<(), PipelineError>, RunOutcome) {
-    let schemas_folder = schemas_folder(root, schemas);
+/// Runs a pipeline over the `declared` manifest inputs, with its own files under `root`, as `setup`
+/// says, and returns how the run ended, or failed to be built, with what it reported and wrote.
+fn run_declared(store: StoreKind, root: &Path, declared: &[String], setup: &RunSetup<'_>) -> (Result<(), PipelineError>, RunOutcome) {
+    let schemas_folder = schemas_folder(root, setup.schemas);
     let output = root.join("out");
 
-    let schedule = schedule.map(|schedule| format!(", schedule: {schedule}")).unwrap_or_default();
-    let document = format!(
-        r#"{{ version: "v1", inputs: [{}], output: {{ target: "file", directory: "{}"{output_extra} }}{schedule} }}"#,
-        declared.join(", "),
-        output.display()
-    );
+    let schedule = setup.schedule.map(|schedule| format!(", schedule: {schedule}")).unwrap_or_default();
+    let output_object = match setup.output {
+        RunOutput::Files(output_extra) => format!(r#"{{ target: "file", directory: "{}"{output_extra} }}"#, output.display()),
+        RunOutput::Declared(object) => object.to_owned(),
+    };
+    let document = format!(r#"{{ version: "v1", inputs: [{}], output: {output_object}{schedule} }}"#, declared.join(", "));
     let manifest = Manifest::from_json5(&document, Path::new("manifest.json5")).unwrap();
 
     let reporter: &'static RecordingReporter = Box::leak(Box::new(RecordingReporter::new()));
@@ -218,7 +255,8 @@ fn run_declared(
     engine.relationship_store = store;
     engine.context_mode = AtContextMode::None;
     engine.schemas_folder = schemas_folder;
-    let mut pipeline = Pipeline::from_manifest(
+    engine.cursors_folder = setup.cursors.map_or_else(|| root.join("cursors"), Path::to_path_buf);
+    let built = Pipeline::from_manifest(
         &manifest,
         ValidationOverrides {
             report_path: None,
@@ -229,11 +267,11 @@ fn run_declared(
         serde_json::Map::new(),
         engine,
         reporter as &'static dyn Reporter,
-        &SHUTDOWN,
+        setup.shutdown,
         observer,
-    )
-    .unwrap();
-    let result = pipeline.run();
+    );
+    // The pipeline holds the run's cursor stores until it is dropped, at the end of this block.
+    let result = built.and_then(|mut pipeline| pipeline.run());
 
     let warnings = totals.0.lock().unwrap_or_else(PoisonError::into_inner).iter().sum();
     let outcome = RunOutcome {

@@ -148,6 +148,16 @@ mod tests {
 
     #[test]
     #[serial(environment)]
+    fn the_cursors_folder_follows_the_environment() {
+        let config = temp_env::with_var("CASSIOPEIA_CURSORS__FOLDER", Some("/x"), || {
+            ConfigLoader::new().load().expect("the defaults are a valid configuration")
+        });
+
+        assert_eq!(config.cursors.folder, PathBuf::from("/x"));
+    }
+
+    #[test]
+    #[serial(environment)]
     fn an_override_displaces_only_the_setting_it_names() {
         let (_directory, path) = config_file("[resolver]\nrelationship_store = \"redb\"\n");
 
