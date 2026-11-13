@@ -1,5 +1,5 @@
 use crate::{
-    end_to_end::harness::{RunOutcome, RunSchemas, STORES, attempt_file_end_to_end, entity_ids},
+    end_to_end::harness::{RunOutcome, RunSchemas, STORES, attempt_declared_end_to_end, attempt_file_end_to_end, entity_ids},
     error::PipelineError,
 };
 use cassiopeia_common::store_kind::StoreKind;
@@ -153,6 +153,54 @@ fn a_range_read_into_series_files_sorts_instances_oldest_first() {
             ["2026-11-12T03:00:00Z", "2026-11-12T04:00:00Z", "2026-11-12T05:00:00Z"],
             "{store:?}"
         );
+    }
+}
+
+#[test]
+fn a_remote_latest_read_writes_one_entity_per_thing() {
+    // The Datastream items of the RIVM latest fixture, as the server answered its discovery.
+    let datastreams: Vec<Value> = fs::read_to_string(fixture("rivm-v1.0-latest.jsonl"))
+        .unwrap()
+        .lines()
+        .skip(1)
+        .map(|line| serde_json::from_str::<Value>(line).unwrap()["datastream"].take())
+        .collect();
+    let page = json!({ "value": datastreams }).to_string();
+    let mut server = mockito::Server::new();
+    let declared = format!(
+        r#"{{ source: "{}/v1.0", format: "sensorthings", mapping: "{}" }}"#,
+        server.url(),
+        fixture("air-quality-observed.json5").display()
+    );
+    let things = [
+        "urn:ngsi-ld:AirQualityObserved:sta-127001-12511",
+        "urn:ngsi-ld:AirQualityObserved:sta-127001-12512",
+    ];
+
+    for store in STORES {
+        let discovery = server
+            .mock(
+                "GET",
+                "/v1.0/Datastreams?$expand=Thing/Locations,ObservedProperty,Observations($orderby=phenomenonTime%20desc;$top=1)&$orderby=id%20asc&$top=1000",
+            )
+            .with_body(&page)
+            .expect(1)
+            .create();
+
+        let (result, outcome) = attempt_declared_end_to_end(store, &declared, &RunSchemas::Folder(&fixture("schemas")), r#", validation: { mode: "fail" }"#);
+        result.unwrap();
+
+        discovery.assert();
+        assert_eq!(entity_ids(&outcome), things, "{store:?}");
+        for id in things {
+            let station = entity(&outcome, id);
+            for attribute in ["pm10", "pm25"] {
+                assert_eq!(station[attribute]["observedAt"], RIVM_LATEST_TIME, "{store:?} {id} {attribute}");
+                assert_eq!(station[attribute]["unitCode"], "GQ", "{store:?} {id} {attribute}");
+            }
+        }
+        assert_eq!(outcome.warnings, 0, "{store:?}: {:?}", outcome.diagnostics);
+        discovery.remove();
     }
 }
 

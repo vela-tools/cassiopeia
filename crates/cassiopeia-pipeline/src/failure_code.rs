@@ -35,7 +35,9 @@ impl From<&PipelineError> for DiagnosticCode {
             PipelineError::Validation(error) => validator_code(error).into(),
             PipelineError::ValidationSchemaMissing { .. } => SchemaCode::Absent.into(),
             PipelineError::SchemaFetch { .. } => SchemaCode::FetchFailed.into(),
-            PipelineError::SeriesRequiresTemporalOperation | PipelineError::SnapshotNeedsSeries { .. } => RunCode::Misconfigured.into(),
+            PipelineError::SeriesRequiresTemporalOperation | PipelineError::SnapshotNeedsSeries { .. } | PipelineError::ScheduledLatestIntoTemporal { .. } => {
+                RunCode::Misconfigured.into()
+            }
             PipelineError::LocalContext(error) => local_context_code(error).into(),
             // A mapping whose `valueType` declarations cannot be checked cannot be used either.
             PipelineError::Mapping(_) | PipelineError::ValueTypeExpander(_) => RunCode::MappingUnusable.into(),
@@ -48,10 +50,16 @@ impl From<&PipelineError> for DiagnosticCode {
 const fn collector_code(error: &CollectorError) -> IngestCode {
     match error {
         CollectorError::ChannelClosed => IngestCode::StreamClosed,
+        // A stopped run, a link that loops or leaves the server, and a page that is no collection all
+        // leave the source as unread as a refused download does.
         CollectorError::ClientInit { .. }
         | CollectorError::Http { .. }
         | CollectorError::HttpStatus { .. }
         | CollectorError::Io { .. }
+        | CollectorError::Interrupted { .. }
+        | CollectorError::LinkLoop { .. }
+        | CollectorError::NextLink { .. }
+        | CollectorError::PageUnreadable { .. }
         | CollectorError::InvalidFileExtension { .. } => IngestCode::SourceUnavailable,
     }
 }

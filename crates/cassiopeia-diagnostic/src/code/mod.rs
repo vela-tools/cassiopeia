@@ -7,6 +7,7 @@
 
 pub mod broker_code;
 pub mod catalog_code;
+pub mod collect_code;
 pub mod context_code;
 pub mod diagnostic_code;
 pub mod expander_code;

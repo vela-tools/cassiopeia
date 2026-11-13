@@ -4,8 +4,9 @@ use crate::{
     error::Result,
     input_config::InputConfig,
     pipeline::Pipeline,
+    scheduled_run::ScheduledRun,
     stages::{
-        collector::spawn_collector_thread,
+        collector::{lane_collector, spawn_collector_thread},
         expander::spawn_expander_thread,
         ingestor::spawn_ingestor_bank,
         profiler::{create_profiler, spawn_profiler_thread},
@@ -13,9 +14,9 @@ use crate::{
         stage_env::StageEnv,
     },
 };
-use cassiopeia_collector::{downloader::Downloader, generic::GenericCollector};
+use cassiopeia_collector::downloader::Downloader;
 use cassiopeia_common::{
-    signal::{MetaSignal, Signal},
+    signal::Signal,
     stage::Stage,
     telemetry::{channel_boundary::ChannelBoundary, run::RunTelemetry},
 };
@@ -37,7 +38,7 @@ impl Pipeline {
         loaded: Vec<(&InputConfig, MappingRouter)>,
         template_resolver: &TemplateResolver,
         fragment_resolver: &FragmentResolver,
-        schedule_meta: &MetaSignal,
+        run: &ScheduledRun,
         controller: &Arc<dyn RunController>,
         telemetry: Arc<RunTelemetry>,
     ) -> Result<u64> {
@@ -54,7 +55,7 @@ impl Pipeline {
         // Every lane merges into one channel governed by the selected memory policy; it is the
         // resolver's intake, fed by every lane's expander bridge.
         let (shared_tx, shared_rx) = env.channel(Some(ChannelBoundary::between(Stage::Expander, Stage::Resolver)));
-        let _ = shared_tx.send(Signal::Meta(schedule_meta.clone()));
+        let _ = shared_tx.send(Signal::Meta(run.meta.clone()));
 
         for (input, router) in loaded {
             let ingestor_bank = spawn_ingestor_bank(
@@ -72,8 +73,8 @@ impl Pipeline {
                 input.headers.clone(),
                 self.context.shutdown,
             );
-            let collector = Box::new(GenericCollector::new(input.collector_source.clone(), input.format_override, downloader));
-            let collector_rx = spawn_collector_thread(collector, channel_policy, Arc::clone(&env.telemetry));
+            let collector = lane_collector(&input.source, input.format_override, run.start, downloader, self.context.shutdown);
+            let collector_rx = spawn_collector_thread(collector, channel_policy, self.context.reporter, Arc::clone(&env.telemetry));
 
             let profiler = create_profiler(
                 input.format_override,

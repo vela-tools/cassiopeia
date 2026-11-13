@@ -7,9 +7,10 @@ use crate::{
     observer::{PipelineProgress, PipelineResult},
     pipeline::Pipeline,
     pipeline_stage::PipelineStage,
+    scheduled_run::ScheduledRun,
     schema_resolution::resolve_custom_schemas,
 };
-use cassiopeia_common::{signal::MetaSignal, telemetry::run::RunTelemetry, user_agent::UserAgent};
+use cassiopeia_common::{telemetry::run::RunTelemetry, user_agent::UserAgent};
 use cassiopeia_expander::{
     compiler::ExpanderCompiler,
     router::{CollectionRoutes, MappingRouter},
@@ -36,7 +37,7 @@ impl Pipeline {
     /// Returns [`PipelineError`](crate::error::PipelineError) when a mapping fails to load, the
     /// resolver reports a failure, or a validation abort or writer failure tears the output phase
     /// down.
-    pub(crate) fn run_cycle(&self, schedule_meta: &MetaSignal) -> Result<()> {
+    pub(crate) fn run_cycle(&self, run: &ScheduledRun) -> Result<()> {
         let mut runner = TemplateRunner::new();
 
         // Compile every input's mappings into the shared runner, deduplicating by path so a mapping
@@ -90,14 +91,7 @@ impl Pipeline {
         // the peak and average are complete when the summary reads them.
         let memory_sampler = MemorySampler::start(Arc::clone(&telemetry));
 
-        let resolved_count = self.run_phase1(
-            loaded,
-            &template_resolver,
-            &fragment_resolver,
-            schedule_meta,
-            &controller,
-            Arc::clone(&telemetry),
-        )?;
+        let resolved_count = self.run_phase1(loaded, &template_resolver, &fragment_resolver, run, &controller, Arc::clone(&telemetry))?;
         telemetry.set_unique_entities(resolved_count);
         self.context.observer.on_progress(&PipelineProgress {
             stage: PipelineStage::ResolverSink,

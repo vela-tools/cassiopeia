@@ -26,7 +26,9 @@ mod phase2;
 pub mod pipeline;
 pub mod pipeline_config;
 pub mod pipeline_stage;
+mod run_compatibility;
 mod schedule_driver;
+mod scheduled_run;
 mod schema_resolution;
 mod stages;
 

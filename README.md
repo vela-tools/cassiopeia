@@ -6,7 +6,7 @@
 
 <p align="center">
   <strong>Turn data from common formats into <a href="https://ngsi-ld.org/">NGSI-LD</a> entities.</strong><br>
-  Convert CSV, JSON, GeoJSON, KML/KMZ, XML, Shapefiles, GeoPackages, GRIB, and NetCDF into validated, standards-compliant context data.
+  Convert CSV, JSON, GeoJSON, KML/KMZ, XML, Shapefiles, GeoPackages, GRIB, NetCDF, and OGC SensorThings API data into validated, standards-compliant context data.
 </p>
 
 <p align="center">
@@ -34,7 +34,7 @@
 
 ## How it works
 
-Give Cassiopeia a source such as a CSV, JSON file, GeoJSON layer, or XML feed, then describe how its data maps to an entity type. Cassiopeia produces standards-compliant NGSI-LD entities, then either writes them to files or sends them to a context broker. It supports CSV, JSON, GeoJSON, KML/KMZ, XML, ESRI Shapefiles, GeoPackages, GRIB, and NetCDF.
+Give Cassiopeia a source such as a CSV, JSON file, GeoJSON layer, or XML feed, then describe how its data maps to an entity type. Cassiopeia produces standards-compliant NGSI-LD entities, then either writes them to files or sends them to a context broker. It supports CSV, JSON, GeoJSON, KML/KMZ, XML, ESRI Shapefiles, GeoPackages, GRIB, NetCDF, and OGC SensorThings API servers and snapshots.
 
 NGSI-LD is the linked-data model used by many smart-city, IoT, and dataspace platforms across Europe. Cassiopeia prepares data for these systems, but does not store or serve context itself.
 
@@ -148,7 +148,7 @@ Everything listed under FOSS remains in that edition permanently. Features relea
 
 ### FOSS
 
-The FOSS edition includes the transformation engine and everything needed to run it in production. It reads CSV, JSON, GeoJSON, KML/KMZ, XML, ESRI Shapefiles, GeoPackages, GRIB, and NetCDF, detecting the format from the content. Mappings build entity attributes with templates, conditional logic, nested objects, relationships, and synthetic entities. The result can be emitted in any NGSI-LD representation and validated against Smart Data Model schemas before it leaves the pipeline. Entities go to files or straight to a context broker over HTTP.
+The FOSS edition includes the transformation engine and everything needed to run it in production. It reads CSV, JSON, GeoJSON, KML/KMZ, XML, ESRI Shapefiles, GeoPackages, GRIB, and NetCDF, detecting the format from the content, and reads OGC SensorThings API servers and their snapshots. Mappings build entity attributes with templates, conditional logic, nested objects, relationships, and synthetic entities. The result can be emitted in any NGSI-LD representation and validated against Smart Data Model schemas before it leaves the pipeline. Entities go to files or straight to a context broker over HTTP.
 
 You can repeat runs without extra machinery: a manifest or command-line flag turns a one-off transformation into a poller on a fixed interval, a cron expression, or fixed times of day. The process stays in the foreground and keeps running until you stop it. That works for a container, a systemd unit, or a cron entry that owns the process lifecycle.
 

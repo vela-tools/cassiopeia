@@ -2,7 +2,7 @@ use crate::file_extension::FileExtension;
 use cassiopeia_common::input::Input;
 
 /// The source configuration for the Collector stage.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CollectorSource {
     /// A single input source.
     Single {

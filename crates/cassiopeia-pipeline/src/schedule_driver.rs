@@ -2,11 +2,9 @@ use crate::{
     error::{PipelineError, Result},
     pipeline::Pipeline,
     pipeline_stage::PipelineStage,
+    scheduled_run::ScheduledRun,
 };
-use cassiopeia_common::{
-    run::RunCount,
-    signal::{MetaSignal, Signal},
-};
+use cassiopeia_common::{cycle_start::CycleStart, run::RunCount, signal::Signal};
 use cassiopeia_diagnostic::{
     code::{diagnostic_code::DiagnosticCode, run_code::RunCode},
     diagnostic_builder::DiagnosticBuilder,
@@ -71,9 +69,14 @@ impl Pipeline {
                     let run_start = Instant::now();
                     let run_number = payload.run_number.get();
                     let pad_width = run_number_width(payload.total_runs);
-                    let schedule_meta = payload.into_meta();
+                    // The run's start is taken once, before its first attempt, so every attempt builds
+                    // the same requests.
+                    let run = ScheduledRun {
+                        meta: payload.into_meta(),
+                        start: CycleStart::now(),
+                    };
 
-                    match self.run_with_retry(&schedule_meta) {
+                    match self.run_with_retry(&run) {
                         Ok(()) => {
                             if !is_once {
                                 let now = Local::now().format("%H:%M:%S");
@@ -127,13 +130,13 @@ impl Pipeline {
 
     /// Runs one cycle, retrying it up to the retry policy's attempt count with an interruptible
     /// backoff between tries.
-    fn run_with_retry(&self, schedule_meta: &MetaSignal) -> Result<()> {
+    fn run_with_retry(&self, run: &ScheduledRun) -> Result<()> {
         let max_attempts = self.schedule.retry.as_ref().map_or(1, |retry| retry.max_attempts().get());
         let backoff = self.schedule.retry.as_ref().map_or(Duration::ZERO, |retry| *retry.backoff());
         let mut attempt: u32 = 1;
 
         loop {
-            match self.run_cycle(schedule_meta) {
+            match self.run_cycle(run) {
                 Ok(()) => return Ok(()),
                 Err(error) => {
                     if attempt >= max_attempts {

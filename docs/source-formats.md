@@ -358,7 +358,51 @@ Listing both a collection and one nested in it yields records from both, in docu
 
 ## SensorThings API
 
-Cassiopeia reads [OGC SensorThings API](https://www.ogc.org/standards/sensorthings/) data, versions 1.0 and 1.1, from a **snapshot file**: the Datastreams and Observations one read of a SensorThings server collected, written as JSON Lines. A server serves its readings as nested JSON whose shape changes with the request, so the snapshot keeps what the server sent and the ingestor joins each reading with its Thing, Location, data stream and ObservedProperty. A mapping then reads one record shape, whichever server the readings came from.
+Cassiopeia reads [OGC SensorThings API](https://www.ogc.org/standards/sensorthings/) data, versions 1.0 and 1.1, from a server or from a **snapshot file**: the Datastreams and Observations one read of a SensorThings server collected, written as JSON Lines. A server serves its readings as nested JSON whose shape changes with the request, so every read of a server is written into a snapshot first, and the ingestor joins each reading with its Thing, Location, data stream and ObservedProperty. A mapping then reads one record shape, whichever server the readings came from, and whether they were read from the server or replayed from a file.
+
+### Reading a server
+
+A remote input whose `format` is `sensorthings` and whose `source` is a service root reads the server itself:
+
+~~~json5
+{
+    source: "https://api-samenmeten.rivm.nl/v1.0",
+    format: "sensorthings",
+    mapping: "air-quality-observed.json5",
+    sensorthings: {
+        datastreams: "startswith(name,'ILM_I67-') or startswith(name,'ILM_I68-')",
+        read: "latest",
+        pageSize: 10,
+        delay: "200ms",
+    },
+}
+~~~
+
+The service root is the URL every resource of the server is addressed under, and it ends with the version the server serves, such as `/v1.0` or `/v1.1`. The `sensorthings` block selects the data streams and limits the read. [SensorThings settings](manifest.md#sensorthings-settings) lists its members and the rules a manifest must keep. `read: "latest"`, the default, reads the newest reading of every selected data stream, which gives one record per Thing.
+
+Each cycle writes what it read into a snapshot whose `serviceRoot` is the root and whose `collectedAt` is the instant the cycle started. The snapshot is then profiled and read as a local one would be, so the [records](#sensorthings-records) are the same. Every attempt at one scheduled run starts from the same instant, so a retried attempt sends the same requests and records the same time.
+
+**The request.** A latest read sends one request, and follows it page by page:
+
+~~~text
+{root}/Datastreams?$filter={datastreams}&$expand=Thing/Locations,ObservedProperty,Observations($orderby=phenomenonTime%20desc;$top=1)&$orderby=id%20asc&$top={pageSize}
+~~~
+
+It selects every data stream with its Thing, the Thing's Locations, its ObservedProperty, and its newest Observation, in id order. `$filter` is sent only when `datastreams` is set. Its value is sent as written, percent-encoded, with a space as `%20` and `'` as `%27`. The Locations are expanded by path, `Thing/Locations`, because some servers ignore an `$expand` nested in parentheses, such as `Thing($expand=Locations)`.
+
+**Paging.** A server answers with pages of at most `pageSize` items. Every page but the last links to the next one with `@iot.nextLink`. Cassiopeia follows each link as the server wrote it, resolved against the page it came from, and adds nothing to it (OGC 18-088 section 9.3.3.6). The input fails without sending the request:
+
+- when a link names another scheme, host, or port than the service root, because the input's `headers`, and so its credentials, go with every request;
+- when a link leads back to a page already read.
+
+A body that is not a page of a collection, a JSON object with a `value` array, fails the input, and the error names the URL and what the body is not. Pages are retried as any remote source is (see [Retried requests](manifest.md#retried-requests)). `delay` spaces the requests of one cycle. Stopping the run with CTRL+C ends collection before its next request.
+
+**Limits.** A read follows at most `limits.pages` pages. At the limit, it keeps what it read and the cycle carries on. One `collect-limit-reached` warning names the server, the limit, and the next link the read did not follow. Raise the limit, or select fewer data streams with `datastreams`.
+
+**Servers differ.** Servers answer the same request in different ways:
+
+- FROST-Server applies every filter, serves up to 10000 items a page by default, and answers the request as written.
+- RIVM Samen Meten (`https://api-samenmeten.rivm.nl/v1.0`) applies a `datastreams` filter only to a Datastream's own properties, such as `endswith(name,'-pm10')` or `startswith(name,'ILM_')`. A filter on `ObservedProperty` or `Thing`, such as `ObservedProperty/name eq 'pm10'`, gives one data stream, every data stream, or none, without an error. RIVM also ignores the parentheses of a filter: it reads `(a or b) and c` as `a or b and c`, so write a filter that needs none, such as conditions joined by `or`. RIVM serves at most 200 items a page. Finding the newest Observation of each data stream takes it up to half a second, so a latest page of 200 times out. Set `pageSize: 10` for a latest read of RIVM. It holds tens of thousands of data streams, so select them by name, and set a `delay` to spare the public service.
 
 ### The snapshot file
 
