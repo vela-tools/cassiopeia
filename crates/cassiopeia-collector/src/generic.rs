@@ -1,4 +1,11 @@
-use crate::{collector::Collector, downloader::Downloader, error::CollectorError, file_extension::FileExtension, source::CollectorSource};
+use crate::{
+    collection_warnings::CollectionWarnings,
+    collector::Collector,
+    downloader::Downloader,
+    error::CollectorError,
+    file_extension::FileExtension,
+    source::CollectorSource,
+};
 use cassiopeia_common::{channel::ChannelSender, format::DataFormat, input::Input, signal::Signal};
 use cassiopeia_encoding_detection::encoding_hint::EncodingHint;
 use cassiopeia_ir::payload::{CollectedPayload, FilePayload};
@@ -29,7 +36,7 @@ impl GenericCollector {
 }
 
 impl Collector for GenericCollector {
-    fn collect(self: Box<Self>, sender: ChannelSender<Signal<CollectedPayload, CollectorError>>) -> Result<(), CollectorError> {
+    fn collect(self: Box<Self>, sender: ChannelSender<Signal<CollectedPayload, CollectorError>>) -> Result<CollectionWarnings, CollectorError> {
         let GenericCollector {
             source,
             format_hint,
@@ -53,7 +60,8 @@ impl Collector for GenericCollector {
             }
         }
 
-        Ok(())
+        // Files are read as they are found, so collecting them meets nothing to warn about.
+        Ok(CollectionWarnings::default())
     }
 }
 

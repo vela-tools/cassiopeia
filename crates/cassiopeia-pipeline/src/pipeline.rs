@@ -1,16 +1,11 @@
 use crate::{
-    error::{PipelineError, Result},
+    error::Result,
     input_config::{InputConfig, build_input_config},
     observer::RunObserver,
     pipeline_config::PipelineConfig,
+    run_compatibility::check_run_compatibility,
 };
-use cassiopeia_common::{
-    broker_operation::BrokerOperationKind,
-    context::mode::AtContextMode,
-    file_framing::FileFraming,
-    representation::NgsiLdRepresentation,
-    schema_source::SchemaSource,
-};
+use cassiopeia_common::{context::mode::AtContextMode, file_framing::FileFraming, representation::NgsiLdRepresentation, schema_source::SchemaSource};
 use cassiopeia_manifest::{
     failure_policy::FailurePolicy,
     manifest::Manifest,
@@ -114,8 +109,8 @@ impl Pipeline {
     ///
     /// # Errors
     ///
-    /// Returns [`PipelineError`] when an input's file extension is
-    /// invalid.
+    /// Returns [`PipelineError`](crate::error::PipelineError) when an input's file extension is invalid, or when the run's inputs,
+    /// destination, temporal output and schedule contradict each other.
     pub fn from_manifest(
         manifest: &Manifest,
         validation: ValidationOverrides,
@@ -155,14 +150,7 @@ impl Pipeline {
         let destination = output.map_or_else(|| Destination::file(None, FileFraming::default()), |output| output.destination().clone());
         let representation = output.and_then(|output| *output.representation());
         let temporal = output.and_then(|output| output.temporal().as_ref()).map(|temporal| *temporal.representation());
-        // A folded EntityTemporal only belongs at the broker's temporal endpoint, so a series run
-        // against a Context Broker requires `operation: "temporal"`.
-        if temporal == Some(TemporalRepresentation::Series)
-            && let Destination::ContextBroker { operation, .. } = &destination
-            && *operation != BrokerOperationKind::Temporal
-        {
-            return Err(PipelineError::SeriesRequiresTemporalOperation);
-        }
+        check_run_compatibility(&inputs, &destination, temporal, manifest.schedule().as_ref())?;
         let global_context_mode = output
             .and_then(|output| output.context().clone())
             .unwrap_or_else(|| config.context_mode.clone());
@@ -217,7 +205,7 @@ impl Pipeline {
     ///
     /// # Errors
     ///
-    /// Returns [`PipelineError`] when a run fails and the failure policy
+    /// Returns [`PipelineError`](crate::error::PipelineError) when a run fails and the failure policy
     /// is [`FailurePolicy::Abort`].
     pub fn run(&mut self) -> Result<()> {
         let schedule = self.schedule.schedule.take();

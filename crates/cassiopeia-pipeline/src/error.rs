@@ -8,7 +8,7 @@ use cassiopeia_mapping::error::MappingError;
 use cassiopeia_ngsi_ld::entity::name::NameBuf;
 use cassiopeia_profiler::error::ProfilerError;
 use cassiopeia_resolver::{entity_store::error::EntityStoreError, error::ResolverError, relationship_store::error::RelationshipStoreError};
-use cassiopeia_sensorthings::read_kind::ReadKind;
+use cassiopeia_sensorthings::{read_kind::ReadKind, service_root::ServiceRoot};
 use cassiopeia_transformer::error::TransformationError;
 use cassiopeia_validator::error::ValidatorError;
 use cassiopeia_value_type_expansion::error::ExpansionError;
@@ -102,6 +102,17 @@ pub enum PipelineError {
         /// The snapshot. Boxed so this variant does not enlarge every `Result` in the crate past the
         /// large-error threshold.
         snapshot: Box<Input>,
+    },
+
+    /// A scheduled run reads the latest readings of a SensorThings server into a broker's temporal API,
+    /// where every cycle would store each unchanged reading again.
+    #[error(
+        "The SensorThings input `{root}` reads the latest readings on a schedule into the temporal API: every cycle would send the newest reading of every data stream again, and the temporal API would store each unchanged reading once more. Write with operation \"upsert\", or run without a schedule"
+    )]
+    ScheduledLatestIntoTemporal {
+        /// The service root of the input that reads the latest readings. Boxed so this variant does
+        /// not enlarge every `Result` in the crate past the large-error threshold.
+        root: Box<ServiceRoot>,
     },
 
     /// A remote custom validation schema could not be fetched at run setup.

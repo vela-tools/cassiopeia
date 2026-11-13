@@ -155,10 +155,11 @@ Cassiopeia checks every template in a mapping when it loads the mapping. A templ
 
 A geometry declaration that could never run is rejected at load time the same way, naming the attribute: a `GeoProperty` whose `transformation` produces no geometry, such as `string`, a `geometry` block on an attribute whose value is never converted to a geometry, and a `geometry` conversion that cannot produce the declared type. See [GeoProperty](mapping.md#geoproperty).
 
-Problems that depend on one record's data, on the rows and header of one CSV file, or on one table of a GeoPackage, do not stop the run. Each is a warning, and the `Reasons` block counts it under one of these codes:
+Problems that depend on one record's data, on the rows and header of one CSV file, on one table of a GeoPackage, or on how far a SensorThings server was read, do not stop the run. Each is a warning, and the `Reasons` block counts it under one of these codes:
 
 | Code | What happened |
 | --- | --- |
+| `collect-limit-reached` | A read of a SensorThings server reached `limits.pages` before the server's last page, so Cassiopeia kept what it had read and the cycle carried on. One warning per server names the limit and the next link it did not follow. See [Reading a server](source-formats.md#reading-a-server). |
 | `expander-urn-ungeneratable` | The record's identity resolved to nothing, or its `identity.entityName` or a `scope` template failed to render, so Cassiopeia skipped the record. An identity resolves to nothing when a field it reads is missing, null, or empty, or when its text has no letter or digit, such as `-`. A synthetic entity's `scope` that fails to render or is not a valid scope skips the record too. A scope or relationship target that resolves to nothing, rather than failing, is left out without a warning. |
 | `expander-expires-at-unreadable` | An entity `expiresAt` resolved to text Cassiopeia cannot read as a date and time, so the entity is written without it. One warning per entity type names the first entity that lost it, the text, and how many records did. |
 | `expander-expires-at-unresolvable` | An entity `expiresAt` template failed to render, so Cassiopeia skipped the record. |

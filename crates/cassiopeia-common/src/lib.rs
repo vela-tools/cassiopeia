@@ -16,6 +16,7 @@ pub mod captured_body;
 pub mod channel;
 pub mod collection;
 pub mod context;
+pub mod cycle_start;
 pub mod destination_kind;
 pub mod environment;
 pub mod error;

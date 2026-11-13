@@ -1,6 +1,11 @@
 use cassiopeia_common::{captured_body::CapturedBody, masked_url::MaskedUrl};
+use cassiopeia_sensorthings::{
+    paging::{next_link::NextLinkError, page::PageError},
+    service_root::ServiceRoot,
+};
 use http::StatusCode;
 use std::{io, path::PathBuf};
+use url::Url;
 
 /// The cap on a captured error-response body, which exists to be read by a person.
 pub const ERROR_BODY_CAP: usize = 2 * 1024;
@@ -57,6 +62,42 @@ pub enum CollectorError {
     /// shutting down.
     #[error("downstream channel closed")]
     ChannelClosed,
+
+    /// The run was being stopped, so collection from a SensorThings server ended before its next
+    /// request.
+    #[error("Collection from '{root}' stopped because the run is being stopped")]
+    Interrupted {
+        /// The service root collection read from. Boxed so a root does not enlarge every `Result`
+        /// in the collector and every pipeline error that wraps one.
+        root: Box<ServiceRoot>,
+    },
+
+    /// A page linked back to a page its traversal had already read, so following it would never end.
+    #[error("'{link}' links back to a page already read, so it is not followed")]
+    LinkLoop {
+        /// The link, resolved. Boxed so a URL does not enlarge every `Result` in the collector.
+        link: Box<Url>,
+    },
+
+    /// A page's `@iot.nextLink` is not followed.
+    #[error("The next link of '{page}' is not followed")]
+    NextLink {
+        /// The page that carries the link. Boxed so a URL does not enlarge every `Result` in the
+        /// collector.
+        page: Box<Url>,
+        /// Why it is not followed.
+        source: NextLinkError,
+    },
+
+    /// A server answered a request with a body that is no page of a collection.
+    #[error("'{url}' answered with no page of a collection")]
+    PageUnreadable {
+        /// The URL the page was requested from. Boxed so a URL does not enlarge every `Result` in the
+        /// collector.
+        url: Box<Url>,
+        /// What the body is not.
+        source: PageError,
+    },
 
     /// A file extension carried path structure and could not name a downloaded source.
     #[error("invalid file extension: '{value}'")]

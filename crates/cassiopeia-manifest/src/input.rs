@@ -5,6 +5,7 @@ use crate::{
 };
 use cassiopeia_common::{context::mode::AtContextMode, format::DataFormat, input::Input, request_header::RequestHeaders, schema_source::SchemaSource};
 use cassiopeia_csv_dialect::statement::DialectStatement;
+use cassiopeia_sensorthings::{service::SensorThingsService, service_root::ServiceRoot, settings::sensorthings_settings::SensorThingsSettings};
 use getset::Getters;
 use serde::{Deserialize, Serialize};
 use std::{
@@ -61,6 +62,12 @@ pub struct ManifestInput {
     #[builder(default = None)]
     #[getset(get = "pub")]
     vars: Option<serde_json::Map<String, serde_json::Value>>,
+
+    /// The SensorThings API server a remote `format: "sensorthings"` input reads, and how it reads
+    /// it; `None` for every other input, a local snapshot among them.
+    #[builder(default = None)]
+    #[getset(get = "pub")]
+    sensorthings: Option<SensorThingsService>,
 
     /// Extra HTTP headers sent on every request that fetches this source, typically carrying an API
     /// key. Only a remote source may declare any, so the builder leaves the set empty and
@@ -128,6 +135,8 @@ struct ManifestInputRaw {
     schema: Option<SchemaSource>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     vars: Option<serde_json::Map<String, serde_json::Value>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    sensorthings: Option<SensorThingsSettings>,
     #[serde(default, skip_serializing_if = "RequestHeaders::is_empty", deserialize_with = "templated::input_headers")]
     headers: RequestHeaders,
 }
@@ -140,6 +149,7 @@ impl TryFrom<ManifestInputRaw> for ManifestInput {
         if raw.dialect.is_some() && raw.format.and_then(DataFormat::to_option) != Some(DataFormat::Csv) {
             return Err(ManifestError::DialectWithoutCsvFormat);
         }
+        let sensorthings = sensorthings_service(&raw.source, raw.format, raw.sensorthings)?;
 
         ManifestInput {
             source: raw.source,
@@ -149,6 +159,7 @@ impl TryFrom<ManifestInputRaw> for ManifestInput {
             context: raw.context,
             schema: raw.schema,
             vars: raw.vars,
+            sensorthings,
             headers: RequestHeaders::default(),
         }
         .with_headers(raw.headers)
@@ -171,7 +182,48 @@ impl From<ManifestInput> for ManifestInputRaw {
             context: input.context,
             schema: input.schema,
             vars: input.vars,
+            sensorthings: input.sensorthings.map(SensorThingsService::into_settings),
             headers: input.headers,
+        }
+    }
+}
+
+/// The SensorThings server a `format: "sensorthings"` input reads, checked against its source.
+///
+/// A remote source is the server's service root, and every request is built on it, so it must be one,
+/// and it must read nothing from the environment: credentials go in `headers`, which keeps every URL
+/// a read requests, logs and writes free of them. Without settings, a remote input reads with the
+/// defaults. A local source is a snapshot, read as it was collected, so it takes no settings; and
+/// settings on an input of another format describe nothing the source is.
+fn sensorthings_service(
+    source: &Input,
+    format: Option<DataFormat>,
+    settings: Option<SensorThingsSettings>,
+) -> Result<Option<SensorThingsService>, ManifestError> {
+    if format.and_then(DataFormat::to_option) != Some(DataFormat::SensorThings) {
+        return match settings {
+            Some(_) => Err(ManifestError::SensorThingsSettingsWithoutFormat),
+            None => Ok(None),
+        };
+    }
+    match source {
+        Input::Local(path) => match settings {
+            // The error names the path, while the input it came from is dropped.
+            Some(_) => Err(ManifestError::SensorThingsSettingsOnSnapshot { path: path.clone() }),
+            None => Ok(None),
+        },
+        Input::Remote(url) => {
+            if !url.secrets().is_empty() {
+                // The error names the URL, while the input keeps its own.
+                return Err(ManifestError::ServiceRootReadsEnvironment { url: Box::new(url.clone()) });
+            }
+            // The root owns its URL, while the input keeps the source it names.
+            let root = ServiceRoot::try_from(url.url().clone()).map_err(|source| ManifestError::NotAServiceRoot {
+                // The error names the URL, while the input keeps its own.
+                url: Box::new(url.clone()),
+                source,
+            })?;
+            Ok(Some(SensorThingsService::new(root, settings.unwrap_or_default())))
         }
     }
 }
@@ -218,6 +270,10 @@ mod tests {
     use cassiopeia_common::{
         collection::CollectionName,
         context::mode::AtContextMode,
+        environment::{
+            secret::{Secret, Secrets},
+            variable_name::VariableName,
+        },
         format::DataFormat,
         input::Input,
         masked_url::MaskedUrl,
@@ -225,8 +281,16 @@ mod tests {
         schema_source::SchemaSource,
     };
     use cassiopeia_csv_dialect::{dialect_byte::DialectByte, preamble::Preamble};
+    use cassiopeia_sensorthings::{
+        service_root::ServiceRootError,
+        settings::{datastream_filter::DatastreamFilter, sensorthings_settings::SensorThingsSettings},
+    };
     use pretty_assertions::assert_eq;
-    use std::path::{Path, PathBuf};
+    use secrecy::SecretString;
+    use std::{
+        path::{Path, PathBuf},
+        str::FromStr,
+    };
     use url::Url;
 
     fn parse(json: &str) -> Result<ManifestInput, serde_json::Error> {
@@ -394,6 +458,129 @@ mod tests {
     }
 
     #[test]
+    fn a_sensorthings_input_loads_with_defaults() {
+        let input = parse(r#"{"source": "https://api-samenmeten.rivm.nl/v1.0/", "format": "sensorthings", "mapping": "m.json5"}"#).unwrap();
+
+        let service = input.sensorthings().as_ref().unwrap();
+        assert_eq!(service.root().url().as_str(), "https://api-samenmeten.rivm.nl/v1.0");
+        assert_eq!(service.settings(), &SensorThingsSettings::default());
+    }
+
+    #[test]
+    fn stated_sensorthings_settings_are_kept() {
+        let input = parse(
+            r#"{"source": "https://h.example/v1.1", "format": "sensorthings", "mapping": "m.json5", "sensorthings": {"datastreams": "endswith(name,'-pm10')", "pageSize": 10}}"#,
+        )
+        .unwrap();
+
+        let settings = input.sensorthings().as_ref().unwrap().settings();
+        assert_eq!(settings.datastreams().as_ref().map(DatastreamFilter::as_str), Some("endswith(name,'-pm10')"));
+        assert_eq!(settings.page_size().get(), 10);
+    }
+
+    #[test]
+    fn sensorthings_settings_without_the_format_are_refused() {
+        for format in ["", r#", "format": "json""#] {
+            let error = parse(&format!(
+                r#"{{"source": "https://h.example/v1.1", "mapping": "m.json5"{format}, "sensorthings": {{}}}}"#
+            ))
+            .unwrap_err();
+
+            assert!(error.to_string().contains("must declare 'format: \"sensorthings\"'"), "{error}");
+        }
+    }
+
+    #[test]
+    fn settings_on_a_local_snapshot_are_refused() {
+        let error = parse(r#"{"source": "rivm.jsonl", "format": "sensorthings", "mapping": "m.json5", "sensorthings": {}}"#).unwrap_err();
+
+        assert!(error.to_string().contains("'rivm.jsonl' is a SensorThings snapshot file"), "{error}");
+    }
+
+    #[test]
+    fn a_remote_source_that_is_no_service_root_is_refused() {
+        let error = parse(r#"{"source": "https://h.example/api", "format": "sensorthings", "mapping": "m.json5"}"#).unwrap_err();
+
+        assert!(error.to_string().contains("'https://h.example/api' is no service root"), "{error}");
+    }
+
+    #[test]
+    fn a_remote_source_that_is_no_service_root_names_why() {
+        let raw = |source: &str| ManifestInputRaw {
+            source: Input::Remote(MaskedUrl::plain(Url::parse(source).unwrap())),
+            mapping: Some(PathBuf::from("m.json5")),
+            mappings: None,
+            format: Some(DataFormat::SensorThings),
+            dialect: None,
+            context: None,
+            schema: None,
+            vars: None,
+            sensorthings: None,
+            headers: RequestHeaders::default(),
+        };
+
+        for (source, reason) in [
+            ("https://h.example/api", ServiceRootError::MissingVersion),
+            ("https://h.example/v2.0", ServiceRootError::UnsupportedVersion("v2.0".into())),
+            ("https://user:pass@h.example/v1.1", ServiceRootError::Credentials),
+            ("https://h.example/v1.1?x=1", ServiceRootError::Query),
+            ("https://h.example/v1.1#top", ServiceRootError::Fragment),
+            ("ftp://h.example/v1.1", ServiceRootError::Scheme { scheme: "ftp".into() }),
+        ] {
+            let error = ManifestInput::try_from(raw(source)).unwrap_err();
+
+            assert!(
+                matches!(&error, ManifestError::NotAServiceRoot { source, .. } if *source == reason),
+                "{source}: {error}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_service_root_reading_the_environment_is_refused() {
+        let mut secrets = Secrets::new();
+        secrets.insert(Secret::new(VariableName::from_str("PATH_KEY").unwrap(), &SecretString::from("k3y")));
+        let raw = ManifestInputRaw {
+            source: Input::Remote(MaskedUrl::with_secrets(Url::parse("https://h.example/k3y/v1.1").unwrap(), secrets)),
+            mapping: Some(PathBuf::from("m.json5")),
+            mappings: None,
+            format: Some(DataFormat::SensorThings),
+            dialect: None,
+            context: None,
+            schema: None,
+            vars: None,
+            sensorthings: None,
+            headers: RequestHeaders::default(),
+        };
+
+        let error = ManifestInput::try_from(raw).unwrap_err();
+
+        assert!(matches!(error, ManifestError::ServiceRootReadsEnvironment { .. }), "{error}");
+        assert!(
+            error.to_string().contains("'https://h.example/${PATH_KEY}/v1.1' reads the environment"),
+            "{error}"
+        );
+        assert!(!error.to_string().contains("k3y"), "{error}");
+    }
+
+    #[test]
+    fn a_sensorthings_input_round_trips_through_serialization() {
+        let input =
+            parse(r#"{"source": "https://h.example/v1.1", "format": "sensorthings", "mapping": "m.json5", "sensorthings": {"delay": "200ms"}}"#).unwrap();
+
+        let json = serde_json::to_string(&input).unwrap();
+
+        assert_eq!(parse(&json).unwrap(), input);
+    }
+
+    #[test]
+    fn an_input_of_another_format_reads_no_server() {
+        let input = parse(r#"{"source": "https://h.example/v1.1", "format": "json", "mapping": "m.json5"}"#).unwrap();
+
+        assert_eq!(input.sensorthings(), &None);
+    }
+
+    #[test]
     fn collections_with_an_omitted_format_defer_to_the_runtime_router() {
         assert!(parse(r#"{"source": "a.kml", "mappings": [{"collection": "A", "mapping": "a.json5"}]}"#).is_ok());
     }
@@ -461,6 +648,7 @@ mod tests {
             context: None,
             schema: None,
             vars: None,
+            sensorthings: None,
             headers: RequestHeaders::default(),
         };
         assert!(matches!(ManifestInput::try_from(raw), Err(ManifestError::ConflictingMappingBinding)));

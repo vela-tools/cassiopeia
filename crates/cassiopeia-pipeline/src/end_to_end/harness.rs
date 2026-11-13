@@ -138,9 +138,21 @@ pub(crate) fn attempt_file_end_to_end(
     schemas: &RunSchemas<'_>,
     output_extra: &str,
 ) -> (Result<(), PipelineError>, RunOutcome) {
-    let directory = TempDir::new().unwrap();
     let declared = format!(r#"{{ source: "{}", mapping: "{}" }}"#, source.display(), mapping.display());
-    run_declared(store, directory.path(), &[declared], schemas, output_extra)
+    attempt_declared_end_to_end(store, &declared, schemas, output_extra)
+}
+
+/// Runs a one-shot pipeline over the one manifest input `declared`, written as a manifest writes it,
+/// writing files, on `store`, validating against `schemas`, with `output_extra` spliced into the
+/// manifest's `output` object, and returns how the run ended with what it reported and wrote.
+pub(crate) fn attempt_declared_end_to_end(
+    store: StoreKind,
+    declared: &str,
+    schemas: &RunSchemas<'_>,
+    output_extra: &str,
+) -> (Result<(), PipelineError>, RunOutcome) {
+    let directory = TempDir::new().unwrap();
+    run_declared(store, directory.path(), &[declared.to_owned()], schemas, output_extra)
 }
 
 /// Runs a one-shot pipeline over `inputs` and returns how the run ended with what it reported and

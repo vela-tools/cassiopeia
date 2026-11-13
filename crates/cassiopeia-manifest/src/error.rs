@@ -1,4 +1,5 @@
-use cassiopeia_common::{collection::CollectionName, error::io::IoError, format::DataFormat};
+use cassiopeia_common::{collection::CollectionName, error::io::IoError, format::DataFormat, masked_url::MaskedUrl};
+use cassiopeia_sensorthings::service_root::ServiceRootError;
 use std::{path::PathBuf, result, string::FromUtf8Error};
 use thiserror::Error;
 
@@ -53,6 +54,37 @@ pub enum ManifestError {
     HeadersOnLocalSource {
         /// The local path the input reads.
         path: PathBuf,
+    },
+
+    /// An input stated `sensorthings` settings without declaring the SensorThings format, so the
+    /// settings may describe nothing the source is.
+    #[error("An input's 'sensorthings' settings describe a SensorThings server, so the input must declare 'format: \"sensorthings\"'")]
+    SensorThingsSettingsWithoutFormat,
+
+    /// A local SensorThings snapshot declared `sensorthings` settings, though a snapshot is read as it
+    /// was collected.
+    #[error("The input '{}' is a SensorThings snapshot file, which is read as it was collected, so it cannot declare 'sensorthings' settings", path.display())]
+    SensorThingsSettingsOnSnapshot {
+        /// The local path the input reads.
+        path: PathBuf,
+    },
+
+    /// A remote SensorThings input's source is no service root, which every request is built on.
+    #[error("The SensorThings input '{url}' is no service root")]
+    NotAServiceRoot {
+        /// The source, masked. Boxed so a URL does not enlarge every `Result` in the crate.
+        url: Box<MaskedUrl>,
+        /// Why it is no service root.
+        source: ServiceRootError,
+    },
+
+    /// A remote SensorThings input's service root read a value from the environment.
+    #[error(
+        "The SensorThings service root '{url}' reads the environment; credentials for a SensorThings server go in 'headers', so every URL a read requests, logs and writes stays free of them"
+    )]
+    ServiceRootReadsEnvironment {
+        /// The source, masked. Boxed so a URL does not enlarge every `Result` in the crate.
+        url: Box<MaskedUrl>,
     },
 
     /// The output's destination settings could not be read: no known `target`, a missing setting,

@@ -1,6 +1,7 @@
 use crate::{
     downloaded_file::DownloadedFile,
     error::{CollectorError, ERROR_BODY_CAP},
+    fetched_body::FetchedBody,
 };
 use cassiopeia_common::{
     captured_body::CapturedBody,
@@ -66,6 +67,33 @@ impl Downloader {
     /// Downloads a single file from `url` to `dest`, returning that path with the URL it was served
     /// from after any redirects and the media type the server declared for it.
     ///
+    /// The file is fetched as [`Downloader::fetch`] fetches a body, and written only once the server
+    /// has served it.
+    ///
+    /// # Errors
+    ///
+    /// Returns every error [`Downloader::fetch`] returns, and [`CollectorError::Io`] when the
+    /// response body cannot be written to `dest`.
+    pub fn download_to_file(&mut self, url: &MaskedUrl, dest: &Path) -> Result<DownloadedFile, CollectorError> {
+        let fetched = self.fetch(url)?;
+        let mut file = File::create(dest).map_err(|source| CollectorError::Io {
+            source,
+            path: dest.to_path_buf(),
+        })?;
+        file.write_all(fetched.bytes()).map_err(|source| CollectorError::Io {
+            source,
+            path: dest.to_path_buf(),
+        })?;
+        file.flush().map_err(|source| CollectorError::Io {
+            source,
+            path: dest.to_path_buf(),
+        })?;
+        Ok(fetched.into_download(dest.to_path_buf()))
+    }
+
+    /// Fetches the body `url` serves, with the URL it was served from after any redirects and the
+    /// media type the server declared for it.
+    ///
     /// A server that answers `429` or a `5xx` is asked again with backoff, waiting at least the
     /// `Retry-After` it sent, up to [`DEFAULT_MAX_ATTEMPTS`] attempts in all; its last answer is the
     /// failure once they are spent, or once shutdown cuts a wait short. Any other non-success status
@@ -77,10 +105,9 @@ impl Downloader {
     /// # Errors
     ///
     /// Returns [`CollectorError::ClientInit`] when the HTTP client cannot be built,
-    /// [`CollectorError::Http`] when the request never completes, [`CollectorError::HttpStatus`]
-    /// when the server answers with a non-success status, and [`CollectorError::Io`] when the
-    /// response body cannot be written to `dest`.
-    pub fn download_to_file(&mut self, url: &MaskedUrl, dest: &Path) -> Result<DownloadedFile, CollectorError> {
+    /// [`CollectorError::Http`] when the request never completes, and [`CollectorError::HttpStatus`]
+    /// when the server answers with a non-success status.
+    pub fn fetch(&mut self, url: &MaskedUrl) -> Result<FetchedBody, CollectorError> {
         let mut attempt: u32 = 1;
         let answer = loop {
             let answer = self.ask(url)?;
@@ -98,8 +125,8 @@ impl Downloader {
             attempt += 1;
         };
 
-        // A 4xx/5xx answers with an error page, not the resource; treating that body as the download
-        // would silently write garbage in place of the file, so a non-success status is a failure.
+        // A 4xx/5xx answers with an error page, not the resource; treating that body as the resource
+        // would silently hand on garbage in its place, so a non-success status is a failure.
         if !answer.status.is_success() {
             return Err(CollectorError::HttpStatus {
                 // The error owns the URL, while the caller keeps the one it asked for.
@@ -108,20 +135,7 @@ impl Downloader {
                 body: Box::new(answer.body.echo(ERROR_BODY_CAP)),
             });
         }
-        let body = answer.body.bytes();
-        let mut file = File::create(dest).map_err(|source| CollectorError::Io {
-            source,
-            path: dest.to_path_buf(),
-        })?;
-        file.write_all(body).map_err(|source| CollectorError::Io {
-            source,
-            path: dest.to_path_buf(),
-        })?;
-        file.flush().map_err(|source| CollectorError::Io {
-            source,
-            path: dest.to_path_buf(),
-        })?;
-        Ok(DownloadedFile::new(dest.to_path_buf(), answer.served_from, answer.content_type))
+        Ok(FetchedBody::new(answer.body, answer.served_from, answer.content_type))
     }
 
     /// Sends one request for `url` and reads the whole answer, whatever its status.
@@ -563,6 +577,29 @@ mod tests {
         delivered.assert();
         // The first backoff is 1s, so only the server's own `Retry-After` makes the wait 2s.
         assert!(started.elapsed() >= Duration::from_secs(2), "waited {:?}", started.elapsed());
+    }
+
+    #[test]
+    fn fetch_returns_the_body_and_where_it_was_served_from() {
+        let (url, _requests) = serve_once("200 OK", "abc");
+
+        let fetched = downloader().fetch(&url).expect("a body");
+
+        assert_eq!(fetched.bytes(), b"abc");
+        assert_eq!(fetched.served_from(), &url);
+    }
+
+    #[test]
+    fn fetch_retries_a_transient_answer() {
+        let mut server = mockito::Server::new();
+        let busy = server.mock("GET", "/feed.csv").with_status(503).expect(1).create();
+        let delivered = server.mock("GET", "/feed.csv").with_status(200).with_body("abc").expect(1).create();
+
+        let fetched = downloader().fetch(&feed(&server)).expect("a body");
+
+        busy.assert();
+        delivered.assert();
+        assert_eq!(fetched.bytes(), b"abc");
     }
 
     #[test]

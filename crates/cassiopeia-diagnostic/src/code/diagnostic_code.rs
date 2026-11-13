@@ -1,6 +1,7 @@
 use crate::code::{
     broker_code::BrokerCode,
     catalog_code::CatalogCode,
+    collect_code::CollectCode,
     context_code::ContextCode,
     expander_code::ExpanderCode,
     extractor_code::ExtractorCode,
@@ -28,6 +29,9 @@ pub enum DiagnosticCode {
     /// A Smart Data Models catalog operation.
     #[display("catalog-{_0}")]
     Catalog(CatalogCode),
+    /// Collecting a source from a server.
+    #[display("collect-{_0}")]
+    Collect(CollectCode),
     /// Resolving or delivering the `@context`.
     #[display("context-{_0}")]
     Context(ContextCode),
@@ -60,6 +64,7 @@ pub enum DiagnosticCode {
 /// How many distinct codes the vocabulary holds.
 pub const DIAGNOSTIC_CODE_COUNT: usize = BrokerCode::COUNT
     + CatalogCode::COUNT
+    + CollectCode::COUNT
     + ContextCode::COUNT
     + ExpanderCode::COUNT
     + ExtractorCode::COUNT
@@ -76,6 +81,7 @@ impl DiagnosticCode {
         BrokerCode::iter()
             .map(DiagnosticCode::Broker)
             .chain(CatalogCode::iter().map(DiagnosticCode::Catalog))
+            .chain(CollectCode::iter().map(DiagnosticCode::Collect))
             .chain(ContextCode::iter().map(DiagnosticCode::Context))
             .chain(ExpanderCode::iter().map(DiagnosticCode::Expander))
             .chain(ExtractorCode::iter().map(DiagnosticCode::Extractor))
@@ -92,6 +98,7 @@ impl DiagnosticCode {
 mod tests {
     use crate::code::{
         broker_code::BrokerCode,
+        collect_code::CollectCode,
         diagnostic_code::{DIAGNOSTIC_CODE_COUNT, DiagnosticCode},
         schema_code::SchemaCode,
     };
@@ -114,6 +121,7 @@ mod tests {
     fn the_documented_codes_render_exactly_as_published() {
         assert_eq!(DiagnosticCode::Broker(BrokerCode::EntityRejected).to_string(), "broker-entity-rejected");
         assert_eq!(DiagnosticCode::Schema(SchemaCode::Nonconformant).to_string(), "schema-nonconformant");
+        assert_eq!(DiagnosticCode::Collect(CollectCode::LimitReached).to_string(), "collect-limit-reached");
     }
 
     #[test]

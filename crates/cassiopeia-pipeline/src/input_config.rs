@@ -4,6 +4,7 @@ use cassiopeia_common::{context::mode::AtContextMode, format::DataFormat, reques
 use cassiopeia_csv_dialect::statement::DialectStatement;
 use cassiopeia_manifest::{input::ManifestInput, mapping_binding::MappingBinding};
 use cassiopeia_mapping::template::run_variables::RunVariables;
+use cassiopeia_sensorthings::service::SensorThingsService;
 use serde_json::{Map, Value};
 
 /// The extension used to name a downloaded source whose format is not declared.
@@ -17,8 +18,8 @@ const DEFAULT_EXTENSION: &str = "dat";
 /// merge at the resolver. A lane is read exactly once regardless of how many mappings its binding
 /// carries, so a multi-collection source is never opened twice.
 pub(crate) struct InputConfig {
-    /// The source the collector reads.
-    pub(crate) collector_source: CollectorSource,
+    /// The source the lane's collector reads.
+    pub(crate) source: LaneSource,
     /// The headers the collector attaches to every request that fetches the source.
     pub(crate) headers: RequestHeaders,
     /// The declared format, or `None` to auto-detect.
@@ -38,6 +39,15 @@ pub(crate) struct InputConfig {
     pub(crate) variables: RunVariables,
 }
 
+/// Where a lane's records come from, which decides the collector that reads them.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum LaneSource {
+    /// Files, local or downloaded, read as they are.
+    Files(CollectorSource),
+    /// A SensorThings API server, read into a snapshot file every cycle.
+    SensorThings(SensorThingsService),
+}
+
 /// Builds a lane configuration from one manifest input.
 ///
 /// `effective_global` is the run's global run-level variables (the manifest's `vars` already overlaid
@@ -49,14 +59,18 @@ pub(crate) struct InputConfig {
 /// is invalid.
 pub(crate) fn build_input_config(input: &ManifestInput, effective_global: &Map<String, Value>) -> Result<InputConfig> {
     let format_override = (*input.format()).and_then(DataFormat::to_option);
-    let extension = FileExtension::new(format_override.map_or(DEFAULT_EXTENSION, |format| format.extension()))?;
-    let collector_source = CollectorSource::Single {
-        input: input.source().clone(),
-        extension,
+    let source = match input.sensorthings() {
+        // The lane owns its service, while the manifest keeps its own.
+        Some(service) => LaneSource::SensorThings(service.clone()),
+        None => LaneSource::Files(CollectorSource::Single {
+            // The lane owns its source, while the manifest keeps its own.
+            input: input.source().clone(),
+            extension: FileExtension::new(format_override.map_or(DEFAULT_EXTENSION, |format| format.extension()))?,
+        }),
     };
 
     Ok(InputConfig {
-        collector_source,
+        source,
         // The lane owns its headers, while the manifest keeps its own.
         headers: input.headers().clone(),
         format_override,
@@ -83,7 +97,7 @@ fn merge_vars(effective_global: &Map<String, Value>, per_input: Option<&Map<Stri
 
 #[cfg(test)]
 mod tests {
-    use crate::input_config::build_input_config;
+    use crate::input_config::{LaneSource, build_input_config};
     use cassiopeia_common::{
         format::DataFormat,
         input::Input,
@@ -184,6 +198,27 @@ mod tests {
             .build();
 
         assert_eq!(build_input_config(&input, &Map::new()).unwrap().format_override, Some(DataFormat::Json));
+    }
+
+    #[test]
+    fn a_remote_sensorthings_input_gives_its_lane_a_server_to_read() {
+        let input: ManifestInput =
+            serde_json::from_str(r#"{"source": "https://h.example/v1.1", "format": "sensorthings", "mapping": "m.json5", "sensorthings": {"pageSize": 10}}"#)
+                .unwrap();
+
+        let config = build_input_config(&input, &Map::new()).unwrap();
+
+        assert_eq!(config.source, LaneSource::SensorThings(input.sensorthings().clone().unwrap()));
+        assert_eq!(config.format_override, Some(DataFormat::SensorThings));
+    }
+
+    #[test]
+    fn a_local_snapshot_gives_its_lane_a_file_to_read() {
+        let input: ManifestInput = serde_json::from_str(r#"{"source": "rivm.jsonl", "format": "sensorthings", "mapping": "m.json5"}"#).unwrap();
+
+        let config = build_input_config(&input, &Map::new()).unwrap();
+
+        assert!(matches!(config.source, LaneSource::Files(_)), "{:?}", config.source);
     }
 
     #[test]
