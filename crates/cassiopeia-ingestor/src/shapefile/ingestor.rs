@@ -118,7 +118,7 @@ mod tests {
         payload::{BytesPayload, CollectedPayload, FilePayload, ProfiledPayload},
         record::Record,
     };
-    use dbase::{Date, FieldName, FieldValue, Record as DbaseRecord, TableWriterBuilder, yore::code_pages::CP1250};
+    use dbase::{Date, FieldName, FieldValue, Record as DbaseRecord, TableWriterBuilder, yore::code_pages};
     use mediatype::media_type;
     use pretty_assertions::assert_eq;
     use serde_json::{Map, Value};
@@ -356,7 +356,7 @@ mod tests {
         let dir = TempDir::new().unwrap();
         let stem = "cesta";
         // Write the .dbf bytes in Windows-1250 so a naive UTF-8 read would mangle them.
-        let table = TableWriterBuilder::with_encoding(CP1250)
+        let table = TableWriterBuilder::with_encoding(code_pages::CP1250)
             .add_character_field(FieldName::try_from("name").unwrap(), 50)
             .build_table_info();
         let mut writer = Writer::from_path_with_info(dir.path().join(format!("{stem}.shp")), table).unwrap();
