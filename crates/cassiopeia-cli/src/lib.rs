@@ -2,6 +2,7 @@ pub mod clap_theme;
 pub mod config;
 pub mod config_scaffold;
 pub mod convert;
+pub mod cursors_table;
 pub mod dereference;
 pub mod error;
 pub mod explorer;
@@ -15,6 +16,10 @@ pub mod readings_table;
 pub mod schema;
 pub mod schema_listing;
 pub mod sdm;
+pub mod sensorthings_cursors;
 pub mod sensorthings_readings;
+#[cfg(test)]
+mod test_cursors;
+mod text_table;
 pub mod theme_choice;
 pub mod wizard;

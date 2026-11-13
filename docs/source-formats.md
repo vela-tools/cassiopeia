@@ -491,6 +491,22 @@ An incremental read reads every reading each selected data stream gained since t
 
 **The cursors folder.** Cursors are kept in the folder of the `cursors.folder` setting, `CASSIOPEIA_CURSORS__FOLDER` in the environment. It defaults to `cursors` under Cassiopeia's data directory, which is `/var/lib/cassiopeia/cursors` in the container. Keep it on a volume a container outlives (see [Persisting cursors](docker.md#persisting-cursors)).
 
+**Inspect and reset cursors.** The `cassiopeia sensorthings cursor` commands work on the cursors of the same cursors folder (see the [command-line reference](cli.md#cassiopeia-sensorthings-cursor)):
+
+~~~sh
+cassiopeia sensorthings cursor list
+cassiopeia sensorthings cursor show rivm-air
+cassiopeia sensorthings cursor reset rivm-air --datastream 56776 --to 6h
+~~~
+
+- `list` prints one row per SensorThings cursor: its name, its server, how many data streams it holds a position for, and the oldest and newest of their high-water marks. A cursor of another kind of input is left out.
+- `show` prints the cursor's server, then one row per data stream: its id, its high-water mark, how many Observations it has seen within the lookback, the start of the last cycle that listed it, and the start of the first cycle that no longer listed it, or `-` while it is listed.
+- `reset` without `--to` removes the positions, so the next cycle starts each data stream at `initial` again. Use it to start over.
+- `reset --to` takes an RFC 3339 instant, or a span before now such as `6h`. It sets the high-water marks there and forgets the Observations the data streams have seen, so the next cycle reads each from the target minus the lookback, and writes those readings again. Use it after fixing a mapping, or when the server reloads its history. A target after now is refused, because the data streams would then skip every reading made before it.
+- `--datastream` limits a reset to one data stream, its id written as `show` prints it. An id the cursor holds no position for is refused, and the error names it.
+
+A running job holds its cursors, so a cursor command against one of them fails with `cursor 'rivm-air' is in use by a running job` and changes nothing: stop the job first. A cursor command that cannot use a cursor fails with `run-cursor-unusable`, as a run does.
+
 ### The snapshot file
 
 A snapshot is UTF-8 JSON Lines: one JSON object per line, each line ended by `\n`. Line 1 is the header:

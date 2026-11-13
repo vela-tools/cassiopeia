@@ -134,6 +134,15 @@ docker run --rm \
 
 A running job holds each cursor it reads through, so a second container that reads through the same cursor in the same volume is refused before it sends any request. See [Reading new readings](source-formats.md#reading-new-readings).
 
+To list, show or reset the cursors, run a cursor command against the same volume while no job holds them:
+
+```bash
+docker run --rm \
+    -v cassiopeia-cursors:/var/lib/cassiopeia/cursors \
+    ghcr.io/vela-tools/cassiopeia:latest \
+    sensorthings cursor list
+```
+
 ## A full run with volumes
 
 A file run reads a source and a mapping, uses the catalog if validation is enabled, and writes entities to an output directory. Mount the source and mapping read-only at `/data`, mount a writable directory at `/out`, and mount the schemas volume:

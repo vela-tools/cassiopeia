@@ -1,4 +1,4 @@
-use crate::cli::input_read::InputHeaderArgs;
+use crate::cli::{input_read::InputHeaderArgs, sensorthings_cursor::CursorCommand};
 use cassiopeia_sensorthings::{service_root::ServiceRoot, settings::datastream_filter::DatastreamFilter};
 use clap::{Args, Parser, Subcommand};
 
@@ -21,6 +21,10 @@ pub enum SensorThingsSubcommand {
     /// hold more than one of them.
     #[command(arg_required_else_help = true)]
     Readings(ReadingsArgs),
+
+    /// Inspect and reset the cursors of incremental reads.
+    #[command(arg_required_else_help = true)]
+    Cursor(CursorCommand),
 }
 
 /// The arguments of `sensorthings readings`.
@@ -56,7 +60,9 @@ mod tests {
         let Commands::SensorThings(command) = Cli::try_parse_from(command_line).unwrap().command else {
             panic!("expected the sensorthings command");
         };
-        let SensorThingsSubcommand::Readings(args) = command.command;
+        let SensorThingsSubcommand::Readings(args) = command.command else {
+            panic!("expected the readings command");
+        };
         args
     }
 

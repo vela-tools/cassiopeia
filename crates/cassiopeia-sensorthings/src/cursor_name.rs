@@ -1,5 +1,6 @@
 use derive_more::Display;
 use serde::{Deserialize, Serialize};
+use std::str::FromStr;
 use thiserror::Error;
 
 /// The most characters a cursor name holds.
@@ -64,6 +65,17 @@ impl TryFrom<String> for CursorName {
     }
 }
 
+// The command line hands a name over as borrowed text, and the check is the one `TryFrom<String>`
+// makes for a manifest, which no derive expresses.
+impl FromStr for CursorName {
+    type Err = CursorNameError;
+
+    /// Reads a name written as text, such as on the command line.
+    fn from_str(text: &str) -> Result<CursorName, CursorNameError> {
+        CursorName::try_from(text.to_owned())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use crate::cursor_name::{CursorName, CursorNameError};
@@ -100,6 +112,12 @@ mod tests {
 
         assert_eq!(name.to_string(), "rivm-air");
         assert_eq!(serde_json::to_string(&name).unwrap(), r#""rivm-air""#);
+    }
+
+    #[test]
+    fn borrowed_text_is_checked_as_owned_text_is() {
+        assert_eq!("rivm-air".parse::<CursorName>().unwrap().as_str(), "rivm-air");
+        assert_eq!("Rivm".parse::<CursorName>(), Err(CursorNameError::Character('R')));
     }
 
     #[test]

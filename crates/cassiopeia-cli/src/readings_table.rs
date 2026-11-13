@@ -1,6 +1,6 @@
+use crate::text_table::render_table;
 use cassiopeia_collector::sensorthings::limit_reached::LimitReached;
 use cassiopeia_sensorthings::offered_readings::offered_reading::OfferedReading;
-use std::iter;
 
 /// The number of columns of the readings table.
 const COLUMNS: usize = 5;
@@ -11,9 +11,6 @@ const HEADINGS: [&str; COLUMNS] = ["reading", "unit", "unit code", "data streams
 /// What the unit columns show for a reading whose data streams have units without text.
 const NO_UNIT: &str = "none";
 
-/// The space between two columns.
-const GAP: &str = "  ";
-
 /// Renders `readings` as a table: a heading row, then one row per reading in the order given, with
 /// every column as wide as its widest cell, so the columns align in a terminal.
 ///
@@ -21,14 +18,7 @@ const GAP: &str = "  ";
 /// their text.
 #[must_use]
 pub fn render_readings(readings: &[OfferedReading]) -> String {
-    let rows: Vec<[String; COLUMNS]> = iter::once(HEADINGS.map(str::to_owned)).chain(readings.iter().map(cells)).collect();
-    let widths = rows.iter().fold([0; COLUMNS], |mut widths, row| {
-        for (width, cell) in widths.iter_mut().zip(row) {
-            *width = (*width).max(cell.chars().count());
-        }
-        widths
-    });
-    rows.iter().map(|row| line(row, &widths)).collect::<Vec<_>>().join("\n")
+    render_table(HEADINGS, readings.iter().map(cells))
 }
 
 /// The note that `limit` stopped the read before it read every data stream, so the listing covers
@@ -60,12 +50,6 @@ fn cells(reading: &OfferedReading) -> [String; COLUMNS] {
 /// `texts` joined by `, `, or [`NO_UNIT`] when there are none.
 fn listed(texts: &[String]) -> String {
     if texts.is_empty() { NO_UNIT.to_owned() } else { texts.join(", ") }
-}
-
-/// The line of `row`, each cell padded to the width of its column, without trailing space.
-fn line(row: &[String; COLUMNS], widths: &[usize; COLUMNS]) -> String {
-    let padded: Vec<String> = row.iter().zip(widths).map(|(cell, &width)| format!("{cell:<width$}")).collect();
-    padded.join(GAP).trim_end().to_owned()
 }
 
 #[cfg(test)]

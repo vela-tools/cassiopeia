@@ -19,9 +19,11 @@ cassiopeia-mapping.workspace = true
 cassiopeia-ngsi-ld.workspace = true
 cassiopeia-reporter.workspace = true
 cassiopeia-sensorthings.workspace = true
+cassiopeia-sensorthings-cursor.workspace = true
 cassiopeia-smart-data-models.workspace = true
 cassiopeia-terminal-style.workspace = true
 cassiopeia-tui.workspace = true
+chrono = "0.4.45"
 clap = { version = "4.6.7", features = ["derive"] }
 clap-markdown = "0.1.5"
 getset = "0.1.7"
@@ -29,6 +31,7 @@ json5format = "0.2.6"
 serde_json = { version = "1.0.154", features = ["preserve_order"] }
 serde_json5 = "0.2.1"
 strum = { version = "0.28.0", features = ["derive"] }
+tabular = "0.2.0"
 thiserror = "2.0.21"
 tokio = { version = "1.54.1", features = ["net", "rt", "sync", "time"] }
 toml = "1.2.1"
@@ -39,6 +42,7 @@ cefact-units = "1.0.0"
 encoding_rs = "0.8.44"
 mockito = { version = "1.7.2", default-features = false }
 pretty_assertions = "1.4.1"
+redb = "4.5.0"
 tempfile = "3.27.0"
 url = "2.5.8"
 

@@ -8,8 +8,10 @@ use std::collections::BTreeMap;
 /// is.
 ///
 /// A server chooses whether its ids are integers or texts, which a person cannot see, so `5` names
-/// the integer id 5 and the text id `"5"` alike.
+/// the integer id 5 and the text id `"5"` alike. Any text is an id text, one the cursor holds no
+/// position for included, so the command line reads it from `String`.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Display, From)]
+#[from(Box<str>, String)]
 pub struct IdText(Box<str>);
 
 /// What a reset applies to.
@@ -89,6 +91,11 @@ mod tests {
         assert!(text("5").names(&EntityId::Text("5".into())));
         assert!(!text("05").names(&EntityId::Integer(5)));
         assert!(!text("5").names(&EntityId::Integer(56)));
+    }
+
+    #[test]
+    fn an_id_text_is_made_from_owned_text() {
+        assert_eq!(IdText::from("t-5".to_owned()), text("t-5"));
     }
 
     #[test]

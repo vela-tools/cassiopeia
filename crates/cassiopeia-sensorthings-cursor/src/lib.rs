@@ -11,13 +11,17 @@
 //! cycle read forms an update, a value that changes nothing until it is committed in one write
 //! transaction, so a cycle that fails leaves its cursors where they were. The store neither reads a
 //! server nor writes output: the collector gathers what a cycle wrote, and the pipeline commits it.
+//! The command line lists the stores of a cursors folder, shows their positions and resets them.
 
 pub mod cursor_store;
 pub mod cursor_store_error;
 pub mod cursor_update;
+pub mod cursors_folder;
 pub mod position;
 pub mod positions;
 mod positions_table;
 pub mod reset;
 pub mod seen_observations;
 mod store_metadata;
+#[cfg(test)]
+mod test_metadata;
