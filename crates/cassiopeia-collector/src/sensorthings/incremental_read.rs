@@ -176,7 +176,7 @@ mod tests {
     use url::Url;
 
     /// The path and query of the metadata discovery request with the default settings.
-    const METADATA: &str = "/v1.1/Datastreams?$expand=Thing/Locations,ObservedProperty,Sensor&$orderby=id%20asc&$top=1000";
+    const METADATA: &str = "/v1.1/Datastreams?$top=1000&$expand=Thing/Locations,ObservedProperty,Sensor&$orderby=id%20asc";
 
     /// The settings of an incremental read through the cursor `rivm-air`, with the members `extra`
     /// beside `read`.
@@ -656,7 +656,7 @@ mod tests {
         server
             .mock(
                 "GET",
-                "/v1.1/MultiDatastreams?$expand=Thing/Locations,ObservedProperties,Sensor&$orderby=id%20asc&$top=1000",
+                "/v1.1/MultiDatastreams?$top=1000&$expand=Thing/Locations,ObservedProperties,Sensor&$orderby=id%20asc",
             )
             .with_body(json!({"value": [{"@iot.id": 4, "name": "ws-4"}]}).to_string())
             .expect(1)
@@ -688,7 +688,7 @@ mod tests {
         server
             .mock(
                 "GET",
-                "/v1.1/MultiDatastreams?$expand=Thing/Locations,ObservedProperties,Sensor&$orderby=id%20asc&$top=1000",
+                "/v1.1/MultiDatastreams?$top=1000&$expand=Thing/Locations,ObservedProperties,Sensor&$orderby=id%20asc",
             )
             .with_body(json!({"value": []}).to_string())
             .expect(1)

@@ -35,14 +35,14 @@ const STATION: &str = "urn:ngsi-ld:AirQualityObserved:sta-hexample-1";
 const MOCK_STATION: &str = "urn:ngsi-ld:AirQualityObserved:sta-127001-1";
 
 /// The path and query of the metadata discovery of the mock server's Datastreams.
-const DATASTREAMS: &str = "/v1.1/Datastreams?$expand=Thing/Locations,ObservedProperty,Sensor&$orderby=id%20asc&$top=1000";
+const DATASTREAMS: &str = "/v1.1/Datastreams?$top=1000&$expand=Thing/Locations,ObservedProperty,Sensor&$orderby=id%20asc";
 
 /// The path and query of the metadata discovery of the mock server's `MultiDatastreams`.
-const MULTI_DATASTREAMS: &str = "/v1.1/MultiDatastreams?$expand=Thing/Locations,ObservedProperties,Sensor&$orderby=id%20asc&$top=1000";
+const MULTI_DATASTREAMS: &str = "/v1.1/MultiDatastreams?$top=1000&$expand=Thing/Locations,ObservedProperties,Sensor&$orderby=id%20asc";
 
 /// The path and query of the latest discovery of the mock server's Datastreams.
 const LATEST_DATASTREAMS: &str =
-    "/v1.1/Datastreams?$expand=Thing/Locations,ObservedProperty,Sensor,Observations($orderby=phenomenonTime%20desc;$top=1)&$orderby=id%20asc&$top=1000";
+    "/v1.1/Datastreams?$top=1000&$expand=Thing/Locations,ObservedProperty,Sensor,Observations($orderby=phenomenonTime%20desc;$top=1)&$orderby=id%20asc";
 
 /// The data stream line of kind `kind`, `datastream` or `multiDatastream`, of the wind fixture
 /// `name`, without its Observations, as a server lists it.

@@ -245,10 +245,10 @@ mod tests {
 
     /// The path and query of the latest discovery request with the default settings.
     const LATEST: &str =
-        "/v1.1/Datastreams?$expand=Thing/Locations,ObservedProperty,Sensor,Observations($orderby=phenomenonTime%20desc;$top=1)&$orderby=id%20asc&$top=1000";
+        "/v1.1/Datastreams?$top=1000&$expand=Thing/Locations,ObservedProperty,Sensor,Observations($orderby=phenomenonTime%20desc;$top=1)&$orderby=id%20asc";
 
     /// The path and query of the latest discovery request that requests features of interest.
-    const LATEST_WITH_FEATURES: &str = "/v1.1/Datastreams?$expand=Thing/Locations,ObservedProperty,Sensor,Observations($orderby=phenomenonTime%20desc;$top=1;$expand=FeatureOfInterest)&$orderby=id%20asc&$top=1000";
+    const LATEST_WITH_FEATURES: &str = "/v1.1/Datastreams?$top=1000&$expand=Thing/Locations,ObservedProperty,Sensor,Observations($orderby=phenomenonTime%20desc;$top=1;$expand=FeatureOfInterest)&$orderby=id%20asc";
 
     /// A shutdown flag the stop test sets once the first page is served.
     static STOPPED_AFTER_PAGE_ONE: AtomicBool = AtomicBool::new(false);
@@ -579,7 +579,7 @@ mod tests {
     }
 
     /// The path and query of the request that lists every Thing.
-    const THINGS: &str = "/v1.1/Things?$expand=Locations&$orderby=id%20asc&$top=1000";
+    const THINGS: &str = "/v1.1/Things?$top=1000&$expand=Locations&$orderby=id%20asc";
 
     /// A Thing as a server lists it, with one `GeoJSON` Location.
     fn thing(id: u64, name: &str) -> Value {
@@ -624,7 +624,7 @@ mod tests {
             serve(&mut server, LATEST, page(&[], None)),
             serve(
                 &mut server,
-                "/v1.1/Things?$filter=startswith(name,%27ILM_%27)&$expand=Locations&$orderby=id%20asc&$top=1000",
+                "/v1.1/Things?$filter=startswith(name,%27ILM_%27)&$top=1000&$expand=Locations&$orderby=id%20asc",
                 json!({"value": [thing(12520, "ILM_I75")]}).to_string(),
             ),
         ];
@@ -664,12 +664,12 @@ mod tests {
         let mocks = [
             serve(
                 &mut server,
-                "/v1.1/Datastreams?$expand=Thing/Locations,ObservedProperty,Sensor,Observations($orderby=phenomenonTime%20desc;$top=1)&$orderby=id%20asc&$top=2",
+                "/v1.1/Datastreams?$top=2&$expand=Thing/Locations,ObservedProperty,Sensor,Observations($orderby=phenomenonTime%20desc;$top=1)&$orderby=id%20asc",
                 page(&[], None),
             ),
             serve(
                 &mut server,
-                "/v1.1/Things?$expand=Locations&$orderby=id%20asc&$top=2",
+                "/v1.1/Things?$top=2&$expand=Locations&$orderby=id%20asc",
                 json!({"value": [thing(1, "Stationsplein"), thing(2, "Kennedylaan")], "@iot.nextLink": next}).to_string(),
             ),
         ];
@@ -734,7 +734,7 @@ mod tests {
     }
 
     /// The path and query of the latest discovery of every `MultiDatastream`.
-    const MULTI_LATEST: &str = "/v1.1/MultiDatastreams?$expand=Thing/Locations,ObservedProperties,Sensor,Observations($orderby=phenomenonTime%20desc;$top=1)&$orderby=id%20asc&$top=1000";
+    const MULTI_LATEST: &str = "/v1.1/MultiDatastreams?$top=1000&$expand=Thing/Locations,ObservedProperties,Sensor,Observations($orderby=phenomenonTime%20desc;$top=1)&$orderby=id%20asc";
 
     /// The path and query of the request for at most one `MultiDatastream`.
     const ANY_MULTI_DATASTREAM: &str = "/v1.1/MultiDatastreams?$top=1";

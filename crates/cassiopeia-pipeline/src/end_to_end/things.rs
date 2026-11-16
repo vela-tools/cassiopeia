@@ -58,12 +58,12 @@ fn a_station_without_data_streams_is_written_beside_the_stations_with_readings()
         let mocks = [
             serve(
                 &mut server,
-                "/v1.1/Datastreams?$expand=Thing/Locations,ObservedProperty,Sensor,Observations($orderby=phenomenonTime%20desc;$top=1)&$orderby=id%20asc&$top=1000",
+                "/v1.1/Datastreams?$top=1000&$expand=Thing/Locations,ObservedProperty,Sensor,Observations($orderby=phenomenonTime%20desc;$top=1)&$orderby=id%20asc",
                 &json!({ "value": [pm10] }),
             ),
             serve(
                 &mut server,
-                "/v1.1/Things?$expand=Locations&$orderby=id%20asc&$top=1000",
+                "/v1.1/Things?$top=1000&$expand=Locations&$orderby=id%20asc",
                 &json!({"value": [stationsplein, thing(2, "Kennedylaan", [5.4812, 51.4402])]}),
             ),
         ];
@@ -97,12 +97,12 @@ fn a_page_limit_keeps_the_things_listed_and_names_the_next_link() {
     let mocks = [
         serve(
             &mut server,
-            "/v1.1/Datastreams?$expand=Thing/Locations,ObservedProperty,Sensor,Observations($orderby=phenomenonTime%20desc;$top=1)&$orderby=id%20asc&$top=2",
+            "/v1.1/Datastreams?$top=2&$expand=Thing/Locations,ObservedProperty,Sensor,Observations($orderby=phenomenonTime%20desc;$top=1)&$orderby=id%20asc",
             &json!({"value": []}),
         ),
         serve(
             &mut server,
-            "/v1.1/Things?$expand=Locations&$orderby=id%20asc&$top=2",
+            "/v1.1/Things?$top=2&$expand=Locations&$orderby=id%20asc",
             &json!({"value": [thing(1, "Stationsplein", [5.4797, 51.4433]), thing(2, "Kennedylaan", [5.4812, 51.4402])], "@iot.nextLink": next}),
         ),
     ];
