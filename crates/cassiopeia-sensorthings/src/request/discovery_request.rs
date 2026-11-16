@@ -1,7 +1,7 @@
 use crate::{
     request::{query_value::query_value, resource_request::resource_request},
     service_root::ServiceRoot,
-    settings::sensorthings_settings::SensorThingsSettings,
+    settings::{features_of_interest::FeaturesOfInterest, sensorthings_settings::SensorThingsSettings},
 };
 use url::Url;
 
@@ -18,6 +18,12 @@ const METADATA_EXPAND: &str = "Thing/Locations,ObservedProperty";
 /// newest Observation.
 const LATEST_EXPAND: &str = "Thing/Locations,ObservedProperty,Observations($orderby=phenomenonTime%20desc;$top=1)";
 
+/// What a latest discovery that requests features of interest expands on every Datastream: what
+/// [`LATEST_EXPAND`] expands, with the newest Observation's `FeatureOfInterest` expanded inside it, as
+/// OGC 18-088 section 9.3.2.1 allows. A server that ignores an `$expand` nested in parentheses, as
+/// RIVM Samen Meten does, serves the Observation without it.
+const LATEST_EXPAND_WITH_FEATURES: &str = "Thing/Locations,ObservedProperty,Observations($orderby=phenomenonTime%20desc;$top=1;$expand=FeatureOfInterest)";
+
 /// The order every discovery pages in, so a `$skip`-built page follows the one before it.
 const BY_ID: &str = "id%20asc";
 
@@ -31,14 +37,19 @@ pub fn metadata_discovery_request(root: &ServiceRoot, settings: &SensorThingsSet
 }
 
 /// The request a latest read starts with, and the only one it sends: every selected Datastream with
-/// its Thing, the Thing's Locations, its `ObservedProperty` and its newest Observation, in id order,
+/// its Thing, the Thing's Locations, its `ObservedProperty` and its newest Observation, with that
+/// Observation's `FeatureOfInterest` when the settings request features of interest, in id order,
 /// `pageSize` a page.
 ///
 /// Query parameters are written in the order `$filter`, `$expand`, `$orderby`, `$top`, and `$filter`
 /// only when the settings select data streams.
 #[must_use]
 pub fn latest_discovery_request(root: &ServiceRoot, settings: &SensorThingsSettings) -> Url {
-    discovery_request(root, settings, LATEST_EXPAND)
+    let expand = match settings.features_of_interest() {
+        FeaturesOfInterest::Requested => LATEST_EXPAND_WITH_FEATURES,
+        FeaturesOfInterest::Omitted => LATEST_EXPAND,
+    };
+    discovery_request(root, settings, expand)
 }
 
 /// The `Datastreams` request of `root` that selects as `settings` say and expands `expand`.
@@ -103,6 +114,29 @@ mod tests {
         assert_eq!(
             request.as_str(),
             "http://localhost:18080/FROST-Server/v1.1/Datastreams?$expand=Thing/Locations,ObservedProperty,Observations($orderby=phenomenonTime%20desc;$top=1)&$orderby=id%20asc&$top=10"
+        );
+    }
+
+    #[test]
+    fn requested_features_of_interest_are_expanded_inside_the_newest_observation() {
+        let request = latest_discovery_request(
+            &root("https://h.example/v1.1"),
+            &settings(r#"{"datastreams": "startswith(name,'bus-')", "featuresOfInterest": true}"#),
+        );
+
+        assert_eq!(
+            request.as_str(),
+            "https://h.example/v1.1/Datastreams?$filter=startswith(name,%27bus-%27)&$expand=Thing/Locations,ObservedProperty,Observations($orderby=phenomenonTime%20desc;$top=1;$expand=FeatureOfInterest)&$orderby=id%20asc&$top=1000"
+        );
+    }
+
+    #[test]
+    fn the_metadata_discovery_never_expands_features_of_interest() {
+        let request = metadata_discovery_request(&root("https://h.example/v1.1"), &settings(r#"{"featuresOfInterest": true}"#));
+
+        assert_eq!(
+            request.as_str(),
+            "https://h.example/v1.1/Datastreams?$expand=Thing/Locations,ObservedProperty&$orderby=id%20asc&$top=1000"
         );
     }
 

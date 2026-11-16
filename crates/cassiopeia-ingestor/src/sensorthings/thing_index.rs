@@ -1,13 +1,15 @@
 use crate::sensorthings::{
+    encoded_geometry::EncodedGeometry,
     error::{SensorThingsIngestError, StaEntity},
     ingest_losses::{SensorThingsLosses, UnreadableLocation},
-    location::{ThingLocation, thing_location},
-    null_members::{move_member, present},
+    location::thing_location,
+    null_members::present,
     reading_keys::{ReadingKey, RenamedReading, reading_keys},
+    record_builder::record_members,
     served_id::{optional_served_id, served_id},
 };
 use cassiopeia_sensorthings::{
-    entity_id::{EntityId, ID_MEMBER},
+    entity_id::EntityId,
     snapshot::{line::DatastreamLine, line_number::LineNumber},
 };
 use indexmap::{IndexMap, map::Entry};
@@ -127,8 +129,8 @@ impl ThingIndexBuilder {
             Entry::Occupied(entry) => entry.into_mut().datastreams.push(datastream),
             Entry::Vacant(entry) => {
                 let location = match thing_location(thing.remove("Locations"), number)? {
-                    ThingLocation::Geometry(geometry) => Some(geometry),
-                    ThingLocation::Unreadable(encoding) => {
+                    EncodedGeometry::Geometry(geometry) => Some(geometry),
+                    EncodedGeometry::Unreadable(encoding) => {
                         losses.unreadable_location(UnreadableLocation {
                             // The loss is reported after the Thing's own id has gone into its record.
                             thing: entry.key().clone(),
@@ -136,7 +138,7 @@ impl ThingIndexBuilder {
                         });
                         None
                     }
-                    ThingLocation::Absent => None,
+                    EncodedGeometry::Absent => None,
                 };
                 let members = record_members(thing, Some(entry.key()), &THING_MEMBERS);
                 entry.insert(PendingThing {
@@ -219,17 +221,4 @@ fn newest_observation(observations: Option<Value>) -> Option<Map<String, Value>>
         Some(Value::Object(observation)) => Some(observation),
         Some(Value::Null | Value::Bool(_) | Value::Number(_) | Value::String(_) | Value::Array(_)) | None => None,
     }
-}
-
-/// The members a record carries of a served entity: its `id`, then each of `keys` it has.
-fn record_members(mut served: Map<String, Value>, id: Option<&EntityId>, keys: &[&str]) -> Map<String, Value> {
-    let mut members = Map::new();
-    if let Some(id) = id {
-        members.insert("id".to_owned(), id.json());
-    }
-    served.remove(ID_MEMBER);
-    for key in keys {
-        move_member(&mut members, key, &mut served, key);
-    }
-    members
 }

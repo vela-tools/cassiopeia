@@ -6,6 +6,7 @@ use crate::{
         renamed_columns_report::report_renamed_columns,
         renamed_readings_report::report_renamed_readings,
         snapshot_read_rule::check_snapshot_read,
+        unreadable_features_of_interest_report::report_unreadable_features_of_interest,
         unreadable_locations_report::report_unreadable_locations,
         unreadable_phenomenon_times_report::report_unreadable_phenomenon_times,
         unreadable_tables_report::report_unreadable_tables,
@@ -195,6 +196,7 @@ fn report_sensorthings_losses(sink: &dyn DiagnosticSink, source: &Input, losses:
     [
         report_renamed_readings(sink, source, losses.renamed_readings()),
         report_unreadable_locations(sink, source, losses.unreadable_locations()),
+        report_unreadable_features_of_interest(sink, source, losses.unreadable_features_of_interest()),
         report_unreadable_phenomenon_times(sink, source, losses.unreadable_phenomenon_times()),
     ]
     .into_iter()

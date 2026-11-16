@@ -197,6 +197,9 @@ mod tests {
     const LATEST: &str =
         "/v1.1/Datastreams?$expand=Thing/Locations,ObservedProperty,Observations($orderby=phenomenonTime%20desc;$top=1)&$orderby=id%20asc&$top=1000";
 
+    /// The path and query of the latest discovery request that requests features of interest.
+    const LATEST_WITH_FEATURES: &str = "/v1.1/Datastreams?$expand=Thing/Locations,ObservedProperty,Observations($orderby=phenomenonTime%20desc;$top=1;$expand=FeatureOfInterest)&$orderby=id%20asc&$top=1000";
+
     /// A shutdown flag the stop test sets once the first page is served.
     static STOPPED_AFTER_PAGE_ONE: AtomicBool = AtomicBool::new(false);
 
@@ -250,6 +253,43 @@ mod tests {
         );
         assert_eq!(lines[1], json!({"datastream": {"@iot.id": 56775, "name": "stream 56775"}}));
         assert_eq!(datastream_ids(&lines), [json!(56775), json!(56776)]);
+    }
+
+    #[test]
+    fn a_latest_read_of_features_of_interest_keeps_each_inside_its_newest_observation() {
+        let mut server = mockito::Server::new();
+        let datastream = json!({
+            "@iot.id": 7,
+            "name": "bus-12-pm10",
+            "Observations": [{
+                "@iot.id": 70,
+                "phenomenonTime": "2026-11-12T09:59:00Z",
+                "result": 18.2,
+                "FeatureOfInterest": {
+                    "@iot.id": 4711,
+                    "encodingType": "application/geo+json",
+                    "feature": {"type": "Point", "coordinates": [5.4797, 51.4433]},
+                },
+            }],
+        });
+        let discovery = serve(&mut server, LATEST_WITH_FEATURES, json!({ "value": [&datastream] }).to_string());
+
+        let (result, payloads) = collect(collector(&server, r#"{"featuresOfInterest": true}"#, RequestHeaders::default(), &RUNNING));
+
+        result.unwrap();
+        discovery.assert();
+        assert_eq!(snapshot_lines(payloads)[1], json!({ "datastream": datastream }));
+    }
+
+    #[test]
+    fn a_latest_read_that_omits_features_of_interest_sends_the_plain_discovery() {
+        let mut server = mockito::Server::new();
+        let discovery = serve(&mut server, LATEST, page(&[7], None));
+
+        let (result, _) = collect(collector(&server, r#"{"featuresOfInterest": false}"#, RequestHeaders::default(), &RUNNING));
+
+        result.unwrap();
+        discovery.assert();
     }
 
     #[test]

@@ -21,6 +21,9 @@ pub enum IngestCode {
     ReadingsRenamed,
     /// SensorThings Things hold a Location that is no `GeoJSON`, so their records have no `location`.
     LocationsUnreadable,
+    /// SensorThings Observations hold a `FeatureOfInterest` that is no `GeoJSON`, so their readings'
+    /// `featureOfInterest` has no `feature`.
+    FeaturesOfInterestUnreadable,
     /// SensorThings Observations hold a `phenomenonTime` that names no instant, so their readings
     /// were dropped.
     PhenomenonTimesUnreadable,
@@ -50,6 +53,7 @@ mod tests {
         assert_eq!(IngestCode::DatesNonexistent.to_string(), "dates-nonexistent");
         assert_eq!(IngestCode::ReadingsRenamed.to_string(), "readings-renamed");
         assert_eq!(IngestCode::LocationsUnreadable.to_string(), "locations-unreadable");
+        assert_eq!(IngestCode::FeaturesOfInterestUnreadable.to_string(), "features-of-interest-unreadable");
         assert_eq!(IngestCode::PhenomenonTimesUnreadable.to_string(), "phenomenon-times-unreadable");
     }
 }

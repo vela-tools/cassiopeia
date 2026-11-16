@@ -1,13 +1,15 @@
 # SensorThings fixtures
 
-The SensorThings snapshot tests in `src/end_to_end/sensorthings.rs` read these files from disk. The suite never contacts a server.
+The SensorThings snapshot tests in `src/end_to_end/sensorthings.rs` and `src/end_to_end/features_of_interest.rs` read these files from disk. The suite never contacts a server.
 
 | File | Content |
 | --- | --- |
 | `rivm-v1.0-latest.jsonl` | A `latest` snapshot of RIVM Samen Meten (`https://api-samenmeten.rivm.nl/v1.0`, SensorThings API 1.0), recorded on 13 November 2026 and trimmed to two Things, `ILM_I67` (id 12511) and `ILM_I68` (id 12512), each with its `pm10`, `pm10_kal` and `pm25_kal` data streams and their newest Observations. |
 | `rivm-v1.0-range.jsonl` | A `range` snapshot of RIVM Samen Meten, recorded on 13 November 2026: 6 Observations of 12 November 2026, 3 each of the `pm10` and `pm25_kal` data streams of `ILM_I68`. |
 | `frost-v1.1-latest.jsonl` | A `latest` snapshot of a local FROST-Server 2.5.3 (`http://localhost:18080/FROST-Server/v1.1`, SensorThings API 1.1), recorded on 13 November 2026 from a container seeded with two Things, `eindhoven-centrum` and `helmond-west`, whose ids are texts and whose Locations are GeoJSON Features. Each has a `pm10` and a `pm25_kal` data stream with two hourly Observations. The readings are made up for the fixture. |
+| `frost-v1.1-moving-range.jsonl` | A `range` snapshot in the shape a local FROST-Server 2.5.3 (`http://localhost:18080/FROST-Server/v1.1`, SensorThings API 1.1) serves with `featuresOfInterest: true`: one Thing that moves, `bus-12`, whose Location is its depot, with a `pm10` data stream of three Observations on 13 November 2026, each expanded with the FeatureOfInterest, a GeoJSON point, where the bus took it. The ids are texts. The snapshot, its places and its readings are made up for the fixture. |
 | `air-quality-observed.json5` | The `AirQualityObserved` mapping the source-format guide shows for SensorThings records. |
+| `moving-air-quality-observed.json5` | The `AirQualityObserved` mapping that places each reading where it was taken, as the source-format guide shows for features of interest: its `location` is the reading's `featureOfInterest.feature`, with the reading's time as `observedAt`. |
 | `schemas/` | The Smart Data Models schemas the run validates against, laid out as the validator looks them up: `dataModel.Environment/AirQualityObserved.json` (schema version 0.1.4), and the documents its `$ref`s name, under the path of their published URL: `data-models/common-schema.json` and `smart-data-models/dataModel.Environment/master/Environment-schema.json`. Each is stored as published on 13 November 2026. |
 
 ## How the RIVM snapshots were recorded

@@ -1,11 +1,7 @@
+use crate::stages::source_warning::report_source_warning;
 use cassiopeia_common::input::Input;
 use cassiopeia_csv_dialect::misshapen_row::MisshapenRow;
-use cassiopeia_diagnostic::{
-    code::{diagnostic_code::DiagnosticCode, ingest_code::IngestCode},
-    context_field::ContextField,
-    diagnostic_builder::DiagnosticBuilder,
-    severity::Severity,
-};
+use cassiopeia_diagnostic::code::ingest_code::IngestCode;
 use cassiopeia_ingestor::csv::misshapen_rows::MisshapenRows;
 use cassiopeia_reporter::reporter::DiagnosticSink;
 use std::num::NonZeroU64;
@@ -57,18 +53,13 @@ pub(crate) fn report_misshapen_rows(sink: &dyn DiagnosticSink, source: &Input, r
         return 0;
     };
 
-    sink.report(
-        &DiagnosticBuilder::new(
-            Severity::Warning,
-            DiagnosticCode::Ingest(IngestCode::RowsMisshapen),
-            headline(source, first.table_fields, rows, total),
-        )
-        // The diagnostic outlives the ingestor that names the source.
-        .with_context(ContextField::Source(source.clone()))
-        .with_occurrences(total)
-        .build(),
-    );
-    total.get()
+    report_source_warning(
+        sink,
+        source,
+        IngestCode::RowsMisshapen,
+        headline(source, first.table_fields, rows, total),
+        total,
+    )
 }
 
 #[cfg(test)]

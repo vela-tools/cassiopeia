@@ -32,7 +32,8 @@ use std::{io::Write, ops::ControlFlow, path::Path};
 /// high-water mark, or from the initial point when the cursor holds no position for it, to the cycle
 /// start, so a reading stamped at or after the cycle start waits for a later cycle. The data streams
 /// furthest behind are read first. An Observation the position has seen, or this read already wrote,
-/// is dropped. A page limit stops one data stream's read and the read goes on with the next; the
+/// is dropped; every other one is written as it was served, with its `FeatureOfInterest` when the
+/// settings request features of interest. A page limit stops one data stream's read and the read goes on with the next; the
 /// observation limit stops the whole read, and what each data stream wrote up to there moves its
 /// position, so the next cycle goes on from there.
 ///
@@ -89,7 +90,7 @@ pub(crate) fn read_incremental<W: Write>(
     let mut sink = ObservationSink::new(snapshot.into_observations(), settings.limits().observations(), path);
     let unseen = SeenObservations::default();
     for (datastream, window) in datastreams.into_reads() {
-        let request = observations_request(service.root(), &datastream, window, settings.page_size());
+        let request = observations_request(service.root(), &datastream, window, settings.page_size(), settings.features_of_interest());
         let seen = positions.get(&datastream).map_or(&unseen, Position::seen);
         let mut written = SeenObservations::default();
         let end = read_observations(reader, request, settings.limits().pages(), &datastream, seen, &mut sink, |id, observation| {
@@ -285,6 +286,46 @@ mod tests {
         let position = positions.get(&id(5)).unwrap();
         assert_eq!(position.high_water(), at("09:30"));
         assert_eq!(position.seen(), &seen(&[(1, "09:00"), (2, "09:30")]));
+    }
+
+    #[test]
+    fn requested_features_of_interest_are_expanded_on_every_observations_request() {
+        let mut server = mockito::Server::new();
+        let answered = Answered::default();
+        discovery(&mut server, &[1, 2]);
+        serve_observations(&mut server, 1, &[(11, "09:00")], &answered);
+        serve_observations(&mut server, 2, &[(21, "09:30")], &answered);
+
+        let (written, _, _) = read(&server, &incremental(r#", "featuresOfInterest": true"#), Positions::default());
+
+        assert_eq!(written.unwrap(), [json!(11), json!(21)]);
+        let requests = answered.requests();
+        assert_eq!(requests.len(), 2);
+        assert!(
+            requests
+                .iter()
+                .all(|request| request.ends_with("&$orderby=phenomenonTime%20asc,id%20asc&$expand=FeatureOfInterest&$top=1000")),
+            "{requests:?}"
+        );
+    }
+
+    #[test]
+    fn an_incremental_read_without_features_of_interest_expands_nothing() {
+        let mut server = mockito::Server::new();
+        let answered = Answered::default();
+        discovery(&mut server, &[1]);
+        serve_observations(&mut server, 1, &[(11, "09:00")], &answered);
+
+        let (written, _, _) = read(&server, &incremental(""), Positions::default());
+
+        written.unwrap();
+        let requests = answered.requests();
+        assert!(
+            requests
+                .iter()
+                .all(|request| request.ends_with("&$orderby=phenomenonTime%20asc,id%20asc&$top=1000")),
+            "{requests:?}"
+        );
     }
 
     #[test]

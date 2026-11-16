@@ -27,6 +27,9 @@ pub struct SensorThingsLosses {
     renamed_readings: LossTally<RenamedReading>,
     /// The Things whose Location is no `GeoJSON`, so their records have no `location`.
     unreadable_locations: LossTally<UnreadableLocation>,
+    /// The readings whose `FeatureOfInterest` is no `GeoJSON`, so their `featureOfInterest` has no
+    /// `feature`.
+    unreadable_features_of_interest: LossTally<UnreadableFeatureOfInterest>,
     /// The texts of the `phenomenonTime` values that named no instant, whose readings were dropped.
     unreadable_phenomenon_times: LossTally<Box<str>>,
 }
@@ -38,16 +41,39 @@ pub struct UnreadableLocation {
     /// The Thing.
     pub thing: EntityId,
     /// What the Location states about its encoding.
-    pub encoding: LocationEncoding,
+    pub encoding: GeometryEncoding,
 }
 
-/// What a Location states about how its `location` is encoded.
+/// A `FeatureOfInterest` that is no `GeoJSON`, with the encoding it named.
 #[derive(Debug, Clone, PartialEq, Eq, Display)]
-pub enum LocationEncoding {
-    /// The Location's `encodingType`.
+#[display("{feature} {encoding}")]
+pub struct UnreadableFeatureOfInterest {
+    /// The `FeatureOfInterest`.
+    pub feature: FeatureOfInterestName,
+    /// What the `FeatureOfInterest` states about its encoding.
+    pub encoding: GeometryEncoding,
+}
+
+/// How a loss names a `FeatureOfInterest`: by its id, or as one served without an id, which a
+/// reading's `featureOfInterest` leaves out as it does every absent member.
+#[derive(Debug, Clone, PartialEq, Eq, Display)]
+pub enum FeatureOfInterestName {
+    /// The `FeatureOfInterest`'s id.
+    #[display("FeatureOfInterest {_0}")]
+    Id(EntityId),
+    /// The `FeatureOfInterest` was served without an `@iot.id`.
+    #[display("a FeatureOfInterest without an id")]
+    WithoutId,
+}
+
+/// What a Location or a `FeatureOfInterest` states about how its geometry is encoded.
+#[derive(Debug, Clone, PartialEq, Eq, Display)]
+pub enum GeometryEncoding {
+    /// The entity's `encodingType`.
     #[display("encodes it as `{_0}`")]
     Stated(Box<str>),
-    /// The Location has no `encodingType`, though OGC 18-088 section 8.2.2 makes it mandatory.
+    /// The entity has no `encodingType`, though OGC 18-088 makes it mandatory for a Location (section
+    /// 8.2.2) and for a `FeatureOfInterest` (section 8.2.8).
     #[display("states no `encodingType`")]
     Unstated,
 }
@@ -98,6 +124,7 @@ impl Default for SensorThingsLosses {
         SensorThingsLosses {
             renamed_readings: LossTally::new(NAMED_RENAMES),
             unreadable_locations: LossTally::new(NAMED_FIRST),
+            unreadable_features_of_interest: LossTally::new(NAMED_FIRST),
             unreadable_phenomenon_times: LossTally::new(NAMED_FIRST),
         }
     }
@@ -116,6 +143,12 @@ impl SensorThingsLosses {
         &self.unreadable_locations
     }
 
+    /// The readings whose `FeatureOfInterest` is no `GeoJSON`.
+    #[must_use]
+    pub const fn unreadable_features_of_interest(&self) -> &LossTally<UnreadableFeatureOfInterest> {
+        &self.unreadable_features_of_interest
+    }
+
     /// The `phenomenonTime` texts that named no instant.
     #[must_use]
     pub const fn unreadable_phenomenon_times(&self) -> &LossTally<Box<str>> {
@@ -132,6 +165,11 @@ impl SensorThingsLosses {
         self.unreadable_locations.record(location);
     }
 
+    /// Counts a reading whose `FeatureOfInterest` is no `GeoJSON`.
+    pub fn unreadable_feature_of_interest(&mut self, feature: UnreadableFeatureOfInterest) {
+        self.unreadable_features_of_interest.record(feature);
+    }
+
     /// Counts a reading dropped for its `phenomenonTime`, whose text is `text`.
     pub fn unreadable_phenomenon_time(&mut self, text: Box<str>) {
         self.unreadable_phenomenon_times.record(text);
@@ -140,7 +178,14 @@ impl SensorThingsLosses {
 
 #[cfg(test)]
 mod tests {
-    use crate::sensorthings::ingest_losses::{LocationEncoding, LossTally, SensorThingsLosses, UnreadableLocation};
+    use crate::sensorthings::ingest_losses::{
+        FeatureOfInterestName,
+        GeometryEncoding,
+        LossTally,
+        SensorThingsLosses,
+        UnreadableFeatureOfInterest,
+        UnreadableLocation,
+    };
     use cassiopeia_sensorthings::entity_id::EntityId;
     use pretty_assertions::assert_eq;
 
@@ -160,6 +205,7 @@ mod tests {
 
         assert_eq!(losses.renamed_readings().total(), 0);
         assert_eq!(losses.unreadable_locations().named(), []);
+        assert_eq!(losses.unreadable_features_of_interest().total(), 0);
         assert_eq!(losses.unreadable_phenomenon_times().unnamed(), 0);
     }
 
@@ -177,14 +223,52 @@ mod tests {
     fn an_unreadable_location_names_its_thing_and_encoding() {
         let stated = UnreadableLocation {
             thing: EntityId::Integer(12512),
-            encoding: LocationEncoding::Stated("text/plain".into()),
+            encoding: GeometryEncoding::Stated("text/plain".into()),
         };
         let unstated = UnreadableLocation {
             thing: EntityId::Text("t-1".into()),
-            encoding: LocationEncoding::Unstated,
+            encoding: GeometryEncoding::Unstated,
         };
 
         assert_eq!(stated.to_string(), "Thing 12512 encodes it as `text/plain`");
         assert_eq!(unstated.to_string(), "Thing t-1 states no `encodingType`");
+    }
+
+    #[test]
+    fn an_unreadable_feature_of_interest_names_the_feature_and_its_encoding() {
+        let stated = UnreadableFeatureOfInterest {
+            feature: FeatureOfInterestName::Id(EntityId::Integer(4711)),
+            encoding: GeometryEncoding::Stated("application/pdf".into()),
+        };
+        let unstated = UnreadableFeatureOfInterest {
+            feature: FeatureOfInterestName::Id(EntityId::Text("stop-12".into())),
+            encoding: GeometryEncoding::Unstated,
+        };
+        let without_id = UnreadableFeatureOfInterest {
+            feature: FeatureOfInterestName::WithoutId,
+            encoding: GeometryEncoding::Stated("application/pdf".into()),
+        };
+
+        assert_eq!(stated.to_string(), "FeatureOfInterest 4711 encodes it as `application/pdf`");
+        assert_eq!(unstated.to_string(), "FeatureOfInterest stop-12 states no `encodingType`");
+        assert_eq!(without_id.to_string(), "a FeatureOfInterest without an id encodes it as `application/pdf`");
+    }
+
+    #[test]
+    fn only_the_first_unreadable_feature_of_interest_is_named() {
+        let mut losses = SensorThingsLosses::default();
+        for feature in [4711, 4712] {
+            losses.unreadable_feature_of_interest(UnreadableFeatureOfInterest {
+                feature: FeatureOfInterestName::Id(EntityId::Integer(feature)),
+                encoding: GeometryEncoding::Stated("application/pdf".into()),
+            });
+        }
+
+        assert_eq!(losses.unreadable_features_of_interest().named().len(), 1);
+        assert_eq!(
+            losses.unreadable_features_of_interest().named()[0].feature,
+            FeatureOfInterestName::Id(EntityId::Integer(4711))
+        );
+        assert_eq!(losses.unreadable_features_of_interest().total(), 2);
     }
 }

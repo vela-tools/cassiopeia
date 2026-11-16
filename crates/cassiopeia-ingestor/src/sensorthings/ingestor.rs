@@ -212,7 +212,7 @@ mod tests {
         ingestor::Ingestor,
         sensorthings::{
             error::SensorThingsIngestError,
-            ingest_losses::{LocationEncoding, SensorThingsLosses, UnreadableLocation},
+            ingest_losses::{FeatureOfInterestName, GeometryEncoding, SensorThingsLosses, UnreadableFeatureOfInterest, UnreadableLocation},
             ingestor::SensorThingsIngestor,
             reading_keys::RenamedReading,
         },
@@ -471,7 +471,7 @@ mod tests {
             losses.unreadable_locations().named(),
             [UnreadableLocation {
                 thing: EntityId::Integer(12512),
-                encoding: LocationEncoding::Stated("text/plain".into()),
+                encoding: GeometryEncoding::Stated("text/plain".into()),
             }]
         );
     }
@@ -578,6 +578,144 @@ mod tests {
             ]
         );
         assert!(records.iter().all(|record| record["thing"]["id"] == 12512 && record.get("location").is_some()));
+    }
+
+    /// A `FeatureOfInterest` with id `id`, encoded as `encoding`, holding `feature`.
+    fn feature_of_interest(id: i64, encoding: &str, feature: Value) -> Value {
+        let mut served = json!({"@iot.id": id, "name": format!("stop {id}"), "encodingType": encoding});
+        served["feature"] = feature;
+        served
+    }
+
+    /// A `GeoJSON` point at `coordinates`.
+    fn point(coordinates: [f64; 2]) -> Value {
+        json!({"type": "Point", "coordinates": coordinates})
+    }
+
+    /// An Observation at `time` with `result`, served with the `FeatureOfInterest` `feature`.
+    fn observation_at(id: i64, time: &str, result: f64, feature: Value) -> Value {
+        let mut observation = observation(id, time, result);
+        observation["FeatureOfInterest"] = feature;
+        observation
+    }
+
+    #[test]
+    fn a_range_snapshot_of_a_moving_thing_gives_each_reading_its_own_feature() {
+        let stops = [[5.4797, 51.4433], [5.4812, 51.4402], [5.4870, 51.4381]];
+        let mut lines = vec![datastream(json!(56776), "pm10", rivm_thing(), Value::Null)];
+        lines.extend(stops.iter().zip(1..).map(|(stop, id)| {
+            let feature = feature_of_interest(4710 + id, "application/geo+json", point(*stop));
+            json!({"observation": observation_at(id, &format!("2026-11-12T0{id}:00:00Z"), 1.0, feature), "datastream": 56776})
+        }));
+
+        let (records, losses) = read(&snapshot("range", &lines));
+
+        let features: Vec<&Value> = records
+            .iter()
+            .map(|record| &record["readings"]["pm10"]["featureOfInterest"]["feature"])
+            .collect();
+        assert_eq!(features, stops.map(point).iter().collect::<Vec<_>>());
+        assert_eq!(
+            records[0]["readings"]["pm10"]["featureOfInterest"],
+            json!({"id": 4711, "name": "stop 4711", "feature": point(stops[0])})
+        );
+        assert!(
+            records
+                .iter()
+                .all(|record| record["location"] == json!({"type": "Point", "coordinates": [5.608, 51.313]})),
+            "the record's location stays the Thing's"
+        );
+        assert_eq!(losses, SensorThingsLosses::default());
+    }
+
+    #[test]
+    fn a_latest_snapshot_gives_each_newest_reading_its_feature() {
+        let feature = feature_of_interest(4711, "application/geo+json", point([5.4797, 51.4433]));
+        let text = snapshot(
+            "latest",
+            &[
+                datastream(
+                    json!(56776),
+                    "pm10",
+                    rivm_thing(),
+                    json!([observation_at(1, "2026-11-12T10:00:00Z", 21.4, feature)]),
+                ),
+                datastream(json!(56775), "pm25_kal", rivm_thing(), json!([observation(2, "2026-11-12T10:00:00Z", 9.1)])),
+            ],
+        );
+
+        let (records, _) = read(&text);
+
+        assert_eq!(records[0]["readings"]["pm10"]["featureOfInterest"]["feature"], point([5.4797, 51.4433]));
+        assert!(
+            !records[0]["readings"]["pm25_kal"].as_object().unwrap().contains_key("featureOfInterest"),
+            "a newest Observation served without its feature has none"
+        );
+    }
+
+    #[test]
+    fn a_feature_of_interest_whose_feature_is_a_geojson_feature_gives_its_geometry() {
+        let feature = feature_of_interest(
+            4711,
+            "application/geo+json",
+            json!({"type": "Feature", "geometry": point([5.4797, 51.4433]), "properties": {"stop": "Stationsplein"}}),
+        );
+        let text = snapshot(
+            "range",
+            &[
+                datastream(json!(5), "pm10", rivm_thing(), Value::Null),
+                json!({"observation": observation_at(1, "2026-11-12T09:00:00Z", 1.0, feature), "datastream": 5}),
+            ],
+        );
+
+        let (records, _) = read(&text);
+
+        assert_eq!(records[0]["readings"]["pm10"]["featureOfInterest"]["feature"], point([5.4797, 51.4433]));
+    }
+
+    #[test]
+    fn a_feature_of_interest_in_another_encoding_has_no_feature_and_is_counted() {
+        let pdf = |id: i64| feature_of_interest(id, "application/pdf", json!("https://h.example/route.pdf"));
+        let text = snapshot(
+            "range",
+            &[
+                datastream(json!(5), "pm10", rivm_thing(), Value::Null),
+                json!({"observation": observation_at(1, "2026-11-12T08:00:00Z", 1.0, pdf(4711)), "datastream": 5}),
+                json!({"observation": observation_at(2, "2026-11-12T09:00:00Z", 2.0, pdf(4712)), "datastream": 5}),
+            ],
+        );
+
+        let (records, losses) = read(&text);
+
+        assert_eq!(records.len(), 2);
+        assert_eq!(records[0]["readings"]["pm10"]["featureOfInterest"], json!({"id": 4711, "name": "stop 4711"}));
+        assert_eq!(
+            losses.unreadable_features_of_interest().named(),
+            [UnreadableFeatureOfInterest {
+                feature: FeatureOfInterestName::Id(EntityId::Integer(4711)),
+                encoding: GeometryEncoding::Stated("application/pdf".into()),
+            }]
+        );
+        assert_eq!(losses.unreadable_features_of_interest().total(), 2);
+    }
+
+    #[test]
+    fn a_snapshot_without_features_of_interest_reads_as_before() {
+        let text = snapshot(
+            "range",
+            &[
+                datastream(json!(5), "pm10", rivm_thing(), Value::Null),
+                json!({"observation": {"@iot.id": 1, "phenomenonTime": "2026-11-12T09:00:00Z", "result": 1.0, "FeatureOfInterest@iot.navigationLink": "https://api-samenmeten.rivm.nl/v1.0/Observations(1)/FeatureOfInterest"}, "datastream": 5}),
+            ],
+        );
+
+        let (records, losses) = read(&text);
+
+        assert_eq!(
+            records[0]["readings"]["pm10"].as_object().unwrap().keys().collect::<Vec<_>>(),
+            ["id", "result", "time", "phenomenonTime", "unit", "datastream", "observedProperty"]
+        );
+        assert_eq!(losses, SensorThingsLosses::default());
     }
 
     #[test]
