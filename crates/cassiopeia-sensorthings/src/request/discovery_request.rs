@@ -1,7 +1,13 @@
 use crate::{
     request::{query_value::query_value, resource_request::resource_request},
     service_root::ServiceRoot,
-    settings::{features_of_interest::FeaturesOfInterest, sensorthings_settings::SensorThingsSettings},
+    settings::{
+        entity_filter::EntityFilter,
+        features_of_interest::FeaturesOfInterest,
+        page_size::PageSize,
+        sensorthings_settings::SensorThingsSettings,
+        things::Things,
+    },
     stream_kind::StreamKind,
 };
 use url::Url;
@@ -20,6 +26,13 @@ const NEWEST_OBSERVATION_WITH_FEATURE: &str = "Observations($orderby=phenomenonT
 /// The order every discovery pages in, so a `$skip`-built page follows the one before it.
 const BY_ID: &str = "id%20asc";
 
+/// The collection a server serves its Things in (OGC 18-088 section 9.2.1).
+const THINGS: &str = "Things";
+
+/// What a Things discovery expands on every Thing: its Locations, which a record's `location` and
+/// `locations` are read from (OGC 18-088 section 8.2.2).
+const LOCATIONS: &str = "Locations";
+
 /// The request that lists every selected data stream of `kind` with its Thing, the Thing's
 /// Locations, what it observes and its `Sensor`, without Observations, in id order, `pageSize` a
 /// page.
@@ -27,7 +40,7 @@ const BY_ID: &str = "id%20asc";
 /// Query parameters are written as in [`latest_discovery_request`].
 #[must_use]
 pub fn metadata_discovery_request(root: &ServiceRoot, settings: &SensorThingsSettings, kind: StreamKind) -> Url {
-    discovery_request(root, settings, kind, metadata_expand(kind))
+    stream_discovery_request(root, settings, kind, metadata_expand(kind))
 }
 
 /// The request a latest read starts with for the data streams of `kind`, and the only one it sends
@@ -43,7 +56,24 @@ pub fn latest_discovery_request(root: &ServiceRoot, settings: &SensorThingsSetti
         FeaturesOfInterest::Requested => NEWEST_OBSERVATION_WITH_FEATURE,
         FeaturesOfInterest::Omitted => NEWEST_OBSERVATION,
     };
-    discovery_request(root, settings, kind, &format!("{},{newest}", metadata_expand(kind)))
+    stream_discovery_request(root, settings, kind, &format!("{},{newest}", metadata_expand(kind)))
+}
+
+/// The request a latest read that lists Things sends after its data stream discoveries: every Thing
+/// `things` selects with its Locations, in id order, `pageSize` a page, or `None` when the settings
+/// list no Thing beyond those of the data streams read.
+///
+/// A Thing may have no data stream (OGC 18-088 section 8.2.1, Table 4), so a read that finds Things
+/// through their data streams never finds it. Query parameters are written as in
+/// [`latest_discovery_request`], and `$filter` only when `things` selects Things by an expression.
+#[must_use]
+pub fn things_discovery_request(root: &ServiceRoot, settings: &SensorThingsSettings) -> Option<Url> {
+    let filter = match settings.things() {
+        Things::OfDatastreams => return None,
+        Things::Every => None,
+        Things::Filtered(filter) => Some(filter),
+    };
+    Some(discovery_request(root, THINGS, filter, LOCATIONS, settings.page_size()))
 }
 
 /// What a metadata discovery expands on every data stream of `kind`: its Thing with the Thing's
@@ -65,22 +95,21 @@ const fn metadata_expand(kind: StreamKind) -> &'static str {
 
 /// The request of the collection of `kind` under `root` that selects as `settings` say and expands
 /// `expand`.
-fn discovery_request(root: &ServiceRoot, settings: &SensorThingsSettings, kind: StreamKind, expand: &str) -> Url {
-    let filter = settings
-        .filter(kind)
-        .map(|filter| format!("$filter={}&", query_value(filter.as_str())))
-        .unwrap_or_default();
-    resource_request(
-        root,
-        kind.collection(),
-        &format!("{filter}$expand={expand}&$orderby={BY_ID}&$top={}", settings.page_size()),
-    )
+fn stream_discovery_request(root: &ServiceRoot, settings: &SensorThingsSettings, kind: StreamKind, expand: &str) -> Url {
+    discovery_request(root, kind.collection(), settings.filter(kind), expand, settings.page_size())
+}
+
+/// The request of the collection `collection` under `root` that selects the entities `filter`
+/// matches, every one when it is `None`, and expands `expand`, in id order, `page_size` a page.
+fn discovery_request(root: &ServiceRoot, collection: &str, filter: Option<&EntityFilter>, expand: &str, page_size: PageSize) -> Url {
+    let filter = filter.map(|filter| format!("$filter={}&", query_value(filter.as_str()))).unwrap_or_default();
+    resource_request(root, collection, &format!("{filter}$expand={expand}&$orderby={BY_ID}&$top={page_size}"))
 }
 
 #[cfg(test)]
 mod tests {
     use crate::{
-        request::discovery_request::{latest_discovery_request, metadata_discovery_request},
+        request::discovery_request::{latest_discovery_request, metadata_discovery_request, things_discovery_request},
         service_root::ServiceRoot,
         settings::sensorthings_settings::SensorThingsSettings,
         stream_kind::StreamKind,
@@ -230,5 +259,45 @@ mod tests {
             request.as_str(),
             "https://h.example/v1.1/MultiDatastreams?$expand=Thing/Locations,ObservedProperties,Sensor,Observations($orderby=phenomenonTime%20desc;$top=1;$expand=FeatureOfInterest)&$orderby=id%20asc&$top=1000"
         );
+    }
+
+    #[test]
+    fn every_thing_is_discovered_with_its_locations() {
+        let request = things_discovery_request(&root("https://h.example/v1.1"), &settings(r#"{"things": true}"#));
+
+        assert_eq!(
+            request.map(String::from).as_deref(),
+            Some("https://h.example/v1.1/Things?$expand=Locations&$orderby=id%20asc&$top=1000")
+        );
+    }
+
+    #[test]
+    fn a_things_filter_leads_the_things_query() {
+        let request = things_discovery_request(&root("https://h.example/v1.1"), &settings(r#"{"things": "startswith(name,'ILM_')"}"#));
+
+        assert_eq!(
+            request.map(String::from).as_deref(),
+            Some("https://h.example/v1.1/Things?$filter=startswith(name,%27ILM_%27)&$expand=Locations&$orderby=id%20asc&$top=1000")
+        );
+    }
+
+    #[test]
+    fn the_things_discovery_pages_as_every_discovery_and_ignores_the_data_stream_filters() {
+        let request = things_discovery_request(
+            &root("http://localhost:18080/FROST-Server/v1.1/"),
+            &settings(r#"{"things": true, "datastreams": "endswith(name,'-pm10')", "multiDatastreams": true, "pageSize": 2}"#),
+        );
+
+        assert_eq!(
+            request.map(String::from).as_deref(),
+            Some("http://localhost:18080/FROST-Server/v1.1/Things?$expand=Locations&$orderby=id%20asc&$top=2")
+        );
+    }
+
+    #[test]
+    fn no_thing_is_discovered_unless_the_settings_list_things() {
+        for json in ["{}", r#"{"things": false}"#] {
+            assert_eq!(things_discovery_request(&root("https://h.example/v1.1"), &settings(json)), None, "{json}");
+        }
     }
 }

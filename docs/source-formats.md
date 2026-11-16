@@ -358,7 +358,7 @@ Listing both a collection and one nested in it yields records from both, in docu
 
 ## SensorThings API
 
-Cassiopeia reads [OGC SensorThings API](https://www.ogc.org/standards/sensorthings/) data, versions 1.0 and 1.1, from a server or from a **snapshot file**: the data streams, Datastreams and MultiDatastreams, the Observations, and the HistoricalLocations of their Things, that one read of a SensorThings server collected, written as JSON Lines. A server serves its readings as nested JSON whose shape changes with the request, so every read of a server is written into a snapshot first, and the ingestor joins each reading with its Thing, Location, data stream, ObservedProperty and Sensor. A mapping then reads one record shape, whichever server the readings came from, and whether they were read from the server or replayed from a file.
+Cassiopeia reads [OGC SensorThings API](https://www.ogc.org/standards/sensorthings/) data, versions 1.0 and 1.1, from a server or from a **snapshot file**: the data streams, Datastreams and MultiDatastreams, the Observations, the HistoricalLocations of their Things, and the Things a latest read lists by themselves, that one read of a SensorThings server collected, written as JSON Lines. A server serves its readings as nested JSON whose shape changes with the request, so every read of a server is written into a snapshot first, and the ingestor joins each reading with its Thing, Location, data stream, ObservedProperty and Sensor. A mapping then reads one record shape, whichever server the readings came from, and whether they were read from the server or replayed from a file.
 
 ### Reading a server
 
@@ -388,7 +388,7 @@ Each cycle writes what it read into a snapshot whose `serviceRoot` is the root a
 {root}/Datastreams?$filter={datastreams}&$expand=Thing/Locations,ObservedProperty,Sensor,Observations($orderby=phenomenonTime%20desc;$top=1)&$orderby=id%20asc&$top={pageSize}
 ~~~
 
-It selects every Datastream with its Thing, the Thing's Locations, its ObservedProperty, its Sensor, and its newest Observation, in id order. `$filter` is sent only when `datastreams` is set. Its value is sent as written, percent-encoded, with a space as `%20` and `'` as `%27`. The Locations are expanded by path, `Thing/Locations`, because some servers ignore an `$expand` nested in parentheses, such as `Thing($expand=Locations)`. With `featuresOfInterest: true`, the newest Observation is also expanded with its FeatureOfInterest (see [Features of interest](#features-of-interest)). A read that selects MultiDatastreams sends the same request to the MultiDatastreams collection as well (see [MultiDatastreams](#multidatastreams)).
+It selects every Datastream with its Thing, the Thing's Locations, its ObservedProperty, its Sensor, and its newest Observation, in id order. `$filter` is sent only when `datastreams` is set. Its value is sent as written, percent-encoded, with a space as `%20` and `'` as `%27`. The Locations are expanded by path, `Thing/Locations`, because some servers ignore an `$expand` nested in parentheses, such as `Thing($expand=Locations)`. With `featuresOfInterest: true`, the newest Observation is also expanded with its FeatureOfInterest (see [Features of interest](#features-of-interest)). A read that selects MultiDatastreams sends the same request to the MultiDatastreams collection as well (see [MultiDatastreams](#multidatastreams)). With `things`, a latest read then lists Things by themselves, which finds a Thing that has no data stream (see [Things without data streams](#things-without-data-streams)).
 
 **Paging.** A server answers with pages of at most `pageSize` items. Every page but the last links to the next one with `@iot.nextLink`. Cassiopeia follows each link as the server wrote it, resolved against the page it came from, and adds nothing to it (OGC 18-088 section 9.3.3.6). The input fails without sending the request:
 
@@ -537,6 +537,12 @@ A MultiDatastream is a `multiDatastream` line, with its `ObservedProperties`, `u
 {"multiDatastream":{"@iot.id":4,"name":"ws-7","unitOfMeasurements":[{"symbol":"m/s"},{"symbol":"deg"}],"multiObservationDataTypes":["http://www.opengis.net/def/observationType/OGC-OM/2.0/OM_Measurement","http://www.opengis.net/def/observationType/OGC-OM/2.0/OM_Measurement"],"Thing":{"@iot.id":7},"ObservedProperties":[{"@iot.id":11,"name":"windSpeed"},{"@iot.id":12,"name":"windDirection"}]}}
 ~~~
 
+In a `latest` read with `things`, every Thing the read listed follows the data streams, one per line, as the server served it with its Locations:
+
+~~~json
+{"thing":{"@iot.id":12520,"name":"ILM_I75","description":"ILM_I75","Locations":[{"@iot.id":36190,"encodingType":"application/vnd.geo+json","location":{"type":"Point","coordinates":[5.61,51.32]}}]}}
+~~~
+
 In a `range` or `incremental` read, every Observation follows the data streams, one per line, with the id of its data stream under the member of its kind, grouped by data stream:
 
 ~~~json
@@ -554,7 +560,7 @@ A read with `featuresOfInterest: true` keeps each FeatureOfInterest inside its O
 
 Each data stream keeps its Sensor inside its line, as the server served it. A snapshot recorded without Sensors still reads, and its readings have no `sensor`.
 
-The source fails when its first line is no header, the header names another snapshot format or a version its service root does not end with, a line is no JSON object of these kinds, a data stream line of either kind follows an observation line or a historicalLocation line, or an observation line follows a historicalLocation line. A snapshot without MultiDatastream lines reads as one recorded before MultiDatastreams were read, and one without historicalLocation lines as one recorded before HistoricalLocations were read. The error names the line. A snapshot holds no request header or credential, so it can be shared or kept as a test fixture.
+The source fails when its first line is no header, the header names another snapshot format or a version its service root does not end with, a line is no JSON object of these kinds, a data stream line of either kind follows a thing line, an observation line or a historicalLocation line, a thing line follows an observation line or a historicalLocation line, or an observation line follows a historicalLocation line. A `range` or `incremental` snapshot with a thing line fails too, because only a latest read lists Things, and so does a `latest` snapshot with an observation line or a historicalLocation line. A snapshot without MultiDatastream lines reads as one recorded before MultiDatastreams were read, one without historicalLocation lines as one recorded before HistoricalLocations were read, and one without thing lines as one recorded before Things were listed. The error names the line. A snapshot holds no request header or credential, so it can be shared or kept as a test fixture.
 
 A snapshot is detected from its header line, which must end within the file's first 4 KiB, so it needs no declared format. The snapshot check runs before the JSON check, and a SensorThings response such as `{"value":[...]}` has no header, so it is still read as JSON. A file declared `format: "sensorthings"` whose first line is no header fails, with an error that quotes a header.
 
@@ -605,10 +611,10 @@ Ids keep the JSON type the server sent: an integer id stays a number and a text 
 
 ### Records per read
 
-- `latest`: one record per Thing, in the order the snapshot first names it. Its `readings` hold one entry for each of its data streams with an Observation. A Thing whose data streams have none is a record without `readings`.
+- `latest`: one record per Thing, in the order the snapshot first names it. Its `readings` hold one entry for each of its data streams with an Observation. A Thing whose data streams have none is a record without `readings`, and so is a Thing that only a thing line names, after the Things the data streams name (see [Things without data streams](#things-without-data-streams)).
 - `range` and `incremental`: one record per Observation. An Observation of a Datastream gives exactly one entry in `readings`, and an Observation of a MultiDatastream one entry per value, so values measured together stay in one record. A record whose Observation gives no reading is dropped. With `historicalLocations: true`, each HistoricalLocation then gives one record of its Thing (see [Historical locations](#historical-locations)).
 
-The snapshot is read as a stream: the data streams are indexed, and each Observation and each HistoricalLocation becomes a record without being held, so a snapshot of any length is read in bounded memory.
+The snapshot is read as a stream: the data streams and the Things a latest read listed are indexed, and each Observation and each HistoricalLocation becomes a record without being held, so a snapshot of any length is read in bounded memory.
 
 A record of a `range` or `incremental` read holds the readings of one Observation, so several records describe one Thing. Without a `temporal` setting, the output keeps one record per entity and mapping, so all but one reading of each Thing would be lost. Such a snapshot is therefore read only into output with `output.temporal.representation: "series"`, which keeps every reading of each Thing as one temporal entity (see [Temporal output](output.md#temporal-output)). Without it, the run fails with `run-misconfigured` before the snapshot's first record is read, and the error names the snapshot, its read, and the setting it needs. A range or incremental read of a server without it fails when the run is built, before any request, and the error names the service root. A `latest` snapshot is read into every output.
 
@@ -785,6 +791,65 @@ location: {
 ~~~
 
 A record of an Observation has no `historicalLocation`, so this attribute is left out of it, and the attributes that read `readings` are left out of a HistoricalLocation's record. Each record's entity is validated on its own, so a schema that requires `location`, as `AirQualityObserved`'s does, finds it missing on the entity of every Observation's record.
+
+### Things without data streams
+
+A latest read finds Things through their data streams: it gives one record for each Thing that has at least one selected data stream. A Thing may have none (OGC 18-088 section 8.2.1), such as a station installed before its sensors are connected, or one whose data streams were removed, so a mapping that keeps an inventory of a server's stations misses it. Set `things` to list Things by themselves:
+
+~~~json5
+sensorthings: {
+    datastreams: "startswith(name,'ILM_')",
+    things: "startswith(name,'ILM_')",
+},
+~~~
+
+| `things` | Lists |
+| --- | --- |
+| absent or `false` | No Thing beyond the Things of the selected data streams. The default. |
+| `true` | Every Thing. |
+| an OData `$filter` expression over Things | The Things it matches, such as `startswith(name,'ILM_')`, sent and checked as `datastreams` is. |
+
+Only a latest read lists Things. A range or incremental read gives one record per Observation, and a Thing without data streams has none, so `things: true` or an expression with a range or incremental read is refused when the manifest loads, and the error names the setting and the read.
+
+**The request.** After its data stream requests, a latest read lists the Things, each with its Locations, in id order:
+
+~~~text
+{root}/Things?$filter={things}&$expand=Locations&$orderby=id%20asc&$top={pageSize}
+~~~
+
+`$filter` is sent only for an expression, percent-encoded as a `datastreams` filter is. The request is followed page by page under the rules of [Reading a server](#reading-a-server): `delay` spaces it from the requests before it, and `limits.pages` stops it, keeping the Things it listed, with one `collect-limit-reached` warning that names the next link. Without `things`, no Things request is sent. RIVM Samen Meten holds tens of thousands of Things, so select them by an expression there.
+
+**The snapshot.** Each Thing listed is a `thing` line after the data stream lines, as the server served it with its Locations (see [The snapshot file](#the-snapshot-file)).
+
+**The records.** A Thing a data stream line names gives the record it gives without `things`, once, whether or not a thing line names it too. Each other Thing listed gives one record, with `server`, `thing`, `location` and `locations`, and without `readings`, after the records of the Things the data streams name, in the order of the thing lines. Its `location` and `locations` are read from its Locations as any Thing's are (see [Locations](#locations)). The ids, names and places are illustrative:
+
+~~~json
+{
+    "server": { "url": "https://h.example/v1.1", "host": "h.example", "version": "v1.1" },
+    "thing": { "id": 2, "name": "Kennedylaan", "description": "Air quality station Kennedylaan" },
+    "location": { "type": "Point", "coordinates": [5.4812, 51.4402] },
+    "locations": [
+        { "id": 201, "encodingType": "application/geo+json", "location": { "type": "Point", "coordinates": [5.4812, 51.4402] } }
+    ]
+}
+~~~
+
+**Mapping.** A mapping that keeps an inventory of a server's stations reads only the Thing's parts, so a Thing without data streams gives the same entity as any other:
+
+~~~json5
+{
+    version: "v4",
+    dataModel: "dataModel.Device/Device",
+    identity: { entityName: "sta-{{ server.host }}-{{ thing.id }}" },
+    attributes: {
+        name: { source: "{{ thing.name }}" },
+        description: { source: "{{ thing.description }}" },
+        location: { type: "GeoProperty", source: "{{ location }}" },
+    },
+}
+~~~
+
+A mapping that also writes readings leaves their attributes out of the entity of a Thing without data streams, and a schema that requires one, as `AirQualityObserved` requires `dateObserved`, finds it missing. [Listing a server's readings](#listing-a-servers-readings) lists readings, which a Thing without data streams has none of, so it is the same with or without `things`.
 
 ### Sensors
 

@@ -11,7 +11,7 @@ use crate::{
         range_read::read_range,
         snapshot_failure::unwritable,
         stream_discovery::discover_streams,
-        traversal::TraversalEnd,
+        traversal::{TraversalEnd, traverse},
         unread_check::UnreadCheck,
     },
 };
@@ -19,15 +19,20 @@ use cassiopeia_common::{channel::ChannelSender, cycle_start::CycleStart, format:
 use cassiopeia_encoding_detection::encoding_hint::EncodingHint;
 use cassiopeia_ir::payload::{CollectedPayload, FilePayload};
 use cassiopeia_sensorthings::{
-    request::discovery_request::latest_discovery_request,
+    request::discovery_request::{latest_discovery_request, things_discovery_request},
     service::SensorThingsService,
     settings::{multi_datastreams::MultiDatastreams, read_mode::ReadMode},
-    snapshot::{header::SnapshotHeader, line::DatastreamLine, writer::SnapshotWriter},
+    snapshot::{
+        header::SnapshotHeader,
+        line::{DatastreamLine, ThingLine},
+        writer::{SnapshotWriter, ThingWriter},
+    },
 };
 use std::{
     env,
     fs::{self, File},
     io::{BufWriter, Write},
+    ops::ControlFlow,
     path::Path,
     sync::atomic::AtomicBool,
 };
@@ -154,8 +159,8 @@ fn write_snapshot(
 }
 
 /// Reads the newest reading of every data stream `service` selects, its Datastreams and then its
-/// `MultiDatastreams`, into `snapshot`, after its header, and returns the collection limits that
-/// stopped a discovery, if any did.
+/// `MultiDatastreams`, into `snapshot`, after its header, then the Things it lists by themselves,
+/// and returns the collection limits that stopped a discovery, if any did.
 fn read_latest<W: Write>(
     reader: &mut PageReader,
     service: &SensorThingsService,
@@ -165,14 +170,44 @@ fn read_latest<W: Write>(
     let ends = discover_streams(reader, service, latest_discovery_request, |kind, served| {
         snapshot.datastream(&DatastreamLine::new(kind, served)).map_err(unwritable(path))
     })?;
-    snapshot.finish().map_err(unwritable(path))?;
     let mut warnings = CollectionWarnings::default();
     for (_, end) in ends {
         if let TraversalEnd::LimitReached(limit) = end {
             warnings.limit_reached(limit);
         }
     }
+    let mut things = snapshot.into_things();
+    read_things(reader, service, &mut things, path, &mut warnings)?;
+    things.finish().map_err(unwritable(path))?;
     Ok(warnings)
+}
+
+/// Writes every Thing `service`'s `things` setting lists into `things`, each with its Locations, in
+/// the order the server sent them, and records a page limit that stops the read in `warnings`.
+///
+/// The Things discovery comes after the data stream discoveries, so a snapshot keeps one order: its
+/// header, its data streams, then its Things. It is followed under the paging rules, the pacing and
+/// `limits.pages` of every request of the read. A setting that lists no Thing sends nothing.
+fn read_things<W: Write>(
+    reader: &mut PageReader,
+    service: &SensorThingsService,
+    things: &mut ThingWriter<W>,
+    path: &Path,
+    warnings: &mut CollectionWarnings,
+) -> Result<(), CollectorError> {
+    let Some(request) = things_discovery_request(service.root(), service.settings()) else {
+        return Ok(());
+    };
+    let end = traverse(reader, request, service.settings().limits().pages(), |served| {
+        things
+            .thing(&ThingLine::new(served))
+            .map(|()| ControlFlow::Continue(()))
+            .map_err(unwritable(path))
+    })?;
+    if let TraversalEnd::LimitReached(limit) = end {
+        warnings.limit_reached(limit);
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -541,6 +576,161 @@ mod tests {
         assert_eq!(path.extension().and_then(|extension| extension.to_str()), Some("jsonl"));
         assert_eq!(source.to_string(), format!("{}/v1.1", server.url()));
         assert!(matches!(source, Input::Remote(_)));
+    }
+
+    /// The path and query of the request that lists every Thing.
+    const THINGS: &str = "/v1.1/Things?$expand=Locations&$orderby=id%20asc&$top=1000";
+
+    /// A Thing as a server lists it, with one `GeoJSON` Location.
+    fn thing(id: u64, name: &str) -> Value {
+        json!({
+            "@iot.id": id,
+            "name": name,
+            "Locations": [{"@iot.id": id * 10, "encodingType": "application/geo+json", "location": {"type": "Point", "coordinates": [5.61, 51.32]}}],
+        })
+    }
+
+    #[test]
+    fn a_latest_read_that_lists_things_writes_them_after_the_data_streams() {
+        let mut server = mockito::Server::new();
+        let mocks = [
+            serve(&mut server, LATEST, page(&[7], None)),
+            serve(
+                &mut server,
+                THINGS,
+                json!({"value": [thing(1, "Stationsplein"), thing(2, "Kennedylaan")]}).to_string(),
+            ),
+        ];
+
+        let (result, payloads) = collect(collector(&server, r#"{"things": true}"#, RequestHeaders::default(), &RUNNING));
+
+        assert_eq!(result.unwrap(), CollectionWarnings::default());
+        mocks.iter().for_each(Mock::assert);
+        let lines = snapshot_lines(payloads);
+        assert_eq!(
+            lines[1..],
+            [
+                json!({"datastream": {"@iot.id": 7, "name": "stream 7"}}),
+                json!({"thing": thing(1, "Stationsplein")}),
+                json!({"thing": thing(2, "Kennedylaan")}),
+            ]
+        );
+    }
+
+    #[test]
+    fn a_things_filter_selects_the_things_listed() {
+        let mut server = mockito::Server::new();
+        let mocks = [
+            serve(&mut server, LATEST, page(&[], None)),
+            serve(
+                &mut server,
+                "/v1.1/Things?$filter=startswith(name,%27ILM_%27)&$expand=Locations&$orderby=id%20asc&$top=1000",
+                json!({"value": [thing(12520, "ILM_I75")]}).to_string(),
+            ),
+        ];
+
+        let (result, payloads) = collect(collector(
+            &server,
+            r#"{"things": "startswith(name,'ILM_')"}"#,
+            RequestHeaders::default(),
+            &RUNNING,
+        ));
+
+        result.unwrap();
+        mocks.iter().for_each(Mock::assert);
+        assert_eq!(snapshot_lines(payloads)[1..], [json!({"thing": thing(12520, "ILM_I75")})]);
+    }
+
+    #[test]
+    fn a_latest_read_without_things_lists_none() {
+        for settings in ["{}", r#"{"things": false}"#] {
+            let mut server = mockito::Server::new();
+            let discovery = serve(&mut server, LATEST, page(&[7], None));
+            let untouched = server.mock("GET", Matcher::Regex("^/v1.1/Things".to_owned())).expect(0).create();
+
+            let (result, payloads) = collect(collector(&server, settings, RequestHeaders::default(), &RUNNING));
+
+            result.unwrap();
+            discovery.assert();
+            untouched.assert();
+            assert_eq!(snapshot_lines(payloads).len(), 2, "{settings}");
+        }
+    }
+
+    #[test]
+    fn the_page_limit_stops_the_things_listing_with_a_warning() {
+        let mut server = mockito::Server::new();
+        let next = format!("{}/v1.1/Things?$skip=2", server.url());
+        let mocks = [
+            serve(
+                &mut server,
+                "/v1.1/Datastreams?$expand=Thing/Locations,ObservedProperty,Sensor,Observations($orderby=phenomenonTime%20desc;$top=1)&$orderby=id%20asc&$top=2",
+                page(&[], None),
+            ),
+            serve(
+                &mut server,
+                "/v1.1/Things?$expand=Locations&$orderby=id%20asc&$top=2",
+                json!({"value": [thing(1, "Stationsplein"), thing(2, "Kennedylaan")], "@iot.nextLink": next}).to_string(),
+            ),
+        ];
+        let untouched = server.mock("GET", "/v1.1/Things?$skip=2").expect(0).create();
+
+        let (result, payloads) = collect(collector(
+            &server,
+            r#"{"things": true, "pageSize": 2, "limits": {"pages": 1}}"#,
+            RequestHeaders::default(),
+            &RUNNING,
+        ));
+
+        mocks.iter().for_each(Mock::assert);
+        untouched.assert();
+        assert_eq!(
+            result.unwrap().limits_reached(),
+            [LimitReached::new(
+                root(&server),
+                CollectLimit::Pages(PageLimit::try_from(1).unwrap()),
+                Url::parse(&next).unwrap(),
+            )]
+        );
+        assert_eq!(
+            snapshot_lines(payloads)[1..],
+            [json!({"thing": thing(1, "Stationsplein")}), json!({"thing": thing(2, "Kennedylaan")})]
+        );
+    }
+
+    #[test]
+    fn a_things_listing_follows_its_next_links_after_every_data_stream() {
+        let mut server = mockito::Server::new();
+        let url = server.url();
+        let mocks = [
+            serve(&mut server, LATEST, page(&[7], None)),
+            serve(&mut server, MULTI_LATEST, page(&[4], None)),
+            serve(
+                &mut server,
+                THINGS,
+                json!({"value": [thing(1, "Stationsplein")], "@iot.nextLink": format!("{url}/v1.1/Things?$skip=1")}).to_string(),
+            ),
+            serve(&mut server, "/v1.1/Things?$skip=1", json!({"value": [thing(2, "Kennedylaan")]}).to_string()),
+        ];
+
+        let (result, payloads) = collect(collector(
+            &server,
+            r#"{"things": true, "multiDatastreams": true}"#,
+            RequestHeaders::default(),
+            &RUNNING,
+        ));
+
+        result.unwrap();
+        mocks.iter().for_each(Mock::assert);
+        assert_eq!(
+            snapshot_lines(payloads)[1..],
+            [
+                json!({"datastream": {"@iot.id": 7, "name": "stream 7"}}),
+                json!({"multiDatastream": {"@iot.id": 4, "name": "stream 4"}}),
+                json!({"thing": thing(1, "Stationsplein")}),
+                json!({"thing": thing(2, "Kennedylaan")}),
+            ]
+        );
     }
 
     /// The path and query of the latest discovery of every `MultiDatastream`.

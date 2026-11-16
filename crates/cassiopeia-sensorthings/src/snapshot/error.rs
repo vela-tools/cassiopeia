@@ -22,7 +22,7 @@ pub enum SnapshotError {
     },
 
     /// A line is no JSON object of a kind the snapshot holds.
-    #[error("line {line} of the snapshot is no header, data stream, observation or historicalLocation line")]
+    #[error("line {line} of the snapshot is no header, data stream, thing, observation or historicalLocation line")]
     Malformed {
         /// The line's number.
         line: LineNumber,
@@ -31,11 +31,11 @@ pub enum SnapshotError {
         source: serde_json::Error,
     },
 
-    /// A line follows a line of a kind that comes after its own: a data stream line follows an
-    /// observation line or a historicalLocation line, or an observation line follows a
-    /// historicalLocation line.
+    /// A line follows a line of a kind that comes after its own: a data stream line follows a thing
+    /// line, an observation line or a historicalLocation line, a thing line follows an observation
+    /// line or a historicalLocation line, or an observation line follows a historicalLocation line.
     #[error(
-        "line {line} of the snapshot is {kind} line after {after} line, but every data stream line comes first, then every observation line, then every historicalLocation line"
+        "line {line} of the snapshot is {kind} line after {after} line, but every data stream line comes first, then every thing line, then every observation line, then every historicalLocation line"
     )]
     OrderViolation {
         /// The line's number.
@@ -66,6 +66,20 @@ mod tests {
         let error = SnapshotError::UnsupportedVersion { found: json!(2) };
 
         assert_eq!(error.to_string(), "snapshot version 2 is not supported: Cassiopeia reads snapshot version 1");
+    }
+
+    #[test]
+    fn a_data_stream_line_after_a_thing_line_names_both_kinds() {
+        let error = SnapshotError::OrderViolation {
+            line: LineNumber::FIRST.next().next(),
+            kind: LineKind::Datastream,
+            after: LineKind::Thing,
+        };
+
+        assert!(
+            error.to_string().starts_with("line 3 of the snapshot is a data stream line after a thing line"),
+            "{error}"
+        );
     }
 
     #[test]

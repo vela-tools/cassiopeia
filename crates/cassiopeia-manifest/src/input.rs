@@ -8,7 +8,7 @@ use cassiopeia_csv_dialect::statement::DialectStatement;
 use cassiopeia_sensorthings::{
     service::SensorThingsService,
     service_root::ServiceRoot,
-    settings::{historical_locations::HistoricalLocations, read_mode::ReadMode, sensorthings_settings::SensorThingsSettings},
+    settings::{historical_locations::HistoricalLocations, read_mode::ReadMode, sensorthings_settings::SensorThingsSettings, things::Things},
 };
 use getset::Getters;
 use serde::{Deserialize, Serialize};
@@ -198,8 +198,11 @@ impl From<ManifestInput> for ManifestInputRaw {
 /// and it must read nothing from the environment: credentials go in `headers`, which keeps every URL
 /// a read requests, logs and writes free of them. Without settings, a remote input reads with the
 /// defaults. A latest read reads no `HistoricalLocations`, since its record's `location` already is the
-/// Thing's last known place, so settings that ask one for them are refused. A local source is a snapshot, read as it was collected, so it takes no settings; and
-/// settings on an input of another format describe nothing the source is.
+/// Thing's last known place, so settings that ask one for them are refused. A range or an incremental
+/// read lists no Thing, since it gives one record per Observation and a Thing without data streams
+/// has none, so settings that ask one to list Things are refused. A local source is a snapshot, read
+/// as it was collected, so it takes no settings; and settings on an input of another format describe
+/// nothing the source is.
 fn sensorthings_service(
     source: &Input,
     format: Option<DataFormat>,
@@ -232,6 +235,13 @@ fn sensorthings_service(
             if let (ReadMode::Latest, HistoricalLocations::Requested) = (settings.read(), settings.historical_locations()) {
                 // The error names the URL, while the input keeps its own.
                 return Err(ManifestError::HistoricalLocationsOnLatestRead { url: Box::new(url.clone()) });
+            }
+            if let (ReadMode::Range(_) | ReadMode::Incremental(_), Things::Every | Things::Filtered(_)) = (settings.read(), settings.things()) {
+                return Err(ManifestError::ThingsOnObservationRead {
+                    // The error names the URL, while the input keeps its own.
+                    url: Box::new(url.clone()),
+                    read: settings.read().kind(),
+                });
             }
             Ok(Some(SensorThingsService::new(root, settings)))
         }
@@ -293,7 +303,7 @@ mod tests {
     use cassiopeia_csv_dialect::{dialect_byte::DialectByte, preamble::Preamble};
     use cassiopeia_sensorthings::{
         service_root::ServiceRootError,
-        settings::{historical_locations::HistoricalLocations, sensorthings_settings::SensorThingsSettings, stream_filter::StreamFilter},
+        settings::{entity_filter::EntityFilter, historical_locations::HistoricalLocations, sensorthings_settings::SensorThingsSettings, things::Things},
     };
     use pretty_assertions::assert_eq;
     use secrecy::SecretString;
@@ -484,7 +494,7 @@ mod tests {
         .unwrap();
 
         let settings = input.sensorthings().as_ref().unwrap().settings();
-        assert_eq!(settings.datastreams().as_ref().map(StreamFilter::as_str), Some("endswith(name,'-pm10')"));
+        assert_eq!(settings.datastreams().as_ref().map(EntityFilter::as_str), Some("endswith(name,'-pm10')"));
         assert_eq!(settings.page_size().get(), 10);
     }
 
@@ -530,6 +540,44 @@ mod tests {
                 HistoricalLocations::Requested,
                 "{read}"
             );
+        }
+    }
+
+    #[test]
+    fn things_are_refused_on_a_range_or_incremental_read_naming_the_setting() {
+        for (read, named) in [
+            (r#"{"range": {"last": "24h"}}"#, "'read: { range: ... }'"),
+            (r#"{"incremental": {"cursor": "c"}}"#, "'read: { incremental: ... }'"),
+        ] {
+            for things in ["true", r#""startswith(name,'ILM_')""#] {
+                let error = parse(&format!(
+                    r#"{{"source": "https://h.example/v1.1", "format": "sensorthings", "mapping": "m.json5", "sensorthings": {{"things": {things}, "read": {read}}}}}"#
+                ))
+                .unwrap_err();
+
+                assert!(
+                    error.to_string().starts_with(&format!(
+                        "The SensorThings input 'https://h.example/v1.1' sets 'things' with {named}; only a latest read lists Things"
+                    )),
+                    "{error}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn things_are_kept_on_a_latest_read_and_false_on_any_read() {
+        let latest =
+            parse(r#"{"source": "https://h.example/v1.1", "format": "sensorthings", "mapping": "m.json5", "sensorthings": {"things": true}}"#).unwrap();
+        assert_eq!(latest.sensorthings().as_ref().unwrap().settings().things(), &Things::Every);
+
+        for read in [r#"{"range": {"last": "24h"}}"#, r#"{"incremental": {"cursor": "c"}}"#] {
+            let input = parse(&format!(
+                r#"{{"source": "https://h.example/v1.1", "format": "sensorthings", "mapping": "m.json5", "sensorthings": {{"things": false, "read": {read}}}}}"#
+            ))
+            .unwrap();
+
+            assert_eq!(input.sensorthings().as_ref().unwrap().settings().things(), &Things::OfDatastreams, "{read}");
         }
     }
 

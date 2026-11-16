@@ -121,6 +121,15 @@ pub enum SensorThingsIngestError {
         line: LineNumber,
     },
 
+    /// A range or incremental snapshot holds a thing line, though only a latest read lists Things.
+    #[error(
+        "line {line} of the snapshot is a thing line, but only a latest snapshot lists Things: a range or incremental snapshot gives one record per Observation, and a Thing without data streams has none"
+    )]
+    UnexpectedThing {
+        /// The thing line's number.
+        line: LineNumber,
+    },
+
     /// A latest snapshot holds a historicalLocation line, though a latest read reads none.
     #[error(
         "line {line} of the snapshot is a historicalLocation line, but a latest snapshot holds none: its records' `location` is each Thing's last known place"
@@ -174,6 +183,20 @@ mod tests {
         assert_eq!(
             error.to_string(),
             "line 2 of the snapshot is a HistoricalLocation of Thing bus-12, which no data stream line holds"
+        );
+    }
+
+    #[test]
+    fn a_thing_line_of_a_range_or_incremental_snapshot_names_its_line() {
+        let error = SensorThingsIngestError::UnexpectedThing {
+            line: LineNumber::FIRST.next().next(),
+        };
+
+        assert!(
+            error
+                .to_string()
+                .starts_with("line 3 of the snapshot is a thing line, but only a latest snapshot lists Things"),
+            "{error}"
         );
     }
 

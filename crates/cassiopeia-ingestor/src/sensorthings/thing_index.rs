@@ -10,7 +10,10 @@ use crate::sensorthings::{
 };
 use cassiopeia_sensorthings::{
     entity_id::EntityId,
-    snapshot::{line::DatastreamLine, line_number::LineNumber},
+    snapshot::{
+        line::{DatastreamLine, ThingLine},
+        line_number::LineNumber,
+    },
     stream_id::StreamId,
     stream_kind::StreamKind,
 };
@@ -21,7 +24,8 @@ use std::collections::{HashMap, HashSet};
 /// The Thing members a record's `thing` carries.
 const THING_MEMBERS: [&str; 3] = ["name", "description", "properties"];
 
-/// A Thing of the snapshot with its data streams, as every record of it needs them.
+/// A Thing of the snapshot with its data streams, as every record of it needs them: none for a Thing
+/// only a thing line names.
 pub(super) struct IndexedThing {
     /// The record's `thing`: the Thing's id and members.
     pub(super) members: Map<String, Value>,
@@ -50,7 +54,7 @@ pub(super) struct IndexedReading {
     pub(super) parts: DatastreamParts,
 }
 
-/// The snapshot's Things and data streams, built from its data stream lines.
+/// The snapshot's Things and data streams, built from its data stream lines and its thing lines.
 pub(super) struct ThingIndex {
     /// The Things by id, in the order the snapshot first names them.
     things: IndexMap<EntityId, IndexedThing>,
@@ -58,7 +62,7 @@ pub(super) struct ThingIndex {
     positions: HashMap<StreamId, (usize, usize)>,
 }
 
-/// Collects the data stream lines of a snapshot into a [`ThingIndex`].
+/// Collects the data stream lines and the thing lines of a snapshot into a [`ThingIndex`].
 #[derive(Default)]
 pub(super) struct ThingIndexBuilder {
     /// The Things seen so far, in the order the snapshot first names them.
@@ -105,7 +109,7 @@ impl ThingIndexBuilder {
         if self.seen.contains(&id) {
             return Ok(());
         }
-        let Some(Value::Object(mut thing)) = served.remove("Thing") else {
+        let Some(Value::Object(thing)) = served.remove("Thing") else {
             return Err(SensorThingsIngestError::ThingMissing { line: number, datastream: id });
         };
         let thing_id = served_id(&thing, number, StaEntity::Thing)?;
@@ -123,14 +127,29 @@ impl ThingIndexBuilder {
         match self.things.entry(thing_id) {
             Entry::Occupied(entry) => entry.into_mut().datastreams.push(datastream),
             Entry::Vacant(entry) => {
-                let locations = thing_locations(thing.remove("Locations"), entry.key(), number, losses)?;
-                let members = record_members(thing, Some(entry.key()), &THING_MEMBERS);
-                entry.insert(PendingThing {
-                    members,
-                    locations,
-                    datastreams: vec![datastream],
-                });
+                let pending = PendingThing::read(thing, entry.key(), number, losses)?;
+                entry.insert(pending).datastreams.push(datastream);
             }
+        }
+        Ok(())
+    }
+
+    /// Adds the Thing of the thing line `line`, read as line `number`, without data streams, unless
+    /// the index holds it.
+    ///
+    /// Thing lines follow every data stream line, so a Thing a data stream line holds keeps what that
+    /// line gave it, as does a Thing an earlier thing line holds, and a Thing gives one record
+    /// whatever lines name it.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`SensorThingsIngestError`] when the Thing or one of its Locations has no readable id.
+    pub(super) fn add_thing(&mut self, line: ThingLine, number: LineNumber, losses: &mut SensorThingsLosses) -> Result<(), SensorThingsIngestError> {
+        let thing = line.into_thing();
+        let id = served_id(&thing, number, StaEntity::Thing)?;
+        if let Entry::Vacant(entry) = self.things.entry(id) {
+            let pending = PendingThing::read(thing, entry.key(), number, losses)?;
+            entry.insert(pending);
         }
         Ok(())
     }
@@ -187,6 +206,24 @@ impl ThingIndexBuilder {
             })
             .collect();
         ThingIndex { things, positions }
+    }
+}
+
+impl PendingThing {
+    /// The Thing `thing` served with the id `id` on line `number`, before its data streams are
+    /// added, with the Locations it was served with.
+    fn read(
+        mut thing: Map<String, Value>,
+        id: &EntityId,
+        number: LineNumber,
+        losses: &mut SensorThingsLosses,
+    ) -> Result<PendingThing, SensorThingsIngestError> {
+        let locations = thing_locations(thing.remove("Locations"), id, number, losses)?;
+        Ok(PendingThing {
+            members: record_members(thing, Some(id), &THING_MEMBERS),
+            locations,
+            datastreams: Vec::new(),
+        })
     }
 }
 

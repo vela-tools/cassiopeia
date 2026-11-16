@@ -34,8 +34,9 @@ use std::{fs::File, io::BufReader, sync::Arc};
 ///
 /// The header is read when the ingestor is built, so the read mode is known before any record is,
 /// and a run can refuse a snapshot its output cannot keep. The data stream lines are then indexed,
-/// since every record needs its Thing, units, `ObservedProperty` and `Sensor`, and the observation
-/// lines and the historicalLocation lines after them are streamed, never held.
+/// since every record needs its Thing, units, `ObservedProperty` and `Sensor`, as are the thing lines
+/// of a latest snapshot, and the observation lines and the historicalLocation lines after them are
+/// streamed, never held.
 pub struct SensorThingsIngestor {
     /// The snapshot's header.
     header: SnapshotHeader,
@@ -103,24 +104,10 @@ impl Ingestor for SensorThingsIngestor {
         let mut losses = losses.lock();
         let mut batches = RecordBatches::new(&sender, batch_size);
         let server = server_member(header.service_root());
+        let records = header.read().records();
 
-        let mut index = ThingIndexBuilder::default();
-        let mut first_record_line = None;
-        while let Some(line) = lines.next() {
-            let record_line = match line.map_err(SensorThingsIngestError::from)? {
-                SnapshotLine::Datastream(datastream) => {
-                    index.add(datastream, lines.line(), &mut losses)?;
-                    continue;
-                }
-                SnapshotLine::Observation(observation) => RecordLine::Observation(observation),
-                SnapshotLine::HistoricalLocation(historical_location) => RecordLine::HistoricalLocation(historical_location),
-            };
-            first_record_line = Some((record_line, lines.line()));
-            break;
-        }
-        let index = index.finish(&mut losses);
-
-        match (header.read().records(), first_record_line) {
+        let (index, first_record_line) = index_lines(&mut lines, records, &mut losses)?;
+        match (records, first_record_line) {
             (SnapshotRecords::PerThing, Some((RecordLine::Observation(_), line))) => return Err(SensorThingsIngestError::UnexpectedObservation { line }.into()),
             (SnapshotRecords::PerThing, Some((RecordLine::HistoricalLocation(_), line))) => {
                 return Err(SensorThingsIngestError::UnexpectedHistoricalLocation { line }.into());
@@ -150,6 +137,44 @@ impl Ingestor for SensorThingsIngestor {
         }
         batches.finish()
     }
+}
+
+/// Indexes the data stream lines at the start of `lines` and, in a snapshot of one record per Thing,
+/// the thing lines after them, and returns the index with the first line past them and its number,
+/// or `None` when there is none.
+///
+/// # Errors
+///
+/// Returns [`SensorThingsIngestError::UnexpectedThing`] for a thing line of a snapshot of one record
+/// per Observation, and every error reading a line or indexing it returns.
+fn index_lines(
+    lines: &mut SnapshotReader<BufReader<File>>,
+    records: SnapshotRecords,
+    losses: &mut SensorThingsLosses,
+) -> Result<(ThingIndex, Option<(RecordLine, LineNumber)>), SensorThingsIngestError> {
+    let mut index = ThingIndexBuilder::default();
+    let mut first_record_line = None;
+    while let Some(line) = lines.next() {
+        let number = lines.line();
+        let record_line = match (line?, records) {
+            (SnapshotLine::Datastream(datastream), SnapshotRecords::PerThing | SnapshotRecords::PerObservation) => {
+                index.add(datastream, number, losses)?;
+                continue;
+            }
+            (SnapshotLine::Thing(thing), SnapshotRecords::PerThing) => {
+                index.add_thing(thing, number, losses)?;
+                continue;
+            }
+            (SnapshotLine::Thing(_), SnapshotRecords::PerObservation) => return Err(SensorThingsIngestError::UnexpectedThing { line: number }),
+            (SnapshotLine::Observation(observation), SnapshotRecords::PerThing | SnapshotRecords::PerObservation) => RecordLine::Observation(observation),
+            (SnapshotLine::HistoricalLocation(historical_location), SnapshotRecords::PerThing | SnapshotRecords::PerObservation) => {
+                RecordLine::HistoricalLocation(historical_location)
+            }
+        };
+        first_record_line = Some((record_line, number));
+        break;
+    }
+    Ok((index.finish(losses), first_record_line))
 }
 
 /// A line of a range or incremental snapshot that gives a record: an observation line, or a
@@ -252,10 +277,11 @@ fn next_record_line(lines: &mut SnapshotReader<BufReader<File>>, after: LineKind
         None => Ok(None),
         Some(SnapshotLine::Observation(observation)) => Ok(Some((RecordLine::Observation(observation), lines.line()))),
         Some(SnapshotLine::HistoricalLocation(historical_location)) => Ok(Some((RecordLine::HistoricalLocation(historical_location), lines.line()))),
-        // The reader refuses a data stream line after a line of a later kind before it yields one.
-        Some(SnapshotLine::Datastream(_)) => Err(SnapshotError::OrderViolation {
+        // The reader refuses a data stream line or a thing line after a line of a later kind before
+        // it yields one.
+        Some(line @ (SnapshotLine::Datastream(_) | SnapshotLine::Thing(_))) => Err(SnapshotError::OrderViolation {
             line: lines.line(),
-            kind: LineKind::Datastream,
+            kind: line.kind(),
             after,
         }
         .into()),
@@ -1546,6 +1572,191 @@ mod tests {
         assert!(matches!(
             read_batches(&text, 100),
             Err(IngestorError::SensorThings(SensorThingsIngestError::UnexpectedHistoricalLocation { line })) if line.get() == 3
+        ));
+    }
+
+    /// The Thing RIVM serves as `ILM_I75`, which has no data stream, with its one Location.
+    fn thing_without_data_streams() -> Value {
+        json!({
+            "@iot.id": 12520,
+            "name": "ILM_I75",
+            "description": "ILM_I75",
+            "Locations": [{"@iot.id": 36190, "encodingType": "application/vnd.geo+json", "location": {"type": "Point", "coordinates": [5.61, 51.32]}}],
+        })
+    }
+
+    /// A thing line of `thing`.
+    fn thing_line(thing: Value) -> Value {
+        let mut line = Map::new();
+        line.insert("thing".to_owned(), thing);
+        Value::Object(line)
+    }
+
+    #[test]
+    fn a_listed_thing_without_data_streams_gives_a_record_without_readings_after_the_others() {
+        let text = snapshot(
+            "latest",
+            &[
+                datastream(json!(56776), "pm10", rivm_thing(), json!([observation(98765, "2026-11-12T10:00:00Z", 21.4)])),
+                thing_line(rivm_thing()),
+                thing_line(thing_without_data_streams()),
+            ],
+        );
+
+        let (records, losses) = read(&text);
+
+        assert_eq!(records.len(), 2);
+        assert_eq!(records[0]["thing"], json!({"id": 12512, "name": "ILM_I68", "description": "ILM_I68"}));
+        assert_eq!(records[0]["readings"]["pm10"]["result"], json!(21.4));
+        assert_eq!(
+            records[1],
+            json!({
+                "server": {"url": "https://api-samenmeten.rivm.nl/v1.0", "host": "api-samenmeten.rivm.nl", "version": "v1.0"},
+                "thing": {"id": 12520, "name": "ILM_I75", "description": "ILM_I75"},
+                "location": {"type": "Point", "coordinates": [5.61, 51.32]},
+                "locations": [{"id": 36190, "encodingType": "application/vnd.geo+json", "location": {"type": "Point", "coordinates": [5.61, 51.32]}}],
+            })
+        );
+        assert_eq!(losses, SensorThingsLosses::default());
+    }
+
+    #[test]
+    fn a_thing_that_a_data_stream_line_and_a_thing_line_name_gives_the_record_of_its_data_streams_once() {
+        let mut listed = rivm_thing();
+        listed["name"] = json!("ILM_I68 as listed");
+        let with_data_stream = snapshot(
+            "latest",
+            &[datastream(
+                json!(56776),
+                "pm10",
+                rivm_thing(),
+                json!([observation(98765, "2026-11-12T10:00:00Z", 21.4)]),
+            )],
+        );
+        let named_twice = snapshot(
+            "latest",
+            &[
+                datastream(json!(56776), "pm10", rivm_thing(), json!([observation(98765, "2026-11-12T10:00:00Z", 21.4)])),
+                thing_line(listed),
+            ],
+        );
+
+        assert_eq!(read(&named_twice).0, read(&with_data_stream).0);
+    }
+
+    #[test]
+    fn listed_things_keep_the_order_of_their_thing_lines_and_their_first_line() {
+        let mut renamed = thing_without_data_streams();
+        renamed["name"] = json!("ILM_I75 again");
+        let mut other = thing_without_data_streams();
+        other["@iot.id"] = json!("station-9");
+        other["name"] = json!("Stationsplein");
+        let text = snapshot("latest", &[thing_line(thing_without_data_streams()), thing_line(other), thing_line(renamed)]);
+
+        let (records, _) = read(&text);
+
+        assert_eq!(
+            records.iter().map(|record| &record["thing"]["name"]).collect::<Vec<_>>(),
+            [&json!("ILM_I75"), &json!("Stationsplein")]
+        );
+        assert_eq!(records[1]["thing"]["id"], json!("station-9"));
+    }
+
+    #[test]
+    fn a_listed_thing_without_locations_gives_a_record_of_its_members_alone() {
+        let (records, _) = read(&snapshot(
+            "latest",
+            &[thing_line(json!({"@iot.id": 7, "name": "depot", "properties": {"zone": "B"}}))],
+        ));
+
+        assert_eq!(
+            records,
+            [json!({
+                "server": {"url": "https://api-samenmeten.rivm.nl/v1.0", "host": "api-samenmeten.rivm.nl", "version": "v1.0"},
+                "thing": {"id": 7, "name": "depot", "properties": {"zone": "B"}},
+            })]
+        );
+    }
+
+    #[test]
+    fn a_thing_line_without_a_readable_id_fails_naming_its_line() {
+        let text = snapshot(
+            "latest",
+            &[datastream(json!(5), "pm10", rivm_thing(), json!([])), thing_line(json!({"name": "ILM_I75"}))],
+        );
+
+        assert!(matches!(
+            read_batches(&text, 100),
+            Err(IngestorError::SensorThings(SensorThingsIngestError::IdUnreadable { line, entity: StaEntity::Thing })) if line.get() == 3
+        ));
+    }
+
+    #[test]
+    fn a_data_stream_line_after_a_thing_line_fails_naming_the_line() {
+        let text = snapshot(
+            "latest",
+            &[
+                thing_line(thing_without_data_streams()),
+                datastream(json!(56776), "pm10", rivm_thing(), json!([observation(98765, "2026-11-12T10:00:00Z", 21.4)])),
+            ],
+        );
+
+        let error = read_batches(&text, 100).unwrap_err();
+
+        assert!(
+            matches!(
+                error,
+                IngestorError::SensorThings(SensorThingsIngestError::Snapshot(SnapshotError::OrderViolation {
+                    line,
+                    kind: LineKind::Datastream,
+                    after: LineKind::Thing
+                })) if line.get() == 3
+            ),
+            "{error:?}"
+        );
+        assert!(error.to_string().contains("line 3 of the snapshot"), "{error}");
+    }
+
+    #[test]
+    fn a_thing_line_in_a_range_or_incremental_snapshot_fails_naming_the_line() {
+        for read in ["range", "incremental"] {
+            let text = snapshot(
+                read,
+                &[
+                    datastream(json!(56776), "pm10", rivm_thing(), Value::Null),
+                    thing_line(thing_without_data_streams()),
+                    json!({"observation": observation(98765, "2026-11-12T10:00:00Z", 21.4), "datastream": 56776}),
+                ],
+            );
+
+            assert!(
+                matches!(
+                    read_batches(&text, 100),
+                    Err(IngestorError::SensorThings(SensorThingsIngestError::UnexpectedThing { line })) if line.get() == 3
+                ),
+                "{read}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_thing_line_after_an_observation_line_fails_as_out_of_order() {
+        let text = snapshot(
+            "range",
+            &[
+                datastream(json!(56776), "pm10", rivm_thing(), Value::Null),
+                json!({"observation": observation(98765, "2026-11-12T10:00:00Z", 21.4), "datastream": 56776}),
+                thing_line(thing_without_data_streams()),
+            ],
+        );
+
+        assert!(matches!(
+            read_batches(&text, 100),
+            Err(IngestorError::SensorThings(SensorThingsIngestError::Snapshot(SnapshotError::OrderViolation {
+                line,
+                kind: LineKind::Thing,
+                after: LineKind::Observation
+            }))) if line.get() == 4
         ));
     }
 }

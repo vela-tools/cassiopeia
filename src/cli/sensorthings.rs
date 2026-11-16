@@ -1,8 +1,10 @@
 use crate::cli::{input_read::InputHeaderArgs, sensorthings_cursor::CursorCommand};
 use cassiopeia_sensorthings::{
     service_root::ServiceRoot,
-    settings::stream_filter::{StreamFilter, StreamFilterError},
-    stream_kind::StreamKind,
+    settings::{
+        entity_filter::{EntityFilter, EntityFilterError},
+        filter_setting::FilterSetting,
+    },
 };
 use clap::{Args, Parser, Subcommand};
 
@@ -44,25 +46,25 @@ pub struct ReadingsArgs {
     /// An `OData` `$filter` over Datastreams that selects the Datastreams listed, such as
     /// `ObservedProperty/name eq 'pm10'`; every Datastream when absent.
     #[arg(long, value_name = "EXPRESSION", value_parser = datastream_filter)]
-    pub datastreams: Option<StreamFilter>,
+    pub datastreams: Option<EntityFilter>,
 
     /// An `OData` `$filter` over `MultiDatastreams` that selects the `MultiDatastreams` listed, such as
     /// `startswith(name,'ws-')`; every `MultiDatastream` when absent.
     #[arg(long, value_name = "EXPRESSION", value_parser = multi_datastream_filter)]
-    pub multi_datastreams: Option<StreamFilter>,
+    pub multi_datastreams: Option<EntityFilter>,
 
     #[command(flatten)]
     pub headers: InputHeaderArgs,
 }
 
 /// Reads a `--datastreams` filter, checked as the `datastreams` setting is.
-fn datastream_filter(text: &str) -> Result<StreamFilter, StreamFilterError> {
-    StreamFilter::new(StreamKind::Datastream, text.to_owned())
+fn datastream_filter(text: &str) -> Result<EntityFilter, EntityFilterError> {
+    EntityFilter::new(FilterSetting::Datastreams, text.to_owned())
 }
 
 /// Reads a `--multi-datastreams` filter, checked as the `multiDatastreams` setting is.
-fn multi_datastream_filter(text: &str) -> Result<StreamFilter, StreamFilterError> {
-    StreamFilter::new(StreamKind::MultiDatastream, text.to_owned())
+fn multi_datastream_filter(text: &str) -> Result<EntityFilter, EntityFilterError> {
+    EntityFilter::new(FilterSetting::MultiDatastreams, text.to_owned())
 }
 
 #[cfg(test)]

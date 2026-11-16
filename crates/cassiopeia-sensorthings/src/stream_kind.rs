@@ -35,25 +35,6 @@ impl StreamKind {
             StreamKind::MultiDatastream => "MultiDatastreams",
         }
     }
-
-    /// The member of a `sensorthings` block that selects the data streams of this kind.
-    #[must_use]
-    pub const fn setting(self) -> &'static str {
-        match self {
-            StreamKind::Datastream => "datastreams",
-            StreamKind::MultiDatastream => "multiDatastreams",
-        }
-    }
-
-    /// A filter that selects data streams of this kind, as an example a message can quote: a
-    /// Datastream has one `ObservedProperty` to filter by, a `MultiDatastream` has several.
-    #[must_use]
-    pub const fn filter_example(self) -> &'static str {
-        match self {
-            StreamKind::Datastream => "ObservedProperty/name eq 'pm10'",
-            StreamKind::MultiDatastream => "startswith(name,'ws-')",
-        }
-    }
 }
 
 #[cfg(test)]
@@ -62,14 +43,12 @@ mod tests {
     use pretty_assertions::assert_eq;
 
     #[test]
-    fn a_kind_is_displayed_in_kebab_case_and_names_its_entity_collection_and_setting() {
+    fn a_kind_is_displayed_in_kebab_case_and_names_its_entity_and_collection() {
         assert_eq!(StreamKind::Datastream.to_string(), "datastream");
         assert_eq!(StreamKind::MultiDatastream.to_string(), "multi-datastream");
         assert_eq!(StreamKind::MultiDatastream.entity(), "MultiDatastream");
         assert_eq!(StreamKind::MultiDatastream.collection(), "MultiDatastreams");
-        assert_eq!(StreamKind::MultiDatastream.setting(), "multiDatastreams");
         assert_eq!(StreamKind::Datastream.collection(), "Datastreams");
-        assert_eq!(StreamKind::Datastream.setting(), "datastreams");
     }
 
     #[test]

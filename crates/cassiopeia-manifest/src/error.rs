@@ -1,5 +1,5 @@
 use cassiopeia_common::{collection::CollectionName, error::io::IoError, format::DataFormat, masked_url::MaskedUrl};
-use cassiopeia_sensorthings::{cursor_name::CursorName, service_root::ServiceRootError};
+use cassiopeia_sensorthings::{cursor_name::CursorName, read_kind::ReadKind, service_root::ServiceRootError};
 use std::{path::PathBuf, result, string::FromUtf8Error};
 use thiserror::Error;
 
@@ -95,6 +95,18 @@ pub enum ManifestError {
     HistoricalLocationsOnLatestRead {
         /// The source, masked. Boxed so a URL does not enlarge every `Result` in the crate.
         url: Box<MaskedUrl>,
+    },
+
+    /// A remote SensorThings input asked a range or an incremental read to list Things, which only a
+    /// latest read lists.
+    #[error(
+        "The SensorThings input '{url}' sets 'things' with 'read: {{ {read}: ... }}'; only a latest read lists Things, because a range or an incremental read gives one record per Observation, and a Thing without data streams has none"
+    )]
+    ThingsOnObservationRead {
+        /// The source, masked. Boxed so a URL does not enlarge every `Result` in the crate.
+        url: Box<MaskedUrl>,
+        /// The read the input asked to list Things.
+        read: ReadKind,
     },
 
     /// Two inputs read incrementally through one cursor, so each would move the positions the other

@@ -1,6 +1,6 @@
-use crate::{
-    settings::stream_filter::{StreamFilter, StreamFilterError},
-    stream_kind::StreamKind,
+use crate::settings::{
+    entity_filter::{EntityFilter, EntityFilterError},
+    filter_setting::FilterSetting,
 };
 use serde::{Deserialize, Serialize};
 
@@ -19,7 +19,7 @@ pub enum MultiDatastreams {
     /// Every `MultiDatastream` is read (`multiDatastreams: true`).
     Every,
     /// The `MultiDatastreams` the filter matches are read.
-    Filtered(StreamFilter),
+    Filtered(EntityFilter),
 }
 
 /// The `multiDatastreams` member as it is written: a boolean, or an expression.
@@ -33,13 +33,13 @@ enum MultiDatastreamsMember {
 }
 
 impl TryFrom<MultiDatastreamsMember> for MultiDatastreams {
-    type Error = StreamFilterError;
+    type Error = EntityFilterError;
 
-    fn try_from(member: MultiDatastreamsMember) -> Result<MultiDatastreams, StreamFilterError> {
+    fn try_from(member: MultiDatastreamsMember) -> Result<MultiDatastreams, EntityFilterError> {
         match member {
             MultiDatastreamsMember::Selected(true) => Ok(MultiDatastreams::Every),
             MultiDatastreamsMember::Selected(false) => Ok(MultiDatastreams::None),
-            MultiDatastreamsMember::Expression(text) => StreamFilter::new(StreamKind::MultiDatastream, text).map(MultiDatastreams::Filtered),
+            MultiDatastreamsMember::Expression(text) => EntityFilter::new(FilterSetting::MultiDatastreams, text).map(MultiDatastreams::Filtered),
         }
     }
 }
@@ -58,15 +58,12 @@ impl From<MultiDatastreams> for MultiDatastreamsMember {
 
 #[cfg(test)]
 mod tests {
-    use crate::{
-        settings::{multi_datastreams::MultiDatastreams, stream_filter::StreamFilter},
-        stream_kind::StreamKind,
-    };
+    use crate::settings::{entity_filter::EntityFilter, filter_setting::FilterSetting, multi_datastreams::MultiDatastreams};
     use pretty_assertions::assert_eq;
     use serde_json::json;
 
     fn filtered(text: &str) -> MultiDatastreams {
-        MultiDatastreams::Filtered(StreamFilter::new(StreamKind::MultiDatastream, text.to_owned()).unwrap())
+        MultiDatastreams::Filtered(EntityFilter::new(FilterSetting::MultiDatastreams, text.to_owned()).unwrap())
     }
 
     #[test]

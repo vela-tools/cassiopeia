@@ -1,6 +1,6 @@
 # SensorThings fixtures
 
-The SensorThings snapshot tests in `src/end_to_end/sensorthings.rs`, `src/end_to_end/features_of_interest.rs`, `src/end_to_end/sensors.rs`, `src/end_to_end/locations.rs`, `src/end_to_end/historical_locations.rs` and `src/end_to_end/multi_datastreams.rs` read these files from disk. The suite never contacts a server.
+The SensorThings snapshot tests in `src/end_to_end/sensorthings.rs`, `src/end_to_end/features_of_interest.rs`, `src/end_to_end/sensors.rs`, `src/end_to_end/locations.rs`, `src/end_to_end/historical_locations.rs`, `src/end_to_end/multi_datastreams.rs` and `src/end_to_end/things.rs` read these files from disk. The suite never contacts a server.
 
 | File | Content |
 | --- | --- |
@@ -18,6 +18,7 @@ The SensorThings snapshot tests in `src/end_to_end/sensorthings.rs`, `src/end_to
 | `device-air-quality-observed.json5` | The `AirQualityObserved` mapping that links each station to a `Device` describing the Sensor of its `pm10` reading through a `refDevice` synthetic entity, as the source-format guide shows for Sensors. |
 | `addressed-air-quality-observed.json5` | The `AirQualityObserved` mapping that writes each station's `address` from the `name` of its Location with the lowest id, as the source-format guide shows for Locations, beside its `location`. |
 | `tracked-air-quality-observed.json5` | The `AirQualityObserved` mapping that writes a Thing's track as `location` instances from its HistoricalLocations, each with its `time` as `observedAt`, beside the `pm10` readings, as the source-format guide shows for historical locations. |
+| `station-inventory.json5` | The `Device` mapping that keeps an inventory of a server's stations, each with its name, description and location, as the source-format guide shows for Things without data streams, so a Thing without data streams gives the same entity as any other. |
 | `wind-air-quality-observed.json5` | The `AirQualityObserved` mapping that writes a station's `pm10` Datastream reading beside the `windSpeed` and `windDirection` values of its wind MultiDatastream, each with its time as `observedAt` and its unit as `unitCode`. |
 | `schemas/` | The Smart Data Models schemas the run validates against, laid out as the validator looks them up: `dataModel.Environment/AirQualityObserved.json` (schema version 0.1.4), and the documents its `$ref`s name, under the path of their published URL: `data-models/common-schema.json` and `smart-data-models/dataModel.Environment/master/Environment-schema.json`. Each is stored as published on 13 November 2026. There is no `Device` schema, so a run that writes Devices reports them as `schema-absent`. |
 
