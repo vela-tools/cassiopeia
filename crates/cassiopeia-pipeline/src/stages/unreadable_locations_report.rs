@@ -6,18 +6,18 @@ use cassiopeia_reporter::reporter::DiagnosticSink;
 use std::num::NonZeroU64;
 
 /// The one-line summary: the source, how many Things lost their location, and the first of them with
-/// the encoding its Location names.
+/// its Location with the lowest id and the encoding that Location names.
 fn headline(source: &Input, first: &UnreadableLocation, total: NonZeroU64) -> String {
     match total.get() {
-        1 => format!("In `{source}`, 1 Thing has a Location that is no GeoJSON, so its records have no `location`: {first}"),
+        1 => format!("In `{source}`, 1 Thing has no GeoJSON Location, so its records have no `location`: {first}"),
         count => format!(
-            "In `{source}`, {count} Things have a Location that is no GeoJSON, so their records have no `location`: {first}, and {} more",
+            "In `{source}`, {count} Things have no GeoJSON Location, so their records have no `location`: {first}, and {} more",
             count.saturating_sub(1)
         ),
     }
 }
 
-/// Warns once for a SensorThings snapshot whose Things have Locations that are no `GeoJSON`, and
+/// Warns once for a SensorThings snapshot whose Things have Locations and none in `GeoJSON`, and
 /// returns how many Things that was.
 ///
 /// One diagnostic per snapshot, carrying every such Thing as an occurrence. `GeoJSON` is the only
@@ -45,6 +45,7 @@ mod tests {
         for &thing in things {
             losses.unreadable_location(UnreadableLocation {
                 thing: EntityId::Integer(thing),
+                location: EntityId::Integer(thing + 23_670),
                 encoding: GeometryEncoding::Stated("text/plain".into()),
             });
         }
@@ -63,7 +64,7 @@ mod tests {
     }
 
     #[test]
-    fn one_unreadable_location_names_the_thing_and_its_encoding() {
+    fn one_unreadable_location_names_the_location_its_thing_and_its_encoding() {
         let sink = RecordingReporter::new();
 
         let total = report_unreadable_locations(&sink, &Input::Local(PathBuf::from("/data/rivm.jsonl")), losses(&[12512]).unreadable_locations());
@@ -74,7 +75,7 @@ mod tests {
         assert_eq!(reported[0].code.to_string(), "ingest-locations-unreadable");
         assert_eq!(
             reported[0].headline,
-            "In `/data/rivm.jsonl`, 1 Thing has a Location that is no GeoJSON, so its records have no `location`: Thing 12512 encodes it as `text/plain`"
+            "In `/data/rivm.jsonl`, 1 Thing has no GeoJSON Location, so its records have no `location`: Location 36182 of Thing 12512 encodes it as `text/plain`"
         );
         assert_eq!(reported[0].occurrences, 1);
     }
@@ -92,7 +93,7 @@ mod tests {
         assert_eq!(total, 3);
         assert_eq!(
             sink.diagnostics()[0].headline,
-            "In `/data/rivm.jsonl`, 3 Things have a Location that is no GeoJSON, so their records have no `location`: Thing 12512 encodes it as `text/plain`, and 2 more"
+            "In `/data/rivm.jsonl`, 3 Things have no GeoJSON Location, so their records have no `location`: Location 36182 of Thing 12512 encodes it as `text/plain`, and 2 more"
         );
         assert_eq!(sink.diagnostics()[0].occurrences, 3);
     }

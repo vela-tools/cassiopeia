@@ -1,0 +1,25 @@
+{
+    version: "v4",
+    dataModel: "dataModel.Environment/AirQualityObserved",
+    identity: {
+        entityName: "sta-{{ server.host }}-{{ thing.id }}",
+    },
+    attributes: {
+        name: { source: "{{ thing.name }}" },
+        location: { type: "GeoProperty", source: "{{ location }}" },
+        address: {
+            transformation: "object",
+            mappings: {
+                streetAddress: { source: "{{ locations[0].name }}" },
+            },
+        },
+        dateObserved: { source: "{{ readings.pm10.time }}", transformation: "datetime" },
+        pm10: {
+            source: "{{ readings.pm10.result }}",
+            transformation: "float",
+            properties: {
+                observedAt: { source: "{{ readings.pm10.time }}", transformation: "datetime" },
+            },
+        },
+    },
+}

@@ -2,6 +2,7 @@ use crate::sensorthings::{
     error::{SensorThingsIngestError, StaEntity},
     feature_of_interest::feature_of_interest,
     ingest_losses::{ObservationName, SensorThingsLosses},
+    location::ThingLocations,
     null_members::{move_member, present},
     served_id::optional_served_id,
 };
@@ -71,14 +72,17 @@ pub(super) fn server_member(root: &ServiceRoot) -> Value {
     Value::Object(server)
 }
 
-/// A record of one Thing: the `server`, the `thing`, its `location` when it has one, and its
-/// `readings` when there are any.
-pub(super) fn thing_record(server: Value, thing: Map<String, Value>, location: Option<Value>, readings: Map<String, Value>) -> Record {
+/// A record of one Thing: the `server`, the `thing`, its `location` when it has one, its
+/// `locations` when it has any, and its `readings` when there are any.
+pub(super) fn thing_record(server: Value, thing: Map<String, Value>, locations: ThingLocations, readings: Map<String, Value>) -> Record {
     let mut data = Map::new();
     data.insert("server".to_owned(), server);
     data.insert("thing".to_owned(), Value::Object(thing));
-    if let Some(location) = location {
+    if let Some(location) = locations.location {
         data.insert("location".to_owned(), location);
+    }
+    if !locations.locations.is_empty() {
+        data.insert("locations".to_owned(), Value::Array(locations.locations));
     }
     if !readings.is_empty() {
         data.insert("readings".to_owned(), Value::Object(readings));

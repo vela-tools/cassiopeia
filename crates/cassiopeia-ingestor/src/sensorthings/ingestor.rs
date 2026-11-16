@@ -150,7 +150,7 @@ fn latest_record(server: Value, thing: IndexedThing, losses: &mut SensorThingsLo
         let keyed = keyed.into_iter().map(|reading| (reading.key.to_string(), reading.parts));
         readings.extend(observation_readings(observation, line, &id, keyed, losses)?);
     }
-    Ok(thing_record(server, thing.members, thing.location, readings))
+    Ok(thing_record(server, thing.members, thing.locations, readings))
 }
 
 /// The record of one Observation of a range or incremental snapshot, holding its reading of a
@@ -177,7 +177,7 @@ fn observation_record(
     if readings.is_empty() {
         return Ok(None);
     }
-    Ok(Some(thing_record(server.clone(), thing.members.clone(), thing.location.clone(), readings)))
+    Ok(Some(thing_record(server.clone(), thing.members.clone(), thing.locations.clone(), readings)))
 }
 
 /// The next observation line and its number, or `None` past the last line.
@@ -344,6 +344,7 @@ mod tests {
                 "server": {"url": "https://api-samenmeten.rivm.nl/v1.0", "host": "api-samenmeten.rivm.nl", "version": "v1.0"},
                 "thing": {"id": 12512, "name": "ILM_I68", "description": "ILM_I68"},
                 "location": {"type": "Point", "coordinates": [5.608, 51.313]},
+                "locations": [{"id": 36182, "encodingType": "application/vnd.geo+json", "location": {"type": "Point", "coordinates": [5.608, 51.313]}}],
                 "readings": {"pm10": reading(98765, 21.4, 56776, "pm10"), "pm25_kal": reading(98764, 9.1, 56775, "pm25_kal")},
             })]
         );
@@ -371,7 +372,10 @@ mod tests {
         let (records, _) = read(&snapshot("latest", &[datastream(json!(56776), "pm10", rivm_thing(), json!([]))]));
 
         assert_eq!(records.len(), 1);
-        assert_eq!(records[0].as_object().unwrap().keys().collect::<Vec<_>>(), ["server", "thing", "location"]);
+        assert_eq!(
+            records[0].as_object().unwrap().keys().collect::<Vec<_>>(),
+            ["server", "thing", "location", "locations"]
+        );
     }
 
     #[test]
@@ -403,43 +407,76 @@ mod tests {
         ));
     }
 
-    #[test]
-    fn the_lowest_location_id_is_used() {
-        let thing = json!({
-            "@iot.id": 12512,
-            "Locations": [
-                {"@iot.id": 3, "encodingType": "application/geo+json", "location": {"type": "Point", "coordinates": [3, 3]}},
-                {"@iot.id": 2, "encodingType": "application/geo+json", "location": {"type": "Point", "coordinates": [2, 2]}},
-            ],
-        });
+    /// A Location with `id`, encoded as `encoding`, holding `location`.
+    fn location(id: Value, encoding: &str, location: Value) -> Value {
+        let mut served = json!({"encodingType": encoding});
+        served["@iot.id"] = id;
+        served["location"] = location;
+        served
+    }
 
-        let (records, _) = read(&snapshot("latest", &[datastream(json!(5), "pm10", thing, json!([]))]));
-
-        assert_eq!(records[0]["location"], json!({"type": "Point", "coordinates": [2, 2]}));
+    /// The records a latest snapshot of one data stream of Thing 12512, served with `locations`, is
+    /// read into, and what reading it lost.
+    fn read_locations(locations: Value) -> (Vec<Value>, SensorThingsLosses) {
+        let mut thing = json!({"@iot.id": 12512, "name": "ILM_I68"});
+        thing["Locations"] = locations;
+        read(&snapshot("latest", &[datastream(json!(5), "pm10", thing, json!([]))]))
     }
 
     #[test]
-    fn a_feature_location_yields_its_geometry() {
-        let thing = json!({
-            "@iot.id": "t-1",
-            "Locations": [{"@iot.id": "l-1", "encodingType": "application/geo+json", "location": {"type": "Feature", "geometry": {"type": "Point", "coordinates": [1, 2]}, "properties": {}}}],
-        });
+    fn a_geojson_location_gives_the_location_though_a_text_location_has_a_lower_id() {
+        let (records, losses) = read_locations(json!([
+            location(json!(2), "application/geo+json", point([5.4797, 51.4433])),
+            location(json!(1), "text/plain", json!("Stationsplein 1, 3rd floor, room 3.12")),
+        ]));
 
-        let (records, _) = read(&snapshot("latest", &[datastream(json!(5), "pm10", thing, json!([]))]));
-
-        assert_eq!(records[0]["location"], json!({"type": "Point", "coordinates": [1, 2]}));
+        assert_eq!(records[0]["location"], point([5.4797, 51.4433]));
+        assert_eq!(
+            records[0]["locations"],
+            json!([
+                {"id": 1, "encodingType": "text/plain", "location": "Stationsplein 1, 3rd floor, room 3.12"},
+                {"id": 2, "encodingType": "application/geo+json", "location": point([5.4797, 51.4433])},
+            ])
+        );
+        assert_eq!(losses, SensorThingsLosses::default());
     }
 
     #[test]
-    fn the_older_geojson_media_type_is_read() {
-        let (records, _) = read(&snapshot("latest", &[datastream(json!(5), "pm10", rivm_thing(), json!([]))]));
+    fn one_geojson_location_gives_the_location_and_its_members() {
+        let (records, losses) = read_locations(json!([{
+            "@iot.id": 36182,
+            "@iot.selfLink": "https://h.example/v1.1/Locations(36182)",
+            "name": "Stationsplein 1, Eindhoven",
+            "description": "Roof of the station building",
+            "encodingType": "application/geo+json",
+            "properties": {"floor": "roof"},
+            "location": point([5.4797, 51.4433]),
+            "Things@iot.navigationLink": "https://h.example/v1.1/Locations(36182)/Things",
+            "HistoricalLocations@iot.navigationLink": "https://h.example/v1.1/Locations(36182)/HistoricalLocations",
+        }]));
 
-        assert!(records[0].get("location").is_some());
+        assert_eq!(records[0]["location"], point([5.4797, 51.4433]));
+        assert_eq!(
+            records[0]["locations"],
+            json!([{
+                "id": 36182,
+                "name": "Stationsplein 1, Eindhoven",
+                "description": "Roof of the station building",
+                "encodingType": "application/geo+json",
+                "properties": {"floor": "roof"},
+                "location": point([5.4797, 51.4433]),
+            }])
+        );
+        assert_eq!(
+            records[0].as_object().unwrap().keys().collect::<Vec<_>>(),
+            ["server", "thing", "location", "locations"]
+        );
+        assert_eq!(losses, SensorThingsLosses::default());
     }
 
     #[test]
-    fn another_location_encoding_is_left_out_with_a_warning() {
-        let thing = json!({"@iot.id": 12512, "Locations": [{"@iot.id": 1, "encodingType": "text/plain", "location": "Valkenswaard"}]});
+    fn a_thing_whose_only_location_is_text_has_no_location_and_one_warning() {
+        let thing = json!({"@iot.id": 12512, "Locations": [location(json!(36183), "text/plain", json!("Valkenswaard"))]});
         let text = snapshot(
             "latest",
             &[
@@ -451,14 +488,105 @@ mod tests {
         let (records, losses) = read(&text);
 
         assert!(records[0].get("location").is_none());
+        assert_eq!(
+            records[0]["locations"],
+            json!([{"id": 36183, "encodingType": "text/plain", "location": "Valkenswaard"}])
+        );
         assert_eq!(losses.unreadable_locations().total(), 1);
         assert_eq!(
             losses.unreadable_locations().named(),
             [UnreadableLocation {
                 thing: EntityId::Integer(12512),
+                location: EntityId::Integer(36183),
                 encoding: GeometryEncoding::Stated("text/plain".into()),
             }]
         );
+    }
+
+    #[test]
+    fn a_feature_location_yields_its_geometry_in_both_members() {
+        let (records, _) = read_locations(json!([location(
+            json!("l-1"),
+            "application/geo+json",
+            json!({"type": "Feature", "geometry": point([1.0, 2.0]), "properties": {}})
+        )]));
+
+        assert_eq!(records[0]["location"], point([1.0, 2.0]));
+        assert_eq!(records[0]["locations"][0]["location"], point([1.0, 2.0]));
+    }
+
+    #[test]
+    fn locations_are_in_id_order_and_the_lowest_geojson_one_gives_the_location() {
+        let (records, _) = read_locations(json!([
+            location(json!("b"), "application/geo+json", point([2.0, 2.0])),
+            location(json!(7), "application/geo+json", point([7.0, 7.0])),
+            location(json!("a"), "application/geo+json", point([1.0, 1.0])),
+        ]));
+
+        let ids: Vec<&Value> = records[0]["locations"].as_array().unwrap().iter().map(|location| &location["id"]).collect();
+        assert_eq!(ids, [&json!(7), &json!("a"), &json!("b")]);
+        assert_eq!(records[0]["location"], point([7.0, 7.0]));
+    }
+
+    #[test]
+    fn a_null_location_member_is_left_out() {
+        let (records, _) = read_locations(json!([{
+            "@iot.id": 36182,
+            "name": "Stationsplein 1, Eindhoven",
+            "description": null,
+            "encodingType": "application/geo+json",
+            "location": point([5.4797, 51.4433]),
+        }]));
+
+        assert_eq!(
+            records[0]["locations"],
+            json!([{"id": 36182, "name": "Stationsplein 1, Eindhoven", "encodingType": "application/geo+json", "location": point([5.4797, 51.4433])}])
+        );
+    }
+
+    #[test]
+    fn the_older_geojson_media_type_is_read() {
+        let (records, _) = read(&snapshot("latest", &[datastream(json!(5), "pm10", rivm_thing(), json!([]))]));
+
+        assert!(records[0].get("location").is_some());
+    }
+
+    #[test]
+    fn every_read_gives_a_thing_the_same_location_and_locations() {
+        let thing = json!({
+            "@iot.id": 12512,
+            "Locations": [
+                location(json!(2), "application/geo+json", point([5.4797, 51.4433])),
+                location(json!(1), "text/plain", json!("Stationsplein 1")),
+            ],
+        });
+        let (latest, _) = read(&snapshot(
+            "latest",
+            &[datastream(
+                json!(5),
+                "pm10",
+                thing.clone(),
+                json!([observation(2, "2026-11-12T10:00:00Z", 2.0)]),
+            )],
+        ));
+        assert_eq!(latest[0]["location"], point([5.4797, 51.4433]));
+
+        for read_kind in ["range", "incremental"] {
+            let (records, _) = read(&snapshot(
+                read_kind,
+                &[
+                    datastream(json!(5), "pm10", thing.clone(), Value::Null),
+                    json!({"observation": observation(1, "2026-11-12T09:00:00Z", 1.0), "datastream": 5}),
+                    json!({"observation": observation(2, "2026-11-12T10:00:00Z", 2.0), "datastream": 5}),
+                ],
+            ));
+
+            assert_eq!(records.len(), 2, "{read_kind}");
+            for record in &records {
+                assert_eq!(record["location"], latest[0]["location"], "{read_kind}");
+                assert_eq!(record["locations"], latest[0]["locations"], "{read_kind}");
+            }
+        }
     }
 
     #[test]

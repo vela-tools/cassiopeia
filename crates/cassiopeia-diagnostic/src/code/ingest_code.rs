@@ -20,7 +20,7 @@ pub enum IngestCode {
     /// before `MultiDatastream` elements and each by ascending id, is read by a generated reading key
     /// instead of the property's name.
     ReadingsRenamed,
-    /// SensorThings Things hold a Location that is no `GeoJSON`, so their records have no `location`.
+    /// SensorThings Things have Locations and none in `GeoJSON`, so their records have no `location`.
     LocationsUnreadable,
     /// SensorThings Observations hold a `FeatureOfInterest` that is no `GeoJSON`, so their readings'
     /// `featureOfInterest` has no `feature`.

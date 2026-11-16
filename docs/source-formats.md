@@ -560,6 +560,9 @@ Every record has this shape. The ids, names, units and definitions are RIVM Same
     "server": { "url": "https://api-samenmeten.rivm.nl/v1.0", "host": "api-samenmeten.rivm.nl", "version": "v1.0" },
     "thing": { "id": 12512, "name": "ILM_I68", "description": "ILM_I68" },
     "location": { "type": "Point", "coordinates": [5.608, 51.313] },
+    "locations": [
+        { "id": 36182, "encodingType": "application/vnd.geo+json", "location": { "type": "Point", "coordinates": [5.608, 51.313] } }
+    ],
     "readings": {
         "pm10": {
             "id": 98765,
@@ -578,7 +581,8 @@ Every record has this shape. The ids, names, units and definitions are RIVM Same
 | --- | --- |
 | `server.url`, `server.host`, `server.version` | The service root, its host without the port, and its version. |
 | `thing.id`, `.name`, `.description`, `.properties` | The Thing's members. |
-| `location` | The GeoJSON geometry of the Thing's Location with the lowest id. See [Locations](#locations). |
+| `location` | The GeoJSON geometry of the Thing's GeoJSON Location with the lowest id. See [Locations](#locations). |
+| `locations` | Every Location of the Thing, in id order, with its members. See [Locations](#locations). |
 | `readings.<key>` | One reading: an Observation of a Datastream, or one value of an Observation of a MultiDatastream, with the data stream it belongs to. See [Reading keys](#reading-keys) and [MultiDatastreams](#multidatastreams). |
 | `.id`, `.result`, `.phenomenonTime`, `.resultTime`, `.validTime`, `.resultQuality`, `.parameters` | The Observation's members, as served. |
 | `.time` | The instant `phenomenonTime` stands for, in UTC. See [Reading times](#reading-times). |
@@ -608,9 +612,49 @@ A key that is not a plain name is read with brackets: `{{ readings['PM2.5'].resu
 
 ### Locations
 
-`location` is the GeoJSON geometry of the Thing's Location with the lowest id. Integer ids come before text ids, integers by value and texts by their bytes. A Location whose `location` is a GeoJSON `Feature` gives the Feature's `geometry`.
+A Thing usually has one Location, but OGC 18-088 section 8.2.1 lets it have several when its place has more than one representation, each in its own encoding, such as a GeoJSON point beside a room written as text. Every discovery request expands each Thing's Locations, and the snapshot keeps them all as served.
 
-GeoJSON is the only Location encoding the SensorThings API defines. A Location is read when its `encodingType` is `application/geo+json` or the older `application/vnd.geo+json`, compared without regard to case or parameters. A Thing whose Location has another encoding, or none, has no `location`, and one `ingest-locations-unreadable` warning per source names the first such Thing and its `encodingType` and counts every one.
+**`location`.** `location` is the geometry of the Thing's GeoJSON Location with the lowest id: the lowest of the Locations whose `encodingType` is `application/geo+json` or the older `application/vnd.geo+json`, compared without regard to case or parameters. Integer ids come before text ids, integers by value and texts by their bytes. A Location whose `location` is a GeoJSON `Feature` gives the Feature's `geometry`. GeoJSON is the only Location encoding the SensorThings API defines, so a Location in another encoding never gives `location`, whatever its id.
+
+A Thing that has Locations and none in GeoJSON has no `location`, and one `ingest-locations-unreadable` warning per source names the first such Thing, its Location with the lowest id and that Location's `encodingType`, and counts every such Thing. A Thing without Locations has no `location`, without a warning.
+
+**`locations`.** Every Location of the Thing, in the order above:
+
+~~~json
+"locations": [
+    {
+        "id": 36182,
+        "name": "Stationsplein 1, Eindhoven",
+        "description": "Roof of the station building",
+        "encodingType": "application/geo+json",
+        "location": { "type": "Point", "coordinates": [5.4797, 51.4433] }
+    },
+    {
+        "id": 36183,
+        "name": "Station building",
+        "encodingType": "text/plain",
+        "location": "Stationsplein 1, 3rd floor, room 3.12"
+    }
+]
+~~~
+
+| Member | Content |
+| --- | --- |
+| `locations[].id`, `.name`, `.description`, `.encodingType`, `.properties` | The Location's members, as served. |
+| `locations[].location` | For a GeoJSON Location, its geometry, read as the record's `location` is. For a Location in any other encoding, its `location` as served. |
+
+Ids keep the JSON type the server sent, and a member that is absent or `null` is left out, as for every member of a record. A Thing without Locations has no `locations`. Every record of a Thing, in every read, carries the same `location` and `locations`.
+
+**Mapping.** A mapping reads a Location's members by position. Smart Data Models write a place's address as an object, so the name of the Thing's first Location goes into its `streetAddress`:
+
+~~~json5
+address: {
+    transformation: "object",
+    mappings: {
+        streetAddress: { source: "{{ locations[0].name }}" },
+    },
+},
+~~~
 
 ### Features of interest
 

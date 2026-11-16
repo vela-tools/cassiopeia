@@ -1,8 +1,7 @@
 use crate::sensorthings::{
-    encoded_geometry::EncodedGeometry,
     error::{SensorThingsIngestError, StaEntity},
-    ingest_losses::{SensorThingsLosses, UnreadableLocation},
-    location::thing_location,
+    ingest_losses::SensorThingsLosses,
+    location::{ThingLocations, thing_locations},
     reading_keys::{ReadingKey, ReadingSource, RenamedReading, reading_keys},
     record_builder::{DatastreamParts, record_members},
     sensor::sensor,
@@ -26,8 +25,8 @@ const THING_MEMBERS: [&str; 3] = ["name", "description", "properties"];
 pub(super) struct IndexedThing {
     /// The record's `thing`: the Thing's id and members.
     pub(super) members: Map<String, Value>,
-    /// The record's `location`, when the Thing has a `GeoJSON` one.
-    pub(super) location: Option<Value>,
+    /// The record's `location` and `locations`.
+    pub(super) locations: ThingLocations,
     /// The Thing's data streams, in snapshot order.
     pub(super) datastreams: Vec<IndexedDatastream>,
 }
@@ -71,7 +70,7 @@ pub(super) struct ThingIndexBuilder {
 /// A Thing whose data streams are still being collected.
 struct PendingThing {
     members: Map<String, Value>,
-    location: Option<Value>,
+    locations: ThingLocations,
     datastreams: Vec<PendingDatastream>,
 }
 
@@ -84,8 +83,8 @@ struct PendingDatastream {
 }
 
 impl ThingIndexBuilder {
-    /// Adds the data stream of the data stream line `line`, read as line `number`, counting the
-    /// Thing's unreadable Location the first time the Thing is seen.
+    /// Adds the data stream of the data stream line `line`, read as line `number`, reading the
+    /// Thing's Locations the first time the Thing is seen.
     ///
     /// A data stream seen before keeps its first line, so a server that pages one twice gives it one
     /// set of readings. A Datastream and a `MultiDatastream` that share an id are two data streams.
@@ -124,22 +123,11 @@ impl ThingIndexBuilder {
         match self.things.entry(thing_id) {
             Entry::Occupied(entry) => entry.into_mut().datastreams.push(datastream),
             Entry::Vacant(entry) => {
-                let location = match thing_location(thing.remove("Locations"), number)? {
-                    EncodedGeometry::Geometry(geometry) => Some(geometry),
-                    EncodedGeometry::Unreadable(encoding) => {
-                        losses.unreadable_location(UnreadableLocation {
-                            // The loss is reported after the Thing's own id has gone into its record.
-                            thing: entry.key().clone(),
-                            encoding,
-                        });
-                        None
-                    }
-                    EncodedGeometry::Absent => None,
-                };
+                let locations = thing_locations(thing.remove("Locations"), entry.key(), number, losses)?;
                 let members = record_members(thing, Some(entry.key()), &THING_MEMBERS);
                 entry.insert(PendingThing {
                     members,
-                    location,
+                    locations,
                     datastreams: vec![datastream],
                 });
             }
@@ -192,7 +180,7 @@ impl ThingIndexBuilder {
                     .collect();
                 IndexedThing {
                     members: pending.members,
-                    location: pending.location,
+                    locations: pending.locations,
                     datastreams,
                 }
             })
