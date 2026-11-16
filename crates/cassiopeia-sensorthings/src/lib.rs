@@ -6,18 +6,21 @@
 //! them speaks of the same things, so they live here, free of I/O beyond the reader and writer handed
 //! to the snapshot file: service roots and their versions (OGC 18-088 section 9.1), the settings a
 //! remote input is read with, the requests a read sends and the pages it is answered with (section
-//! 9.3), entity ids and their order, a Datastream's unit of measurement (section 8.2.4), the readings
-//! a server offers, the instant a `phenomenonTime` stands for (section 8.2.7), the read modes, the
-//! window a range read covers and the data streams it requests, the names of the cursors an
-//! incremental read keeps its positions in and the data streams it requests, stalest first, the
-//! points in time a read starts at or a cursor is reset to, and the snapshot file that is the
-//! boundary between transport and format.
+//! 9.3), entity ids and their order, the two kinds of data stream, Datastreams and the
+//! `MultiDatastreams` of the extension of section 12, each named by its kind and id, the elements of
+//! a `MultiDatastream`, which collections a service root lists, a Datastream's unit of measurement
+//! (section 8.2.4), the readings a server offers, the instant a `phenomenonTime` stands for
+//! (section 8.2.7), the read modes, the window a range read covers and the data streams it
+//! requests, the names of the cursors an incremental read keeps its positions in and the data
+//! streams it requests, stalest first, the points in time a read starts at or a cursor is reset to,
+//! and the snapshot file that is the boundary between transport and format.
 
 pub mod cursor_name;
 pub mod datastream_span;
 pub mod entity_id;
 pub mod incremental_datastreams;
 pub mod instant_text;
+pub mod multi_datastream_elements;
 pub mod observed_property_name;
 pub mod offered_readings;
 pub mod paging;
@@ -28,9 +31,12 @@ pub mod read_kind;
 pub mod read_window;
 pub mod request;
 pub mod service;
+pub mod service_document;
 pub mod service_root;
 pub mod settings;
 pub mod snapshot;
+pub mod stream_id;
+pub mod stream_kind;
 pub mod time_point;
 pub mod unit_of_measurement;
 pub mod version;

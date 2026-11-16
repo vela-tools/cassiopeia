@@ -23,7 +23,8 @@ pub enum CursorSubcommand {
 
     /// Show the position a cursor keeps for each data stream.
     ///
-    /// Prints the service root, then one row per data stream: its id, its high-water mark, the
+    /// Prints the service root, then one row per data stream, Datastreams first: its kind,
+    /// `datastream` or `multi-datastream`, its id, its high-water mark, the
     /// number of Observations it has seen within the lookback, the start of the last cycle that
     /// listed it, and the start of the first cycle that no longer listed it, `-` while it is listed.
     #[command(arg_required_else_help = true)]
@@ -53,10 +54,15 @@ pub struct ResetArgs {
     #[command(flatten)]
     pub cursor: CursorArg,
 
-    /// Reset only the data stream with this id, as `cursor show` prints it; every data stream when
-    /// absent.
-    #[arg(long, value_name = "ID")]
+    /// Reset only the Datastream with this id, as `cursor show` prints it; every data stream when
+    /// neither this nor `--multi-datastream` is given.
+    #[arg(long, value_name = "ID", conflicts_with = "multi_datastream")]
     pub datastream: Option<IdText>,
+
+    /// Reset only the `MultiDatastream` with this id, as `cursor show` prints it. A Datastream with
+    /// the same id keeps its position.
+    #[arg(long, value_name = "ID")]
+    pub multi_datastream: Option<IdText>,
 
     /// Set the high-water marks to this RFC 3339 instant, or to this span before now, such as `1h`;
     /// remove the positions when absent. A target after now is refused.
@@ -65,11 +71,16 @@ pub struct ResetArgs {
 }
 
 impl ResetArgs {
-    /// What the reset applies to: the data stream `--datastream` names, or every one.
+    /// What the reset applies to: the Datastream `--datastream` names, the `MultiDatastream`
+    /// `--multi-datastream` names, or every data stream.
     #[must_use]
     pub fn scope(&self) -> ResetScope {
         // The scope owns its id text, while the parsed command line keeps its own.
-        self.datastream.clone().map_or(ResetScope::Store, ResetScope::Datastream)
+        match (&self.datastream, &self.multi_datastream) {
+            (Some(id), _) => ResetScope::Datastream(id.clone()),
+            (None, Some(id)) => ResetScope::MultiDatastream(id.clone()),
+            (None, None) => ResetScope::Store,
+        }
     }
 }
 

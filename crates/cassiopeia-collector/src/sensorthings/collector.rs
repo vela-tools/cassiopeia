@@ -6,10 +6,13 @@ use crate::{
     sensorthings::{
         cursor_cycle::CursorCycle,
         incremental_read::read_incremental,
+        multi_datastreams_unread::MultiDatastreamsUnread,
         page_reader::PageReader,
         range_read::read_range,
         snapshot_failure::unwritable,
-        traversal::{TraversalEnd, traverse},
+        stream_discovery::discover_streams,
+        traversal::TraversalEnd,
+        unread_check::UnreadCheck,
     },
 };
 use cassiopeia_common::{channel::ChannelSender, cycle_start::CycleStart, format::DataFormat, masked_url::MaskedUrl, signal::Signal};
@@ -18,14 +21,13 @@ use cassiopeia_ir::payload::{CollectedPayload, FilePayload};
 use cassiopeia_sensorthings::{
     request::discovery_request::latest_discovery_request,
     service::SensorThingsService,
-    settings::read_mode::ReadMode,
+    settings::{multi_datastreams::MultiDatastreams, read_mode::ReadMode},
     snapshot::{header::SnapshotHeader, line::DatastreamLine, writer::SnapshotWriter},
 };
 use std::{
     env,
     fs::{self, File},
     io::{BufWriter, Write},
-    ops::ControlFlow,
     path::Path,
     sync::atomic::AtomicBool,
 };
@@ -43,6 +45,8 @@ pub struct SensorThingsCollector {
     /// The cursor positions an incremental read resumes from and the slot it leaves its update in;
     /// `None` for any other read.
     cursor: Option<CursorCycle>,
+    /// Whether the cycle checks the server for `MultiDatastreams` the input reads none of.
+    unread_check: UnreadCheck,
     /// The instant the cycle started, which the snapshot records as its collection time.
     cycle_start: CycleStart,
     /// The downloader every page is fetched through, with the input's headers.
@@ -53,11 +57,13 @@ pub struct SensorThingsCollector {
 
 impl SensorThingsCollector {
     /// A collector of `service` for the cycle that started at `cycle_start`, resuming an incremental
-    /// read from `cursor`, fetching through `downloader` and stopping once `shutdown` is set.
+    /// read from `cursor`, checking for unread `MultiDatastreams` when `unread_check` is due, fetching
+    /// through `downloader` and stopping once `shutdown` is set.
     #[must_use]
     pub const fn new(
         service: SensorThingsService,
         cursor: Option<CursorCycle>,
+        unread_check: UnreadCheck,
         cycle_start: CycleStart,
         downloader: Downloader,
         shutdown: &'static AtomicBool,
@@ -65,6 +71,7 @@ impl SensorThingsCollector {
         SensorThingsCollector {
             service,
             cursor,
+            unread_check,
             cycle_start,
             downloader,
             shutdown,
@@ -77,6 +84,7 @@ impl Collector for SensorThingsCollector {
         let SensorThingsCollector {
             service,
             cursor,
+            unread_check,
             cycle_start,
             downloader,
             shutdown,
@@ -87,7 +95,7 @@ impl Collector for SensorThingsCollector {
         let directory = directory.dont_delete_on_drop();
         let path = directory.path().join(format!("snapshot.{}", DataFormat::SensorThings.extension()));
 
-        let warnings = match write_snapshot(&service, cursor, cycle_start, downloader, shutdown, &path) {
+        let warnings = match write_snapshot(&service, cursor, unread_check, cycle_start, downloader, shutdown, &path) {
             Ok(warnings) => warnings,
             Err(error) => {
                 // Nothing reads a snapshot whose read failed, so it does not outlive the collector.
@@ -110,9 +118,13 @@ impl Collector for SensorThingsCollector {
 /// Reads one cycle of `service` into a snapshot at `path`, recording `cycle_start` as its
 /// collection time, resuming an incremental read from `cursor`, and returns what the read met that
 /// the cycle carries on past.
+///
+/// Once the read has succeeded, a cycle whose `unread_check` is due checks whether the server holds
+/// `MultiDatastreams` an input that reads none leaves unread.
 fn write_snapshot(
     service: &SensorThingsService,
     cursor: Option<CursorCycle>,
+    unread_check: UnreadCheck,
     cycle_start: CycleStart,
     downloader: Downloader,
     shutdown: &'static AtomicBool,
@@ -124,7 +136,7 @@ fn write_snapshot(
     let mut reader = PageReader::new(service.root().clone(), downloader, settings.delay(), shutdown);
     let file = File::create(path).map_err(unwritable(path))?;
     let snapshot = SnapshotWriter::start(BufWriter::new(file), &header).map_err(unwritable(path))?;
-    match (settings.read(), cursor) {
+    let mut warnings = match (settings.read(), cursor) {
         (ReadMode::Latest, _) => read_latest(&mut reader, service, snapshot, path),
         (ReadMode::Range(range), _) => read_range(&mut reader, service, *range, cycle_start, snapshot, path),
         (ReadMode::Incremental(incremental), Some(cursor)) => read_incremental(&mut reader, service, incremental, cursor, cycle_start, snapshot, path),
@@ -132,31 +144,33 @@ fn write_snapshot(
             // The error names the root, while the service keeps its own.
             root: Box::new(service.root().clone()),
         }),
+    }?;
+    if let (UnreadCheck::Due, MultiDatastreams::None) = (unread_check, settings.multi_datastreams())
+        && let Some(unread) = MultiDatastreamsUnread::check(&mut reader)
+    {
+        warnings.multi_datastreams_unread(unread);
     }
+    Ok(warnings)
 }
 
-/// Reads the newest reading of every data stream `service` selects into `snapshot`, after its
-/// header, and returns the collection limit that stopped the read, if one did.
+/// Reads the newest reading of every data stream `service` selects, its Datastreams and then its
+/// `MultiDatastreams`, into `snapshot`, after its header, and returns the collection limits that
+/// stopped a discovery, if any did.
 fn read_latest<W: Write>(
     reader: &mut PageReader,
     service: &SensorThingsService,
     mut snapshot: SnapshotWriter<W>,
     path: &Path,
 ) -> Result<CollectionWarnings, CollectorError> {
-    let settings = service.settings();
-    let end = traverse(
-        reader,
-        latest_discovery_request(service.root(), settings),
-        settings.limits().pages(),
-        |datastream| {
-            snapshot.datastream(&DatastreamLine::new(datastream)).map_err(unwritable(path))?;
-            Ok::<_, CollectorError>(ControlFlow::Continue(()))
-        },
-    )?;
+    let ends = discover_streams(reader, service, latest_discovery_request, |kind, served| {
+        snapshot.datastream(&DatastreamLine::new(kind, served)).map_err(unwritable(path))
+    })?;
     snapshot.finish().map_err(unwritable(path))?;
     let mut warnings = CollectionWarnings::default();
-    if let TraversalEnd::LimitReached(limit) = end {
-        warnings.limit_reached(limit);
+    for (_, end) in ends {
+        if let TraversalEnd::LimitReached(limit) = end {
+            warnings.limit_reached(limit);
+        }
     }
     Ok(warnings)
 }
@@ -168,7 +182,8 @@ mod tests {
         error::CollectorError,
         sensorthings::{
             limit_reached::{CollectLimit, LimitReached},
-            test_collection::{RUNNING, collect, collector, cycle_start, root, snapshot_lines},
+            multi_datastreams_unread::MultiDatastreamsUnread,
+            test_collection::{RUNNING, checking_collector, collect, collector, cycle_start, root, snapshot_lines},
         },
     };
     use cassiopeia_common::{
@@ -526,5 +541,123 @@ mod tests {
         assert_eq!(path.extension().and_then(|extension| extension.to_str()), Some("jsonl"));
         assert_eq!(source.to_string(), format!("{}/v1.1", server.url()));
         assert!(matches!(source, Input::Remote(_)));
+    }
+
+    /// The path and query of the latest discovery of every `MultiDatastream`.
+    const MULTI_LATEST: &str = "/v1.1/MultiDatastreams?$expand=Thing/Locations,ObservedProperties,Sensor,Observations($orderby=phenomenonTime%20desc;$top=1)&$orderby=id%20asc&$top=1000";
+
+    /// The path and query of the request for at most one `MultiDatastream`.
+    const ANY_MULTI_DATASTREAM: &str = "/v1.1/MultiDatastreams?$top=1";
+
+    /// A service root document that lists the collections `names`.
+    fn service_document(names: &[&str]) -> String {
+        json!({"value": names.iter().map(|name| json!({"name": name, "url": format!("https://h.example/v1.1/{name}")})).collect::<Vec<_>>()}).to_string()
+    }
+
+    #[test]
+    fn a_latest_read_of_multi_datastreams_writes_them_after_the_datastreams() {
+        let mut server = mockito::Server::new();
+        let wind = json!({
+            "@iot.id": 4,
+            "name": "ws-7",
+            "ObservedProperties": [{"@iot.id": 11, "name": "windSpeed"}, {"@iot.id": 12, "name": "windDirection"}],
+            "Observations": [{"@iot.id": 501, "phenomenonTime": "2026-11-12T09:50:00Z", "result": [4.2, 270]}],
+        });
+        let mocks = [
+            serve(&mut server, LATEST, page(&[1], None)),
+            serve(&mut server, MULTI_LATEST, json!({ "value": [&wind] }).to_string()),
+        ];
+
+        let (result, payloads) = collect(collector(&server, r#"{"multiDatastreams": true}"#, RequestHeaders::default(), &RUNNING));
+
+        result.unwrap();
+        mocks.iter().for_each(Mock::assert);
+        let lines = snapshot_lines(payloads);
+        assert_eq!(
+            lines[1..],
+            [json!({"datastream": {"@iot.id": 1, "name": "stream 1"}}), json!({ "multiDatastream": wind })]
+        );
+    }
+
+    #[test]
+    fn a_read_of_no_multi_datastream_reports_those_its_server_holds_once_checked() {
+        let mut server = mockito::Server::new();
+        let mocks = [
+            serve(&mut server, LATEST, page(&[1], None)),
+            serve(&mut server, "/v1.1", service_document(&["Datastreams", "MultiDatastreams"])),
+            serve(&mut server, ANY_MULTI_DATASTREAM, json!({"value": [{"@iot.id": 4}]}).to_string()),
+        ];
+        let untouched = server.mock("GET", MULTI_LATEST).expect(0).create();
+
+        let (result, payloads) = collect(checking_collector(&server, "{}"));
+
+        mocks.iter().for_each(Mock::assert);
+        untouched.assert();
+        assert_eq!(result.unwrap().unread_multi_datastreams(), [MultiDatastreamsUnread::new(root(&server))]);
+        assert_eq!(snapshot_lines(payloads).len(), 2);
+    }
+
+    #[test]
+    fn a_server_whose_root_lists_no_multi_datastreams_is_asked_for_none() {
+        let mut server = mockito::Server::new();
+        serve(&mut server, LATEST, page(&[1], None));
+        let root_document = serve(&mut server, "/v1.1", service_document(&["Datastreams"]));
+        let untouched = server.mock("GET", ANY_MULTI_DATASTREAM).expect(0).create();
+
+        let (result, _) = collect(checking_collector(&server, "{}"));
+
+        root_document.assert();
+        untouched.assert();
+        assert_eq!(result.unwrap(), CollectionWarnings::default());
+    }
+
+    #[test]
+    fn a_server_without_multi_datastreams_is_not_reported() {
+        let mut server = mockito::Server::new();
+        serve(&mut server, LATEST, page(&[1], None));
+        serve(&mut server, "/v1.1", service_document(&["Datastreams", "MultiDatastreams"]));
+        let probe = serve(&mut server, ANY_MULTI_DATASTREAM, json!({"value": []}).to_string());
+
+        let (result, _) = collect(checking_collector(&server, "{}"));
+
+        probe.assert();
+        assert_eq!(result.unwrap(), CollectionWarnings::default());
+    }
+
+    #[test]
+    fn a_failed_check_reports_nothing_and_keeps_the_read() {
+        let mut server = mockito::Server::new();
+        serve(&mut server, LATEST, page(&[1], None));
+        server.mock("GET", "/v1.1").with_status(404).create();
+
+        let (result, payloads) = collect(checking_collector(&server, "{}"));
+
+        assert_eq!(result.unwrap(), CollectionWarnings::default());
+        assert_eq!(snapshot_lines(payloads).len(), 2);
+    }
+
+    #[test]
+    fn a_read_of_multi_datastreams_never_checks() {
+        let mut server = mockito::Server::new();
+        serve(&mut server, LATEST, page(&[1], None));
+        serve(&mut server, MULTI_LATEST, page(&[], None));
+        let untouched = server.mock("GET", "/v1.1").expect(0).create();
+
+        let (result, _) = collect(checking_collector(&server, r#"{"multiDatastreams": true}"#));
+
+        untouched.assert();
+        assert_eq!(result.unwrap(), CollectionWarnings::default());
+    }
+
+    #[test]
+    fn a_cycle_after_the_check_sends_no_check() {
+        let mut server = mockito::Server::new();
+        serve(&mut server, LATEST, page(&[1], None));
+        let untouched = server.mock("GET", "/v1.1").expect(0).create();
+
+        let (result, _) = collect(collector(&server, "{}", RequestHeaders::default(), &RUNNING));
+
+        untouched.assert();
+        assert_eq!(result.unwrap(), CollectionWarnings::default());
     }
 }

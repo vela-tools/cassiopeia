@@ -1,6 +1,8 @@
 use cassiopeia_sensorthings::{
     entity_id::EntityId,
+    multi_datastream_elements::ElementCounts,
     snapshot::{error::SnapshotError, line_number::LineNumber},
+    stream_id::StreamId,
 };
 use strum::Display;
 use thiserror::Error;
@@ -12,16 +14,19 @@ pub enum StaEntity {
     /// A Datastream.
     #[strum(serialize = "a Datastream")]
     Datastream,
+    /// A `MultiDatastream`.
+    #[strum(serialize = "a MultiDatastream")]
+    MultiDatastream,
     /// A Thing.
     #[strum(serialize = "a Thing")]
     Thing,
     /// A Location of a Thing.
     #[strum(serialize = "a Location")]
     Location,
-    /// The `ObservedProperty` of a Datastream.
+    /// The `ObservedProperty` of a Datastream or of an element of a `MultiDatastream`.
     #[strum(serialize = "an ObservedProperty")]
     ObservedProperty,
-    /// The `Sensor` of a Datastream.
+    /// The `Sensor` of a data stream.
     #[strum(serialize = "a Sensor")]
     Sensor,
     /// An Observation.
@@ -52,41 +57,53 @@ pub enum SensorThingsIngestError {
         entity: StaEntity,
     },
 
-    /// A Datastream was served without its Thing.
-    #[error("line {line} of the snapshot holds data stream {datastream} without its Thing")]
+    /// A data stream was served without its Thing.
+    #[error("line {line} of the snapshot holds {datastream} without its Thing")]
     ThingMissing {
         /// The line the data stream is on.
         line: LineNumber,
-        /// The data stream's id.
-        datastream: EntityId,
+        /// The data stream.
+        datastream: StreamId,
     },
 
-    /// A Datastream was served without its `ObservedProperty`, so its readings cannot be named.
-    #[error("data stream {datastream} has no ObservedProperty, so its readings have no name")]
+    /// A data stream was served without an `ObservedProperty`, so its readings cannot be named.
+    #[error("{datastream} has no ObservedProperty, so its readings have no name")]
     ObservedPropertyMissing {
-        /// The data stream's id.
-        datastream: EntityId,
+        /// The data stream.
+        datastream: StreamId,
     },
 
-    /// A Datastream's `ObservedProperty` has no `name`, so its readings cannot be named.
-    #[error("data stream {datastream} has an ObservedProperty without a `name`, so its readings have no name")]
+    /// An `ObservedProperty` of a data stream has no `name`, so its readings cannot be named.
+    #[error("{datastream} has an ObservedProperty without a `name`, so its readings have no name")]
     ObservedPropertyUnnamed {
-        /// The data stream's id.
-        datastream: EntityId,
+        /// The data stream.
+        datastream: StreamId,
     },
 
-    /// An Observation names a data stream no datastream line holds.
-    #[error("line {line} of the snapshot is an Observation of data stream {datastream}, which no datastream line holds")]
+    /// A `MultiDatastream` holds `ObservedProperties`, units of measurement and observation types
+    /// that differ in number, so the values of its results cannot be read by position.
+    #[error("line {line} of the snapshot holds MultiDatastream {multi_datastream} with {counts}, so the values of its results cannot be read by position")]
+    ElementCountsDiffer {
+        /// The line the `MultiDatastream` is on.
+        line: LineNumber,
+        /// The `MultiDatastream`'s id.
+        multi_datastream: EntityId,
+        /// How many of each it holds.
+        counts: ElementCounts,
+    },
+
+    /// An Observation names a data stream no data stream line holds.
+    #[error("line {line} of the snapshot is an Observation of {datastream}, which no data stream line holds")]
     UnknownDatastream {
         /// The observation line's number.
         line: LineNumber,
         /// The data stream the Observation names.
-        datastream: EntityId,
+        datastream: StreamId,
     },
 
     /// A latest snapshot holds an observation line, though it carries each newest Observation in its
-    /// datastream line.
-    #[error("line {line} of the snapshot is an observation line, but a latest snapshot holds its Observations in its datastream lines")]
+    /// data stream line.
+    #[error("line {line} of the snapshot is an observation line, but a latest snapshot holds its Observations in its data stream lines")]
     UnexpectedObservation {
         /// The observation line's number.
         line: LineNumber,
@@ -96,16 +113,34 @@ pub enum SensorThingsIngestError {
 #[cfg(test)]
 mod tests {
     use crate::sensorthings::error::{SensorThingsIngestError, StaEntity};
-    use cassiopeia_sensorthings::{entity_id::EntityId, snapshot::line_number::LineNumber};
+    use cassiopeia_sensorthings::{entity_id::EntityId, multi_datastream_elements::ElementCounts, snapshot::line_number::LineNumber, stream_id::StreamId};
     use pretty_assertions::assert_eq;
 
     #[test]
     fn a_missing_observed_property_names_its_data_stream() {
         let error = SensorThingsIngestError::ObservedPropertyMissing {
-            datastream: EntityId::Integer(5),
+            datastream: StreamId::Datastream(EntityId::Integer(5)),
         };
 
-        assert_eq!(error.to_string(), "data stream 5 has no ObservedProperty, so its readings have no name");
+        assert_eq!(error.to_string(), "Datastream 5 has no ObservedProperty, so its readings have no name");
+    }
+
+    #[test]
+    fn a_multi_datastream_whose_members_differ_in_number_is_named_with_its_counts() {
+        let error = SensorThingsIngestError::ElementCountsDiffer {
+            line: LineNumber::FIRST.next(),
+            multi_datastream: EntityId::Integer(4),
+            counts: ElementCounts {
+                observed_properties: 2,
+                units: 3,
+                observation_types: 2,
+            },
+        };
+
+        assert_eq!(
+            error.to_string(),
+            "line 2 of the snapshot holds MultiDatastream 4 with 2 ObservedProperties, 3 `unitOfMeasurements` and 2 `multiObservationDataTypes`, so the values of its results cannot be read by position"
+        );
     }
 
     #[test]

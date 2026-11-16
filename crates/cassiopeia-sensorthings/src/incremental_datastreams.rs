@@ -1,23 +1,23 @@
-use crate::{datastream_span::ended_before, entity_id::EntityId, read_window::ReadWindow};
+use crate::{datastream_span::ended_before, read_window::ReadWindow, stream_id::StreamId};
 use chrono::{DateTime, Utc};
 use serde_json::{Map, Value};
 use std::{collections::BTreeMap, vec};
 
 /// The data streams an incremental read requests the Observations of, each with the window it
-/// reads, gathered one served Datastream at a time from its metadata discovery.
+/// reads, gathered one served data stream at a time from its metadata discoveries.
 ///
 /// Each data stream is read from its own start to the end every read of the cycle shares, the cycle
-/// start. They are requested stalest first, by ascending start, then by ascending id, each once
-/// however the server ordered or repeated them, so a cycle that `limits.observations` cuts short has
-/// read the data streams furthest behind. A data stream whose Datastream `phenomenonTime` ends
-/// before its start holds no reading to read and is not requested, and neither is one whose start
-/// is not before the end.
+/// start. They are requested stalest first, by ascending start whatever their kind, then
+/// Datastreams before `MultiDatastreams` and by ascending id, each once however the server ordered
+/// or repeated them, so a cycle that `limits.observations` cuts short has read the data streams
+/// furthest behind. A data stream whose own `phenomenonTime` ends before its start holds no reading
+/// to read and is not requested, and neither is one whose start is not before the end.
 #[derive(Debug)]
 pub struct IncrementalDatastreams {
     /// The first `phenomenonTime` past every window.
     to: DateTime<Utc>,
     /// The window of each data stream requested.
-    windows: BTreeMap<EntityId, ReadWindow>,
+    windows: BTreeMap<StreamId, ReadWindow>,
 }
 
 impl IncrementalDatastreams {
@@ -29,7 +29,7 @@ impl IncrementalDatastreams {
 
     /// Adds the data stream `id`, served as `datastream`, to be read from `from`, unless it holds no
     /// reading from there on.
-    pub fn add(&mut self, id: EntityId, datastream: &Map<String, Value>, from: DateTime<Utc>) {
+    pub fn add(&mut self, id: StreamId, datastream: &Map<String, Value>, from: DateTime<Utc>) {
         if ended_before(datastream, from) {
             return;
         }
@@ -40,10 +40,10 @@ impl IncrementalDatastreams {
 
     /// The data streams to request, each with its window, stalest first.
     #[must_use]
-    pub fn into_reads(self) -> vec::IntoIter<(EntityId, ReadWindow)> {
-        let mut reads: Vec<(EntityId, ReadWindow)> = self.windows.into_iter().collect();
-        // The map yields ascending ids and the sort is stable, so data streams of one start keep that
-        // order.
+    pub fn into_reads(self) -> vec::IntoIter<(StreamId, ReadWindow)> {
+        let mut reads: Vec<(StreamId, ReadWindow)> = self.windows.into_iter().collect();
+        // The map yields Datastreams first, each kind by ascending id, and the sort is stable, so
+        // data streams of one start keep that order.
         reads.sort_by_key(|(_, window)| window.from());
         reads.into_iter()
     }
@@ -51,7 +51,7 @@ impl IncrementalDatastreams {
 
 #[cfg(test)]
 mod tests {
-    use crate::{entity_id::EntityId, incremental_datastreams::IncrementalDatastreams};
+    use crate::{entity_id::EntityId, incremental_datastreams::IncrementalDatastreams, stream_id::StreamId, stream_kind::StreamKind};
     use chrono::{DateTime, Utc};
     use pretty_assertions::assert_eq;
     use serde_json::{Map, Value, json};
@@ -70,10 +70,24 @@ mod tests {
     /// The data streams requested of `served`, each a Datastream with the start it is read from, as
     /// their ids and starts in the order requested, in a cycle that started at 2026-11-12T10:00:00Z.
     fn requested(served: &[(Value, &str)]) -> Vec<(EntityId, DateTime<Utc>)> {
+        let streams: Vec<(StreamKind, Value, &str)> = served
+            .iter()
+            .map(|(datastream, from)| (StreamKind::Datastream, datastream.clone(), *from))
+            .collect();
+        requested_streams(&streams)
+            .into_iter()
+            .map(|(stream, from)| (stream.id().clone(), from))
+            .collect()
+    }
+
+    /// The data streams requested of `served`, each a data stream of a kind with the start it is read
+    /// from, with their starts in the order requested, in a cycle that started at
+    /// 2026-11-12T10:00:00Z.
+    fn requested_streams(served: &[(StreamKind, Value, &str)]) -> Vec<(StreamId, DateTime<Utc>)> {
         let mut datastreams = IncrementalDatastreams::new(instant("2026-11-12T10:00:00Z"));
-        for (datastream, from) in served {
+        for (kind, datastream, from) in served {
             let datastream = object(datastream.clone());
-            datastreams.add(EntityId::of(&datastream).unwrap(), &datastream, instant(from));
+            datastreams.add(StreamId::of(*kind, &datastream).unwrap(), &datastream, instant(from));
         }
         datastreams
             .into_reads()
@@ -132,5 +146,23 @@ mod tests {
         let reads = requested(&[(json!({"@iot.id": 1}), "2026-11-12T10:00:00Z"), (json!({"@iot.id": 2}), "2026-11-12T11:00:00Z")]);
 
         assert_eq!(reads, []);
+    }
+
+    #[test]
+    fn data_streams_of_both_kinds_are_read_stalest_first_and_datastreams_first_on_a_tie() {
+        let reads = requested_streams(&[
+            (StreamKind::Datastream, json!({"@iot.id": 4}), "2026-11-12T08:00:00Z"),
+            (StreamKind::MultiDatastream, json!({"@iot.id": 4}), "2026-11-12T06:00:00Z"),
+            (StreamKind::MultiDatastream, json!({"@iot.id": 2}), "2026-11-12T08:00:00Z"),
+        ]);
+
+        assert_eq!(
+            reads,
+            [
+                (StreamId::MultiDatastream(EntityId::Integer(4)), instant("2026-11-12T06:00:00Z")),
+                (StreamId::Datastream(EntityId::Integer(4)), instant("2026-11-12T08:00:00Z")),
+                (StreamId::MultiDatastream(EntityId::Integer(2)), instant("2026-11-12T08:00:00Z")),
+            ]
+        );
     }
 }

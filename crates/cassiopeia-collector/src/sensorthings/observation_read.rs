@@ -13,6 +13,7 @@ use cassiopeia_sensorthings::{
     entity_id::EntityId,
     settings::collect_limits::{ObservationLimit, PageLimit},
     snapshot::{line::ObservationLine, writer::ObservationWriter},
+    stream_id::StreamId,
 };
 use cassiopeia_sensorthings_cursor::seen_observations::SeenObservations;
 use serde_json::{Map, Value};
@@ -21,7 +22,7 @@ use url::Url;
 
 /// Where a read writes its Observations, and how many more it may write.
 pub(crate) struct ObservationSink<'a, W> {
-    /// The snapshot, past its datastream lines.
+    /// The snapshot, past its data stream lines.
     lines: ObservationWriter<W>,
     /// How many more Observations the cycle may write.
     budget: ObservationBudget,
@@ -61,7 +62,7 @@ pub(crate) fn read_observations<W: Write>(
     reader: &mut PageReader,
     request: Url,
     pages: PageLimit,
-    datastream: &EntityId,
+    datastream: &StreamId,
     seen: &SeenObservations,
     sink: &mut ObservationSink<'_, W>,
     mut wrote: impl FnMut(&EntityId, &Map<String, Value>),

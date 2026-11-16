@@ -8,7 +8,7 @@ use crate::{
 };
 use cassiopeia_common::store_kind::StoreKind;
 use cassiopeia_diagnostic::code::{diagnostic_code::DiagnosticCode, run_code::RunCode};
-use cassiopeia_sensorthings::{cursor_name::CursorName, entity_id::EntityId, service_root::ServiceRoot};
+use cassiopeia_sensorthings::{cursor_name::CursorName, entity_id::EntityId, service_root::ServiceRoot, stream_id::StreamId};
 use cassiopeia_sensorthings_cursor::{
     cursor_store::CursorStore,
     cursor_store_error::CursorStoreError,
@@ -190,7 +190,7 @@ impl RivmServer {
 }
 
 /// The `phenomenonTime` bounds the observations request `path_and_query` asks for.
-fn bounds(path_and_query: &str) -> (DateTime<Utc>, DateTime<Utc>) {
+pub(crate) fn bounds(path_and_query: &str) -> (DateTime<Utc>, DateTime<Utc>) {
     let instant = |text: &str| DateTime::parse_from_rfc3339(text).unwrap().to_utc();
     let (_, filter) = path_and_query.split_once("phenomenonTime%20ge%20").unwrap();
     let (from, rest) = filter.split_once("%20and%20phenomenonTime%20lt%20").unwrap();
@@ -250,7 +250,7 @@ fn reset(cursors: &Path, target: ResetTarget) {
 
 /// The high-water mark of the PM10 data stream among `positions`, if it has one.
 fn pm10_high_water(positions: &Positions) -> Option<DateTime<Utc>> {
-    positions.get(&EntityId::Integer(PM10)).map(Position::high_water)
+    positions.get(&StreamId::Datastream(EntityId::Integer(PM10))).map(Position::high_water)
 }
 
 /// The `observedAt` of every PM10 reading of the fixture Thing a run wrote into files.

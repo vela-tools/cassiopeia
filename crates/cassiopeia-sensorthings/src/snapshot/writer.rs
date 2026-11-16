@@ -5,10 +5,10 @@ use crate::snapshot::{
 use serde::Serialize;
 use std::io::{self, Write};
 
-/// Writes the header and the datastream lines of a snapshot.
+/// Writes the header and the data stream lines of a snapshot.
 ///
-/// Every datastream line comes before the first observation line, so the writer hands over to an
-/// [`ObservationWriter`] once the datastreams are written, and a snapshot it writes is always in the
+/// Every data stream line, of either kind, comes before the first observation line, so the writer
+/// hands over to an [`ObservationWriter`] once the data streams are written, and a snapshot it writes is always in the
 /// order a reader accepts. It writes only what it is given, and a header holds no credential, so a
 /// snapshot never holds a request header or a credential.
 pub struct SnapshotWriter<W> {
@@ -16,7 +16,7 @@ pub struct SnapshotWriter<W> {
     target: W,
 }
 
-/// Writes the observation lines of a snapshot, after its datastream lines.
+/// Writes the observation lines of a snapshot, after its data stream lines.
 pub struct ObservationWriter<W> {
     /// Where the snapshot is written.
     target: W,
@@ -33,7 +33,7 @@ impl<W: Write> SnapshotWriter<W> {
         Ok(SnapshotWriter { target })
     }
 
-    /// Writes one datastream line.
+    /// Writes one data stream line.
     ///
     /// # Errors
     ///
@@ -42,7 +42,7 @@ impl<W: Write> SnapshotWriter<W> {
         write_line(&mut self.target, line)
     }
 
-    /// Ends the datastream lines, so observation lines can follow.
+    /// Ends the data stream lines, so observation lines can follow.
     #[must_use]
     pub fn into_observations(self) -> ObservationWriter<W> {
         ObservationWriter { target: self.target }
@@ -101,6 +101,8 @@ mod tests {
             line::{DatastreamLine, ObservationLine},
             writer::SnapshotWriter,
         },
+        stream_id::StreamId,
+        stream_kind::StreamKind,
     };
     use chrono::{TimeZone, Utc};
     use pretty_assertions::assert_eq;
@@ -125,7 +127,9 @@ mod tests {
     #[test]
     fn a_latest_snapshot_is_its_header_and_its_datastream_lines() {
         let mut writer = SnapshotWriter::start(Vec::new(), &header(ReadKind::Latest)).unwrap();
-        writer.datastream(&DatastreamLine::new(object(json!({"@iot.id": 5})))).unwrap();
+        writer
+            .datastream(&DatastreamLine::new(StreamKind::Datastream, object(json!({"@iot.id": 5}))))
+            .unwrap();
 
         let written = String::from_utf8(writer.finish().unwrap()).unwrap();
 
@@ -139,7 +143,7 @@ mod tests {
     fn observation_lines_follow_the_datastream_lines() {
         let mut writer = SnapshotWriter::start(Vec::new(), &header(ReadKind::Range)).unwrap().into_observations();
         writer
-            .observation(&ObservationLine::new(object(json!({"@iot.id": 1})), EntityId::Integer(5)))
+            .observation(&ObservationLine::new(object(json!({"@iot.id": 1})), StreamId::Datastream(EntityId::Integer(5))))
             .unwrap();
 
         let written = String::from_utf8(writer.finish().unwrap()).unwrap();

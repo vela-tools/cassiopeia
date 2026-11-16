@@ -1,10 +1,10 @@
 use crate::{
-    entity_id::EntityId,
     instant_text::instant_text,
     read_window::ReadWindow,
     request::{entity_key::entity_key, query_value::query_value, resource_request::resource_request},
     service_root::ServiceRoot,
     settings::{features_of_interest::FeaturesOfInterest, page_size::PageSize},
+    stream_id::StreamId,
 };
 use url::Url;
 
@@ -18,14 +18,15 @@ const FEATURE_OF_INTEREST_EXPAND: &str = "$expand=FeatureOfInterest&";
 
 /// The request for the Observations of the data stream `datastream` whose `phenomenonTime` falls in
 /// `window`, oldest first, `page_size` a page, each with its `FeatureOfInterest` when `features` asks
-/// for it.
+/// for it: `Datastreams({id})/Observations` for a Datastream, and `MultiDatastreams({id})/Observations`
+/// for a `MultiDatastream`.
 ///
 /// The bounds are written as RFC 3339 instants in UTC with a `Z`, with a fraction only when they have
 /// one. Query parameters are written in the order `$filter`, `$orderby`, `$expand`, `$top`, and
 /// `$expand` only when features of interest are requested. OGC 18-088 section 9.3.3.5 does not
 /// define how a server compares a `phenomenonTime` interval with an instant.
 #[must_use]
-pub fn observations_request(root: &ServiceRoot, datastream: &EntityId, window: ReadWindow, page_size: PageSize, features: FeaturesOfInterest) -> Url {
+pub fn observations_request(root: &ServiceRoot, datastream: &StreamId, window: ReadWindow, page_size: PageSize, features: FeaturesOfInterest) -> Url {
     let filter = format!(
         "phenomenonTime ge {} and phenomenonTime lt {}",
         instant_text(window.from()),
@@ -37,7 +38,7 @@ pub fn observations_request(root: &ServiceRoot, datastream: &EntityId, window: R
     };
     resource_request(
         root,
-        &format!("Datastreams{}/Observations", entity_key(datastream)),
+        &format!("{}{}/Observations", datastream.kind().collection(), entity_key(datastream.id())),
         &format!("$filter={}&$orderby={BY_TIME_THEN_ID}&{expand}$top={page_size}", query_value(&filter)),
     )
 }
@@ -50,6 +51,7 @@ mod tests {
         request::observations_request::observations_request,
         service_root::ServiceRoot,
         settings::{features_of_interest::FeaturesOfInterest, page_size::PageSize},
+        stream_id::StreamId,
     };
     use chrono::{DateTime, Utc};
     use pretty_assertions::assert_eq;
@@ -68,7 +70,7 @@ mod tests {
     fn a_bounded_observation_request_is_built_exactly() {
         let request = observations_request(
             &root(),
-            &EntityId::Integer(56776),
+            &StreamId::Datastream(EntityId::Integer(56776)),
             window("2026-11-11T10:00:00Z", "2026-11-12T10:00:00Z"),
             PageSize::try_from(500).unwrap(),
             FeaturesOfInterest::Omitted,
@@ -84,7 +86,7 @@ mod tests {
     fn requested_features_of_interest_are_expanded_after_the_order() {
         let request = observations_request(
             &root(),
-            &EntityId::Integer(56776),
+            &StreamId::Datastream(EntityId::Integer(56776)),
             window("2026-11-11T10:00:00Z", "2026-11-12T10:00:00Z"),
             PageSize::default(),
             FeaturesOfInterest::Requested,
@@ -100,7 +102,7 @@ mod tests {
     fn a_fractional_bound_keeps_its_fraction() {
         let request = observations_request(
             &root(),
-            &EntityId::Integer(1),
+            &StreamId::Datastream(EntityId::Integer(1)),
             window("2026-11-11T10:00:00.250Z", "2026-11-12T10:00:00Z"),
             PageSize::default(),
             FeaturesOfInterest::Omitted,
@@ -116,12 +118,32 @@ mod tests {
     fn a_text_id_is_addressed_as_a_string_literal() {
         let request = observations_request(
             &root(),
-            &EntityId::Text("o'neil".into()),
+            &StreamId::Datastream(EntityId::Text("o'neil".into())),
             window("2026-11-11T10:00:00Z", "2026-11-12T10:00:00Z"),
             PageSize::default(),
             FeaturesOfInterest::Omitted,
         );
 
         assert_eq!(request.path(), "/v1.1/Datastreams('o''neil')/Observations");
+    }
+
+    #[test]
+    fn the_observations_of_a_multi_datastream_are_requested_from_it() {
+        for (features, expand) in [(FeaturesOfInterest::Omitted, ""), (FeaturesOfInterest::Requested, "$expand=FeatureOfInterest&")] {
+            let request = observations_request(
+                &root(),
+                &StreamId::MultiDatastream(EntityId::Integer(4)),
+                window("2026-11-11T10:00:00Z", "2026-11-12T10:00:00Z"),
+                PageSize::default(),
+                features,
+            );
+
+            assert_eq!(
+                request.as_str(),
+                format!(
+                    "https://h.example/v1.1/MultiDatastreams(4)/Observations?$filter=phenomenonTime%20ge%202026-11-11T10:00:00Z%20and%20phenomenonTime%20lt%202026-11-12T10:00:00Z&$orderby=phenomenonTime%20asc,id%20asc&{expand}$top=1000"
+                )
+            );
+        }
     }
 }

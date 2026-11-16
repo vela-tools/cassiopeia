@@ -8,6 +8,7 @@ use crate::{
         snapshot_read_rule::check_snapshot_read,
         unreadable_features_of_interest_report::report_unreadable_features_of_interest,
         unreadable_locations_report::report_unreadable_locations,
+        unreadable_multi_results_report::report_unreadable_multi_results,
         unreadable_phenomenon_times_report::report_unreadable_phenomenon_times,
         unreadable_tables_report::report_unreadable_tables,
     },
@@ -198,6 +199,7 @@ fn report_sensorthings_losses(sink: &dyn DiagnosticSink, source: &Input, losses:
         report_unreadable_locations(sink, source, losses.unreadable_locations()),
         report_unreadable_features_of_interest(sink, source, losses.unreadable_features_of_interest()),
         report_unreadable_phenomenon_times(sink, source, losses.unreadable_phenomenon_times()),
+        report_unreadable_multi_results(sink, source, losses.unreadable_multi_results()),
     ]
     .into_iter()
     .fold(0, u64::saturating_add)

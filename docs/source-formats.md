@@ -358,7 +358,7 @@ Listing both a collection and one nested in it yields records from both, in docu
 
 ## SensorThings API
 
-Cassiopeia reads [OGC SensorThings API](https://www.ogc.org/standards/sensorthings/) data, versions 1.0 and 1.1, from a server or from a **snapshot file**: the Datastreams and Observations one read of a SensorThings server collected, written as JSON Lines. A server serves its readings as nested JSON whose shape changes with the request, so every read of a server is written into a snapshot first, and the ingestor joins each reading with its Thing, Location, data stream, ObservedProperty and Sensor. A mapping then reads one record shape, whichever server the readings came from, and whether they were read from the server or replayed from a file.
+Cassiopeia reads [OGC SensorThings API](https://www.ogc.org/standards/sensorthings/) data, versions 1.0 and 1.1, from a server or from a **snapshot file**: the data streams, Datastreams and MultiDatastreams, and the Observations one read of a SensorThings server collected, written as JSON Lines. A server serves its readings as nested JSON whose shape changes with the request, so every read of a server is written into a snapshot first, and the ingestor joins each reading with its Thing, Location, data stream, ObservedProperty and Sensor. A mapping then reads one record shape, whichever server the readings came from, and whether they were read from the server or replayed from a file.
 
 ### Reading a server
 
@@ -388,7 +388,7 @@ Each cycle writes what it read into a snapshot whose `serviceRoot` is the root a
 {root}/Datastreams?$filter={datastreams}&$expand=Thing/Locations,ObservedProperty,Sensor,Observations($orderby=phenomenonTime%20desc;$top=1)&$orderby=id%20asc&$top={pageSize}
 ~~~
 
-It selects every data stream with its Thing, the Thing's Locations, its ObservedProperty, its Sensor, and its newest Observation, in id order. `$filter` is sent only when `datastreams` is set. Its value is sent as written, percent-encoded, with a space as `%20` and `'` as `%27`. The Locations are expanded by path, `Thing/Locations`, because some servers ignore an `$expand` nested in parentheses, such as `Thing($expand=Locations)`. With `featuresOfInterest: true`, the newest Observation is also expanded with its FeatureOfInterest (see [Features of interest](#features-of-interest)).
+It selects every Datastream with its Thing, the Thing's Locations, its ObservedProperty, its Sensor, and its newest Observation, in id order. `$filter` is sent only when `datastreams` is set. Its value is sent as written, percent-encoded, with a space as `%20` and `'` as `%27`. The Locations are expanded by path, `Thing/Locations`, because some servers ignore an `$expand` nested in parentheses, such as `Thing($expand=Locations)`. With `featuresOfInterest: true`, the newest Observation is also expanded with its FeatureOfInterest (see [Features of interest](#features-of-interest)). A read that selects MultiDatastreams sends the same request to the MultiDatastreams collection as well (see [MultiDatastreams](#multidatastreams)).
 
 **Paging.** A server answers with pages of at most `pageSize` items. Every page but the last links to the next one with `@iot.nextLink`. Cassiopeia follows each link as the server wrote it, resolved against the page it came from, and adds nothing to it (OGC 18-088 section 9.3.3.6). The input fails without sending the request:
 
@@ -431,7 +431,7 @@ Every attempt at one scheduled run starts from the same instant, so a retried at
 
 The bounds are written in UTC with a `Z`, with a fraction only when they have one, such as `2026-11-11T10:00:00Z` or `2026-11-11T10:00:00.250Z`. A data stream's id is written as `(56776)` for an integer id, or as `('o''neil')` for a text id: in single quotes, with each `'` doubled, percent-encoded where a path cannot hold a character. With `featuresOfInterest: true`, each request also carries `$expand=FeatureOfInterest` after `$orderby` (see [Features of interest](#features-of-interest)). Each request is followed page by page under the rules of [Reading a server](#reading-a-server).
 
-**What is read.** The data streams are read one after the other, by ascending id, whatever order the server listed them in. A Datastream's `phenomenonTime` covers all of its Observations, so a data stream whose `phenomenonTime` ends before the range is not requested. One without a `phenomenonTime` is requested. The Observations of each data stream come oldest first, then by id, and each is written once: when a page repeats an Observation the read already wrote, because the server gained rows between pages, the repeat is dropped. The read stops once it has written `limits.observations` Observations in a cycle, keeps what it wrote, and reports `collect-limit-reached` with the page that holds the first Observation it did not write. `limits.pages` stops one data stream's request, and the read goes on with the next one.
+**What is read.** The data streams are read one after the other, the Datastreams and then the MultiDatastreams, each by ascending id, whatever order the server listed them in. A data stream's `phenomenonTime` covers all of its Observations, so a data stream whose `phenomenonTime` ends before the range is not requested. One without a `phenomenonTime` is requested. The Observations of each data stream come oldest first, then by id, and each is written once: when a page repeats an Observation the read already wrote, because the server gained rows between pages, the repeat is dropped. The read stops once it has written `limits.observations` Observations in a cycle, of both kinds together, keeps what it wrote, and reports `collect-limit-reached` with the page that holds the first Observation it did not write. `limits.pages` stops one data stream's request, and the read goes on with the next one.
 
 **Series output.** A range read gives one record per Observation, so it runs only into output with `output.temporal.representation: "series"`. A run without it is refused with `run-misconfigured` when it is built, before any request (see [Records per read](#records-per-read)).
 
@@ -469,15 +469,15 @@ An incremental read reads every reading each selected data stream gained since t
 
 `cursor` names the cursor that keeps how far the read has read each data stream, `initial` is where a data stream without a position starts, and `lookback` is how far behind its high-water mark each data stream is read again. [SensorThings settings](manifest.md#sensorthings-settings) lists their forms and defaults.
 
-**Positions.** A cursor keeps one position per data stream: its high-water mark, the latest reading time written for it, and the Observations written within the lookback behind that mark. A cursor is a store named `<cursor>.redb` in the cursors folder, and it records the server it was read from, so an input that reads another server through it is refused, and the error names both servers. Two inputs of one manifest that name one cursor are refused when the manifest loads.
+**Positions.** A cursor keeps one position per data stream: its high-water mark, the latest reading time written for it, and the Observations written within the lookback behind that mark. A Datastream and a MultiDatastream that share an id keep a position each. A cursor is a store named `<cursor>.redb` in the cursors folder, and it records the server it was read from, so an input that reads another server through it is refused, and the error names both servers. Two inputs of one manifest that name one cursor are refused when the manifest loads.
 
-**The requests.** The read first lists the selected Datastreams, as a range read does, and writes each into the snapshot, whose header records `read: "incremental"`. Then it reads the Observations of each data stream with the request of [Reading a time range](#reading-a-time-range), from a lookback behind its high-water mark, or from `initial` when the cursor holds no position for it, to the cycle start. A reading stamped at or after the cycle start, a forecast among them, waits for a later cycle. The data streams furthest behind are read first: by ascending start, then by ascending id. A data stream whose Datastream `phenomenonTime` ends before its start is not requested. An Observation the position already holds, or one this read already wrote, is dropped. Every other one is written.
+**The requests.** The read first lists the selected data streams, as a range read does, and writes each into the snapshot, whose header records `read: "incremental"`. Then it reads the Observations of each data stream with the request of [Reading a time range](#reading-a-time-range), from a lookback behind its high-water mark, or from `initial` when the cursor holds no position for it, to the cycle start. A reading stamped at or after the cycle start, a forecast among them, waits for a later cycle. The data streams furthest behind are read first, whatever their kind: by ascending start, then Datastreams before MultiDatastreams, then by ascending id. A data stream whose own `phenomenonTime` ends before its start is not requested. An Observation the position already holds, or one this read already wrote, is dropped. Every other one is written.
 
 **Advancing.** A cursor moves only once the whole cycle has succeeded: every reading was written and the run was not stopped. All positions of one cursor then move in one write. A cycle that fails or is stopped leaves its cursors where they were, so the next cycle reads its readings again, and a retried attempt reads from the positions as they were before it. A data stream's high-water mark becomes the latest reading time written for it. When `limits.observations` or `limits.pages` stops a data stream midway, its mark is the last reading it wrote, so the next cycle goes on from there, and each reading a limit left unread is read later, once. The data streams a limit left unread are the furthest behind, so the next cycle reads them first.
 
 **Late readings.** A reading uploaded within the lookback behind its data stream's high-water mark is read once. A reading uploaded later than that is never read: SensorThings gives no entity an insertion time (OGC 18-088 section 8.1), so such a reading cannot be told apart from one already read without reading the whole history again. Choose `lookback` from the server's usual upload delay. A longer lookback requests more Observations every cycle, and drops the ones it already wrote.
 
-**Missing data streams.** A data stream the cursor holds a position for that discovery no longer lists keeps its position, and resumes from it when it is listed again. One `collect-datastreams-missing` warning per server names up to three such data streams, counts them, and gives the earliest cycle start since which one is missing. When `limits.pages` stops discovery, no data stream is reported missing.
+**Missing data streams.** A data stream the cursor holds a position for that discovery no longer lists keeps its position, and resumes from it when it is listed again. One `collect-datastreams-missing` warning per server names up to three such data streams by their kind and id, such as `Datastream 56776` or `MultiDatastream 4`, counts them, and gives the earliest cycle start since which one is missing. When `limits.pages` stops the discovery of one kind of data stream, no data stream of that kind is reported missing.
 
 **Delivery.** What an incremental read writes once depends on the destination:
 
@@ -497,13 +497,14 @@ An incremental read reads every reading each selected data stream gained since t
 cassiopeia sensorthings cursor list
 cassiopeia sensorthings cursor show rivm-air
 cassiopeia sensorthings cursor reset rivm-air --datastream 56776 --to 6h
+cassiopeia sensorthings cursor reset weather --multi-datastream 4
 ~~~
 
 - `list` prints one row per SensorThings cursor: its name, its server, how many data streams it holds a position for, and the oldest and newest of their high-water marks. A cursor of another kind of input is left out.
-- `show` prints the cursor's server, then one row per data stream: its id, its high-water mark, how many Observations it has seen within the lookback, the start of the last cycle that listed it, and the start of the first cycle that no longer listed it, or `-` while it is listed.
+- `show` prints the cursor's server, then one row per data stream, Datastreams first: its kind, `datastream` or `multi-datastream`, its id, its high-water mark, how many Observations it has seen within the lookback, the start of the last cycle that listed it, and the start of the first cycle that no longer listed it, or `-` while it is listed.
 - `reset` without `--to` removes the positions, so the next cycle starts each data stream at `initial` again. Use it to start over.
 - `reset --to` takes an RFC 3339 instant, or a span before now such as `6h`. It sets the high-water marks there and forgets the Observations the data streams have seen, so the next cycle reads each from the target minus the lookback, and writes those readings again. Use it after fixing a mapping, or when the server reloads its history. A target after now is refused, because the data streams would then skip every reading made before it.
-- `--datastream` limits a reset to one data stream, its id written as `show` prints it. An id the cursor holds no position for is refused, and the error names it.
+- `--datastream` limits a reset to one Datastream, and `--multi-datastream` to one MultiDatastream, its id written as `show` prints it. A Datastream and a MultiDatastream that share an id are reset apart, and the two options cannot be given together. An id the cursor holds no position for is refused, and the error names it.
 
 A running job holds its cursors, so a cursor command against one of them fails with `cursor 'rivm-air' is in use by a running job` and changes nothing: stop the job first. A cursor command that cannot use a cursor fails with `run-cursor-unusable`, as a run does.
 
@@ -523,23 +524,30 @@ A snapshot is UTF-8 JSON Lines: one JSON object per line, each line ended by `\n
 | `read` | How the read chose its readings: `latest`, the newest reading of every data stream; `range`, every reading of a time range; or `incremental`, every reading since the last read. |
 | `collectedAt` | The instant the read started. |
 
-Every Datastream follows, one per line, as the server served it, with its Thing, the Thing's Locations, its ObservedProperty, and its Sensor. In a `latest` read, each one also carries its newest Observation:
+Every data stream follows, one per line, the Datastreams and then the MultiDatastreams, each as the server served it, with its Thing, the Thing's Locations, what it observes, and its Sensor. In a `latest` read, each one also carries its newest Observation:
 
 ~~~json
 {"datastream":{"@iot.id":56776,"name":"ILM_I68-13-pm10","unitOfMeasurement":{"symbol":"ug/m3","definition":"https://qudt.org/vocab/unit/MicroGM-PER-M3"},"Thing":{"@iot.id":12512,"name":"ILM_I68","Locations":[{"@iot.id":36182,"encodingType":"application/vnd.geo+json","location":{"type":"Point","coordinates":[5.608,51.313]}}]},"ObservedProperty":{"@iot.id":1,"name":"pm10","definition":"https://www.eea.europa.eu/help/glossary/eea-glossary/pm10"},"Observations":[{"@iot.id":98765,"phenomenonTime":"2026-11-12T09:00:00Z/2026-11-12T10:00:00Z","result":21.4}]}}
 ~~~
 
-In a `range` or `incremental` read, every Observation follows the Datastreams, one per line, with the id of its data stream, grouped by data stream:
+A MultiDatastream is a `multiDatastream` line, with its `ObservedProperties`, `unitOfMeasurements` and `multiObservationDataTypes`:
+
+~~~json
+{"multiDatastream":{"@iot.id":4,"name":"ws-7","unitOfMeasurements":[{"symbol":"m/s"},{"symbol":"deg"}],"multiObservationDataTypes":["http://www.opengis.net/def/observationType/OGC-OM/2.0/OM_Measurement","http://www.opengis.net/def/observationType/OGC-OM/2.0/OM_Measurement"],"Thing":{"@iot.id":7},"ObservedProperties":[{"@iot.id":11,"name":"windSpeed"},{"@iot.id":12,"name":"windDirection"}]}}
+~~~
+
+In a `range` or `incremental` read, every Observation follows the data streams, one per line, with the id of its data stream under the member of its kind, grouped by data stream:
 
 ~~~json
 {"observation":{"@iot.id":98766,"phenomenonTime":"2026-11-12T10:00:00Z","resultTime":null,"result":19.8},"datastream":56776}
+{"observation":{"@iot.id":501,"phenomenonTime":"2026-11-12T10:00:00Z","result":[4.2,270]},"multiDatastream":4}
 ~~~
 
 A read with `featuresOfInterest: true` keeps each FeatureOfInterest inside its Observation, as the server served it: in each observation line of a `range` or `incremental` read, and in each Datastream's `Observations` of a `latest` read. A snapshot recorded without features of interest still reads, and its readings have no `featureOfInterest`.
 
-Each Datastream keeps its Sensor inside its line, as the server served it. A snapshot recorded without Sensors still reads, and its readings have no `sensor`.
+Each data stream keeps its Sensor inside its line, as the server served it. A snapshot recorded without Sensors still reads, and its readings have no `sensor`.
 
-The source fails when its first line is no header, the header names another snapshot format or a version its service root does not end with, a line is no JSON object of these kinds, or a datastream line follows an observation line. The error names the line. A snapshot holds no request header or credential, so it can be shared or kept as a test fixture.
+The source fails when its first line is no header, the header names another snapshot format or a version its service root does not end with, a line is no JSON object of these kinds, or a data stream line of either kind follows an observation line. A snapshot without MultiDatastream lines reads as one recorded before MultiDatastreams were read. The error names the line. A snapshot holds no request header or credential, so it can be shared or kept as a test fixture.
 
 A snapshot is detected from its header line, which must end within the file's first 4 KiB, so it needs no declared format. The snapshot check runs before the JSON check, and a SensorThings response such as `{"value":[...]}` has no header, so it is still read as JSON. A file declared `format: "sensorthings"` whose first line is no header fails, with an error that quotes a header.
 
@@ -571,31 +579,32 @@ Every record has this shape. The ids, names, units and definitions are RIVM Same
 | `server.url`, `server.host`, `server.version` | The service root, its host without the port, and its version. |
 | `thing.id`, `.name`, `.description`, `.properties` | The Thing's members. |
 | `location` | The GeoJSON geometry of the Thing's Location with the lowest id. See [Locations](#locations). |
-| `readings.<key>` | One reading: an Observation with the data stream it belongs to. See [Reading keys](#reading-keys). |
+| `readings.<key>` | One reading: an Observation of a Datastream, or one value of an Observation of a MultiDatastream, with the data stream it belongs to. See [Reading keys](#reading-keys) and [MultiDatastreams](#multidatastreams). |
 | `.id`, `.result`, `.phenomenonTime`, `.resultTime`, `.validTime`, `.resultQuality`, `.parameters` | The Observation's members, as served. |
 | `.time` | The instant `phenomenonTime` stands for, in UTC. See [Reading times](#reading-times). |
-| `.unit` | The data stream's `unitOfMeasurement`. |
-| `.datastream` | The data stream's `id`, `name`, `description`, `observationType`, and `properties`. |
-| `.observedProperty` | The ObservedProperty's `id`, `name`, `definition`, `description`, and `properties`. |
+| `.unit` | The Datastream's `unitOfMeasurement`, or the MultiDatastream's `unitOfMeasurements` entry at the value's position. |
+| `.datastream` | The Datastream's `id`, `name`, `description`, `observationType`, and `properties`. A reading of a MultiDatastream has `.multiDatastream` in its place. |
+| `.multiDatastream` | The MultiDatastream's `id`, `name`, `description`, and `properties`, the value's `observationType` from `multiObservationDataTypes`, and its `position`, counted from 1. |
+| `.observedProperty` | The ObservedProperty's `id`, `name`, `definition`, `description`, and `properties`: for a MultiDatastream, the one at the value's position. |
 | `.featureOfInterest` | The FeatureOfInterest the Observation was made at, when the read requested it. See [Features of interest](#features-of-interest). |
 | `.sensor` | The Sensor of the data stream, when the server served one. See [Sensors](#sensors). |
 
-Ids keep the JSON type the server sent: an integer id stays a number and a text id stays text. An id of any other type fails the source, naming its line. A member the server leaves out or sends as `null` is absent from the record, at any depth, because NGSI-LD allows no `null` and an absent field produces no attribute. A data stream without a Thing, or without an ObservedProperty with a `name`, fails the source, naming the data stream.
+Ids keep the JSON type the server sent: an integer id stays a number and a text id stays text. An id of any other type fails the source, naming its line. A member the server leaves out or sends as `null` is absent from the record, at any depth, because NGSI-LD allows no `null` and an absent field produces no attribute. A data stream without a Thing, or without an ObservedProperty with a `name`, fails the source, naming the data stream by its kind and id, such as `Datastream 56776`.
 
 ### Records per read
 
 - `latest`: one record per Thing, in the order the snapshot first names it. Its `readings` hold one entry for each of its data streams with an Observation. A Thing whose data streams have none is a record without `readings`.
-- `range` and `incremental`: one record per Observation, with exactly one entry in `readings`.
+- `range` and `incremental`: one record per Observation. An Observation of a Datastream gives exactly one entry in `readings`, and an Observation of a MultiDatastream one entry per value, so values measured together stay in one record. A record whose Observation gives no reading is dropped.
 
-The snapshot is read as a stream: the Datastreams are indexed, and each Observation becomes a record without being held, so a snapshot of any length is read in bounded memory.
+The snapshot is read as a stream: the data streams are indexed, and each Observation becomes a record without being held, so a snapshot of any length is read in bounded memory.
 
-A record of a `range` or `incremental` read holds one reading, so several records describe one Thing. Without a `temporal` setting, the output keeps one record per entity and mapping, so all but one reading of each Thing would be lost. Such a snapshot is therefore read only into output with `output.temporal.representation: "series"`, which keeps every reading of each Thing as one temporal entity (see [Temporal output](output.md#temporal-output)). Without it, the run fails with `run-misconfigured` before the snapshot's first record is read, and the error names the snapshot, its read, and the setting it needs. A range or incremental read of a server without it fails when the run is built, before any request, and the error names the service root. A `latest` snapshot is read into every output.
+A record of a `range` or `incremental` read holds the readings of one Observation, so several records describe one Thing. Without a `temporal` setting, the output keeps one record per entity and mapping, so all but one reading of each Thing would be lost. Such a snapshot is therefore read only into output with `output.temporal.representation: "series"`, which keeps every reading of each Thing as one temporal entity (see [Temporal output](output.md#temporal-output)). Without it, the run fails with `run-misconfigured` before the snapshot's first record is read, and the error names the snapshot, its read, and the setting it needs. A range or incremental read of a server without it fails when the run is built, before any request, and the error names the service root. A `latest` snapshot is read into every output.
 
 ### Reading keys
 
-A reading's key is its ObservedProperty's `name`. When several data streams of one Thing observe a property of the same name, the data stream with the lowest id keeps the name and every other one is keyed `<name>@<data stream id>`, as CSV keys a repeated column `<name>@<column number>`. One `ingest-readings-renamed` warning per source names up to three such data streams and counts the rest. The keys come from the data streams alone, so a data stream has the same key in every read.
+A reading's key is its ObservedProperty's `name`. When several readings of one Thing observe a property of the same name, the first keeps the name: Datastreams rank before MultiDatastream elements, then by id, then by position. Every other Datastream is keyed `<name>@<data stream id>`, as CSV keys a repeated column `<name>@<column number>`, and every other element `<name>@<MultiDatastream id>/<position>`. One `ingest-readings-renamed` warning per source names up to three such readings and counts the rest. The keys come from the data streams alone, so a reading has the same key in every read.
 
-A key that is not a plain name is read with brackets: `{{ readings['PM2.5'].result }}`, or `{{ readings['pm10@9'].result }}`. [Listing a server's readings](#listing-a-servers-readings) counts, for each name, the Things whose data streams are keyed this way.
+A key that is not a plain name is read with brackets: `{{ readings['PM2.5'].result }}`, `{{ readings['pm10@9'].result }}`, or `{{ readings['temperature@4/2'].result }}`. [Listing a server's readings](#listing-a-servers-readings) counts, for each name, the Things whose data streams are keyed this way.
 
 ### Locations
 
@@ -702,6 +711,94 @@ refDevice: {
 
 For Sensor 7 of `https://h.example/v1.1`, the Device is `urn:ngsi-ld:Device:sta-hexample-sensor-7`. A record without `readings.pm10`, or whose reading has no `sensor`, writes neither the Device nor the link, and the observation is still written.
 
+### MultiDatastreams
+
+A MultiDatastream, of the MultiDatastream extension of the SensorThings API (OGC 18-088 section 12), groups properties measured together into one data stream, such as the wind speed and wind direction of a weather station, or the temperature, conductivity and depth of a water sensor. Each of its Observations holds one `result` array, whose values correspond, in order, to the MultiDatastream's `ObservedProperties`, to its `unitOfMeasurements`, and to its `multiObservationDataTypes`. FROST-Server serves the extension when it is enabled.
+
+**The setting.** `datastreams` selects Datastreams only. `multiDatastreams` selects the MultiDatastreams a read reads:
+
+| `multiDatastreams` | Selects |
+| --- | --- |
+| absent or `false` | No MultiDatastream. |
+| `true` | Every MultiDatastream. |
+| an OData `$filter` expression | The MultiDatastreams it matches, sent as `datastreams` is. |
+
+~~~json5
+sensorthings: {
+    datastreams: "startswith(name,'ws-')",
+    multiDatastreams: "startswith(name,'ws-')",
+    read: { range: { last: "24h" } },
+},
+~~~
+
+A filter written for Datastreams can name `ObservedProperty`, which a MultiDatastream lacks, so each kind has a filter of its own. A manifest without `multiDatastreams` sends no request to the MultiDatastreams collection.
+
+**The requests.** A read that selects MultiDatastreams sends the requests it sends for Datastreams to the MultiDatastreams collection as well, with `ObservedProperties` in place of `ObservedProperty`. A latest read sends:
+
+~~~text
+{root}/MultiDatastreams?$filter={multiDatastreams}&$expand=Thing/Locations,ObservedProperties,Sensor,Observations($orderby=phenomenonTime%20desc;$top=1)&$orderby=id%20asc&$top={pageSize}
+~~~
+
+A range or incremental read lists the selected MultiDatastreams:
+
+~~~text
+{root}/MultiDatastreams?$filter={multiDatastreams}&$expand=Thing/Locations,ObservedProperties,Sensor&$orderby=id%20asc&$top={pageSize}
+~~~
+
+It then reads the Observations of each with `{root}/MultiDatastreams({id})/Observations`, under the filter, order, paging and limits of a Datastream's Observations request. `$filter` is sent only for an expression, and `featuresOfInterest: true` expands each FeatureOfInterest as it does for a Datastream. A range read reads the Datastreams, then the MultiDatastreams, each by ascending id. An incremental read reads the data streams of both kinds furthest behind first. `limits.observations` counts the Observations of both kinds. A server without the extension answers the MultiDatastreams request with an HTTP error, and the input fails with that answer, as for any failed request.
+
+**Readings.** Each value of a MultiDatastream Observation's `result` is one reading, keyed by the `name` of the ObservedProperty at its position:
+
+~~~json
+"windSpeed": {
+    "id": 501,
+    "result": 4.2,
+    "time": "2026-11-12T10:00:00Z",
+    "phenomenonTime": "2026-11-12T10:00:00Z",
+    "unit": { "name": "metre per second", "symbol": "m/s", "definition": "http://qudt.org/vocab/unit/M-PER-SEC" },
+    "multiDatastream": { "id": 4, "name": "ws-7", "observationType": "http://www.opengis.net/def/observationType/OGC-OM/2.0/OM_Measurement", "position": 1 },
+    "observedProperty": { "id": 11, "name": "windSpeed" }
+}
+~~~
+
+| Member | Content |
+| --- | --- |
+| `.result` | The value of the Observation's `result` array. |
+| `.unit` | The `unitOfMeasurements` entry at the value's position. |
+| `.observedProperty` | The ObservedProperty at the value's position. |
+| `.multiDatastream` | Present in place of `.datastream`: the MultiDatastream's `id`, `name`, `description` and `properties`, the value's `observationType` from `multiObservationDataTypes`, and its `position`, counted from 1. |
+
+Every other member of the reading, such as `id`, `time`, `phenomenonTime`, `resultTime`, `featureOfInterest` and `sensor`, is the Observation's or the MultiDatastream's, shared by its values, and is read as for a Datastream.
+
+**Records.** A `latest` read gives one record per Thing, holding the readings of its Datastreams and of the values of its MultiDatastreams. A `range` or `incremental` read gives one record per Observation: an Observation of a MultiDatastream gives one record holding one reading per value, so values measured together stay in one record and a mapping reads them side by side.
+
+**Keys.** When several readings of one Thing share a name, Datastreams rank before MultiDatastream values, then by id, then by position. The first keeps the name. A later Datastream is keyed `<name>@<data stream id>`, and a later value `<name>@<MultiDatastream id>/<position>`, read as `{{ readings['temperature@4/2'].result }}` (see [Reading keys](#reading-keys)).
+
+**Unreadable MultiDatastreams.**
+
+- A MultiDatastream whose ObservedProperties, `unitOfMeasurements` and `multiObservationDataTypes` differ in number fails the source, naming the MultiDatastream and how many of each it holds. One without ObservedProperties, or with one without a `name`, fails it as a Datastream without a named ObservedProperty does.
+- An Observation whose `result` is not an array with one value per ObservedProperty gives no readings, and in a `range` or `incremental` read its record is dropped. One `ingest-multi-results-unreadable` warning per source names the first such Observation and its MultiDatastream, and counts every one.
+- A value that is `null` gives no reading, as an absent member gives none. An Observation all of whose values are `null` gives no record in a `range` or `incremental` read.
+
+**Unread MultiDatastreams.** A run whose input reads no MultiDatastreams checks once, in its first cycle, whether its server holds any: it reads the service root, and when the root lists the MultiDatastreams collection, it requests `{root}/MultiDatastreams?$top=1`. When that gives one, one `collect-multi-datastreams-unread` warning names the server and says that `multiDatastreams` selects them. The check costs at most two requests, and one that fails reports nothing and fails nothing.
+
+**Cursors.** An incremental read keeps one position per MultiDatastream, apart from the position of a Datastream with the same id. `cassiopeia sensorthings cursor show` prints each position's kind, `datastream` or `multi-datastream`, and `cassiopeia sensorthings cursor reset --multi-datastream <ID>` resets one MultiDatastream (see [Reading new readings](#reading-new-readings)).
+
+**Mapping.** A mapping reads a value as it reads a Datastream's reading, by its key:
+
+~~~json5
+windSpeed: {
+    source: "{{ readings.windSpeed.result }}",
+    transformation: "float",
+    properties: {
+        observedAt: { source: "{{ readings.windSpeed.time }}", transformation: "datetime" },
+        unitCode: { source: "{% if readings.windSpeed %}{{ readings.windSpeed.unit | cefact_unit }}{% endif %}" },
+    },
+},
+~~~
+
+A server's ObservedProperties of a MultiDatastream are served in the order of the values of its results. Check the order a server serves with a latest read before mapping a value by its name.
+
 ### Reading times
 
 `time` is the instant a reading's `phenomenonTime` stands for, written in UTC: the instant itself, or the end of a `start/end` interval, when the reading was complete. It keeps at most six fractional digits, the microsecond precision NGSI-LD uses, and leaves out a fraction of zero, so `2026-11-12T11:00:00.000Z` becomes `2026-11-12T11:00:00Z` and `2026-11-12T12:00:00+02:00` becomes `2026-11-12T10:00:00Z`. Use it as an attribute's `observedAt`.
@@ -719,27 +816,32 @@ cassiopeia sensorthings readings https://iot.example.org/sta/v1.1
 The command prints one row per ObservedProperty name, sorted by name, with the columns aligned:
 
 ~~~text
-reading  unit          unit code  data streams  things with repeats
-no2      ug/m3         GQ         96            0
-pm10     ug/m3, µg/m³  GQ         412           3
-status   none          none       12            0
+reading        unit          unit code  data streams  multi data streams  things with repeats
+no2            ug/m3         GQ         96            0                   0
+pm10           ug/m3, µg/m³  GQ         412           0                   3
+status         none          none       12            0                   0
+windDirection  deg           DD         0             8                   0
+windSpeed      m/s           MTS        0             8                   0
 ~~~
 
 | Column | Content |
 | --- | --- |
 | `reading` | The ObservedProperty name, which a mapping reads as `readings.<name>`. |
-| `unit` | The distinct texts of the data streams' units: each `unitOfMeasurement`'s `symbol`, else its `name`, else its `definition`, which is the text `cefact_unit` writes for a unit it does not resolve. `none` when no unit has a text, as for readings that have no unit. |
+| `unit` | The distinct texts of the readings' units: each `unitOfMeasurement`'s, or `unitOfMeasurements` entry's, `symbol`, else its `name`, else its `definition`, which is the text `cefact_unit` writes for a unit it does not resolve. `none` when no unit has a text, as for readings that have no unit. |
 | `unit code` | The UN/CEFACT codes [`cefact_unit`](templates.md#unit-codes) resolves those units to, or `unknown` for a unit it does not resolve. |
-| `data streams` | The number of data streams of the name. |
-| `things with repeats` | The number of Things that hold more than one data stream of the name. Their extra data streams are read under `<name>@<data stream id>` keys (see [Reading keys](#reading-keys)). |
+| `data streams` | The number of Datastreams of the name. |
+| `multi data streams` | The number of MultiDatastreams with a value of the name. |
+| `things with repeats` | The number of Things that hold more than one reading of the name. Their extra readings are read under `<name>@<data stream id>` or `<name>@<MultiDatastream id>/<position>` keys (see [Reading keys](#reading-keys)). |
 
-`--datastreams` selects the data streams listed with a filter, as `datastreams` does in an input's `sensorthings` block, and `--input-header` sends a header with every request, as an input's `headers` do. The service root carries no credentials. The command reads the server as a run does, with every other setting at its default: it follows one request page by page under the rules of [Paging](#reading-a-server) and fails with a run's errors. The request asks for each Datastream with its Thing, the Thing's Locations, its ObservedProperty, and its Sensor, without Observations:
+`--datastreams` selects the Datastreams listed with a filter, as `datastreams` does in an input's `sensorthings` block, `--multi-datastreams` selects the MultiDatastreams listed, as `multiDatastreams` does, and `--input-header` sends a header with every request, as an input's `headers` do. The service root carries no credentials. The command reads the server as a run does, with every other setting at its default: it follows one request page by page under the rules of [Paging](#reading-a-server) and fails with a run's errors. The request asks for each Datastream with its Thing, the Thing's Locations, its ObservedProperty, and its Sensor, without Observations:
 
 ~~~text
 {root}/Datastreams?$filter={datastreams}&$expand=Thing/Locations,ObservedProperty,Sensor&$orderby=id%20asc&$top=1000
 ~~~
 
-When `limits.pages` stops the read, the table lists the data streams read before it, and a note on standard error names the next link that was not followed. A data stream without a Thing, or without an ObservedProperty with a `name`, fails the command and is named, as it fails a run. RIVM Samen Meten holds tens of thousands of data streams, so select them by name there, as for a read.
+The command then reads the server's service root, and when the root lists the MultiDatastreams collection, it lists every MultiDatastream, or those `--multi-datastreams` selects, with the listing request of [MultiDatastreams](#multidatastreams), each value a reading under the name of its ObservedProperty. A server whose root lists no MultiDatastreams is sent no MultiDatastreams request.
+
+When `limits.pages` stops a listing, the table lists the data streams read before it, and a note on standard error names the next link that was not followed. A data stream without a Thing, or without an ObservedProperty with a `name`, fails the command and is named, as it fails a run, and so does a MultiDatastream whose members differ in number. RIVM Samen Meten holds tens of thousands of data streams, so select them by name there, as for a read.
 
 ### Mapping a SensorThings record
 

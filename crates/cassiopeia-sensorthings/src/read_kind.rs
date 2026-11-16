@@ -17,10 +17,11 @@ pub enum ReadKind {
 /// What one record of a snapshot stands for, which decides the output it can be read into.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum SnapshotRecords {
-    /// One record per Thing, holding the newest reading of each of its data streams.
+    /// One record per Thing, holding the newest readings of each of its data streams.
     PerThing,
-    /// One record per Observation, holding that one reading. Several records then describe one
-    /// Thing, so only an output that keeps every observation keeps them all.
+    /// One record per Observation, holding its reading, or one reading per value of an Observation
+    /// of a `MultiDatastream`. Several records then describe one Thing, so only an output that
+    /// keeps every observation keeps them all.
     PerObservation,
 }
 

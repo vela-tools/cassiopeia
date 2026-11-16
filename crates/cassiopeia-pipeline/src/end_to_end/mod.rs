@@ -5,6 +5,7 @@ mod harness;
 mod incremental_reads;
 mod json_collections;
 mod local_contexts;
+mod multi_datastreams;
 mod record_merges;
 mod relationships;
 mod sensors;

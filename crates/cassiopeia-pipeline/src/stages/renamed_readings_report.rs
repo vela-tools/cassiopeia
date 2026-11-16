@@ -5,29 +5,29 @@ use cassiopeia_ingestor::sensorthings::{ingest_losses::LossTally, reading_keys::
 use cassiopeia_reporter::reporter::DiagnosticSink;
 use std::num::NonZeroU64;
 
-/// The one-line summary: the source, how many data streams were renamed, the first few renames with
-/// the key each is read by, and the rest counted.
+/// The one-line summary: the source, how many readings were renamed, the first few renames with the
+/// key each is read by, and the rest counted.
 ///
 /// The renames ride on the headline because the concise form shows nothing else, and a mapping
 /// author needs the generated key to read the reading at all.
 fn headline(source: &Input, renamed: &LossTally<RenamedReading>, total: NonZeroU64) -> String {
-    let streams = match total.get() {
-        1 => "1 data stream is read by a generated key".to_owned(),
-        count => format!("{count} data streams are read by generated keys"),
+    let readings = match total.get() {
+        1 => "1 reading is read by a generated key".to_owned(),
+        count => format!("{count} readings are read by generated keys"),
     };
     let named = renamed.named().iter().map(ToString::to_string).collect::<Vec<_>>().join("; ");
     let details = match renamed.unnamed() {
         0 => named,
         rest => format!("{named}; and {rest} more"),
     };
-    format!("In `{source}`, data streams of one Thing observe the same property, so {streams}: {details}")
+    format!("In `{source}`, readings of one Thing observe the same property, so {readings}: {details}")
 }
 
-/// Names a SensorThings snapshot's renamed readings in one warning and returns how many data streams
-/// were renamed.
+/// Names a SensorThings snapshot's renamed readings in one warning and returns how many readings
+/// were renamed, of Datastreams and of `MultiDatastream` elements alike.
 ///
-/// One diagnostic per snapshot, carrying every renamed data stream as an occurrence, since the
-/// renames share one cause: Things whose data streams observe one property. The snapshot is named by
+/// One diagnostic per snapshot, carrying every renamed reading as an occurrence, since the renames
+/// share one cause: Things whose readings observe one property. The snapshot is named by
 /// its `source`, so a downloaded one is named by its URL rather than by its temporary copy.
 pub(crate) fn report_renamed_readings(sink: &dyn DiagnosticSink, source: &Input, renamed: &LossTally<RenamedReading>) -> u64 {
     let Some(total) = NonZeroU64::new(renamed.total()) else {
@@ -46,7 +46,7 @@ mod tests {
     };
     use cassiopeia_ingestor::sensorthings::{
         ingest_losses::SensorThingsLosses,
-        reading_keys::{ReadingKey, RenamedReading},
+        reading_keys::{ReadingKey, ReadingSource, RenamedReading},
     };
     use cassiopeia_sensorthings::entity_id::EntityId;
     use pretty_assertions::assert_eq;
@@ -59,7 +59,7 @@ mod tests {
         for &(thing, datastream, key) in renames {
             losses.rename(RenamedReading {
                 thing: EntityId::Integer(thing),
-                datastream: EntityId::Integer(datastream),
+                source: ReadingSource::Datastream(EntityId::Integer(datastream)),
                 key: ReadingKey::from(Box::<str>::from(key)),
             });
         }
@@ -94,7 +94,7 @@ mod tests {
         assert_eq!(reported[0].code.to_string(), "ingest-readings-renamed");
         assert_eq!(
             reported[0].headline,
-            "In `/data/rivm.jsonl`, data streams of one Thing observe the same property, so 1 data stream is read by a generated key: Thing 12512 reads data stream 9 as `readings['pm10@9']`"
+            "In `/data/rivm.jsonl`, readings of one Thing observe the same property, so 1 reading is read by a generated key: Thing 12512 reads Datastream 9 as `readings['pm10@9']`"
         );
         assert_eq!(reported[0].occurrences, 1);
         assert_eq!(reported[0].defining, [ContextField::Source(Input::Local(PathBuf::from("/data/rivm.jsonl")))]);
@@ -110,7 +110,7 @@ mod tests {
         assert_eq!(total, 5);
         assert_eq!(
             sink.diagnostics()[0].headline,
-            "In `/data/rivm.jsonl`, data streams of one Thing observe the same property, so 5 data streams are read by generated keys: Thing 1 reads data stream 9 as `readings['pm10@9']`; Thing 1 reads data stream 10 as `readings['pm10@10']`; Thing 2 reads data stream 11 as `readings['no2@11']`; and 2 more"
+            "In `/data/rivm.jsonl`, readings of one Thing observe the same property, so 5 readings are read by generated keys: Thing 1 reads Datastream 9 as `readings['pm10@9']`; Thing 1 reads Datastream 10 as `readings['pm10@10']`; Thing 2 reads Datastream 11 as `readings['no2@11']`; and 2 more"
         );
         assert_eq!(sink.diagnostics()[0].occurrences, 5);
     }

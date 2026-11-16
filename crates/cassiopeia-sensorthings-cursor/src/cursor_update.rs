@@ -1,8 +1,8 @@
 use crate::{position::Position, positions::Positions, seen_observations::SeenObservations};
-use cassiopeia_sensorthings::entity_id::EntityId;
+use cassiopeia_sensorthings::{stream_id::StreamId, stream_kind::StreamKind};
 use chrono::{DateTime, Utc};
 use std::{
-    collections::{BTreeMap, btree_map::Entry},
+    collections::{BTreeMap, BTreeSet, btree_map::Entry},
     time::Duration,
 };
 
@@ -18,18 +18,10 @@ pub struct CursorUpdate {
     /// How far behind its high-water mark a position keeps the Observations it has seen.
     lookback: Duration,
     /// The Observations the cycle wrote, by listed data stream.
-    listed: BTreeMap<EntityId, SeenObservations>,
-    /// Whether discovery listed every data stream the server serves.
-    listing: Listing,
-}
-
-/// How far a cycle's discovery listed the data streams a server serves.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Listing {
-    /// Discovery read its last page, so a data stream it did not list is no longer served.
-    Complete,
-    /// A collection limit stopped discovery, so a data stream it did not list may still be served.
-    CutShort,
+    listed: BTreeMap<StreamId, SeenObservations>,
+    /// The kinds of data stream whose discovery a collection limit stopped before it listed every
+    /// data stream of the kind the server serves.
+    cut_short: BTreeSet<StreamKind>,
 }
 
 impl CursorUpdate {
@@ -41,25 +33,26 @@ impl CursorUpdate {
             cycle_start,
             lookback,
             listed: BTreeMap::new(),
-            listing: Listing::Complete,
+            cut_short: BTreeSet::new(),
         }
     }
 
-    /// Records that a collection limit stopped discovery before it listed every data stream, so no
-    /// position is marked missing for not being listed.
-    pub const fn listing_cut_short(&mut self) {
-        self.listing = Listing::CutShort;
+    /// Records that a collection limit stopped the discovery of the data streams of `kind` before it
+    /// listed every one, so no position of the kind is marked missing for not being listed.
+    pub fn listing_cut_short(&mut self, kind: StreamKind) {
+        self.cut_short.insert(kind);
     }
 
-    /// The positions of `committed` this update marks missing, by ascending data stream id: those
-    /// whose data stream discovery did not list, unless it was cut short.
-    pub fn missing<'a>(&self, committed: &'a Positions) -> impl Iterator<Item = (&'a EntityId, &'a Position)> {
+    /// The positions of `committed` this update marks missing, Datastreams first, each kind by
+    /// ascending id: those whose data stream discovery did not list, unless the discovery of its kind
+    /// was cut short.
+    pub fn missing<'a>(&self, committed: &'a Positions) -> impl Iterator<Item = (&'a StreamId, &'a Position)> {
         committed.iter().filter(|(datastream, _)| self.marks_missing(datastream))
     }
 
     /// Records that discovery listed `datastream` and that the cycle wrote `written` for it, which
     /// may be none. Recording a data stream again adds to what was written for it.
-    pub fn record(&mut self, datastream: EntityId, written: SeenObservations) {
+    pub fn record(&mut self, datastream: StreamId, written: SeenObservations) {
         self.listed.entry(datastream).or_default().join(written);
     }
 
@@ -67,7 +60,7 @@ impl CursorUpdate {
     ///
     /// A listed data stream moves past what the cycle wrote, and gets a first position only when the
     /// cycle wrote for it. A held position whose data stream was not listed keeps its high-water mark
-    /// and seen Observations, and is marked missing unless discovery was cut short.
+    /// and seen Observations, and is marked missing unless the discovery of its kind was cut short.
     #[must_use]
     pub fn apply(self, committed: Positions) -> Positions {
         let mut positions = BTreeMap::from(committed);
@@ -89,18 +82,15 @@ impl CursorUpdate {
     }
 
     /// Whether this update marks the position of `datastream` missing.
-    fn marks_missing(&self, datastream: &EntityId) -> bool {
-        match self.listing {
-            Listing::Complete => !self.listed.contains_key(datastream),
-            Listing::CutShort => false,
-        }
+    fn marks_missing(&self, datastream: &StreamId) -> bool {
+        !self.cut_short.contains(&datastream.kind()) && !self.listed.contains_key(datastream)
     }
 }
 
 #[cfg(test)]
 mod tests {
     use crate::{cursor_update::CursorUpdate, positions::Positions, seen_observations::SeenObservations};
-    use cassiopeia_sensorthings::entity_id::EntityId;
+    use cassiopeia_sensorthings::{entity_id::EntityId, stream_id::StreamId, stream_kind::StreamKind};
     use chrono::{DateTime, Utc};
     use pretty_assertions::assert_eq;
     use std::{collections::BTreeMap, time::Duration};
@@ -121,12 +111,17 @@ mod tests {
         )
     }
 
+    /// The Datastream `id`.
+    fn datastream_id(id: i64) -> StreamId {
+        StreamId::Datastream(EntityId::Integer(id))
+    }
+
     /// The positions after a cycle that started at `cycle_start` listed each of `listed` with what
     /// it wrote for it.
     fn after(committed: Positions, cycle_start: &str, listed: Vec<(i64, SeenObservations)>) -> Positions {
         let mut update = CursorUpdate::new(at(cycle_start), LOOKBACK);
         for (datastream, written) in listed {
-            update.record(EntityId::Integer(datastream), written);
+            update.record(datastream_id(datastream), written);
         }
         update.apply(committed)
     }
@@ -142,7 +137,7 @@ mod tests {
     #[test]
     fn a_new_stream_s_high_water_is_its_latest_reading() {
         let positions = after(Positions::default(), "10:00", vec![(5, seen(&[(3, "09:10"), (4, "09:40")]))]);
-        let position = positions.get(&EntityId::Integer(5)).unwrap();
+        let position = positions.get(&datastream_id(5)).unwrap();
 
         assert_eq!(position.high_water(), at("09:40"));
         assert_eq!(position.seen(), &seen(&[(3, "09:10"), (4, "09:40")]));
@@ -157,14 +152,14 @@ mod tests {
         let second_miss = after(first_miss.clone(), "11:00", vec![(9, SeenObservations::default())]);
 
         for positions in [&first_miss, &second_miss] {
-            let missing = positions.get(&EntityId::Integer(5)).unwrap();
-            let held = committed.get(&EntityId::Integer(5)).unwrap();
+            let missing = positions.get(&datastream_id(5)).unwrap();
+            let held = committed.get(&datastream_id(5)).unwrap();
 
             assert_eq!(missing.missing_since(), Some(at("10:00")));
             assert_eq!((missing.high_water(), missing.seen()), (held.high_water(), held.seen()));
             assert_eq!(missing.last_listed(), at("09:00"));
         }
-        assert_eq!(second_miss.get(&EntityId::Integer(9)).unwrap().missing_since(), None);
+        assert_eq!(second_miss.get(&datastream_id(9)).unwrap().missing_since(), None);
     }
 
     #[test]
@@ -173,41 +168,70 @@ mod tests {
         let missed = after(committed, "10:00", Vec::new());
         let listed = after(missed, "11:00", vec![(5, SeenObservations::default())]);
 
-        assert_eq!(listed.get(&EntityId::Integer(5)).unwrap().missing_since(), None);
-        assert_eq!(listed.get(&EntityId::Integer(5)).unwrap().last_listed(), at("11:00"));
+        assert_eq!(listed.get(&datastream_id(5)).unwrap().missing_since(), None);
+        assert_eq!(listed.get(&datastream_id(5)).unwrap().last_listed(), at("11:00"));
     }
 
     #[test]
     fn a_cut_short_listing_marks_no_stream_missing() {
         let committed = after(Positions::default(), "09:00", vec![(5, seen(&[(1, "08:50")])), (9, seen(&[(2, "08:55")]))]);
         let mut update = CursorUpdate::new(at("10:00"), LOOKBACK);
-        update.record(EntityId::Integer(5), SeenObservations::default());
-        update.listing_cut_short();
+        update.record(datastream_id(5), SeenObservations::default());
+        update.listing_cut_short(StreamKind::Datastream);
 
         assert_eq!(update.missing(&committed).count(), 0);
         let positions = update.apply(committed);
-        assert_eq!(positions.get(&EntityId::Integer(9)).unwrap().missing_since(), None);
-        assert_eq!(positions.get(&EntityId::Integer(9)).unwrap().last_listed(), at("09:00"));
+        assert_eq!(positions.get(&datastream_id(9)).unwrap().missing_since(), None);
+        assert_eq!(positions.get(&datastream_id(9)).unwrap().last_listed(), at("09:00"));
     }
 
     #[test]
     fn the_positions_an_update_marks_missing_are_the_unlisted_ones() {
         let committed = after(Positions::default(), "09:00", vec![(5, seen(&[(1, "08:50")])), (9, seen(&[(2, "08:55")]))]);
         let mut update = CursorUpdate::new(at("10:00"), LOOKBACK);
-        update.record(EntityId::Integer(9), SeenObservations::default());
+        update.record(datastream_id(9), SeenObservations::default());
 
-        let missing: Vec<&EntityId> = update.missing(&committed).map(|(datastream, _)| datastream).collect();
+        let missing: Vec<&StreamId> = update.missing(&committed).map(|(datastream, _)| datastream).collect();
 
-        assert_eq!(missing, [&EntityId::Integer(5)]);
+        assert_eq!(missing, [&datastream_id(5)]);
     }
 
     #[test]
     fn a_stream_recorded_twice_keeps_both_writes() {
         let mut update = CursorUpdate::new(at("10:00"), LOOKBACK);
-        update.record(EntityId::Integer(5), seen(&[(1, "09:10")]));
-        update.record(EntityId::Integer(5), seen(&[(2, "09:20")]));
+        update.record(datastream_id(5), seen(&[(1, "09:10")]));
+        update.record(datastream_id(5), seen(&[(2, "09:20")]));
         let positions = update.apply(Positions::default());
 
-        assert_eq!(positions.get(&EntityId::Integer(5)).unwrap().seen(), &seen(&[(1, "09:10"), (2, "09:20")]));
+        assert_eq!(positions.get(&datastream_id(5)).unwrap().seen(), &seen(&[(1, "09:10"), (2, "09:20")]));
+    }
+
+    #[test]
+    fn a_datastream_and_a_multi_datastream_with_one_id_keep_a_position_each() {
+        let mut update = CursorUpdate::new(at("10:00"), LOOKBACK);
+        update.record(datastream_id(4), seen(&[(1, "09:10")]));
+        update.record(StreamId::MultiDatastream(EntityId::Integer(4)), seen(&[(2, "09:40")]));
+        let positions = update.apply(Positions::default());
+
+        assert_eq!(positions.len(), 2);
+        assert_eq!(positions.get(&datastream_id(4)).unwrap().high_water(), at("09:10"));
+        assert_eq!(
+            positions.get(&StreamId::MultiDatastream(EntityId::Integer(4))).unwrap().high_water(),
+            at("09:40")
+        );
+    }
+
+    #[test]
+    fn a_listing_cut_short_for_one_kind_still_marks_the_other_kind_missing() {
+        let mut first = CursorUpdate::new(at("09:00"), LOOKBACK);
+        first.record(datastream_id(5), seen(&[(1, "08:50")]));
+        first.record(StreamId::MultiDatastream(EntityId::Integer(4)), seen(&[(2, "08:55")]));
+        let committed = first.apply(Positions::default());
+        let mut update = CursorUpdate::new(at("10:00"), LOOKBACK);
+        update.listing_cut_short(StreamKind::MultiDatastream);
+
+        let missing: Vec<&StreamId> = update.missing(&committed).map(|(datastream, _)| datastream).collect();
+
+        assert_eq!(missing, [&datastream_id(5)]);
     }
 }

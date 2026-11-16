@@ -623,7 +623,7 @@ SensorThings API server operations
 
 List the readings a SensorThings API server offers.
 
-Prints one row per ObservedProperty name, the name a mapping reads as `readings.<name>`, with the units of its data streams, the UN/CEFACT codes `cefact_unit` resolves them to (`unknown` for one it does not resolve), the number of its data streams, and the number of Things that hold more than one of them.
+Prints one row per ObservedProperty name, the name a mapping reads as `readings.<name>`, with the units of its readings, the UN/CEFACT codes `cefact_unit` resolves them to (`unknown` for one it does not resolve), the number of its Datastreams, the number of MultiDatastreams with an element of the name, and the number of Things that hold more than one reading of the name. MultiDatastreams are listed when the server's service root lists them.
 
 **Usage:** `cassiopeia sensorthings readings [OPTIONS] <SERVICE_ROOT>`
 
@@ -633,7 +633,8 @@ Prints one row per ObservedProperty name, the name a mapping reads as `readings.
 
 ###### **Options:**
 
-* `--datastreams <EXPRESSION>` — An OData `$filter` over Datastreams that selects the data streams listed, such as `ObservedProperty/name eq 'pm10'`; every data stream when absent
+* `--datastreams <EXPRESSION>` — An OData `$filter` over Datastreams that selects the Datastreams listed, such as `ObservedProperty/name eq 'pm10'`; every Datastream when absent
+* `--multi-datastreams <EXPRESSION>` — An OData `$filter` over MultiDatastreams that selects the MultiDatastreams listed, such as `startswith(name,'ws-')`; every MultiDatastream when absent
 * `--input-header <NAME: VALUE>` — Extra HTTP header sent when fetching a remote input, written as `Name: Value`; repeat for several. Typically carries an API key, e.g. `--input-header "X-Api-Key: <key>"`. Refused for a local input
 
 
@@ -666,7 +667,7 @@ Prints one row per cursor: its name, the service root its positions were read fr
 
 Show the position a cursor keeps for each data stream.
 
-Prints the service root, then one row per data stream: its id, its high-water mark, the number of Observations it has seen within the lookback, the start of the last cycle that listed it, and the start of the first cycle that no longer listed it, `-` while it is listed.
+Prints the service root, then one row per data stream, Datastreams first: its kind, `datastream` or `multi-datastream`, its id, its high-water mark, the number of Observations it has seen within the lookback, the start of the last cycle that listed it, and the start of the first cycle that no longer listed it, `-` while it is listed.
 
 **Usage:** `cassiopeia sensorthings cursor show <CURSOR>`
 
@@ -690,7 +691,8 @@ Without `--to`, removes the positions, so the next cycle starts each data stream
 
 ###### **Options:**
 
-* `--datastream <ID>` — Reset only the data stream with this id, as `cursor show` prints it; every data stream when absent
+* `--datastream <ID>` — Reset only the Datastream with this id, as `cursor show` prints it; every data stream when neither this nor `--multi-datastream` is given
+* `--multi-datastream <ID>` — Reset only the MultiDatastream with this id, as `cursor show` prints it. A Datastream with the same id keeps its position
 * `--to <INSTANT|DURATION>` — Set the high-water marks to this RFC 3339 instant, or to this span before now, such as `1h`; remove the positions when absent. A target after now is refused
 
 
