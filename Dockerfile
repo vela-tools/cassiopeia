@@ -1,4 +1,4 @@
-FROM rust:1.99.1-trixie AS chef
+FROM rust:1.100.0-trixie AS chef
 
 RUN apt-get update \
     && apt-get install -y --no-install-recommends cmake g++ git libclang-dev libopenjp2-7-dev \
@@ -11,7 +11,7 @@ FROM chef AS planner
 COPY . .
 RUN cargo chef prepare --recipe-path recipe.json
 
-FROM rust:1.99.1-trixie AS sqlite
+FROM rust:1.100.0-trixie AS sqlite
 
 ARG SQLITE_VERSION=3540100
 ARG SQLITE_SHA256=926ef8d3eab93fbf6e06011901273eec076b25594a4e1cdadd50c987f4f6d64e
