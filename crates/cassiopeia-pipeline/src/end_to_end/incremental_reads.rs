@@ -39,7 +39,7 @@ const PM10: i64 = 56776;
 const PM25: i64 = 56775;
 
 /// The path and query of the metadata discovery request of the mock server's `/v1.0` root.
-const METADATA: &str = "/v1.0/Datastreams?$expand=Thing/Locations,ObservedProperty,Sensor&$orderby=id%20asc&$top=1000";
+const METADATA: &str = "/v1.0/Datastreams?$top=1000&$expand=Thing/Locations,ObservedProperty,Sensor&$orderby=id%20asc";
 
 /// The flag the cancellation test raises once the server answered the last request of collection.
 static STOPPED_AFTER_COLLECTION: AtomicBool = AtomicBool::new(false);

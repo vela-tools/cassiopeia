@@ -48,8 +48,12 @@ pub fn metadata_discovery_request(root: &ServiceRoot, settings: &SensorThingsSet
 /// observes, its `Sensor` and its newest Observation, with that Observation's `FeatureOfInterest`
 /// when the settings request features of interest, in id order, `pageSize` a page.
 ///
-/// Query parameters are written in the order `$filter`, `$expand`, `$orderby`, `$top`, and `$filter`
-/// only when the settings select data streams of `kind` by an expression.
+/// Query parameters are written in the order `$filter`, `$top`, `$expand`, `$orderby`, and `$filter`
+/// only when the settings select data streams of `kind` by an expression. A server evaluates query
+/// options in one order whatever order they are written in (OGC 18-088 section 9.3.1, Req 22), but
+/// `$top` comes before the `$top=1` of the newest Observation's expansion: istSOS4 1.3 builds its next link from the first `$top=` of the
+/// request, so a later `$top` gives it a page of one data stream, and every page then repeats all but
+/// one of the data streams of the page before it.
 #[must_use]
 pub fn latest_discovery_request(root: &ServiceRoot, settings: &SensorThingsSettings, kind: StreamKind) -> Url {
     let newest = match settings.features_of_interest() {
@@ -103,7 +107,7 @@ fn stream_discovery_request(root: &ServiceRoot, settings: &SensorThingsSettings,
 /// matches, every one when it is `None`, and expands `expand`, in id order, `page_size` a page.
 fn discovery_request(root: &ServiceRoot, collection: &str, filter: Option<&EntityFilter>, expand: &str, page_size: PageSize) -> Url {
     let filter = filter.map(|filter| format!("$filter={}&", query_value(filter.as_str()))).unwrap_or_default();
-    resource_request(root, collection, &format!("{filter}$expand={expand}&$orderby={BY_ID}&$top={page_size}"))
+    resource_request(root, collection, &format!("{filter}$top={page_size}&$expand={expand}&$orderby={BY_ID}"))
 }
 
 #[cfg(test)]
@@ -131,8 +135,20 @@ mod tests {
 
         assert_eq!(
             request.as_str(),
-            "https://h.example/v1.1/Datastreams?$expand=Thing/Locations,ObservedProperty,Sensor,Observations($orderby=phenomenonTime%20desc;$top=1)&$orderby=id%20asc&$top=1000"
+            "https://h.example/v1.1/Datastreams?$top=1000&$expand=Thing/Locations,ObservedProperty,Sensor,Observations($orderby=phenomenonTime%20desc;$top=1)&$orderby=id%20asc"
         );
+    }
+
+    #[test]
+    fn the_page_size_comes_before_the_top_of_the_newest_observation() {
+        let request = latest_discovery_request(
+            &root("https://h.example/v1.1"),
+            &settings(r#"{"datastreams": "endswith(name,'-pm10')", "pageSize": 25, "featuresOfInterest": true}"#),
+            StreamKind::Datastream,
+        );
+        let query = request.query().unwrap_or_default();
+
+        assert_eq!(query.find("$top=").and_then(|start| query.get(start..start + 7)), Some("$top=25"));
     }
 
     #[test]
@@ -145,7 +161,7 @@ mod tests {
 
         assert_eq!(
             request.as_str(),
-            "https://h.example/v1.1/Datastreams?$filter=ObservedProperty/name%20eq%20%27pm10%27&$expand=Thing/Locations,ObservedProperty,Sensor,Observations($orderby=phenomenonTime%20desc;$top=1)&$orderby=id%20asc&$top=1000"
+            "https://h.example/v1.1/Datastreams?$filter=ObservedProperty/name%20eq%20%27pm10%27&$top=1000&$expand=Thing/Locations,ObservedProperty,Sensor,Observations($orderby=phenomenonTime%20desc;$top=1)&$orderby=id%20asc"
         );
     }
 
@@ -159,7 +175,7 @@ mod tests {
 
         assert_eq!(
             request.as_str(),
-            "http://localhost:18080/FROST-Server/v1.1/Datastreams?$expand=Thing/Locations,ObservedProperty,Sensor,Observations($orderby=phenomenonTime%20desc;$top=1)&$orderby=id%20asc&$top=10"
+            "http://localhost:18080/FROST-Server/v1.1/Datastreams?$top=10&$expand=Thing/Locations,ObservedProperty,Sensor,Observations($orderby=phenomenonTime%20desc;$top=1)&$orderby=id%20asc"
         );
     }
 
@@ -173,7 +189,7 @@ mod tests {
 
         assert_eq!(
             request.as_str(),
-            "https://h.example/v1.1/Datastreams?$filter=startswith(name,%27bus-%27)&$expand=Thing/Locations,ObservedProperty,Sensor,Observations($orderby=phenomenonTime%20desc;$top=1;$expand=FeatureOfInterest)&$orderby=id%20asc&$top=1000"
+            "https://h.example/v1.1/Datastreams?$filter=startswith(name,%27bus-%27)&$top=1000&$expand=Thing/Locations,ObservedProperty,Sensor,Observations($orderby=phenomenonTime%20desc;$top=1;$expand=FeatureOfInterest)&$orderby=id%20asc"
         );
     }
 
@@ -187,7 +203,7 @@ mod tests {
 
         assert_eq!(
             request.as_str(),
-            "https://h.example/v1.1/Datastreams?$expand=Thing/Locations,ObservedProperty,Sensor&$orderby=id%20asc&$top=1000"
+            "https://h.example/v1.1/Datastreams?$top=1000&$expand=Thing/Locations,ObservedProperty,Sensor&$orderby=id%20asc"
         );
     }
 
@@ -197,7 +213,7 @@ mod tests {
 
         assert_eq!(
             request.as_str(),
-            "https://h.example/v1.1/Datastreams?$expand=Thing/Locations,ObservedProperty,Sensor&$orderby=id%20asc&$top=1000"
+            "https://h.example/v1.1/Datastreams?$top=1000&$expand=Thing/Locations,ObservedProperty,Sensor&$orderby=id%20asc"
         );
     }
 
@@ -211,7 +227,7 @@ mod tests {
 
         assert_eq!(
             request.as_str(),
-            "https://h.example/v1.1/Datastreams?$filter=ObservedProperty/name%20eq%20%27pm10%27&$expand=Thing/Locations,ObservedProperty,Sensor&$orderby=id%20asc&$top=200"
+            "https://h.example/v1.1/Datastreams?$filter=ObservedProperty/name%20eq%20%27pm10%27&$top=200&$expand=Thing/Locations,ObservedProperty,Sensor&$orderby=id%20asc"
         );
     }
 
@@ -221,11 +237,11 @@ mod tests {
 
         assert_eq!(
             latest_discovery_request(&root("https://h.example/v1.1"), &every, StreamKind::MultiDatastream).as_str(),
-            "https://h.example/v1.1/MultiDatastreams?$expand=Thing/Locations,ObservedProperties,Sensor,Observations($orderby=phenomenonTime%20desc;$top=1)&$orderby=id%20asc&$top=1000"
+            "https://h.example/v1.1/MultiDatastreams?$top=1000&$expand=Thing/Locations,ObservedProperties,Sensor,Observations($orderby=phenomenonTime%20desc;$top=1)&$orderby=id%20asc"
         );
         assert_eq!(
             metadata_discovery_request(&root("https://h.example/v1.1"), &every, StreamKind::MultiDatastream).as_str(),
-            "https://h.example/v1.1/MultiDatastreams?$expand=Thing/Locations,ObservedProperties,Sensor&$orderby=id%20asc&$top=1000"
+            "https://h.example/v1.1/MultiDatastreams?$top=1000&$expand=Thing/Locations,ObservedProperties,Sensor&$orderby=id%20asc"
         );
     }
 
@@ -235,15 +251,15 @@ mod tests {
 
         assert_eq!(
             latest_discovery_request(&root("https://h.example/v1.1"), &filtered, StreamKind::MultiDatastream).as_str(),
-            "https://h.example/v1.1/MultiDatastreams?$filter=startswith(name,%27ws-%27)&$expand=Thing/Locations,ObservedProperties,Sensor,Observations($orderby=phenomenonTime%20desc;$top=1)&$orderby=id%20asc&$top=1000"
+            "https://h.example/v1.1/MultiDatastreams?$filter=startswith(name,%27ws-%27)&$top=1000&$expand=Thing/Locations,ObservedProperties,Sensor,Observations($orderby=phenomenonTime%20desc;$top=1)&$orderby=id%20asc"
         );
         assert_eq!(
             metadata_discovery_request(&root("https://h.example/v1.1"), &filtered, StreamKind::MultiDatastream).as_str(),
-            "https://h.example/v1.1/MultiDatastreams?$filter=startswith(name,%27ws-%27)&$expand=Thing/Locations,ObservedProperties,Sensor&$orderby=id%20asc&$top=1000"
+            "https://h.example/v1.1/MultiDatastreams?$filter=startswith(name,%27ws-%27)&$top=1000&$expand=Thing/Locations,ObservedProperties,Sensor&$orderby=id%20asc"
         );
         assert_eq!(
             metadata_discovery_request(&root("https://h.example/v1.1"), &filtered, StreamKind::Datastream).as_str(),
-            "https://h.example/v1.1/Datastreams?$filter=ObservedProperty/name%20eq%20%27pm10%27&$expand=Thing/Locations,ObservedProperty,Sensor&$orderby=id%20asc&$top=1000"
+            "https://h.example/v1.1/Datastreams?$filter=ObservedProperty/name%20eq%20%27pm10%27&$top=1000&$expand=Thing/Locations,ObservedProperty,Sensor&$orderby=id%20asc"
         );
     }
 
@@ -257,7 +273,7 @@ mod tests {
 
         assert_eq!(
             request.as_str(),
-            "https://h.example/v1.1/MultiDatastreams?$expand=Thing/Locations,ObservedProperties,Sensor,Observations($orderby=phenomenonTime%20desc;$top=1;$expand=FeatureOfInterest)&$orderby=id%20asc&$top=1000"
+            "https://h.example/v1.1/MultiDatastreams?$top=1000&$expand=Thing/Locations,ObservedProperties,Sensor,Observations($orderby=phenomenonTime%20desc;$top=1;$expand=FeatureOfInterest)&$orderby=id%20asc"
         );
     }
 
@@ -267,7 +283,7 @@ mod tests {
 
         assert_eq!(
             request.map(String::from).as_deref(),
-            Some("https://h.example/v1.1/Things?$expand=Locations&$orderby=id%20asc&$top=1000")
+            Some("https://h.example/v1.1/Things?$top=1000&$expand=Locations&$orderby=id%20asc")
         );
     }
 
@@ -277,7 +293,7 @@ mod tests {
 
         assert_eq!(
             request.map(String::from).as_deref(),
-            Some("https://h.example/v1.1/Things?$filter=startswith(name,%27ILM_%27)&$expand=Locations&$orderby=id%20asc&$top=1000")
+            Some("https://h.example/v1.1/Things?$filter=startswith(name,%27ILM_%27)&$top=1000&$expand=Locations&$orderby=id%20asc")
         );
     }
 
@@ -290,7 +306,7 @@ mod tests {
 
         assert_eq!(
             request.map(String::from).as_deref(),
-            Some("http://localhost:18080/FROST-Server/v1.1/Things?$expand=Locations&$orderby=id%20asc&$top=2")
+            Some("http://localhost:18080/FROST-Server/v1.1/Things?$top=2&$expand=Locations&$orderby=id%20asc")
         );
     }
 

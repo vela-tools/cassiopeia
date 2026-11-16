@@ -69,7 +69,7 @@ mod tests {
     use url::Url;
 
     /// The path and query of the metadata discovery request with the default settings.
-    const METADATA: &str = "/v1.1/Datastreams?$expand=Thing/Locations,ObservedProperty,Sensor&$orderby=id%20asc&$top=1000";
+    const METADATA: &str = "/v1.1/Datastreams?$top=1000&$expand=Thing/Locations,ObservedProperty,Sensor&$orderby=id%20asc";
 
     /// A shutdown flag never set, as in a run nobody stops.
     static RUNNING: AtomicBool = AtomicBool::new(false);
@@ -127,7 +127,7 @@ mod tests {
         let discovery = server
             .mock(
                 "GET",
-                "/v1.1/Datastreams?$filter=startswith(name,%27ILM_I68-%27)&$expand=Thing/Locations,ObservedProperty,Sensor&$orderby=id%20asc&$top=10",
+                "/v1.1/Datastreams?$filter=startswith(name,%27ILM_I68-%27)&$top=10&$expand=Thing/Locations,ObservedProperty,Sensor&$orderby=id%20asc",
             )
             .with_body(page(&[1], None))
             .expect(1)
@@ -175,7 +175,7 @@ mod tests {
     }
 
     /// The path and query of the metadata discovery of every `MultiDatastream`.
-    const MULTI_METADATA: &str = "/v1.1/MultiDatastreams?$expand=Thing/Locations,ObservedProperties,Sensor&$orderby=id%20asc&$top=1000";
+    const MULTI_METADATA: &str = "/v1.1/MultiDatastreams?$top=1000&$expand=Thing/Locations,ObservedProperties,Sensor&$orderby=id%20asc";
 
     /// A service root document that lists the collections `names`.
     fn service_document(names: &[&str]) -> String {

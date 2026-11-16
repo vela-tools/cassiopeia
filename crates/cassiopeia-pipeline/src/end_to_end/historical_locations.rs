@@ -136,7 +136,7 @@ impl TrackServer {
             server
                 .mock(
                     "GET",
-                    "/v1.1/Datastreams?$expand=Thing/Locations,ObservedProperty,Sensor&$orderby=id%20asc&$top=1000",
+                    "/v1.1/Datastreams?$top=1000&$expand=Thing/Locations,ObservedProperty,Sensor&$orderby=id%20asc",
                 )
                 .with_body(json!({ "value": [datastream] }).to_string())
                 .create(),

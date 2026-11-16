@@ -119,7 +119,7 @@ mod tests {
     use url::Url;
 
     /// The path and query of the metadata discovery request with the default settings.
-    const METADATA: &str = "/v1.1/Datastreams?$expand=Thing/Locations,ObservedProperty,Sensor&$orderby=id%20asc&$top=1000";
+    const METADATA: &str = "/v1.1/Datastreams?$top=1000&$expand=Thing/Locations,ObservedProperty,Sensor&$orderby=id%20asc";
 
     /// The bounds of a `last: "24h"` range in the cycle the tests collect in.
     const LAST_DAY: (&str, &str) = ("2026-11-11T10:00:00Z", "2026-11-12T10:00:00Z");
@@ -492,7 +492,7 @@ mod tests {
     }
 
     /// The path and query of the metadata discovery of every `MultiDatastream`.
-    const MULTI_METADATA: &str = "/v1.1/MultiDatastreams?$expand=Thing/Locations,ObservedProperties,Sensor&$orderby=id%20asc&$top=1000";
+    const MULTI_METADATA: &str = "/v1.1/MultiDatastreams?$top=1000&$expand=Thing/Locations,ObservedProperties,Sensor&$orderby=id%20asc";
 
     /// The path and query of the observations request of the `MultiDatastream` `id` between
     /// `bounds`.
