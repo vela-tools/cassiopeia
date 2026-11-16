@@ -876,7 +876,7 @@ dependencies = [
  "kml",
  "mediatype",
  "ndarray",
- "netcdf-core",
+ "netcdf-core 0.12.1",
  "netcdf-reader",
  "netcdf-writer",
  "num-traits",
@@ -2417,7 +2417,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e35d6e78f4cebb90e51d543db8fe41528851d6deeef6ef21ebd4bfdc1e784776"
 dependencies = [
  "libc",
- "windows-sys 0.59.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -3176,15 +3176,24 @@ dependencies = [
 ]
 
 [[package]]
-name = "hdf5-reader"
-version = "0.12.1"
+name = "hdf5-core"
+version = "0.13.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d1ac773e9e47f3765399b71525783c203c53844c83d52a73f3f313d0a040e413"
+checksum = "8677f7e6cdd34853d824de6d4394395aff5f4d00e388e75b7366e08fefe91236"
+dependencies = [
+ "thiserror 2.0.21",
+]
+
+[[package]]
+name = "hdf5-reader"
+version = "0.13.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a34ef20fa8f104da38fbc79438b31d18c790e5f65d7200021987f974d69e7462"
 dependencies = [
  "flate2",
- "hdf5-core",
+ "hdf5-core 0.13.0",
  "libc",
- "lru 0.16.4",
+ "lru 0.19.0",
  "lz4_flex",
  "memmap2",
  "ndarray",
@@ -3201,7 +3210,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4a30694330c92d37b3d8183037d699012011976f14f45784b829e8be61d58bc3"
 dependencies = [
  "flate2",
- "hdf5-core",
+ "hdf5-core 0.12.1",
  "thiserror 2.0.21",
 ]
 
@@ -4636,18 +4645,18 @@ checksum = "5d15f86d12da44cd8d4ec3c73984537eb7f4cadcb9776a575a0a8a05ca11005c"
 
 [[package]]
 name = "lru"
-version = "0.16.4"
+version = "0.18.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7f66e8d5d03f609abc3a39e6f08e4164ebf1447a732906d39eb9b99b7919ef39"
+checksum = "ef9ac18847474e638e3702b76c65d4eb93428471a74778ef0f1be711717f89b5"
 dependencies = [
- "hashbrown 0.16.1",
+ "hashbrown 0.17.1",
 ]
 
 [[package]]
 name = "lru"
-version = "0.18.5"
+version = "0.19.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ef9ac18847474e638e3702b76c65d4eb93428471a74778ef0f1be711717f89b5"
+checksum = "4a9f71e3591c7ec44d3e563e87bf14ddc2bada8519dca046e5b0e560cd004e2d"
 dependencies = [
  "hashbrown 0.17.1",
 ]
@@ -4660,9 +4669,9 @@ checksum = "4050469837a6ff301cd14c1f8f24f88549e6d548f24f64e2148eb0f72cebc51f"
 
 [[package]]
 name = "lz4_flex"
-version = "0.11.7"
+version = "0.14.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "13591d77a9b6d941f7e6fcade7f9dfd9e801308752bde50c0a9bb5852778c22c"
+checksum = "f56455fff36934a9500d69062aec1c77037179b6f0669e4d5d6b72b84722d6a3"
 dependencies = [
  "twox-hash",
 ]
@@ -4885,16 +4894,25 @@ dependencies = [
 ]
 
 [[package]]
-name = "netcdf-reader"
-version = "0.12.1"
+name = "netcdf-core"
+version = "0.13.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a9f1a196246124ca06303e9d11ed268f499852277899e52fb47cc74e08fdd11b"
+checksum = "e0c8352e5715be57c27c37152188eed61fd9402c869b71a23d981e8e19685638"
+dependencies = [
+ "thiserror 2.0.21",
+]
+
+[[package]]
+name = "netcdf-reader"
+version = "0.13.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "511aa141b4ac02fc0c40ffe3282f296eaba60a73696f9b66abbe1f26bddc8e0d"
 dependencies = [
  "chrono",
  "hdf5-reader",
  "memmap2",
  "ndarray",
- "netcdf-core",
+ "netcdf-core 0.13.0",
  "thiserror 2.0.21",
 ]
 
@@ -4905,7 +4923,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d5917acdf004e1bf7c90b90ac0a20d965ead91b1fec111221ae1ac0db7806e20"
 dependencies = [
  "hdf5-writer",
- "netcdf-core",
+ "netcdf-core 0.12.1",
  "thiserror 2.0.21",
 ]
 
@@ -4968,7 +4986,7 @@ version = "0.50.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7957b9740744892f114936ab4a57b3f487491bbeafaf8083688b16841a4240e5"
 dependencies = [
- "windows-sys 0.59.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -5732,7 +5750,7 @@ dependencies = [
  "once_cell",
  "socket2",
  "tracing",
- "windows-sys 0.59.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -6392,7 +6410,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys 0.12.1",
- "windows-sys 0.59.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -6449,7 +6467,7 @@ dependencies = [
  "security-framework",
  "security-framework-sys",
  "webpki-root-certs",
- "windows-sys 0.59.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -7259,10 +7277,10 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "32497e9a4c7b38532efcdebeef879707aa9f794296a4f0244f6f69e9bc8574bd"
 dependencies = [
  "fastrand",
- "getrandom 0.3.4",
+ "getrandom 0.4.3",
  "once_cell",
  "rustix 1.1.6",
- "windows-sys 0.59.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -7330,7 +7348,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "230a1b821ccbd75b185820a1f1ff7b14d21da1e442e22c0863ea5f08771a8874"
 dependencies = [
  "rustix 1.1.6",
- "windows-sys 0.59.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -8276,7 +8294,7 @@ version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c2a7b1c03c876122aa43f3020e6c3c3ee5c05081c9a00739faf7503aeba10d22"
 dependencies = [
- "windows-sys 0.59.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
