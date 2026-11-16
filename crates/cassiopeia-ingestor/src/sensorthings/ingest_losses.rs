@@ -25,7 +25,7 @@ pub struct LossTally<T> {
 pub struct SensorThingsLosses {
     /// The readings keyed `<name>@<data stream id>` or `<name>@<MultiDatastream id>/<position>`.
     renamed_readings: LossTally<RenamedReading>,
-    /// The Things whose Location is no `GeoJSON`, so their records have no `location`.
+    /// The Things that have Locations and none in `GeoJSON`, so their records have no `location`.
     unreadable_locations: LossTally<UnreadableLocation>,
     /// The readings whose `FeatureOfInterest` is no `GeoJSON`, so their `featureOfInterest` has no
     /// `feature`.
@@ -37,13 +37,16 @@ pub struct SensorThingsLosses {
     unreadable_multi_results: LossTally<UnreadableMultiResult>,
 }
 
-/// A Thing whose Location is no `GeoJSON`, with the encoding it named.
+/// A Thing that has Locations and none in `GeoJSON`, with its Location with the lowest id and the
+/// encoding that Location names.
 #[derive(Debug, Clone, PartialEq, Eq, Display)]
-#[display("Thing {thing} {encoding}")]
+#[display("Location {location} of Thing {thing} {encoding}")]
 pub struct UnreadableLocation {
     /// The Thing.
     pub thing: EntityId,
-    /// What the Location states about its encoding.
+    /// The Thing's Location with the lowest id.
+    pub location: EntityId,
+    /// What that Location states about its encoding.
     pub encoding: GeometryEncoding,
 }
 
@@ -163,7 +166,7 @@ impl SensorThingsLosses {
         &self.renamed_readings
     }
 
-    /// The Things whose Location is no `GeoJSON`.
+    /// The Things that have Locations and none in `GeoJSON`.
     #[must_use]
     pub const fn unreadable_locations(&self) -> &LossTally<UnreadableLocation> {
         &self.unreadable_locations
@@ -192,7 +195,7 @@ impl SensorThingsLosses {
         self.renamed_readings.record(renamed);
     }
 
-    /// Counts a Thing whose Location is no `GeoJSON`.
+    /// Counts a Thing that has Locations and none in `GeoJSON`.
     pub fn unreadable_location(&mut self, location: UnreadableLocation) {
         self.unreadable_locations.record(location);
     }
@@ -280,18 +283,20 @@ mod tests {
     }
 
     #[test]
-    fn an_unreadable_location_names_its_thing_and_encoding() {
+    fn an_unreadable_location_names_its_location_its_thing_and_its_encoding() {
         let stated = UnreadableLocation {
             thing: EntityId::Integer(12512),
+            location: EntityId::Integer(36183),
             encoding: GeometryEncoding::Stated("text/plain".into()),
         };
         let unstated = UnreadableLocation {
             thing: EntityId::Text("t-1".into()),
+            location: EntityId::Text("loc-1".into()),
             encoding: GeometryEncoding::Unstated,
         };
 
-        assert_eq!(stated.to_string(), "Thing 12512 encodes it as `text/plain`");
-        assert_eq!(unstated.to_string(), "Thing t-1 states no `encodingType`");
+        assert_eq!(stated.to_string(), "Location 36183 of Thing 12512 encodes it as `text/plain`");
+        assert_eq!(unstated.to_string(), "Location loc-1 of Thing t-1 states no `encodingType`");
     }
 
     #[test]

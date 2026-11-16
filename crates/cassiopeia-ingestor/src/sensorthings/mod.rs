@@ -5,7 +5,7 @@
 //! took, each with its `FeatureOfInterest` when the read expanded it. A Datastream gives each of its
 //! Observations one reading, and a `MultiDatastream` one per element, by position. A record joins
 //! readings with all of these, so a mapping reads one documented shape: `server`, `thing`,
-//! `location` and `readings`.
+//! `location`, `locations` and `readings`.
 
 pub mod element_position;
 mod encoded_geometry;
