@@ -53,7 +53,7 @@ mod tests {
     use std::sync::atomic::AtomicBool;
 
     /// The path and query of the metadata discovery request with the default settings.
-    const METADATA: &str = "/v1.1/Datastreams?$expand=Thing/Locations,ObservedProperty&$orderby=id%20asc&$top=1000";
+    const METADATA: &str = "/v1.1/Datastreams?$expand=Thing/Locations,ObservedProperty,Sensor&$orderby=id%20asc&$top=1000";
 
     /// A shutdown flag never set, as in a listing nobody stops.
     static RUNNING: AtomicBool = AtomicBool::new(false);

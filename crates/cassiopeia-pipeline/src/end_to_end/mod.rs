@@ -7,6 +7,7 @@ mod json_collections;
 mod local_contexts;
 mod record_merges;
 mod relationships;
+mod sensors;
 mod sensorthings;
 mod station_mappings;
 mod unit_codes;

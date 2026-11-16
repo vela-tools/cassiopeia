@@ -104,7 +104,7 @@ mod tests {
     use url::Url;
 
     /// The path and query of the metadata discovery request with the default settings.
-    const METADATA: &str = "/v1.1/Datastreams?$expand=Thing/Locations,ObservedProperty&$orderby=id%20asc&$top=1000";
+    const METADATA: &str = "/v1.1/Datastreams?$expand=Thing/Locations,ObservedProperty,Sensor&$orderby=id%20asc&$top=1000";
 
     /// The bounds of a `last: "24h"` range in the cycle the tests collect in.
     const LAST_DAY: (&str, &str) = ("2026-11-11T10:00:00Z", "2026-11-12T10:00:00Z");
@@ -193,6 +193,28 @@ mod tests {
             lines[3],
             json!({"observation": {"@iot.id": 11, "phenomenonTime": "2026-11-12T01:00:00Z", "result": 11}, "datastream": 1})
         );
+    }
+
+    #[test]
+    fn a_range_read_keeps_each_sensor_inside_its_datastream_line() {
+        let mut server = mockito::Server::new();
+        let datastream = json!({
+            "@iot.id": 1,
+            "name": "stream 1",
+            "Sensor": {"@iot.id": 7, "name": "PM-200", "metadata": "https://sensors.example.org/pm-200.pdf"},
+        });
+        let mocks = [
+            serve(&mut server, METADATA, page(slice::from_ref(&datastream), None)),
+            serve(&mut server, &observations_path(1, LAST_DAY), page(&observations(&[11]), None)),
+        ];
+
+        let (result, payloads) = collect(collector(&server, &range_read(r#"{"last": "24h"}"#, ""), RequestHeaders::default(), &RUNNING));
+
+        result.unwrap();
+        mocks.iter().for_each(Mock::assert);
+        let lines = snapshot_lines(payloads);
+        assert_eq!(lines[1], json!({ "datastream": datastream }));
+        assert_eq!(observation_lines(&lines), [(json!(11), json!(1))]);
     }
 
     #[test]

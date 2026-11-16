@@ -5,7 +5,7 @@ use crate::{
     sensorthings::{
         error::SensorThingsIngestError,
         ingest_losses::SensorThingsLosses,
-        record_builder::{DatastreamParts, reading, server_member, thing_record},
+        record_builder::{reading, server_member, thing_record},
         thing_index::{IndexedDatastream, IndexedThing, ThingIndex, ThingIndexBuilder},
     },
 };
@@ -32,8 +32,8 @@ use std::{fs::File, io::BufReader, sync::Arc};
 ///
 /// The header is read when the ingestor is built, so the read mode is known before any record is,
 /// and a run can refuse a snapshot its output cannot keep. The datastream lines are then indexed,
-/// since every record needs its Thing, unit and `ObservedProperty`, and the observation lines are
-/// streamed, never held.
+/// since every record needs its Thing, unit, `ObservedProperty` and `Sensor`, and the observation
+/// lines are streamed, never held.
 pub struct SensorThingsIngestor {
     /// The snapshot's header.
     header: SnapshotHeader,
@@ -141,20 +141,9 @@ impl Ingestor for SensorThingsIngestor {
 fn latest_record(server: Value, thing: IndexedThing, losses: &mut SensorThingsLosses) -> Result<Record, SensorThingsIngestError> {
     let mut readings = Map::new();
     for datastream in thing.datastreams {
-        let IndexedDatastream {
-            key,
-            unit,
-            members,
-            observed_property,
-            latest,
-        } = datastream;
+        let IndexedDatastream { key, parts, latest } = datastream;
         let Some((observation, line)) = latest else {
             continue;
-        };
-        let parts = DatastreamParts {
-            unit,
-            members,
-            observed_property,
         };
         if let Some(reading) = reading(observation, line, parts, losses)? {
             readings.insert(key.to_string(), reading);
@@ -182,12 +171,7 @@ fn observation_record(
     };
     // Every record owns its data, so each Observation's record takes its own copy of what it shares
     // with the other readings of its data stream and Thing.
-    let parts = DatastreamParts {
-        unit: datastream.unit.clone(),
-        members: datastream.members.clone(),
-        observed_property: datastream.observed_property.clone(),
-    };
-    let Some(reading) = reading(observation, line, parts, losses)? else {
+    let Some(reading) = reading(observation, line, datastream.parts.clone(), losses)? else {
         return Ok(None);
     };
     let mut readings = Map::new();
@@ -211,7 +195,7 @@ mod tests {
         error::IngestorError,
         ingestor::Ingestor,
         sensorthings::{
-            error::SensorThingsIngestError,
+            error::{SensorThingsIngestError, StaEntity},
             ingest_losses::{FeatureOfInterestName, GeometryEncoding, SensorThingsLosses, UnreadableFeatureOfInterest, UnreadableLocation},
             ingestor::SensorThingsIngestor,
             reading_keys::RenamedReading,
@@ -716,6 +700,164 @@ mod tests {
             ["id", "result", "time", "phenomenonTime", "unit", "datastream", "observedProperty"]
         );
         assert_eq!(losses, SensorThingsLosses::default());
+    }
+
+    /// A `Sensor` with id `id`, called `name`, described as `description`, whose datasheet is the
+    /// PDF at `metadata`.
+    fn sensor(id: i64, name: &str, description: &str, metadata: &str) -> Value {
+        json!({
+            "@iot.id": id,
+            "@iot.selfLink": format!("https://h.example/v1.1/Sensors({id})"),
+            "name": name,
+            "description": description,
+            "encodingType": "application/pdf",
+            "metadata": metadata,
+            "Datastreams@iot.navigationLink": format!("https://h.example/v1.1/Sensors({id})/Datastreams"),
+        })
+    }
+
+    /// Sensor 7, an optical particulate matter sensor.
+    fn pm_sensor() -> Value {
+        sensor(7, "PM-200", "Optical particulate matter sensor", "https://sensors.example.org/pm-200.pdf")
+    }
+
+    /// Sensor 8, an electrochemical nitrogen dioxide sensor.
+    fn no2_sensor() -> Value {
+        sensor(8, "NO2-50", "Electrochemical nitrogen dioxide sensor", "https://sensors.example.org/no2-50.pdf")
+    }
+
+    /// The datastream line `line`, its data stream served with the `Sensor` `sensor`.
+    fn with_sensor(mut line: Value, sensor: Value) -> Value {
+        line["datastream"]["Sensor"] = sensor;
+        line
+    }
+
+    #[test]
+    fn a_latest_snapshot_gives_each_reading_the_sensor_of_its_data_stream() {
+        let text = snapshot(
+            "latest",
+            &[
+                with_sensor(
+                    datastream(json!(56776), "pm10", rivm_thing(), json!([observation(1, "2026-11-12T10:00:00Z", 21.4)])),
+                    pm_sensor(),
+                ),
+                with_sensor(
+                    datastream(json!(56778), "no2", rivm_thing(), json!([observation(2, "2026-11-12T10:00:00Z", 17.0)])),
+                    no2_sensor(),
+                ),
+            ],
+        );
+
+        let (records, losses) = read(&text);
+
+        assert_eq!(
+            records[0]["readings"]["pm10"]["sensor"],
+            json!({
+                "id": 7,
+                "name": "PM-200",
+                "description": "Optical particulate matter sensor",
+                "encodingType": "application/pdf",
+                "metadata": "https://sensors.example.org/pm-200.pdf",
+            })
+        );
+        assert_eq!(
+            records[0]["readings"]["no2"]["sensor"],
+            json!({
+                "id": 8,
+                "name": "NO2-50",
+                "description": "Electrochemical nitrogen dioxide sensor",
+                "encodingType": "application/pdf",
+                "metadata": "https://sensors.example.org/no2-50.pdf",
+            })
+        );
+        assert_eq!(losses, SensorThingsLosses::default());
+    }
+
+    #[test]
+    fn a_range_snapshot_gives_every_reading_the_sensor_of_its_data_stream() {
+        let text = snapshot(
+            "range",
+            &[
+                with_sensor(datastream(json!(56776), "pm10", rivm_thing(), Value::Null), pm_sensor()),
+                with_sensor(datastream(json!(56778), "no2", rivm_thing(), Value::Null), no2_sensor()),
+                json!({"observation": observation(1, "2026-11-12T08:00:00Z", 1.0), "datastream": 56776}),
+                json!({"observation": observation(2, "2026-11-12T09:00:00Z", 2.0), "datastream": 56776}),
+                json!({"observation": observation(3, "2026-11-12T08:00:00Z", 3.0), "datastream": 56778}),
+            ],
+        );
+
+        let (records, _) = read(&text);
+
+        let sensors: Vec<(&str, &Value)> = records
+            .iter()
+            .map(|record| {
+                let (key, reading) = record["readings"].as_object().unwrap().iter().next().unwrap();
+                (key.as_str(), &reading["sensor"]["name"])
+            })
+            .collect();
+        assert_eq!(sensors, [("pm10", &json!("PM-200")), ("pm10", &json!("PM-200")), ("no2", &json!("NO2-50"))]);
+    }
+
+    #[test]
+    fn a_data_stream_without_a_sensor_gives_readings_without_one() {
+        let text = snapshot(
+            "latest",
+            &[
+                with_sensor(
+                    datastream(json!(56776), "pm10", rivm_thing(), json!([observation(1, "2026-11-12T10:00:00Z", 21.4)])),
+                    pm_sensor(),
+                ),
+                datastream(json!(56778), "no2", rivm_thing(), json!([observation(2, "2026-11-12T10:00:00Z", 17.0)])),
+                with_sensor(
+                    datastream(json!(56779), "o3", rivm_thing(), json!([observation(3, "2026-11-12T10:00:00Z", 40.0)])),
+                    Value::Null,
+                ),
+            ],
+        );
+
+        let (records, losses) = read(&text);
+
+        assert_eq!(records[0]["readings"]["pm10"]["sensor"]["id"], 7);
+        for key in ["no2", "o3"] {
+            assert!(!records[0]["readings"][key].as_object().unwrap().contains_key("sensor"), "{key}");
+        }
+        assert_eq!(losses, SensorThingsLosses::default());
+    }
+
+    #[test]
+    fn a_snapshot_recorded_without_sensors_reads_as_before() {
+        let mut line = datastream(json!(56776), "pm10", rivm_thing(), json!([observation(1, "2026-11-12T10:00:00Z", 21.4)]));
+        line["datastream"]["Sensor@iot.navigationLink"] = json!("https://api-samenmeten.rivm.nl/v1.0/Datastreams(56776)/Sensor");
+
+        let (records, losses) = read(&snapshot("latest", &[line]));
+
+        assert_eq!(
+            records[0]["readings"]["pm10"].as_object().unwrap().keys().collect::<Vec<_>>(),
+            ["id", "result", "time", "phenomenonTime", "unit", "datastream", "observedProperty"]
+        );
+        assert_eq!(losses, SensorThingsLosses::default());
+    }
+
+    #[test]
+    fn a_sensor_with_an_unreadable_id_fails_naming_its_line() {
+        let text = snapshot(
+            "latest",
+            &[
+                datastream(json!(5), "pm10", rivm_thing(), json!([])),
+                with_sensor(datastream(json!(6), "no2", rivm_thing(), json!([])), json!({"@iot.id": 7.5, "name": "NO2-50"})),
+            ],
+        );
+
+        let error = read_batches(&text, 100).unwrap_err();
+
+        assert!(
+            matches!(
+                error,
+                IngestorError::SensorThings(SensorThingsIngestError::IdUnreadable { line, entity: StaEntity::Sensor }) if line.get() == 3
+            ),
+            "{error:?}"
+        );
+        assert!(error.to_string().starts_with("line 3 of the snapshot holds a Sensor without"), "{error}");
     }
 
     #[test]

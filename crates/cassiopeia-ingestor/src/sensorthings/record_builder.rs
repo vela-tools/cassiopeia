@@ -18,13 +18,17 @@ use serde_json::{Map, Value};
 const OBSERVATION_MEMBERS: [&str; 4] = ["resultTime", "validTime", "resultQuality", "parameters"];
 
 /// What a reading carries of the data stream it belongs to.
+#[derive(Clone)]
 pub(super) struct DatastreamParts {
-    /// The data stream's `unitOfMeasurement`, when it has one.
+    /// The reading's `unit`: the data stream's `unitOfMeasurement`, when it has one.
     pub(super) unit: Option<Value>,
-    /// The data stream's id and members.
+    /// The reading's `datastream`: the data stream's id and members.
     pub(super) members: Map<String, Value>,
-    /// The `ObservedProperty`'s id and members.
+    /// The reading's `observedProperty`: the `ObservedProperty`'s id and members.
     pub(super) observed_property: Map<String, Value>,
+    /// The reading's `sensor`: the `Sensor`'s id and members, when the data stream was served with
+    /// one.
+    pub(super) sensor: Option<Map<String, Value>>,
 }
 
 /// The members a record carries of a served entity: its `id`, then each of `keys` it has.
@@ -67,8 +71,8 @@ pub(super) fn thing_record(server: Value, thing: Map<String, Value>, location: O
 }
 
 /// The reading of one served Observation, read on `line`, with its `featureOfInterest` when the read
-/// expanded it and what it carries of its data stream, or `None` when its `phenomenonTime` names no
-/// instant, which is counted as a loss.
+/// expanded it and what it carries of its data stream, its `sensor` among them, or `None` when its
+/// `phenomenonTime` names no instant, which is counted as a loss.
 ///
 /// # Errors
 ///
@@ -115,6 +119,9 @@ pub(super) fn reading(
     }
     reading.insert("datastream".to_owned(), Value::Object(datastream.members));
     reading.insert("observedProperty".to_owned(), Value::Object(datastream.observed_property));
+    if let Some(sensor) = datastream.sensor {
+        reading.insert("sensor".to_owned(), Value::Object(sensor));
+    }
     Ok(Some(Value::Object(reading)))
 }
 
@@ -140,6 +147,7 @@ mod tests {
             unit: None,
             members: object(json!({"id": 5})),
             observed_property: object(json!({"name": "pm10"})),
+            sensor: None,
         }
     }
 
@@ -180,6 +188,24 @@ mod tests {
                 "datastream": {"id": 5},
                 "observedProperty": {"name": "pm10"},
             })
+        );
+    }
+
+    #[test]
+    fn the_sensor_follows_the_observed_property() {
+        let mut losses = SensorThingsLosses::default();
+        let observation = object(json!({"@iot.id": 1, "phenomenonTime": "2026-11-12T10:00:00Z", "result": 2}));
+        let parts = DatastreamParts {
+            sensor: Some(object(json!({"id": 7, "name": "PM-200"}))),
+            ..parts()
+        };
+
+        let read = reading(observation, LineNumber::FIRST, parts, &mut losses).unwrap().unwrap();
+
+        assert_eq!(read["sensor"], json!({"id": 7, "name": "PM-200"}));
+        assert_eq!(
+            read.as_object().unwrap().keys().collect::<Vec<_>>(),
+            ["id", "result", "time", "phenomenonTime", "datastream", "observedProperty", "sensor"]
         );
     }
 }

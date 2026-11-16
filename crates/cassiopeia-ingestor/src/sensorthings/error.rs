@@ -21,6 +21,9 @@ pub enum StaEntity {
     /// The `ObservedProperty` of a Datastream.
     #[strum(serialize = "an ObservedProperty")]
     ObservedProperty,
+    /// The `Sensor` of a Datastream.
+    #[strum(serialize = "a Sensor")]
+    Sensor,
     /// An Observation.
     #[strum(serialize = "an Observation")]
     Observation,

@@ -5,30 +5,32 @@ use crate::{
 };
 use url::Url;
 
-/// What a metadata discovery expands on every Datastream: its Thing with the Thing's Locations, and
-/// its `ObservedProperty`.
+/// What a metadata discovery expands on every Datastream: its Thing with the Thing's Locations, its
+/// `ObservedProperty`, and its `Sensor`.
 ///
 /// The Locations are expanded by path, `Thing/Locations`, rather than nested as
 /// `Thing($expand=Locations)`: OGC 18-088 section 9.3.2.1 defines both, and RIVM Samen Meten ignores
 /// an `$expand` nested in parentheses while it honours query options one level deep, as on
-/// `Observations`.
-const METADATA_EXPAND: &str = "Thing/Locations,ObservedProperty";
+/// `Observations`. A Datastream links exactly one `Sensor` (section 8.2.4), so expanding it here
+/// reads each one once per data stream rather than once per Observation.
+const METADATA_EXPAND: &str = "Thing/Locations,ObservedProperty,Sensor";
 
 /// What a latest discovery expands on every Datastream: what a metadata discovery expands, and its
 /// newest Observation.
-const LATEST_EXPAND: &str = "Thing/Locations,ObservedProperty,Observations($orderby=phenomenonTime%20desc;$top=1)";
+const LATEST_EXPAND: &str = "Thing/Locations,ObservedProperty,Sensor,Observations($orderby=phenomenonTime%20desc;$top=1)";
 
 /// What a latest discovery that requests features of interest expands on every Datastream: what
 /// [`LATEST_EXPAND`] expands, with the newest Observation's `FeatureOfInterest` expanded inside it, as
 /// OGC 18-088 section 9.3.2.1 allows. A server that ignores an `$expand` nested in parentheses, as
 /// RIVM Samen Meten does, serves the Observation without it.
-const LATEST_EXPAND_WITH_FEATURES: &str = "Thing/Locations,ObservedProperty,Observations($orderby=phenomenonTime%20desc;$top=1;$expand=FeatureOfInterest)";
+const LATEST_EXPAND_WITH_FEATURES: &str =
+    "Thing/Locations,ObservedProperty,Sensor,Observations($orderby=phenomenonTime%20desc;$top=1;$expand=FeatureOfInterest)";
 
 /// The order every discovery pages in, so a `$skip`-built page follows the one before it.
 const BY_ID: &str = "id%20asc";
 
-/// The request that lists every selected Datastream with its Thing, the Thing's Locations and its
-/// `ObservedProperty`, without Observations, in id order, `pageSize` a page.
+/// The request that lists every selected Datastream with its Thing, the Thing's Locations, its
+/// `ObservedProperty` and its `Sensor`, without Observations, in id order, `pageSize` a page.
 ///
 /// Query parameters are written as in [`latest_discovery_request`].
 #[must_use]
@@ -37,9 +39,9 @@ pub fn metadata_discovery_request(root: &ServiceRoot, settings: &SensorThingsSet
 }
 
 /// The request a latest read starts with, and the only one it sends: every selected Datastream with
-/// its Thing, the Thing's Locations, its `ObservedProperty` and its newest Observation, with that
-/// Observation's `FeatureOfInterest` when the settings request features of interest, in id order,
-/// `pageSize` a page.
+/// its Thing, the Thing's Locations, its `ObservedProperty`, its `Sensor` and its newest Observation,
+/// with that Observation's `FeatureOfInterest` when the settings request features of interest, in id
+/// order, `pageSize` a page.
 ///
 /// Query parameters are written in the order `$filter`, `$expand`, `$orderby`, `$top`, and `$filter`
 /// only when the settings select data streams.
@@ -90,7 +92,7 @@ mod tests {
 
         assert_eq!(
             request.as_str(),
-            "https://h.example/v1.1/Datastreams?$expand=Thing/Locations,ObservedProperty,Observations($orderby=phenomenonTime%20desc;$top=1)&$orderby=id%20asc&$top=1000"
+            "https://h.example/v1.1/Datastreams?$expand=Thing/Locations,ObservedProperty,Sensor,Observations($orderby=phenomenonTime%20desc;$top=1)&$orderby=id%20asc&$top=1000"
         );
     }
 
@@ -103,7 +105,7 @@ mod tests {
 
         assert_eq!(
             request.as_str(),
-            "https://h.example/v1.1/Datastreams?$filter=ObservedProperty/name%20eq%20%27pm10%27&$expand=Thing/Locations,ObservedProperty,Observations($orderby=phenomenonTime%20desc;$top=1)&$orderby=id%20asc&$top=1000"
+            "https://h.example/v1.1/Datastreams?$filter=ObservedProperty/name%20eq%20%27pm10%27&$expand=Thing/Locations,ObservedProperty,Sensor,Observations($orderby=phenomenonTime%20desc;$top=1)&$orderby=id%20asc&$top=1000"
         );
     }
 
@@ -113,7 +115,7 @@ mod tests {
 
         assert_eq!(
             request.as_str(),
-            "http://localhost:18080/FROST-Server/v1.1/Datastreams?$expand=Thing/Locations,ObservedProperty,Observations($orderby=phenomenonTime%20desc;$top=1)&$orderby=id%20asc&$top=10"
+            "http://localhost:18080/FROST-Server/v1.1/Datastreams?$expand=Thing/Locations,ObservedProperty,Sensor,Observations($orderby=phenomenonTime%20desc;$top=1)&$orderby=id%20asc&$top=10"
         );
     }
 
@@ -126,7 +128,7 @@ mod tests {
 
         assert_eq!(
             request.as_str(),
-            "https://h.example/v1.1/Datastreams?$filter=startswith(name,%27bus-%27)&$expand=Thing/Locations,ObservedProperty,Observations($orderby=phenomenonTime%20desc;$top=1;$expand=FeatureOfInterest)&$orderby=id%20asc&$top=1000"
+            "https://h.example/v1.1/Datastreams?$filter=startswith(name,%27bus-%27)&$expand=Thing/Locations,ObservedProperty,Sensor,Observations($orderby=phenomenonTime%20desc;$top=1;$expand=FeatureOfInterest)&$orderby=id%20asc&$top=1000"
         );
     }
 
@@ -136,7 +138,7 @@ mod tests {
 
         assert_eq!(
             request.as_str(),
-            "https://h.example/v1.1/Datastreams?$expand=Thing/Locations,ObservedProperty&$orderby=id%20asc&$top=1000"
+            "https://h.example/v1.1/Datastreams?$expand=Thing/Locations,ObservedProperty,Sensor&$orderby=id%20asc&$top=1000"
         );
     }
 
@@ -146,20 +148,20 @@ mod tests {
 
         assert_eq!(
             request.as_str(),
-            "https://h.example/v1.1/Datastreams?$expand=Thing/Locations,ObservedProperty&$orderby=id%20asc&$top=1000"
+            "https://h.example/v1.1/Datastreams?$expand=Thing/Locations,ObservedProperty,Sensor&$orderby=id%20asc&$top=1000"
         );
     }
 
     #[test]
     fn a_filter_leads_the_metadata_discovery_query() {
         let request = metadata_discovery_request(
-            &root("https://api-samenmeten.rivm.nl/v1.0"),
-            &settings(r#"{"datastreams": "startswith(name,'ILM_I68-')", "pageSize": 200}"#),
+            &root("https://h.example/v1.1"),
+            &settings(r#"{"datastreams": "ObservedProperty/name eq 'pm10'", "pageSize": 200}"#),
         );
 
         assert_eq!(
             request.as_str(),
-            "https://api-samenmeten.rivm.nl/v1.0/Datastreams?$filter=startswith(name,%27ILM_I68-%27)&$expand=Thing/Locations,ObservedProperty&$orderby=id%20asc&$top=200"
+            "https://h.example/v1.1/Datastreams?$filter=ObservedProperty/name%20eq%20%27pm10%27&$expand=Thing/Locations,ObservedProperty,Sensor&$orderby=id%20asc&$top=200"
         );
     }
 }

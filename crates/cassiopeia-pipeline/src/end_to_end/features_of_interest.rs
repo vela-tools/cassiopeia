@@ -16,11 +16,11 @@ const STOPS: [[f64; 2]; 3] = [[5.4797, 51.4433], [5.4812, 51.4402], [5.4870, 51.
 const READING_TIMES: [&str; 3] = ["2026-11-13T08:00:00Z", "2026-11-13T08:10:00Z", "2026-11-13T08:20:00Z"];
 
 /// The path and query of the metadata discovery request of the mock server's `/v1.1` root.
-const METADATA: &str = "/v1.1/Datastreams?$expand=Thing/Locations,ObservedProperty&$orderby=id%20asc&$top=1000";
+const METADATA: &str = "/v1.1/Datastreams?$expand=Thing/Locations,ObservedProperty,Sensor&$orderby=id%20asc&$top=1000";
 
 /// The path and query of the latest discovery request of the mock server's `/v1.1` root that
 /// requests features of interest.
-const LATEST_WITH_FEATURES: &str = "/v1.1/Datastreams?$expand=Thing/Locations,ObservedProperty,Observations($orderby=phenomenonTime%20desc;$top=1;$expand=FeatureOfInterest)&$orderby=id%20asc&$top=1000";
+const LATEST_WITH_FEATURES: &str = "/v1.1/Datastreams?$expand=Thing/Locations,ObservedProperty,Sensor,Observations($orderby=phenomenonTime%20desc;$top=1;$expand=FeatureOfInterest)&$orderby=id%20asc&$top=1000";
 
 /// The entity the bus is written as when read from the mock server.
 const MOCK_BUS: &str = "urn:ngsi-ld:AirQualityObserved:sta-127001-bus-12";
