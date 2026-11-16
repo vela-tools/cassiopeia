@@ -9,22 +9,26 @@
 //! 9.3), entity ids and their order, the two kinds of data stream, Datastreams and the
 //! `MultiDatastreams` of the extension of section 12, each named by its kind and id, the elements of
 //! a `MultiDatastream`, which collections a service root lists, a Datastream's unit of measurement
-//! (section 8.2.4), the readings a server offers, the instant a `phenomenonTime` stands for
-//! (section 8.2.7) and a `HistoricalLocation`'s `time` names (section 8.2.3), the read modes, the
-//! window a range read covers and the data streams it requests, the Things whose `HistoricalLocations`
-//! a read requests, the names of the cursors an incremental read keeps its positions in, the streams
-//! it keeps them for and the data streams it requests, stalest first, the points in time a read
-//! starts at or a cursor is reset to, and the snapshot file that is the boundary between transport
-//! and format.
+//! (section 8.2.4), the readings a server offers, the members a record reads of an Observation and of
+//! its `FeatureOfInterest` and the member that names how a geometry is encoded (sections 8.2.2,
+//! 8.2.7 and 8.2.8), the instant a `phenomenonTime` stands for (section 8.2.7) and a
+//! `HistoricalLocation`'s `time` names (section 8.2.3), the read modes, the window a range read
+//! covers and the data streams it requests, the Things whose `HistoricalLocations` a read requests,
+//! the names of the cursors an incremental read keeps its positions in, the streams it keeps them
+//! for and the data streams it requests, stalest first, the points in time a read starts at or a
+//! cursor is reset to, and the snapshot file that is the boundary between transport and format.
 
 pub mod cursor_name;
 pub mod datastream_span;
+pub mod encoding_type;
 pub mod entity_id;
+pub mod feature_of_interest_members;
 pub mod historical_location_time;
 pub mod incremental_datastreams;
 pub mod instant_text;
 pub mod listed_things;
 pub mod multi_datastream_elements;
+pub mod observation_members;
 pub mod observed_property_name;
 pub mod offered_readings;
 pub mod paging;

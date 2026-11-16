@@ -119,7 +119,7 @@ fn an_incremental_read_places_each_reading_where_it_was_taken() {
             .mock(
                 "GET",
                 Matcher::Regex(
-                    r"^/v1\.1/Datastreams\('bus-12-pm10'\)/Observations\?\$filter=[^&]+&\$orderby=phenomenonTime%20asc,id%20asc&\$expand=FeatureOfInterest&\$top=1000$"
+                    r"^/v1\.1/Datastreams\('bus-12-pm10'\)/Observations\?\$filter=[^&]+&\$orderby=phenomenonTime%20asc,id%20asc&\$expand=FeatureOfInterest\(\$select=id,name,description,properties,encodingType,feature\)&\$select=id,phenomenonTime,result,resultTime,validTime,resultQuality,parameters&\$top=1000$"
                         .to_owned(),
                 ),
             )

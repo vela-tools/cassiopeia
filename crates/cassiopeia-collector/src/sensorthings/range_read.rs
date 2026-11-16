@@ -132,7 +132,7 @@ mod tests {
     /// The path and query of the observations request of the data stream `id` between `bounds`.
     fn observations_path(id: u64, bounds: (&str, &str)) -> String {
         format!(
-            "/v1.1/Datastreams({id})/Observations?$filter=phenomenonTime%20ge%20{}%20and%20phenomenonTime%20lt%20{}&$orderby=phenomenonTime%20asc,id%20asc&$top=1000",
+            "/v1.1/Datastreams({id})/Observations?$filter=phenomenonTime%20ge%20{}%20and%20phenomenonTime%20lt%20{}&$orderby=phenomenonTime%20asc,id%20asc&$select=id,phenomenonTime,result,resultTime,validTime,resultQuality,parameters&$top=1000",
             bounds.0, bounds.1
         )
     }
@@ -141,7 +141,7 @@ mod tests {
     /// requests every Observation with its `FeatureOfInterest`.
     fn observations_with_features_path(id: u64, bounds: (&str, &str)) -> String {
         format!(
-            "/v1.1/Datastreams({id})/Observations?$filter=phenomenonTime%20ge%20{}%20and%20phenomenonTime%20lt%20{}&$orderby=phenomenonTime%20asc,id%20asc&$expand=FeatureOfInterest&$top=1000",
+            "/v1.1/Datastreams({id})/Observations?$filter=phenomenonTime%20ge%20{}%20and%20phenomenonTime%20lt%20{}&$orderby=phenomenonTime%20asc,id%20asc&$expand=FeatureOfInterest($select=id,name,description,properties,encodingType,feature)&$select=id,phenomenonTime,result,resultTime,validTime,resultQuality,parameters&$top=1000",
             bounds.0, bounds.1
         )
     }

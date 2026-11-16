@@ -385,7 +385,7 @@ mod tests {
         assert!(
             requests
                 .iter()
-                .all(|request| request.ends_with("&$orderby=phenomenonTime%20asc,id%20asc&$expand=FeatureOfInterest&$top=1000")),
+                .all(|request| request.ends_with("&$orderby=phenomenonTime%20asc,id%20asc&$expand=FeatureOfInterest($select=id,name,description,properties,encodingType,feature)&$select=id,phenomenonTime,result,resultTime,validTime,resultQuality,parameters&$top=1000")),
             "{requests:?}"
         );
     }
@@ -402,9 +402,8 @@ mod tests {
         written.unwrap();
         let requests = answered.requests();
         assert!(
-            requests
-                .iter()
-                .all(|request| request.ends_with("&$orderby=phenomenonTime%20asc,id%20asc&$top=1000")),
+            requests.iter().all(|request| request
+                .ends_with("&$orderby=phenomenonTime%20asc,id%20asc&$select=id,phenomenonTime,result,resultTime,validTime,resultQuality,parameters&$top=1000")),
             "{requests:?}"
         );
     }
