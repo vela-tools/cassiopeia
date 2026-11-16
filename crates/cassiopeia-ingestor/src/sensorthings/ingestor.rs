@@ -1381,6 +1381,153 @@ mod tests {
         assert_eq!(keys, [vec!["pm10"], vec!["windSpeed", "windDirection"]]);
     }
 
+    /// The `phenomenonTime`, `resultTime` and `observedArea` a server serves of a data stream whose
+    /// Observations were made from 1 to 12 November 2026 around Eindhoven (OGC 18-088 section 8.2.4,
+    /// Table 10).
+    fn extents() -> Map<String, Value> {
+        let Value::Object(extents) = json!({
+            "phenomenonTime": "2026-11-01T00:00:00Z/2026-11-12T10:00:00Z",
+            "resultTime": "2026-11-01T00:00:05Z/2026-11-12T10:00:05Z",
+            "observedArea": {"type": "Polygon", "coordinates": [[[5.40, 51.40], [5.50, 51.40], [5.50, 51.47], [5.40, 51.47], [5.40, 51.40]]]},
+        }) else {
+            panic!("expected an object");
+        };
+        extents
+    }
+
+    /// The members of [`extents`], each served as `null`.
+    fn null_extents() -> Map<String, Value> {
+        extents().into_iter().map(|(member, _)| (member, Value::Null)).collect()
+    }
+
+    /// The data stream line `line`, whose data stream is served under `kind`, with `members` added to
+    /// its data stream.
+    fn served_with(mut line: Value, kind: &str, members: Map<String, Value>) -> Value {
+        line[kind].as_object_mut().unwrap().extend(members);
+        line
+    }
+
+    #[test]
+    fn a_latest_snapshot_gives_a_reading_the_times_and_observed_area_of_its_datastream_as_served() {
+        let line = served_with(
+            datastream(
+                json!(56776),
+                "pm10",
+                rivm_thing(),
+                json!([observation(98765, "2026-11-12T09:00:00Z/2026-11-12T10:00:00Z", 21.4)]),
+            ),
+            "datastream",
+            extents(),
+        );
+
+        let (records, losses) = read(&snapshot("latest", &[line]));
+
+        let datastream = &records[0]["readings"]["pm10"]["datastream"];
+        for (member, served) in extents() {
+            assert_eq!(datastream[&member], served, "{member}");
+        }
+        assert_eq!(
+            datastream.as_object().unwrap().keys().collect::<Vec<_>>(),
+            ["id", "name", "observationType", "phenomenonTime", "resultTime", "observedArea"]
+        );
+        assert_eq!(losses, SensorThingsLosses::default());
+    }
+
+    #[test]
+    fn a_latest_snapshot_gives_every_element_reading_the_times_and_observed_area_of_its_multi_datastream() {
+        let line = served_with(
+            multi_datastream(
+                4,
+                &WIND,
+                &rivm_thing(),
+                &json!([multi_observation(501, "2026-11-12T09:50:00Z", &json!([4.2, 270]))]),
+            ),
+            "multiDatastream",
+            extents(),
+        );
+
+        let (records, losses) = read(&snapshot("latest", &[line]));
+
+        for key in ["windSpeed", "windDirection"] {
+            let multi_datastream = &records[0]["readings"][key]["multiDatastream"];
+            for (member, served) in extents() {
+                assert_eq!(multi_datastream[&member], served, "{key} {member}");
+            }
+        }
+        assert_eq!(losses, SensorThingsLosses::default());
+    }
+
+    #[test]
+    fn a_data_stream_served_without_times_and_observed_area_or_with_them_null_gives_readings_without_them() {
+        let text = snapshot(
+            "latest",
+            &[
+                datastream(json!(56776), "pm10", rivm_thing(), json!([observation(1, "2026-11-12T10:00:00Z", 21.4)])),
+                served_with(
+                    datastream(json!(56778), "no2", rivm_thing(), json!([observation(2, "2026-11-12T10:00:00Z", 17.0)])),
+                    "datastream",
+                    null_extents(),
+                ),
+                served_with(
+                    multi_datastream(
+                        4,
+                        &WIND,
+                        &rivm_thing(),
+                        &json!([multi_observation(501, "2026-11-12T09:50:00Z", &json!([4.2, 270]))]),
+                    ),
+                    "multiDatastream",
+                    null_extents(),
+                ),
+            ],
+        );
+
+        let (records, losses) = read(&text);
+
+        for (key, kind) in [
+            ("pm10", "datastream"),
+            ("no2", "datastream"),
+            ("windSpeed", "multiDatastream"),
+            ("windDirection", "multiDatastream"),
+        ] {
+            let members = records[0]["readings"][key][kind].as_object().unwrap();
+            for member in extents().keys() {
+                assert!(!members.contains_key(member), "{key} {member}");
+            }
+        }
+        assert_eq!(losses, SensorThingsLosses::default());
+    }
+
+    #[test]
+    fn range_and_incremental_snapshots_give_every_reading_the_times_and_observed_area_of_its_data_stream() {
+        for kind in ["range", "incremental"] {
+            let text = snapshot(
+                kind,
+                &[
+                    served_with(datastream(json!(56776), "pm10", rivm_thing(), Value::Null), "datastream", extents()),
+                    served_with(multi_datastream(4, &WIND, &rivm_thing(), &Value::Null), "multiDatastream", extents()),
+                    json!({"observation": observation(1, "2026-11-12T08:00:00Z", 18.2), "datastream": 56776}),
+                    json!({"observation": observation(2, "2026-11-12T09:00:00Z", 19.4), "datastream": 56776}),
+                    multi_observation_line(&multi_observation(501, "2026-11-12T08:00:00Z", &json!([4.2, 270])), 4),
+                ],
+            );
+
+            let (records, losses) = read(&text);
+
+            let streams: Vec<&Value> = records
+                .iter()
+                .flat_map(|record| record["readings"].as_object().unwrap().values())
+                .map(|reading| reading.get("datastream").or_else(|| reading.get("multiDatastream")).unwrap())
+                .collect();
+            assert_eq!(streams.len(), 4, "{kind}");
+            for stream in streams {
+                for (member, served) in extents() {
+                    assert_eq!(stream[&member], served, "{kind} {member} of {stream}");
+                }
+            }
+            assert_eq!(losses, SensorThingsLosses::default(), "{kind}");
+        }
+    }
+
     /// The `GeoJSON` Location `id` of a Point at `coordinates`.
     fn geojson_location(id: i64, coordinates: [f64; 2]) -> Value {
         json!({"@iot.id": id, "encodingType": "application/geo+json", "location": {"type": "Point", "coordinates": coordinates}})

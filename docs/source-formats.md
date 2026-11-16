@@ -601,8 +601,8 @@ Every record has this shape. The ids, names, units and definitions are RIVM Same
 | `.id`, `.result`, `.phenomenonTime`, `.resultTime`, `.validTime`, `.resultQuality`, `.parameters` | The Observation's members, as served. |
 | `.time` | The instant `phenomenonTime` stands for, in UTC. See [Reading times](#reading-times). |
 | `.unit` | The Datastream's `unitOfMeasurement`, or the MultiDatastream's `unitOfMeasurements` entry at the value's position. |
-| `.datastream` | The Datastream's `id`, `name`, `description`, `observationType`, and `properties`. A reading of a MultiDatastream has `.multiDatastream` in its place. |
-| `.multiDatastream` | The MultiDatastream's `id`, `name`, `description`, and `properties`, the value's `observationType` from `multiObservationDataTypes`, and its `position`, counted from 1. |
+| `.datastream` | The Datastream's `id`, `name`, `description`, `observationType`, `properties`, `phenomenonTime`, `resultTime`, and `observedArea`. See [Data stream times and area](#data-stream-times-and-area). A reading of a MultiDatastream has `.multiDatastream` in its place. |
+| `.multiDatastream` | The MultiDatastream's `id`, `name`, `description`, `properties`, `phenomenonTime`, `resultTime`, and `observedArea`, the value's `observationType` from `multiObservationDataTypes`, and its `position`, counted from 1. |
 | `.observedProperty` | The ObservedProperty's `id`, `name`, `definition`, `description`, and `properties`: for a MultiDatastream, the one at the value's position. |
 | `.featureOfInterest` | The FeatureOfInterest the Observation was made at, when the read requested it. See [Features of interest](#features-of-interest). |
 | `.sensor` | The Sensor of the data stream, when the server served one. See [Sensors](#sensors). |
@@ -892,6 +892,29 @@ refDevice: {
 
 For Sensor 7 of `https://h.example/v1.1`, the Device is `urn:ngsi-ld:Device:sta-hexample-sensor-7`. A record without `readings.pm10`, or whose reading has no `sensor`, writes neither the Device nor the link, and the observation is still written.
 
+### Data stream times and area
+
+A Datastream may carry three members that sum up all of its Observations (OGC 18-088 section 8.2.4), and a MultiDatastream the same three (section 12). A server that keeps them, such as FROST-Server, updates them as Observations are added. Each reading carries them in its `datastream`, or in its `multiDatastream`, as served:
+
+| Member | Content |
+| --- | --- |
+| `.phenomenonTime` | The interval of the phenomenon times of all of the data stream's Observations, such as `2026-11-01T00:00:00Z/2026-11-12T10:00:00Z`. |
+| `.resultTime` | The interval of their result times. |
+| `.observedArea` | The area of the FeaturesOfInterest of its Observations, as the GeoJSON geometry the server served: a Polygon, or a Point for a station that stays in one place. |
+
+A member that is absent or `null` is left out, as for every member of a record. RIVM Samen Meten serves `observedArea` alone. No request and no snapshot line changes for them: the discovery requests return them, and each data stream line keeps them as served, so a snapshot that holds them gives them whenever it was recorded. In a `range` or `incremental` read, the members are the data stream's as the server listed it in that cycle, not as they were when an Observation was made, so every reading of one data stream in a cycle carries the same ones.
+
+**Mapping.** A `Device` that describes a station writes when it last reported from the end of its `pm10` data stream's `phenomenonTime`:
+
+~~~json5
+dateLastValueReported: {
+    source: "{% if readings.pm10.datastream.phenomenonTime %}{{ readings.pm10.datastream.phenomenonTime | split(pat='/') | last }}{% endif %}",
+    transformation: "datetime",
+},
+~~~
+
+The end of an interval is the instant after its `/`, and an instant holds no `/`, so `last` gives it whole. The filters fail on a missing field, so the `if` guards them: a record whose reading has no `phenomenonTime` writes no `dateLastValueReported`, without a warning.
+
 ### MultiDatastreams
 
 A MultiDatastream, of the MultiDatastream extension of the SensorThings API (OGC 18-088 section 12), groups properties measured together into one data stream, such as the wind speed and wind direction of a weather station, or the temperature, conductivity and depth of a water sensor. Each of its Observations holds one `result` array, whose values correspond, in order, to the MultiDatastream's `ObservedProperties`, to its `unitOfMeasurements`, and to its `multiObservationDataTypes`. FROST-Server serves the extension when it is enabled.
@@ -947,7 +970,7 @@ It then reads the Observations of each with `{root}/MultiDatastreams({id})/Obser
 | `.result` | The value of the Observation's `result` array. |
 | `.unit` | The `unitOfMeasurements` entry at the value's position. |
 | `.observedProperty` | The ObservedProperty at the value's position. |
-| `.multiDatastream` | Present in place of `.datastream`: the MultiDatastream's `id`, `name`, `description` and `properties`, the value's `observationType` from `multiObservationDataTypes`, and its `position`, counted from 1. |
+| `.multiDatastream` | Present in place of `.datastream`: the MultiDatastream's `id`, `name`, `description`, `properties`, `phenomenonTime`, `resultTime` and `observedArea`, the value's `observationType` from `multiObservationDataTypes`, and its `position`, counted from 1. Its `phenomenonTime`, `resultTime` and `observedArea` sum up all of the MultiDatastream's Observations (see [Data stream times and area](#data-stream-times-and-area)). |
 
 Every other member of the reading, such as `id`, `time`, `phenomenonTime`, `resultTime`, `featureOfInterest` and `sensor`, is the Observation's or the MultiDatastream's, shared by its values, and is read as for a Datastream.
 
