@@ -88,6 +88,7 @@ mod tests {
     use cassiopeia_ngsi_ld::entity::{NgsiLdEntity, name::NameBuf};
     use cassiopeia_validator::{
         error::{Result as ValidatorResult, ValidatorError},
+        required_members::RequiredMembers,
         schema_validator::SchemaValidator,
         schema_validator_config::SchemaValidatorConfig,
         schema_verdict::{DiagnosticsLevel, ValidationDiagnostics, ValidationOutcome},
@@ -193,7 +194,7 @@ mod tests {
         let entity = NgsiLdEntity::new("urn:ngsi-ld:Sensor:1".parse::<Urn>().unwrap(), NameBuf::new("Sensor").unwrap());
 
         for level in [DiagnosticsLevel::None, DiagnosticsLevel::Errors, DiagnosticsLevel::Report] {
-            let outcome = validator.check(&entity, level).unwrap();
+            let outcome = validator.check(&entity, level, RequiredMembers::Decided).unwrap();
             assert!(matches!(outcome.into_diagnostics(), ValidationDiagnostics::None));
         }
     }

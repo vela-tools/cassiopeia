@@ -790,7 +790,7 @@ location: {
 },
 ~~~
 
-A record of an Observation has no `historicalLocation`, so this attribute is left out of it, and the attributes that read `readings` are left out of a HistoricalLocation's record. Each record's entity is validated on its own, so a schema that requires `location`, as `AirQualityObserved`'s does, finds it missing on the entity of every Observation's record.
+A record of an Observation has no `historicalLocation`, so this attribute is left out of it, and the attributes that read `readings` are left out of a HistoricalLocation's record. A series run checks a member a schema requires at the top level, such as `location` and `dateObserved` in `AirQualityObserved`, on the entity it writes, which holds both (see [Series output](validation.md#series-output)).
 
 ### Things without data streams
 

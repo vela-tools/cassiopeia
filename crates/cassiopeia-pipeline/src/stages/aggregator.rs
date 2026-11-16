@@ -2,85 +2,126 @@ use crate::{
     error::PipelineError,
     pipeline_stage::PipelineStage,
     stages::{
+        enforcement::{EnforcedBatch, Enforcement, ValidationSettings},
         pump::{BatchSender, PumpConfig, PumpProcessor, run_pump_stage},
+        record_entity::RecordEntity,
         stage_env::StageEnv,
         stream_outcome::StreamOutcome,
     },
 };
-use cassiopeia_aggregator::{aggregator::Aggregator, temporal_aggregator::TemporalAggregator};
+use cassiopeia_aggregator::{
+    aggregator::{Aggregator, Offered},
+    temporal_aggregator::TemporalAggregator,
+};
 use cassiopeia_common::{batch::Batch, channel::ChannelReceiver, signal::Signal, stage::Stage, telemetry::channel_boundary::ChannelBoundary};
 use cassiopeia_ngsi_ld::entity::NgsiLdEntity;
 use cassiopeia_reporter::guard::StageGuard;
-use std::ops::ControlFlow;
+use cassiopeia_validator::carried_members::CarriedMembers;
+use std::{convert, mem, ops::ControlFlow};
 
-/// Drives an [`Aggregator`] over the entity stream, forwarding each folded `EntityTemporal` downstream.
+/// Drives an [`Aggregator`] over the record entities of a series run, folding each id's into the
+/// `EntityTemporal` the run writes, and decides on each folded entity the members its schema requires
+/// at the top level, which no record decided.
 ///
-/// The processor is thin: the grouping and folding live in the aggregator, and this only plumbs its
-/// `offer`/`finish` results onto the channel and counts them on the stage bar. The fold carries
-/// across batch boundaries: the aggregator holds one id open until a different id arrives, whether
-/// or not a batch ends in between, so an id split across two batches still folds into one entity.
+/// The fold carries across batch boundaries: the aggregator holds one id open until a different id
+/// arrives, whether or not a batch ends in between, so an id split across two batches still folds
+/// into one entity, and the members its records lack are gathered across them too.
 struct AggregatorProcessor {
+    /// The fold, holding one id open at a time.
     aggregator: TemporalAggregator,
+    /// The members every record of the open id lacks so far, which the entity lacks unless a later
+    /// record holds them.
+    missing: CarriedMembers,
+    /// The run's validation mode, applied to the members each folded entity lacks.
+    enforcement: Enforcement,
 }
 
 impl AggregatorProcessor {
-    /// Forwards one batch of folded entities, counting them on the stage bar.
-    fn emit(batch: Batch<NgsiLdEntity>, stage: &StageGuard, tx: &BatchSender<NgsiLdEntity>) -> ControlFlow<()> {
-        if batch.is_empty() {
-            return ControlFlow::Continue(());
+    /// Folds one record entity in, handing back the entity it finished, with the members none of
+    /// that entity's records holds, when it begins a new id.
+    fn offer(&mut self, record: RecordEntity) -> Option<(NgsiLdEntity, CarriedMembers)> {
+        let RecordEntity { entity, carried } = record;
+        match self.aggregator.offer(entity) {
+            Offered::Opened => {
+                self.missing = carried;
+                None
+            }
+            Offered::Joined => {
+                self.missing.retain_shared(&carried);
+                None
+            }
+            Offered::Finished(finished) => Some((*finished, mem::replace(&mut self.missing, carried))),
         }
-        let count = batch.count();
-        if stage.measure_output_wait(|| tx.send(Signal::Data(batch)).is_ok()) {
-            stage.inc_by(count);
-            ControlFlow::Continue(())
-        } else {
-            ControlFlow::Break(())
-        }
+    }
+
+    /// Decides on a folded entity the members none of its records holds, and forwards it unless that
+    /// aborts the run.
+    fn admit(&mut self, enforced: &mut EnforcedBatch<NgsiLdEntity>, entity: NgsiLdEntity, missing: CarriedMembers) -> ControlFlow<()> {
+        let verdict = Ok(missing.into_outcome(&entity, self.enforcement.diagnostics_level()));
+        enforced.admit(&mut self.enforcement, entity, verdict, convert::identity)
     }
 }
 
 impl PumpProcessor for AggregatorProcessor {
-    type In = NgsiLdEntity;
+    type In = RecordEntity;
     type Out = NgsiLdEntity;
 
-    fn process(&mut self, batch: Batch<NgsiLdEntity>, stage: &StageGuard, tx: &BatchSender<NgsiLdEntity>) -> ControlFlow<()> {
+    fn process(&mut self, batch: Batch<RecordEntity>, stage: &StageGuard, tx: &BatchSender<NgsiLdEntity>) -> ControlFlow<()> {
         let service = stage.service_span();
-        // A batch of N observations yields at most N folded entities, and usually far fewer: one per
+        // A batch of N records yields at most N folded entities, and usually far fewer: one per
         // distinct id the batch spans.
-        let mut folded = Batch::with_capacity(batch.len());
-        for entity in batch {
-            if let Some(complete) = self.aggregator.offer(entity) {
-                folded.push(complete);
+        let mut enforced = EnforcedBatch::with_capacity(batch.len());
+        for record in batch {
+            if let Some((entity, missing)) = self.offer(record)
+                && self.admit(&mut enforced, entity, missing).is_break()
+            {
+                break;
             }
         }
         drop(service);
 
-        Self::emit(folded, stage, tx)
+        enforced.send(&self.enforcement, stage, tx)
     }
 
-    fn finalize(&mut self, _outcome: StreamOutcome, stage: &StageGuard, tx: &BatchSender<NgsiLdEntity>) {
-        // The last id's aggregate is still open when the stream ends; flush it so nothing is dropped.
-        let service = stage.service_span();
-        let last = self.aggregator.finish();
-        drop(service);
-
-        if let Some(folded) = last {
-            let _ = Self::emit(Batch::from(vec![folded]), stage, tx);
+    fn finalize(&mut self, outcome: StreamOutcome, stage: &StageGuard, tx: &BatchSender<NgsiLdEntity>) {
+        match outcome {
+            // The last id's aggregate is still open when the stream ends; flush it so nothing is
+            // dropped.
+            StreamOutcome::Clean => {
+                let service = stage.service_span();
+                let last = self.aggregator.finish();
+                drop(service);
+                if let Some(entity) = last {
+                    let missing = mem::take(&mut self.missing);
+                    let mut enforced = EnforcedBatch::with_capacity(1);
+                    let _ = self.admit(&mut enforced, entity, missing);
+                    let _ = enforced.send(&self.enforcement, stage, tx);
+                }
+            }
+            // A failed or cancelled stream may have stopped before the open entity's last records,
+            // so it is not written: it may be incomplete, and a member a missing record holds cannot
+            // be told missing.
+            StreamOutcome::Failed => {}
         }
+        self.enforcement.finish();
     }
 }
 
-/// Spawns the aggregator stage. It groups each id's single-instance observations, emitting one folded
-/// `EntityTemporal` per id. Inserted only for a series-representation run; a current-state run wires
-/// the validator straight to the writer.
+/// Spawns the aggregator stage. It groups each id's record entities, emitting one folded
+/// `EntityTemporal` per id, and enforces the run's validation mode on the members each one's schema
+/// requires at the top level. Inserted only for a series-representation run; a current-state run
+/// wires the validator straight to the writer.
 pub(crate) fn spawn_aggregator_thread(
-    receiver: ChannelReceiver<Signal<Batch<NgsiLdEntity>, PipelineError>>,
+    receiver: ChannelReceiver<Signal<Batch<RecordEntity>, PipelineError>>,
     entity_count: u64,
+    settings: ValidationSettings,
     env: StageEnv,
 ) -> ChannelReceiver<Signal<Batch<NgsiLdEntity>, PipelineError>> {
     run_pump_stage(
         AggregatorProcessor {
             aggregator: TemporalAggregator::new(),
+            missing: CarriedMembers::none(),
+            enforcement: Enforcement::new(settings, &env),
         },
         receiver,
         PumpConfig {
@@ -99,27 +140,41 @@ mod tests {
         controller::RunController,
         error::PipelineError,
         pipeline_stage::PipelineStage,
-        stages::{aggregator::spawn_aggregator_thread, stage_env::StageEnv},
+        stages::{aggregator::spawn_aggregator_thread, enforcement::ValidationSettings, record_entity::RecordEntity, stage_env::StageEnv},
+        test_reporter::RecordingReporter,
     };
     use cassiopeia_common::{
         batch::Batch,
         channel::{ChannelPolicy, channel},
+        representation::NgsiLdRepresentation,
         signal::{MetaSignal, Signal},
         telemetry::run::RunTelemetry,
     };
+    use cassiopeia_diagnostic::code::{diagnostic_code::DiagnosticCode, schema_code::SchemaCode};
+    use cassiopeia_geometry::geometry::NgsiLdGeometry;
+    use cassiopeia_manifest::output::validation_mode::ValidationMode;
     use cassiopeia_ngsi_ld::{
         entity::{
             NgsiLdEntity,
-            attribute::{NgsiLdAttribute, NgsiLdAttributeWrapper, property::NgsiLdProperty},
+            attribute::{NgsiLdAttribute, NgsiLdAttributeWrapper, geo_property::NgsiLdGeoProperty, property::NgsiLdProperty},
             name::NameBuf,
         },
         value::types::Value,
     };
     use cassiopeia_reporter::{backend::noop::NoopReporter, reporter::Reporter};
+    use cassiopeia_validator::{
+        carried_members::CarriedMembers,
+        required_members::RequiredMembers,
+        schema_validator::SchemaValidator,
+        schema_validator_config::SchemaValidatorConfig,
+        schema_verdict::DiagnosticsLevel,
+        validator::Validator,
+    };
     use chrono::{DateTime, Utc};
     use pretty_assertions::assert_eq;
     use serde_json::json;
-    use std::{num::NonZeroUsize, sync::Arc};
+    use std::{collections::HashMap, fs, num::NonZeroUsize, sync::Arc};
+    use temp_dir::TempDir;
     use urn_rs::Urn;
 
     static NOOP: NoopReporter = NoopReporter::new();
@@ -133,17 +188,17 @@ mod tests {
         }
     }
 
-    fn env() -> StageEnv {
+    fn env(reporter: &'static dyn Reporter, telemetry: &Arc<RunTelemetry>) -> StageEnv {
         StageEnv {
             channel_policy: ChannelPolicy::Unbounded,
-            reporter: &NOOP as &'static dyn Reporter,
+            reporter,
             controller: Arc::new(NeverCancel),
-            telemetry: Arc::new(RunTelemetry::new()),
+            telemetry: Arc::clone(telemetry),
         }
     }
 
     /// A temporal `maxSustainedWind` observation for `id`, stamped at `observed_at`.
-    fn wind_observation(id: &str, value: f64, observed_at: &str) -> NgsiLdEntity {
+    fn wind_entity(id: &str, value: f64, observed_at: &str) -> NgsiLdEntity {
         let mut property = NgsiLdProperty::new(Value::try_from(json!(value)).unwrap());
         property.observed_at = Some(observed_at.parse::<DateTime<Utc>>().unwrap());
         let mut entity = NgsiLdEntity::new(id.parse::<Urn>().unwrap(), NameBuf::new("TropicalCyclone").unwrap());
@@ -154,14 +209,95 @@ mod tests {
         entity
     }
 
-    /// Feeds a prepared list of signals through the aggregator stage and returns the drained output.
-    fn run_stage(inputs: Vec<Signal<Batch<NgsiLdEntity>, PipelineError>>) -> Vec<Signal<Batch<NgsiLdEntity>, PipelineError>> {
+    /// A temporal `location` observation for `id`, stamped at `observed_at`.
+    fn location_entity(id: &str, coordinates: [f64; 2], observed_at: &str) -> NgsiLdEntity {
+        let mut geo = NgsiLdGeoProperty::new(NgsiLdGeometry::Point {
+            coordinates: coordinates.into(),
+        });
+        geo.observed_at = Some(observed_at.parse::<DateTime<Utc>>().unwrap());
+        let mut entity = NgsiLdEntity::new(id.parse::<Urn>().unwrap(), NameBuf::new("TropicalCyclone").unwrap());
+        entity.attributes.insert(
+            NameBuf::new("location").unwrap(),
+            NgsiLdAttributeWrapper::single(NgsiLdAttribute::GeoProperty(geo)),
+        );
+        entity
+    }
+
+    /// The record entity of a `maxSustainedWind` observation, lacking no member a schema requires.
+    fn wind_observation(id: &str, value: f64, observed_at: &str) -> RecordEntity {
+        RecordEntity {
+            entity: wind_entity(id, value, observed_at),
+            carried: CarriedMembers::none(),
+        }
+    }
+
+    /// Lets `entities` through a validator whose `TropicalCyclone` schema requires `maxSustainedWind`
+    /// and `location`, as a series run does, each carrying the members it lacks.
+    fn checked(entities: Vec<NgsiLdEntity>) -> Vec<RecordEntity> {
+        let schemas = TempDir::new().unwrap();
+        fs::write(
+            schemas.path().join("TropicalCyclone.json"),
+            r#"{"type": "object", "properties": {"maxSustainedWind": {"type": "number"}}, "required": ["id", "type", "maxSustainedWind", "location"]}"#,
+        )
+        .unwrap();
+        let validator = SchemaValidator::new(SchemaValidatorConfig {
+            schemas_folder: schemas.path().to_path_buf(),
+            repositories: HashMap::new(),
+            custom_schemas: HashMap::new(),
+            representation: NgsiLdRepresentation::Simplified,
+        });
+        let outcomes = validator.validate_batch(&entities, DiagnosticsLevel::None, RequiredMembers::Carried);
+        entities
+            .into_iter()
+            .zip(outcomes)
+            .map(|(entity, outcome)| RecordEntity {
+                entity,
+                carried: outcome.unwrap().take_carried(),
+            })
+            .collect()
+    }
+
+    /// What one run of the aggregator stage produced.
+    struct StageRun {
+        output: Vec<Signal<Batch<NgsiLdEntity>, PipelineError>>,
+        errors: u64,
+        warnings: u64,
+    }
+
+    /// Feeds a prepared list of signals through the aggregator stage under `mode`, reporting to
+    /// `reporter`, and returns the drained output with the errors and warnings it counted.
+    fn run_checked(mode: ValidationMode, reporter: &'static dyn Reporter, inputs: Vec<Signal<Batch<RecordEntity>, PipelineError>>) -> StageRun {
+        let telemetry = Arc::new(RunTelemetry::new());
         let (tx, rx) = channel(ChannelPolicy::Bounded(NonZeroUsize::new(1024).unwrap()));
         for signal in inputs {
             tx.send(signal).unwrap();
         }
         drop(tx);
-        spawn_aggregator_thread(rx, 0, env()).into_iter().collect()
+        let output = spawn_aggregator_thread(rx, 0, ValidationSettings { mode, report: None }, env(reporter, &telemetry))
+            .into_iter()
+            .collect();
+        let counters = telemetry.snapshot().counters;
+        StageRun {
+            output,
+            errors: counters.errors,
+            warnings: counters.warnings,
+        }
+    }
+
+    /// Feeds a prepared list of signals through the aggregator stage and returns the drained output.
+    fn run_stage(inputs: Vec<Signal<Batch<RecordEntity>, PipelineError>>) -> Vec<Signal<Batch<NgsiLdEntity>, PipelineError>> {
+        run_checked(ValidationMode::FailWhenSchema, &NOOP, inputs).output
+    }
+
+    /// The message of the error a run emitted.
+    fn error_message(output: &[Signal<Batch<NgsiLdEntity>, PipelineError>]) -> Vec<String> {
+        output
+            .iter()
+            .filter_map(|signal| match signal {
+                Signal::Error(error) => Some(error.to_string()),
+                Signal::Start | Signal::Stop | Signal::Data(_) | Signal::Meta(_) => None,
+            })
+            .collect()
     }
 
     /// Every folded entity that reached the output, in arrival order.
@@ -258,5 +394,110 @@ mod tests {
 
         assert!(output.iter().any(|signal| matches!(signal, Signal::Meta(_))));
         assert!(output.iter().any(|signal| matches!(signal, Signal::Error(_))));
+    }
+
+    #[test]
+    fn the_entity_still_open_when_the_stream_fails_is_not_written() {
+        let output = run_stage(vec![
+            Signal::Data(Batch::from(vec![
+                wind_observation("urn:ngsi-ld:TropicalCyclone:A", 1.0, "2005-08-25T12:00:00Z"),
+                wind_observation("urn:ngsi-ld:TropicalCyclone:B", 2.0, "2005-08-25T18:00:00Z"),
+            ])),
+            Signal::Error(PipelineError::StagePanic {
+                stage: PipelineStage::Validator,
+            }),
+            Signal::Stop,
+        ]);
+
+        // A was finished by B's first record before the stream failed; B may lack records.
+        let ids: Vec<String> = folded(&output).iter().map(|entity| entity.id.to_string()).collect();
+        assert_eq!(ids, ["urn:ngsi-ld:TropicalCyclone:A"]);
+    }
+
+    #[test]
+    fn records_that_each_lack_a_different_required_member_fold_into_an_entity_that_conforms() {
+        static REPORTER: RecordingReporter = RecordingReporter::new();
+        let records = checked(vec![
+            wind_entity("urn:ngsi-ld:TropicalCyclone:A", 30.0, "2005-08-25T12:00:00Z"),
+            location_entity("urn:ngsi-ld:TropicalCyclone:A", [-75.1, 23.1], "2005-08-25T12:00:00Z"),
+            wind_entity("urn:ngsi-ld:TropicalCyclone:A", 45.0, "2005-08-25T18:00:00Z"),
+        ]);
+
+        let run = run_checked(
+            ValidationMode::FailWhenSchema,
+            &REPORTER,
+            vec![Signal::Data(Batch::from(records)), Signal::Stop],
+        );
+
+        assert_eq!(folded(&run.output).len(), 1);
+        assert_eq!(error_message(&run.output), Vec::<String>::new());
+        assert_eq!((run.errors, run.warnings), (0, 0));
+        assert!(REPORTER.diagnostics().is_empty());
+    }
+
+    #[test]
+    fn an_entity_none_of_whose_records_holds_a_required_member_aborts_the_run_once_naming_it() {
+        for mode in [ValidationMode::FailWhenSchema, ValidationMode::Fail] {
+            let records = checked(vec![
+                wind_entity("urn:ngsi-ld:TropicalCyclone:A", 30.0, "2005-08-25T12:00:00Z"),
+                wind_entity("urn:ngsi-ld:TropicalCyclone:A", 45.0, "2005-08-25T18:00:00Z"),
+            ]);
+
+            let run = run_checked(mode, &NOOP, vec![Signal::Data(Batch::from(records)), Signal::Stop]);
+
+            assert!(folded(&run.output).is_empty(), "{mode:?}");
+            assert_eq!(
+                error_message(&run.output),
+                [
+                    r#"Entity urn:ngsi-ld:TropicalCyclone:A of type 'TropicalCyclone' does not conform to its schema: 1 violation(s), first at '': "location" is a required property"#
+                ],
+                "{mode:?}"
+            );
+            assert_eq!((run.errors, run.warnings), (1, 0), "{mode:?}");
+        }
+    }
+
+    #[test]
+    fn an_entity_lacking_a_required_member_is_written_and_counted_once_when_relaxed() {
+        static REPORTER: RecordingReporter = RecordingReporter::new();
+        let mut records = checked(vec![
+            wind_entity("urn:ngsi-ld:TropicalCyclone:A", 30.0, "2005-08-25T12:00:00Z"),
+            wind_entity("urn:ngsi-ld:TropicalCyclone:A", 45.0, "2005-08-25T18:00:00Z"),
+            wind_entity("urn:ngsi-ld:TropicalCyclone:A", 60.0, "2005-08-26T00:00:00Z"),
+        ]);
+        let last = records.split_off(2);
+
+        let run = run_checked(
+            ValidationMode::Warn,
+            &REPORTER,
+            vec![Signal::Data(Batch::from(records)), Signal::Data(Batch::from(last)), Signal::Stop],
+        );
+
+        assert_eq!(folded(&run.output).len(), 1);
+        assert_eq!((run.errors, run.warnings), (0, 1));
+        let diagnostics = REPORTER.diagnostics();
+        assert_eq!(diagnostics.len(), 1);
+        assert_eq!(diagnostics[0].code, DiagnosticCode::Schema(SchemaCode::Nonconformant));
+        assert_eq!(diagnostics[0].occurrences, 1);
+        assert_eq!(
+            diagnostics[0].headline,
+            "1 'TropicalCyclone' entities do not conform to their schema (first: urn:ngsi-ld:TropicalCyclone:A)"
+        );
+    }
+
+    #[test]
+    fn each_entity_is_decided_on_its_own_records() {
+        let records = checked(vec![
+            wind_entity("urn:ngsi-ld:TropicalCyclone:A", 30.0, "2005-08-25T12:00:00Z"),
+            location_entity("urn:ngsi-ld:TropicalCyclone:A", [-75.1, 23.1], "2005-08-25T12:00:00Z"),
+            wind_entity("urn:ngsi-ld:TropicalCyclone:B", 10.0, "2005-08-26T06:00:00Z"),
+        ]);
+
+        let run = run_checked(ValidationMode::FailWhenSchema, &NOOP, vec![Signal::Data(Batch::from(records)), Signal::Stop]);
+
+        let ids: Vec<String> = folded(&run.output).iter().map(|entity| entity.id.to_string()).collect();
+        assert_eq!(ids, ["urn:ngsi-ld:TropicalCyclone:A"]);
+        assert_eq!(error_message(&run.output).len(), 1);
+        assert!(error_message(&run.output)[0].contains("urn:ngsi-ld:TropicalCyclone:B"));
     }
 }

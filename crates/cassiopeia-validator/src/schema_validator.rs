@@ -1,6 +1,8 @@
 use crate::{
+    carried_members::{CarriedMembers, remove_carried_units},
     error::{Result, ValidatorError},
     report::ValidationReportEntry,
+    required_members::RequiredMembers,
     retriever::FileRetriever,
     schema_file::load_schema,
     schema_location::SchemaLocation,
@@ -161,7 +163,17 @@ impl SchemaValidator {
     /// a run names the same handful of types, so the per-entity probe was contending on one shard for
     /// an answer that never changes. Borrowing it rather than taking the `Arc` also spares a refcount
     /// bump per entity.
-    fn check_against(&self, entity: &NgsiLdEntity, schema: Option<&JsonSchemaValidator>, diagnostics_level: DiagnosticsLevel) -> Result<ValidationOutcome> {
+    ///
+    /// An entity whose required members are carried, and that fails its schema, has every violation
+    /// read to tell the members it lacks from the rest, whatever diagnostics were asked for: the
+    /// verdict depends on whether anything else is broken.
+    fn check_against(
+        &self,
+        entity: &NgsiLdEntity,
+        schema: Option<&JsonSchemaValidator>,
+        diagnostics_level: DiagnosticsLevel,
+        required: RequiredMembers,
+    ) -> Result<ValidationOutcome> {
         let Some(validator) = schema else {
             return Ok(ValidationOutcome::absent());
         };
@@ -175,30 +187,25 @@ impl SchemaValidator {
             return Ok(ValidationOutcome::conformant());
         }
 
-        let diagnostics = match diagnostics_level {
-            DiagnosticsLevel::None => ValidationDiagnostics::None,
-            DiagnosticsLevel::Errors => ValidationDiagnostics::Errors {
-                error: Box::new(validation_error(validator, &entity_value, entity)),
-            },
-            DiagnosticsLevel::Report => {
-                let error = Box::new(validation_error(validator, &entity_value, entity));
-                let evaluation = validator.evaluate(&entity_value);
-                let list_output = serde_json::to_value(evaluation.list()).map_err(|source| ValidatorError::SerializeEvaluation {
-                    source,
-                    // The error must own its context after this borrowed entity leaves the check.
-                    entity_type: entity.entity_type.clone(),
-                })?;
-                let entry = ValidationReportEntry {
-                    // Report entries outlive the borrowed entity and therefore own their identity.
-                    entity_id: entity.id.clone(),
-                    entity_type: entity.entity_type.clone(),
-                    evaluation: list_output,
-                };
-                ValidationDiagnostics::Report { error, entry }
-            }
+        let failure = Failure {
+            validator,
+            entity_value: &entity_value,
+            entity,
         };
-
-        Ok(ValidationOutcome::nonconformant(diagnostics))
+        match required {
+            RequiredMembers::Decided => {
+                let diagnostics = failure.diagnostics(diagnostics_level, required, || SchemaViolations::collect(validator, &entity_value))?;
+                Ok(ValidationOutcome::nonconformant(diagnostics))
+            }
+            RequiredMembers::Carried => {
+                let (carried, violations) = CarriedMembers::split(validator, &entity_value);
+                if violations.is_empty() {
+                    return Ok(ValidationOutcome::conformant().carrying(carried));
+                }
+                let diagnostics = failure.diagnostics(diagnostics_level, required, || violations)?;
+                Ok(ValidationOutcome::nonconformant(diagnostics).carrying(carried))
+            }
+        }
     }
 
     /// Resolves every distinct entity type in a batch to its compiled schema, once per type.
@@ -222,31 +229,78 @@ impl SchemaValidator {
 }
 
 impl Validator for SchemaValidator {
-    fn check(&self, entity: &NgsiLdEntity, diagnostics_level: DiagnosticsLevel) -> Result<ValidationOutcome> {
-        self.check_against(entity, self.get_or_load_validator(&entity.entity_type)?.as_deref(), diagnostics_level)
+    fn check(&self, entity: &NgsiLdEntity, diagnostics_level: DiagnosticsLevel, required: RequiredMembers) -> Result<ValidationOutcome> {
+        self.check_against(entity, self.get_or_load_validator(&entity.entity_type)?.as_deref(), diagnostics_level, required)
     }
 
-    fn validate_batch(&self, entities: &[NgsiLdEntity], diagnostics: DiagnosticsLevel) -> Vec<Result<ValidationOutcome>> {
+    fn validate_batch(&self, entities: &[NgsiLdEntity], diagnostics: DiagnosticsLevel, required: RequiredMembers) -> Vec<Result<ValidationOutcome>> {
         let resolved = self.schemas_for_batch(entities);
         entities
             .par_iter()
             .map(|entity| match resolved.iter().find(|(known, _)| *known == entity.entity_type) {
-                Some((_, schema)) => self.check_against(entity, schema.as_deref(), diagnostics),
+                Some((_, schema)) => self.check_against(entity, schema.as_deref(), diagnostics, required),
                 // A type absent from the table failed to resolve; the per-entity path reports that
                 // failure for each of its entities unchanged.
-                None => self.check(entity, diagnostics),
+                None => self.check(entity, diagnostics, required),
             })
             .collect()
     }
 }
 
-/// Collects the structured diagnostics for one known-invalid entity.
-fn validation_error(validator: &JsonSchemaValidator, entity_value: &Value, entity: &NgsiLdEntity) -> ValidatorError {
-    ValidatorError::ValidationFailed {
-        // Diagnostics must own their identity after the borrowed entity leaves validation.
-        entity_id: entity.id.clone(),
-        entity_type: entity.entity_type.clone(),
-        violations: SchemaViolations::collect(validator, entity_value),
+/// One entity known to fail its schema, and what it failed.
+struct Failure<'a> {
+    /// The schema it failed.
+    validator: &'a JsonSchemaValidator,
+    /// The entity, serialized as it was checked.
+    entity_value: &'a Value,
+    /// The entity itself.
+    entity: &'a NgsiLdEntity,
+}
+
+impl Failure<'_> {
+    /// The diagnostics `level` asks for, naming `violations`, the rules the entity broke that are
+    /// decided on it, gathered only when they are asked for.
+    fn diagnostics(&self, level: DiagnosticsLevel, required: RequiredMembers, violations: impl FnOnce() -> SchemaViolations) -> Result<ValidationDiagnostics> {
+        match level {
+            DiagnosticsLevel::None => Ok(ValidationDiagnostics::None),
+            DiagnosticsLevel::Errors => Ok(ValidationDiagnostics::Errors {
+                error: Box::new(self.validation_error(violations())),
+            }),
+            DiagnosticsLevel::Report => {
+                let error = Box::new(self.validation_error(violations()));
+                let entry = ValidationReportEntry {
+                    // Report entries outlive the borrowed entity and therefore own their identity.
+                    entity_id: self.entity.id.clone(),
+                    entity_type: self.entity.entity_type.clone(),
+                    evaluation: self.evaluation(required)?,
+                };
+                Ok(ValidationDiagnostics::Report { error, entry })
+            }
+        }
+    }
+
+    /// The entity's list-format evaluation, without the units of members carried rather than decided.
+    fn evaluation(&self, required: RequiredMembers) -> Result<Value> {
+        let mut evaluation = serde_json::to_value(self.validator.evaluate(self.entity_value).list()).map_err(|source| ValidatorError::SerializeEvaluation {
+            source,
+            // The error must own its context after this borrowed entity leaves the check.
+            entity_type: self.entity.entity_type.clone(),
+        })?;
+        match required {
+            RequiredMembers::Decided => {}
+            RequiredMembers::Carried => remove_carried_units(&mut evaluation),
+        }
+        Ok(evaluation)
+    }
+
+    /// The failure naming `violations`.
+    fn validation_error(&self, violations: SchemaViolations) -> ValidatorError {
+        ValidatorError::ValidationFailed {
+            // Diagnostics must own their identity after the borrowed entity leaves validation.
+            entity_id: self.entity.id.clone(),
+            entity_type: self.entity.entity_type.clone(),
+            violations,
+        }
     }
 }
 
@@ -254,17 +308,24 @@ fn validation_error(validator: &JsonSchemaValidator, entity_value: &Value, entit
 mod tests {
     use crate::{
         error::ValidatorError,
+        required_members::RequiredMembers,
         schema_validator::SchemaValidator,
         schema_validator_config::SchemaValidatorConfig,
-        schema_verdict::{DiagnosticsLevel, SchemaVerdict, ValidationDiagnostics},
+        schema_verdict::{DiagnosticsLevel, SchemaVerdict, ValidationDiagnostics, ValidationOutcome},
         validator::Validator,
     };
     use cassiopeia_common::representation::NgsiLdRepresentation;
     use cassiopeia_ngsi_ld::{
         data_model::DataModelRepository,
-        entity::{NgsiLdEntity, name::NameBuf},
+        entity::{
+            NgsiLdEntity,
+            attribute::{NgsiLdAttribute, NgsiLdAttributeWrapper, property::NgsiLdProperty},
+            name::NameBuf,
+        },
+        value::types::Value,
     };
     use pretty_assertions::assert_eq;
+    use serde_json::json;
     use std::{collections::HashMap, fs, path::PathBuf};
     use tempfile::TempDir;
     use urn_rs::Urn;
@@ -295,12 +356,45 @@ mod tests {
         NgsiLdEntity::new(id.parse::<Urn>().unwrap(), NameBuf::new(entity_type).unwrap())
     }
 
+    /// A `Sensor` entity whose `pm10` property holds `pm10`.
+    fn sensor_reading(pm10: serde_json::Value) -> NgsiLdEntity {
+        let mut sensor = entity("Sensor", "urn:ngsi-ld:Sensor:1");
+        sensor.attributes.insert(
+            NameBuf::new("pm10").unwrap(),
+            NgsiLdAttributeWrapper::single(NgsiLdAttribute::Property(NgsiLdProperty::new(Value::try_from(pm10).unwrap()))),
+        );
+        sensor
+    }
+
+    /// A validator over a key-values `Sensor` schema that requires `dateObserved` and `location`, and
+    /// `pm10` to be a number, in the folder `directory`.
+    fn requiring_validator(directory: &TempDir) -> SchemaValidator {
+        fs::write(
+            directory.path().join("Sensor.json"),
+            r#"{"type": "object", "properties": {"pm10": {"type": "number"}}, "required": ["id", "type", "dateObserved", "location"]}"#,
+        )
+        .unwrap();
+        SchemaValidator::new(SchemaValidatorConfig {
+            schemas_folder: directory.path().to_path_buf(),
+            repositories: HashMap::new(),
+            custom_schemas: HashMap::new(),
+            representation: NgsiLdRepresentation::Simplified,
+        })
+    }
+
+    /// The names of the members an outcome carries.
+    fn carried(outcome: &mut ValidationOutcome) -> Vec<String> {
+        outcome.take_carried().members().map(ToString::to_string).collect()
+    }
+
     #[test]
     fn an_entity_type_without_a_schema_is_absent() {
         let directory = TempDir::new().unwrap();
         let validator = validator(directory.path().to_path_buf());
 
-        let outcome = validator.check(&entity("Unknown", "urn:ngsi-ld:Unknown:1"), DiagnosticsLevel::None).unwrap();
+        let outcome = validator
+            .check(&entity("Unknown", "urn:ngsi-ld:Unknown:1"), DiagnosticsLevel::None, RequiredMembers::Decided)
+            .unwrap();
 
         assert_eq!(outcome.verdict(), SchemaVerdict::Absent);
     }
@@ -311,7 +405,9 @@ mod tests {
         fs::write(directory.path().join("Sensor.json"), r#"{"type": "object", "required": ["id", "type"]}"#).unwrap();
         let validator = validator(directory.path().to_path_buf());
 
-        let outcome = validator.check(&entity("Sensor", "urn:ngsi-ld:Sensor:1"), DiagnosticsLevel::Report).unwrap();
+        let outcome = validator
+            .check(&entity("Sensor", "urn:ngsi-ld:Sensor:1"), DiagnosticsLevel::Report, RequiredMembers::Decided)
+            .unwrap();
 
         assert_eq!(outcome.verdict(), SchemaVerdict::Conformant);
         assert!(matches!(outcome.into_diagnostics(), ValidationDiagnostics::None));
@@ -338,6 +434,7 @@ mod tests {
             .check(
                 &entity("BikeHireDockingStation", "urn:ngsi-ld:BikeHireDockingStation:1"),
                 DiagnosticsLevel::None,
+                RequiredMembers::Decided,
             )
             .unwrap();
 
@@ -353,7 +450,9 @@ mod tests {
         fs::write(directory.path().join("Sensor.json"), r#"{"type": "object", "required": ["temperature"]}"#).unwrap();
         let validator = validator(directory.path().to_path_buf());
 
-        let outcome = validator.check(&entity("Sensor", "urn:ngsi-ld:Sensor:1"), DiagnosticsLevel::Report).unwrap();
+        let outcome = validator
+            .check(&entity("Sensor", "urn:ngsi-ld:Sensor:1"), DiagnosticsLevel::Report, RequiredMembers::Decided)
+            .unwrap();
 
         assert_eq!(outcome.verdict(), SchemaVerdict::Nonconformant);
         let ValidationDiagnostics::Report { error, entry } = outcome.into_diagnostics() else {
@@ -369,7 +468,9 @@ mod tests {
         fs::write(directory.path().join("Sensor.json"), r#"{"type": "object", "required": ["temperature"]}"#).unwrap();
         let validator = validator(directory.path().to_path_buf());
 
-        let outcome = validator.check(&entity("Sensor", "urn:ngsi-ld:Sensor:1"), DiagnosticsLevel::Errors).unwrap();
+        let outcome = validator
+            .check(&entity("Sensor", "urn:ngsi-ld:Sensor:1"), DiagnosticsLevel::Errors, RequiredMembers::Decided)
+            .unwrap();
 
         assert_eq!(outcome.verdict(), SchemaVerdict::Nonconformant);
         let ValidationDiagnostics::Errors { error } = outcome.into_diagnostics() else {
@@ -384,7 +485,7 @@ mod tests {
         fs::write(directory.path().join("Sensor.json"), "null").unwrap();
         let validator = validator(directory.path().to_path_buf());
 
-        let result = validator.check(&entity("Sensor", "urn:ngsi-ld:Sensor:1"), DiagnosticsLevel::None);
+        let result = validator.check(&entity("Sensor", "urn:ngsi-ld:Sensor:1"), DiagnosticsLevel::None, RequiredMembers::Decided);
 
         assert!(matches!(result, Err(ValidatorError::SchemaFileIsNull { .. })));
     }
@@ -400,7 +501,11 @@ mod tests {
         let validator = validator_with_custom_schemas(directory.path().to_path_buf(), custom);
 
         let outcome = validator
-            .check(&entity("ExoPlanet", "urn:ngsi-ld:ExoPlanet:1"), DiagnosticsLevel::None)
+            .check(
+                &entity("ExoPlanet", "urn:ngsi-ld:ExoPlanet:1"),
+                DiagnosticsLevel::None,
+                RequiredMembers::Decided,
+            )
             .unwrap();
 
         assert_eq!(outcome.verdict(), SchemaVerdict::Nonconformant);
@@ -413,7 +518,11 @@ mod tests {
         let custom = HashMap::from([(NameBuf::new("ExoPlanet").unwrap(), directory.path().join("nonexistent.json"))]);
         let validator = validator_with_custom_schemas(directory.path().to_path_buf(), custom);
 
-        let result = validator.check(&entity("ExoPlanet", "urn:ngsi-ld:ExoPlanet:1"), DiagnosticsLevel::None);
+        let result = validator.check(
+            &entity("ExoPlanet", "urn:ngsi-ld:ExoPlanet:1"),
+            DiagnosticsLevel::None,
+            RequiredMembers::Decided,
+        );
 
         assert!(matches!(result, Err(ValidatorError::CustomSchemaMissing { .. })));
     }
@@ -430,7 +539,11 @@ mod tests {
         let validator = validator_with_custom_schemas(directory.path().to_path_buf(), custom);
 
         let outcome = validator
-            .check(&entity("ExoPlanet", "urn:ngsi-ld:ExoPlanet:1"), DiagnosticsLevel::None)
+            .check(
+                &entity("ExoPlanet", "urn:ngsi-ld:ExoPlanet:1"),
+                DiagnosticsLevel::None,
+                RequiredMembers::Decided,
+            )
             .unwrap();
 
         assert_eq!(outcome.verdict(), SchemaVerdict::Nonconformant);
@@ -453,7 +566,11 @@ mod tests {
 
         // The schema compiled (the sibling `$ref` resolved) and its `mass` requirement was applied.
         let outcome = validator
-            .check(&entity("ExoPlanet", "urn:ngsi-ld:ExoPlanet:1"), DiagnosticsLevel::None)
+            .check(
+                &entity("ExoPlanet", "urn:ngsi-ld:ExoPlanet:1"),
+                DiagnosticsLevel::None,
+                RequiredMembers::Decided,
+            )
             .unwrap();
 
         assert_eq!(outcome.verdict(), SchemaVerdict::Nonconformant);
@@ -466,7 +583,7 @@ mod tests {
         let validator = validator(directory.path().to_path_buf());
         let entities = vec![entity("Unknown", "urn:ngsi-ld:Unknown:1"), entity("Sensor", "urn:ngsi-ld:Sensor:1")];
 
-        let results = validator.validate_batch(&entities, DiagnosticsLevel::None);
+        let results = validator.validate_batch(&entities, DiagnosticsLevel::None, RequiredMembers::Decided);
 
         assert_eq!(results.len(), 2);
         assert!(matches!(&results[0], Ok(outcome) if outcome.verdict() == SchemaVerdict::Absent));
@@ -484,11 +601,11 @@ mod tests {
             entity("Sensor", "urn:ngsi-ld:Sensor:3"),
         ];
 
-        let batched = validator.validate_batch(&entities, DiagnosticsLevel::None);
+        let batched = validator.validate_batch(&entities, DiagnosticsLevel::None, RequiredMembers::Decided);
 
         // Resolving the schema once for the whole batch must not change any entity's verdict.
         for (index, result) in batched.iter().enumerate() {
-            let alone = validator.check(&entities[index], DiagnosticsLevel::None).unwrap();
+            let alone = validator.check(&entities[index], DiagnosticsLevel::None, RequiredMembers::Decided).unwrap();
             assert_eq!(result.as_ref().unwrap().verdict(), alone.verdict());
             assert_eq!(result.as_ref().unwrap().verdict(), SchemaVerdict::Conformant);
         }
@@ -500,7 +617,7 @@ mod tests {
         let validator = validator(directory.path().to_path_buf());
         let entities = vec![entity("Unknown", "urn:ngsi-ld:Unknown:1"), entity("Unknown", "urn:ngsi-ld:Unknown:2")];
 
-        let results = validator.validate_batch(&entities, DiagnosticsLevel::None);
+        let results = validator.validate_batch(&entities, DiagnosticsLevel::None, RequiredMembers::Decided);
 
         assert!(
             results
@@ -516,7 +633,7 @@ mod tests {
         let validator = validator(directory.path().to_path_buf());
         let entities = vec![entity("Sensor", "urn:ngsi-ld:Sensor:1"), entity("Unknown", "urn:ngsi-ld:Unknown:1")];
 
-        let results = validator.validate_batch(&entities, DiagnosticsLevel::None);
+        let results = validator.validate_batch(&entities, DiagnosticsLevel::None, RequiredMembers::Decided);
 
         assert_eq!(results.len(), 2);
         assert!(matches!(&results[0], Ok(outcome) if outcome.verdict() == SchemaVerdict::Conformant));
@@ -532,7 +649,7 @@ mod tests {
         let validator = validator_with_custom_schemas(directory.path().to_path_buf(), custom);
         let entities = vec![entity("Sensor", "urn:ngsi-ld:Sensor:1"), entity("Sensor", "urn:ngsi-ld:Sensor:2")];
 
-        let results = validator.validate_batch(&entities, DiagnosticsLevel::None);
+        let results = validator.validate_batch(&entities, DiagnosticsLevel::None, RequiredMembers::Decided);
 
         assert_eq!(results.len(), 2);
         assert!(results.iter().all(|result| matches!(result, Err(ValidatorError::CustomSchemaMissing { .. }))));
@@ -545,10 +662,80 @@ mod tests {
         let validator = validator(directory.path().to_path_buf());
         let entities = vec![entity("Sensor", "urn:ngsi-ld:Sensor:1")];
 
-        let mut results = validator.validate_batch(&entities, DiagnosticsLevel::Errors);
+        let mut results = validator.validate_batch(&entities, DiagnosticsLevel::Errors, RequiredMembers::Decided);
 
         let outcome = results.remove(0).unwrap();
         assert_eq!(outcome.verdict(), SchemaVerdict::Nonconformant);
         assert!(matches!(outcome.into_diagnostics(), ValidationDiagnostics::Errors { .. }));
+    }
+
+    #[test]
+    fn an_entity_whose_required_members_are_decided_on_it_violates_its_schema_by_lacking_one() {
+        let directory = TempDir::new().unwrap();
+        let validator = requiring_validator(&directory);
+
+        let mut outcome = validator
+            .check(&sensor_reading(json!(18.2)), DiagnosticsLevel::Errors, RequiredMembers::Decided)
+            .unwrap();
+
+        assert_eq!(outcome.verdict(), SchemaVerdict::Nonconformant);
+        assert_eq!(carried(&mut outcome), Vec::<String>::new());
+    }
+
+    #[test]
+    fn an_entity_lacking_only_required_members_that_are_carried_conforms_and_carries_them() {
+        let directory = TempDir::new().unwrap();
+        let validator = requiring_validator(&directory);
+
+        for level in [DiagnosticsLevel::None, DiagnosticsLevel::Errors, DiagnosticsLevel::Report] {
+            let mut outcome = validator.check(&sensor_reading(json!(18.2)), level, RequiredMembers::Carried).unwrap();
+
+            assert_eq!(outcome.verdict(), SchemaVerdict::Conformant, "{level:?}");
+            assert_eq!(carried(&mut outcome), ["dateObserved", "location"], "{level:?}");
+        }
+    }
+
+    #[test]
+    fn a_value_of_the_wrong_type_is_still_decided_on_an_entity_whose_required_members_are_carried() {
+        let directory = TempDir::new().unwrap();
+        let validator = requiring_validator(&directory);
+
+        let mut outcome = validator
+            .check(&sensor_reading(json!("high")), DiagnosticsLevel::Report, RequiredMembers::Carried)
+            .unwrap();
+
+        assert_eq!(outcome.verdict(), SchemaVerdict::Nonconformant);
+        assert_eq!(carried(&mut outcome), ["dateObserved", "location"]);
+        let ValidationDiagnostics::Report { error, entry } = outcome.into_diagnostics() else {
+            panic!("expected report diagnostics");
+        };
+        assert_eq!(
+            error.to_string(),
+            r#"Entity urn:ngsi-ld:Sensor:1 of type 'Sensor' does not conform to its schema: 1 violation(s), first at '/pm10': "high" is not of type "number""#
+        );
+        let units_with_errors: Vec<&str> = entry.evaluation["details"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|unit| unit.get("errors").is_some())
+            .map(|unit| unit["evaluationPath"].as_str().unwrap())
+            .collect();
+        assert_eq!(units_with_errors, ["/properties/pm10/type"]);
+    }
+
+    #[test]
+    fn a_batch_carries_the_required_members_of_each_entity() {
+        let directory = TempDir::new().unwrap();
+        let validator = requiring_validator(&directory);
+        let entities = vec![sensor_reading(json!(18.2)), sensor_reading(json!("high"))];
+
+        let mut results = validator.validate_batch(&entities, DiagnosticsLevel::None, RequiredMembers::Carried);
+
+        let mut second = results.remove(1).unwrap();
+        let mut first = results.remove(0).unwrap();
+        assert_eq!(first.verdict(), SchemaVerdict::Conformant);
+        assert_eq!(second.verdict(), SchemaVerdict::Nonconformant);
+        assert_eq!(carried(&mut first), ["dateObserved", "location"]);
+        assert_eq!(carried(&mut second), ["dateObserved", "location"]);
     }
 }

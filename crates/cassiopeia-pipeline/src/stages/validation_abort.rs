@@ -1,4 +1,4 @@
-use crate::{error::PipelineError, stages::validation_report::ReportCollector};
+use crate::{error::PipelineError, stages::validation_report::SharedReport};
 use cassiopeia_ngsi_ld::entity::NgsiLdEntity;
 use cassiopeia_validator::{
     error::{Result as ValidatorResult, ValidatorError},
@@ -10,11 +10,11 @@ use cassiopeia_validator::{
 ///
 /// A [`SchemaVerdict::Conformant`] never reaches this path (a conformant entity is always forwarded);
 /// it is folded into the missing-schema arm only to keep the match exhaustive.
-pub(crate) fn abort_error(verdict: ValidatorResult<ValidationOutcome>, entity: &NgsiLdEntity, collector: Option<&mut ReportCollector>) -> PipelineError {
+pub(crate) fn abort_error(verdict: ValidatorResult<ValidationOutcome>, entity: &NgsiLdEntity, report: Option<&SharedReport>) -> PipelineError {
     match verdict {
         Err(error) => PipelineError::Validation(error),
         Ok(outcome) => match outcome.verdict() {
-            SchemaVerdict::Nonconformant => nonconformance_error(outcome.into_diagnostics(), entity, collector),
+            SchemaVerdict::Nonconformant => nonconformance_error(outcome.into_diagnostics(), entity, report),
             SchemaVerdict::Absent | SchemaVerdict::Conformant => PipelineError::ValidationSchemaMissing {
                 // Pipeline errors own their context after the borrowed entity is dropped.
                 entity_id: entity.id.clone(),
@@ -26,12 +26,12 @@ pub(crate) fn abort_error(verdict: ValidatorResult<ValidationOutcome>, entity: &
 
 /// Converts diagnostics for an aborting nonconformance into the pipeline error and records its
 /// structured entry when reporting is enabled.
-fn nonconformance_error(diagnostics: ValidationDiagnostics, entity: &NgsiLdEntity, collector: Option<&mut ReportCollector>) -> PipelineError {
+fn nonconformance_error(diagnostics: ValidationDiagnostics, entity: &NgsiLdEntity, report: Option<&SharedReport>) -> PipelineError {
     match diagnostics {
         ValidationDiagnostics::Errors { error } => PipelineError::Validation(*error),
         ValidationDiagnostics::Report { error, entry } => {
-            if let Some(collector) = collector {
-                collector.record(entry);
+            if let Some(report) = report {
+                report.record(entry);
             }
             PipelineError::Validation(*error)
         }

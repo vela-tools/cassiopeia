@@ -88,7 +88,7 @@ Schemas can come from the Smart Data Models catalog or from a user-managed schem
 
 The writer is the final stage. File output can use a JSON array or one entity per line. Broker output sends batches through the corresponding NGSI-LD operations for creating, updating, merging, or upserting entities. The [output guide](output.md) documents destinations, framing, broker delivery, and context handling.
 
-Writing can be preceded and decorated by additional policies. Atomic output is a writer decorator held back until a cycle succeeds, which prevents a failed or cancelled cycle from publishing a partial result. A series temporal output inserts a separate aggregation stage between validation and writing: it folds each entity's single-instance observations into one NGSI-LD EntityTemporal (ETSI GS CIM 009 v1.9.1 clause 5.2.20), holding one entity at a time. A current-state run omits that stage.
+Writing can be preceded and decorated by additional policies. Atomic output is a writer decorator held back until a cycle succeeds, which prevents a failed or cancelled cycle from publishing a partial result. A series temporal output inserts a separate aggregation stage between validation and writing: it folds each entity's single-instance observations into one NGSI-LD EntityTemporal (ETSI GS CIM 009 v1.9.1 clause 5.2.20), holding one entity at a time. The validator carries the members a schema requires at the top level that an observation lacks, rather than deciding them, and the aggregation stage decides them on the folded entity, under the same validation mode. A current-state run omits that stage.
 
 ## Why the pipeline has two phases
 

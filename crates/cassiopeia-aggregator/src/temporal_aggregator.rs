@@ -1,4 +1,4 @@
-use crate::aggregator::Aggregator;
+use crate::aggregator::{Aggregator, Offered};
 use cassiopeia_ngsi_ld::entity::{NgsiLdEntity, temporal_aggregate::TemporalAggregate};
 
 /// The standard [`Aggregator`]: folds each id's contiguous observations into one `EntityTemporal`
@@ -26,17 +26,18 @@ impl Default for TemporalAggregator {
 }
 
 impl Aggregator for TemporalAggregator {
-    fn offer(&mut self, entity: NgsiLdEntity) -> Option<NgsiLdEntity> {
+    fn offer(&mut self, entity: NgsiLdEntity) -> Offered {
         // While the incoming id matches the open aggregate, fold it in and emit nothing.
-        if matches!(&self.open, Some(aggregate) if aggregate.id() == &entity.id) {
-            if let Some(aggregate) = self.open.as_mut() {
-                aggregate.push(entity);
-            }
-            return None;
+        if let Some(aggregate) = self.open.as_mut().filter(|aggregate| aggregate.id() == &entity.id) {
+            aggregate.push(entity);
+            return Offered::Joined;
         }
         // A new id, or the first observation: seed the new aggregate and emit any previous one. The
         // upstream emits an id's observations contiguously, so the replaced aggregate is complete.
-        self.open.replace(TemporalAggregate::new(entity)).map(TemporalAggregate::finish)
+        match self.open.replace(TemporalAggregate::new(entity)) {
+            Some(previous) => Offered::Finished(Box::new(previous.finish())),
+            None => Offered::Opened,
+        }
     }
 
     fn finish(&mut self) -> Option<NgsiLdEntity> {
@@ -46,7 +47,10 @@ impl Aggregator for TemporalAggregator {
 
 #[cfg(test)]
 mod tests {
-    use crate::{aggregator::Aggregator, temporal_aggregator::TemporalAggregator};
+    use crate::{
+        aggregator::{Aggregator, Offered},
+        temporal_aggregator::TemporalAggregator,
+    };
     use cassiopeia_common::representation::NgsiLdRepresentation;
     use cassiopeia_geometry::geometry::NgsiLdGeometry;
     use cassiopeia_ngsi_ld::{
@@ -105,16 +109,14 @@ mod tests {
     #[test]
     fn one_id_with_out_of_order_observations_folds_into_a_time_sorted_multi() {
         let mut aggregator = TemporalAggregator::new();
-        // Offered newest first; both continue the one open id, so neither emits.
-        assert!(
-            aggregator
-                .offer(wind_observation("urn:ngsi-ld:TropicalCyclone:A", 50.0, "2005-08-25T18:00:00Z"))
-                .is_none()
+        // Offered newest first; the first opens the one id and the second joins it, so neither emits.
+        assert_eq!(
+            aggregator.offer(wind_observation("urn:ngsi-ld:TropicalCyclone:A", 50.0, "2005-08-25T18:00:00Z")),
+            Offered::Opened
         );
-        assert!(
-            aggregator
-                .offer(wind_observation("urn:ngsi-ld:TropicalCyclone:A", 45.0, "2005-08-25T12:00:00Z"))
-                .is_none()
+        assert_eq!(
+            aggregator.offer(wind_observation("urn:ngsi-ld:TropicalCyclone:A", 45.0, "2005-08-25T12:00:00Z")),
+            Offered::Joined
         );
         let folded = aggregator.finish().expect("the last id flushes");
 
@@ -153,25 +155,23 @@ mod tests {
     #[test]
     fn a_new_id_emits_the_previous_fold_and_the_last_flushes_on_finish() {
         let mut aggregator = TemporalAggregator::new();
-        assert!(
-            aggregator
-                .offer(wind_observation("urn:ngsi-ld:TropicalCyclone:A", 1.0, "2005-08-25T12:00:00Z"))
-                .is_none()
+        assert_eq!(
+            aggregator.offer(wind_observation("urn:ngsi-ld:TropicalCyclone:A", 1.0, "2005-08-25T12:00:00Z")),
+            Offered::Opened
         );
-        assert!(
-            aggregator
-                .offer(wind_observation("urn:ngsi-ld:TropicalCyclone:A", 2.0, "2005-08-25T18:00:00Z"))
-                .is_none()
+        assert_eq!(
+            aggregator.offer(wind_observation("urn:ngsi-ld:TropicalCyclone:A", 2.0, "2005-08-25T18:00:00Z")),
+            Offered::Joined
         );
         // Id B begins, so id A's fold is emitted here.
-        let a = aggregator
-            .offer(wind_observation("urn:ngsi-ld:TropicalCyclone:B", 3.0, "2005-08-26T00:00:00Z"))
-            .expect("A flushed");
+        let Offered::Finished(a) = aggregator.offer(wind_observation("urn:ngsi-ld:TropicalCyclone:B", 3.0, "2005-08-26T00:00:00Z")) else {
+            panic!("A flushed");
+        };
         assert_eq!(a.id, urn("urn:ngsi-ld:TropicalCyclone:A"));
         // Id C begins, so id B's fold is emitted here.
-        let b = aggregator
-            .offer(wind_observation("urn:ngsi-ld:TropicalCyclone:C", 4.0, "2005-08-27T00:00:00Z"))
-            .expect("B flushed");
+        let Offered::Finished(b) = aggregator.offer(wind_observation("urn:ngsi-ld:TropicalCyclone:C", 4.0, "2005-08-27T00:00:00Z")) else {
+            panic!("B flushed");
+        };
         assert_eq!(b.id, urn("urn:ngsi-ld:TropicalCyclone:B"));
         // Id C is still open; finish flushes it.
         let c = aggregator.finish().expect("C flushed");
