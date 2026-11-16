@@ -1,11 +1,11 @@
 use crate::{cursor_store_error::CursorStoreError, positions::Positions};
-use cassiopeia_sensorthings::{cursor_name::CursorName, entity_id::EntityId};
+use cassiopeia_sensorthings::{cursor_name::CursorName, entity_id::EntityId, stream_id::StreamId, stream_kind::StreamKind};
 use chrono::{DateTime, Utc};
 use derive_more::{Display, From};
 use std::collections::BTreeMap;
 
-/// A data stream id as a person writes it, such as `5`, which names the stored ids whose text form it
-/// is.
+/// A data stream id as a person writes it, such as `5`, which names the stored ids of one kind of
+/// data stream whose text form it is.
 ///
 /// A server chooses whether its ids are integers or texts, which a person cannot see, so `5` names
 /// the integer id 5 and the text id `"5"` alike. Any text is an id text, one the cursor holds no
@@ -19,8 +19,10 @@ pub struct IdText(Box<str>);
 pub enum ResetScope {
     /// Every position of the cursor.
     Store,
-    /// The position of the data stream the id names.
+    /// The position of the Datastream the id names.
     Datastream(IdText),
+    /// The position of the `MultiDatastream` the id names.
+    MultiDatastream(IdText),
 }
 
 /// Where a reset leaves the positions it applies to.
@@ -41,10 +43,21 @@ impl IdText {
 
 impl ResetScope {
     /// Whether the reset applies to the position of `datastream`.
-    fn covers(&self, datastream: &EntityId) -> bool {
+    fn covers(&self, datastream: &StreamId) -> bool {
+        match (self, datastream) {
+            (ResetScope::Store, _) => true,
+            (ResetScope::Datastream(text), StreamId::Datastream(id)) | (ResetScope::MultiDatastream(text), StreamId::MultiDatastream(id)) => text.names(id),
+            (ResetScope::Datastream(_), StreamId::MultiDatastream(_)) | (ResetScope::MultiDatastream(_), StreamId::Datastream(_)) => false,
+        }
+    }
+
+    /// The kind and id of the one data stream the reset names, or `None` for a reset of every
+    /// position.
+    const fn named(&self) -> Option<(StreamKind, &IdText)> {
         match self {
-            ResetScope::Store => true,
-            ResetScope::Datastream(text) => text.names(datastream),
+            ResetScope::Store => None,
+            ResetScope::Datastream(text) => Some((StreamKind::Datastream, text)),
+            ResetScope::MultiDatastream(text) => Some((StreamKind::MultiDatastream, text)),
         }
     }
 }
@@ -57,12 +70,13 @@ impl ResetScope {
 /// no position for.
 pub(crate) fn reset(positions: Positions, scope: &ResetScope, target: ResetTarget, cursor: &CursorName) -> Result<Positions, CursorStoreError> {
     let mut positions = BTreeMap::from(positions);
-    if let ResetScope::Datastream(text) = scope
-        && !positions.keys().any(|datastream| text.names(datastream))
+    if let Some((kind, text)) = scope.named()
+        && !positions.keys().any(|datastream| scope.covers(datastream))
     {
         return Err(CursorStoreError::UnknownDatastream {
             // The error outlives the store it names.
             cursor: cursor.clone(),
+            kind,
             datastream: text.clone(),
         });
     }
@@ -79,7 +93,7 @@ pub(crate) fn reset(positions: Positions, scope: &ResetScope, target: ResetTarge
 #[cfg(test)]
 mod tests {
     use crate::reset::{IdText, ResetScope};
-    use cassiopeia_sensorthings::entity_id::EntityId;
+    use cassiopeia_sensorthings::{entity_id::EntityId, stream_id::StreamId};
 
     fn text(id: &str) -> IdText {
         IdText::from(Box::<str>::from(id))
@@ -100,8 +114,15 @@ mod tests {
 
     #[test]
     fn a_store_reset_covers_every_data_stream_and_a_stream_reset_its_own() {
-        assert!(ResetScope::Store.covers(&EntityId::Text("t-1".into())));
-        assert!(ResetScope::Datastream(text("t-1")).covers(&EntityId::Text("t-1".into())));
-        assert!(!ResetScope::Datastream(text("t-1")).covers(&EntityId::Text("t-2".into())));
+        let datastream = |id: &str| StreamId::Datastream(EntityId::Text(id.into()));
+        let multi = |id: &str| StreamId::MultiDatastream(EntityId::Text(id.into()));
+
+        assert!(ResetScope::Store.covers(&datastream("t-1")));
+        assert!(ResetScope::Store.covers(&multi("t-1")));
+        assert!(ResetScope::Datastream(text("t-1")).covers(&datastream("t-1")));
+        assert!(!ResetScope::Datastream(text("t-1")).covers(&datastream("t-2")));
+        assert!(!ResetScope::Datastream(text("t-1")).covers(&multi("t-1")));
+        assert!(ResetScope::MultiDatastream(text("t-1")).covers(&multi("t-1")));
+        assert!(!ResetScope::MultiDatastream(text("t-1")).covers(&datastream("t-1")));
     }
 }

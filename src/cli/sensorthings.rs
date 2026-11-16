@@ -1,5 +1,9 @@
 use crate::cli::{input_read::InputHeaderArgs, sensorthings_cursor::CursorCommand};
-use cassiopeia_sensorthings::{service_root::ServiceRoot, settings::datastream_filter::DatastreamFilter};
+use cassiopeia_sensorthings::{
+    service_root::ServiceRoot,
+    settings::stream_filter::{StreamFilter, StreamFilterError},
+    stream_kind::StreamKind,
+};
 use clap::{Args, Parser, Subcommand};
 
 /// The `sensorthings` command group.
@@ -16,9 +20,10 @@ pub enum SensorThingsSubcommand {
     /// List the readings a SensorThings API server offers.
     ///
     /// Prints one row per `ObservedProperty` name, the name a mapping reads as `readings.<name>`, with
-    /// the units of its data streams, the UN/CEFACT codes `cefact_unit` resolves them to (`unknown`
-    /// for one it does not resolve), the number of its data streams, and the number of Things that
-    /// hold more than one of them.
+    /// the units of its readings, the UN/CEFACT codes `cefact_unit` resolves them to (`unknown` for
+    /// one it does not resolve), the number of its Datastreams, the number of `MultiDatastreams` with
+    /// an element of the name, and the number of Things that hold more than one reading of the name.
+    /// `MultiDatastreams` are listed when the server's service root lists them.
     #[command(arg_required_else_help = true)]
     Readings(ReadingsArgs),
 
@@ -36,13 +41,28 @@ pub struct ReadingsArgs {
     #[arg(value_name = "SERVICE_ROOT")]
     pub root: ServiceRoot,
 
-    /// An `OData` `$filter` over Datastreams that selects the data streams listed, such as
-    /// `ObservedProperty/name eq 'pm10'`; every data stream when absent.
-    #[arg(long, value_name = "EXPRESSION")]
-    pub datastreams: Option<DatastreamFilter>,
+    /// An `OData` `$filter` over Datastreams that selects the Datastreams listed, such as
+    /// `ObservedProperty/name eq 'pm10'`; every Datastream when absent.
+    #[arg(long, value_name = "EXPRESSION", value_parser = datastream_filter)]
+    pub datastreams: Option<StreamFilter>,
+
+    /// An `OData` `$filter` over `MultiDatastreams` that selects the `MultiDatastreams` listed, such as
+    /// `startswith(name,'ws-')`; every `MultiDatastream` when absent.
+    #[arg(long, value_name = "EXPRESSION", value_parser = multi_datastream_filter)]
+    pub multi_datastreams: Option<StreamFilter>,
 
     #[command(flatten)]
     pub headers: InputHeaderArgs,
+}
+
+/// Reads a `--datastreams` filter, checked as the `datastreams` setting is.
+fn datastream_filter(text: &str) -> Result<StreamFilter, StreamFilterError> {
+    StreamFilter::new(StreamKind::Datastream, text.to_owned())
+}
+
+/// Reads a `--multi-datastreams` filter, checked as the `multiDatastreams` setting is.
+fn multi_datastream_filter(text: &str) -> Result<StreamFilter, StreamFilterError> {
+    StreamFilter::new(StreamKind::MultiDatastream, text.to_owned())
 }
 
 #[cfg(test)]

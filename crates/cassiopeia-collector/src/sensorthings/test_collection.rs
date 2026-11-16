@@ -6,7 +6,7 @@ use crate::{
     collector::Collector,
     downloader::Downloader,
     error::CollectorError,
-    sensorthings::{collector::SensorThingsCollector, cursor_cycle::CursorCycle},
+    sensorthings::{collector::SensorThingsCollector, cursor_cycle::CursorCycle, unread_check::UnreadCheck},
 };
 use cassiopeia_common::{
     channel::{ChannelPolicy, channel},
@@ -37,11 +37,27 @@ pub(crate) fn cycle_start() -> CycleStart {
 }
 
 /// A collector of the mock server's root with the settings `settings` and the request headers
-/// `headers`, that stops once `shutdown` is set.
+/// `headers`, in a cycle after the run's check for unread `MultiDatastreams`, that stops once
+/// `shutdown` is set.
 pub(crate) fn collector(server: &ServerGuard, settings: &str, headers: RequestHeaders, shutdown: &'static AtomicBool) -> Box<SensorThingsCollector> {
     let downloader = Downloader::new(UserAgent::from("cassiopeia/test".to_owned()), headers, shutdown);
     let service = SensorThingsService::new(root(server), serde_json::from_str(settings).unwrap());
-    Box::new(SensorThingsCollector::new(service, None, cycle_start(), downloader, shutdown))
+    Box::new(SensorThingsCollector::new(
+        service,
+        None,
+        UnreadCheck::Done,
+        cycle_start(),
+        downloader,
+        shutdown,
+    ))
+}
+
+/// A collector of the mock server's root with the settings `settings`, in the cycle that checks for
+/// unread `MultiDatastreams`, that nobody stops.
+pub(crate) fn checking_collector(server: &ServerGuard, settings: &str) -> Box<SensorThingsCollector> {
+    let downloader = Downloader::new(UserAgent::from("cassiopeia/test".to_owned()), RequestHeaders::default(), &RUNNING);
+    let service = SensorThingsService::new(root(server), serde_json::from_str(settings).unwrap());
+    Box::new(SensorThingsCollector::new(service, None, UnreadCheck::Due, cycle_start(), downloader, &RUNNING))
 }
 
 /// A collector of the mock server's root with the settings `settings`, resuming from `cursor`, that
@@ -49,7 +65,14 @@ pub(crate) fn collector(server: &ServerGuard, settings: &str, headers: RequestHe
 pub(crate) fn resuming_collector(server: &ServerGuard, settings: &str, cursor: CursorCycle) -> Box<SensorThingsCollector> {
     let downloader = Downloader::new(UserAgent::from("cassiopeia/test".to_owned()), RequestHeaders::default(), &RUNNING);
     let service = SensorThingsService::new(root(server), serde_json::from_str(settings).unwrap());
-    Box::new(SensorThingsCollector::new(service, Some(cursor), cycle_start(), downloader, &RUNNING))
+    Box::new(SensorThingsCollector::new(
+        service,
+        Some(cursor),
+        UnreadCheck::Done,
+        cycle_start(),
+        downloader,
+        &RUNNING,
+    ))
 }
 
 /// Runs `collector`, returning what it returned and every payload it sent.

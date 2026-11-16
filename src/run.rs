@@ -187,7 +187,7 @@ fn dispatch_sensorthings(command: &SensorThingsSubcommand, cursors: &Path) -> Re
         SensorThingsSubcommand::Readings(args) => {
             let listing = list_server_readings(args)?;
             println!("{}", render_readings(listing.readings()));
-            if let Some(limit) = listing.limit_reached() {
+            for limit in listing.limits_reached() {
                 eprintln!("{}", render_limit_note(limit));
             }
         }

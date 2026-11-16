@@ -57,7 +57,7 @@ mod tests {
         code::{collect_code::CollectCode, diagnostic_code::DiagnosticCode},
         context_field::ContextField,
     };
-    use cassiopeia_sensorthings::{cursor_name::CursorName, entity_id::EntityId, service_root::ServiceRoot};
+    use cassiopeia_sensorthings::{cursor_name::CursorName, entity_id::EntityId, service_root::ServiceRoot, stream_id::StreamId};
     use cassiopeia_sensorthings_cursor::{cursor_update::CursorUpdate, positions::Positions, seen_observations::SeenObservations};
     use chrono::{DateTime, Utc};
     use pretty_assertions::assert_eq;
@@ -74,7 +74,7 @@ mod tests {
         let mut first = CursorUpdate::new(at("2026-11-12T09:00:00Z"), Duration::from_secs(3600));
         for datastream in datastreams {
             let written = SeenObservations::from(BTreeMap::from([(EntityId::Integer(*datastream), at("2026-11-12T08:00:00Z"))]));
-            first.record(EntityId::Integer(*datastream), written);
+            first.record(StreamId::Datastream(EntityId::Integer(*datastream)), written);
         }
         let committed = first.apply(Positions::default());
         let cycle_start = at("2026-11-12T10:00:00Z");
@@ -112,7 +112,7 @@ mod tests {
         assert_eq!(reported[0].code.to_string(), "collect-datastreams-missing");
         assert_eq!(
             reported[0].headline,
-            "In `https://h.example/v1.1`, 4 data streams the cursor 'rivm-air' keeps a position for are no longer listed, the earliest since 2026-11-12T10:00:00Z: 5, 7, 9 and 1 more. The positions are kept, so a data stream listed again resumes where it stopped"
+            "In `https://h.example/v1.1`, 4 data streams the cursor 'rivm-air' keeps a position for are no longer listed, the earliest since 2026-11-12T10:00:00Z: Datastream 5, Datastream 7, Datastream 9 and 1 more. The positions are kept, so a data stream listed again resumes where it stopped"
         );
         assert_eq!(
             reported[0].defining,
@@ -130,7 +130,7 @@ mod tests {
 
         assert_eq!(
             sink.diagnostics()[0].headline,
-            "In `https://h.example/v1.1`, 1 data stream the cursor 'rivm-air' keeps a position for is no longer listed, the earliest since 2026-11-12T10:00:00Z: 5. The positions are kept, so a data stream listed again resumes where it stopped"
+            "In `https://h.example/v1.1`, 1 data stream the cursor 'rivm-air' keeps a position for is no longer listed, the earliest since 2026-11-12T10:00:00Z: Datastream 5. The positions are kept, so a data stream listed again resumes where it stopped"
         );
     }
 }

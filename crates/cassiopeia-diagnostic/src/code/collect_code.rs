@@ -9,9 +9,12 @@ pub enum CollectCode {
     LimitReached,
     /// A range read's range held no reading in its cycle, so the read requested nothing.
     RangeEmpty,
-    /// A server no longer lists data streams an incremental read's cursor keeps a position for, so
-    /// the cycle read nothing of them and kept their positions.
+    /// A server no longer lists data streams, Datastreams or `MultiDatastreams`, an incremental read's
+    /// cursor keeps a position for, so the cycle read nothing of them and kept their positions.
     DatastreamsMissing,
+    /// A server holds `MultiDatastreams` an input reads none of, because its `multiDatastreams`
+    /// setting selects none.
+    MultiDatastreamsUnread,
 }
 
 #[cfg(test)]
@@ -24,5 +27,6 @@ mod tests {
         assert_eq!(CollectCode::LimitReached.to_string(), "limit-reached");
         assert_eq!(CollectCode::RangeEmpty.to_string(), "range-empty");
         assert_eq!(CollectCode::DatastreamsMissing.to_string(), "datastreams-missing");
+        assert_eq!(CollectCode::MultiDatastreamsUnread.to_string(), "multi-datastreams-unread");
     }
 }

@@ -32,6 +32,7 @@ mod schedule_driver;
 mod scheduled_run;
 mod schema_resolution;
 mod stages;
+mod unread_checks;
 
 #[cfg(test)]
 mod test_engine;

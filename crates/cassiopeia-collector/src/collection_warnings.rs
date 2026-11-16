@@ -1,4 +1,9 @@
-use crate::sensorthings::{datastreams_missing::DatastreamsMissing, limit_reached::LimitReached, range_empty::RangeEmpty};
+use crate::sensorthings::{
+    datastreams_missing::DatastreamsMissing,
+    limit_reached::LimitReached,
+    multi_datastreams_unread::MultiDatastreamsUnread,
+    range_empty::RangeEmpty,
+};
 
 /// What collecting a lane's sources met that the run carries on past, for the run to report once
 /// collection has ended.
@@ -11,6 +16,8 @@ pub struct CollectionWarnings {
     /// The incremental reads whose server no longer lists data streams their cursor keeps a
     /// position for.
     missing_datastreams: Vec<DatastreamsMissing>,
+    /// The servers that hold `MultiDatastreams` their input reads none of.
+    unread_multi_datastreams: Vec<MultiDatastreamsUnread>,
 }
 
 impl CollectionWarnings {
@@ -31,6 +38,12 @@ impl CollectionWarnings {
     #[must_use]
     pub fn missing_datastreams(&self) -> &[DatastreamsMissing] {
         &self.missing_datastreams
+    }
+
+    /// The servers that hold `MultiDatastreams` their input reads none of.
+    #[must_use]
+    pub fn unread_multi_datastreams(&self) -> &[MultiDatastreamsUnread] {
+        &self.unread_multi_datastreams
     }
 
     /// Records that a collection limit stopped a read, unless the same limit already stopped a read
@@ -55,6 +68,11 @@ impl CollectionWarnings {
     /// position for.
     pub fn datastreams_missing(&mut self, missing: DatastreamsMissing) {
         self.missing_datastreams.push(missing);
+    }
+
+    /// Records that a server holds `MultiDatastreams` its input reads none of.
+    pub fn multi_datastreams_unread(&mut self, unread: MultiDatastreamsUnread) {
+        self.unread_multi_datastreams.push(unread);
     }
 }
 

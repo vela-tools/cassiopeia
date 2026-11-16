@@ -23,7 +23,7 @@ pub struct LossTally<T> {
 /// What reading a SensorThings snapshot lost or changed, for the run report.
 #[derive(Debug, PartialEq, Eq)]
 pub struct SensorThingsLosses {
-    /// The data streams whose readings are keyed `<name>@<data stream id>`.
+    /// The readings keyed `<name>@<data stream id>` or `<name>@<MultiDatastream id>/<position>`.
     renamed_readings: LossTally<RenamedReading>,
     /// The Things whose Location is no `GeoJSON`, so their records have no `location`.
     unreadable_locations: LossTally<UnreadableLocation>,
@@ -32,6 +32,9 @@ pub struct SensorThingsLosses {
     unreadable_features_of_interest: LossTally<UnreadableFeatureOfInterest>,
     /// The texts of the `phenomenonTime` values that named no instant, whose readings were dropped.
     unreadable_phenomenon_times: LossTally<Box<str>>,
+    /// The Observations of `MultiDatastreams` whose `result` is no array with one value per
+    /// `ObservedProperty`, which gave no readings.
+    unreadable_multi_results: LossTally<UnreadableMultiResult>,
 }
 
 /// A Thing whose Location is no `GeoJSON`, with the encoding it named.
@@ -52,6 +55,28 @@ pub struct UnreadableFeatureOfInterest {
     pub feature: FeatureOfInterestName,
     /// What the `FeatureOfInterest` states about its encoding.
     pub encoding: GeometryEncoding,
+}
+
+/// An Observation of a `MultiDatastream` whose `result` is no array with one value per
+/// `ObservedProperty`, so its values cannot be read by position.
+#[derive(Debug, Clone, PartialEq, Eq, Display)]
+#[display("{observation} of MultiDatastream {multi_datastream}")]
+pub struct UnreadableMultiResult {
+    /// The Observation.
+    pub observation: ObservationName,
+    /// The `MultiDatastream`'s id.
+    pub multi_datastream: EntityId,
+}
+
+/// How a loss names an Observation: by its id, or as one served without an id.
+#[derive(Debug, Clone, PartialEq, Eq, Display)]
+pub enum ObservationName {
+    /// The Observation's id.
+    #[display("Observation {_0}")]
+    Id(EntityId),
+    /// The Observation was served without an `@iot.id`.
+    #[display("an Observation without an id")]
+    WithoutId,
 }
 
 /// How a loss names a `FeatureOfInterest`: by its id, or as one served without an id, which a
@@ -126,12 +151,13 @@ impl Default for SensorThingsLosses {
             unreadable_locations: LossTally::new(NAMED_FIRST),
             unreadable_features_of_interest: LossTally::new(NAMED_FIRST),
             unreadable_phenomenon_times: LossTally::new(NAMED_FIRST),
+            unreadable_multi_results: LossTally::new(NAMED_FIRST),
         }
     }
 }
 
 impl SensorThingsLosses {
-    /// The data streams whose readings are keyed `<name>@<data stream id>`.
+    /// The readings keyed `<name>@<data stream id>` or `<name>@<MultiDatastream id>/<position>`.
     #[must_use]
     pub const fn renamed_readings(&self) -> &LossTally<RenamedReading> {
         &self.renamed_readings
@@ -155,6 +181,12 @@ impl SensorThingsLosses {
         &self.unreadable_phenomenon_times
     }
 
+    /// The Observations of `MultiDatastreams` whose `result` could not be read by position.
+    #[must_use]
+    pub const fn unreadable_multi_results(&self) -> &LossTally<UnreadableMultiResult> {
+        &self.unreadable_multi_results
+    }
+
     /// Counts a renamed reading.
     pub fn rename(&mut self, renamed: RenamedReading) {
         self.renamed_readings.record(renamed);
@@ -174,6 +206,11 @@ impl SensorThingsLosses {
     pub fn unreadable_phenomenon_time(&mut self, text: Box<str>) {
         self.unreadable_phenomenon_times.record(text);
     }
+
+    /// Counts an Observation of a `MultiDatastream` whose `result` could not be read by position.
+    pub fn unreadable_multi_result(&mut self, result: UnreadableMultiResult) {
+        self.unreadable_multi_results.record(result);
+    }
 }
 
 #[cfg(test)]
@@ -182,9 +219,11 @@ mod tests {
         FeatureOfInterestName,
         GeometryEncoding,
         LossTally,
+        ObservationName,
         SensorThingsLosses,
         UnreadableFeatureOfInterest,
         UnreadableLocation,
+        UnreadableMultiResult,
     };
     use cassiopeia_sensorthings::entity_id::EntityId;
     use pretty_assertions::assert_eq;
@@ -207,6 +246,27 @@ mod tests {
         assert_eq!(losses.unreadable_locations().named(), []);
         assert_eq!(losses.unreadable_features_of_interest().total(), 0);
         assert_eq!(losses.unreadable_phenomenon_times().unnamed(), 0);
+        assert_eq!(losses.unreadable_multi_results().total(), 0);
+    }
+
+    #[test]
+    fn an_unreadable_multi_result_names_its_observation_and_multi_datastream_and_only_the_first_is_named() {
+        let mut losses = SensorThingsLosses::default();
+        losses.unreadable_multi_result(UnreadableMultiResult {
+            observation: ObservationName::Id(EntityId::Integer(501)),
+            multi_datastream: EntityId::Integer(4),
+        });
+        losses.unreadable_multi_result(UnreadableMultiResult {
+            observation: ObservationName::WithoutId,
+            multi_datastream: EntityId::Integer(4),
+        });
+
+        assert_eq!(
+            losses.unreadable_multi_results().named().iter().map(ToString::to_string).collect::<Vec<_>>(),
+            ["Observation 501 of MultiDatastream 4"]
+        );
+        assert_eq!(losses.unreadable_multi_results().total(), 2);
+        assert_eq!(ObservationName::WithoutId.to_string(), "an Observation without an id");
     }
 
     #[test]

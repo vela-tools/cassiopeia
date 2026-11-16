@@ -14,7 +14,10 @@ use crate::{
         stage_env::StageEnv,
     },
 };
-use cassiopeia_collector::{downloader::Downloader, sensorthings::cursor_cycle::CursorCycle};
+use cassiopeia_collector::{
+    downloader::Downloader,
+    sensorthings::{cursor_cycle::CursorCycle, unread_check::UnreadCheck},
+};
 use cassiopeia_common::{
     signal::Signal,
     stage::Stage,
@@ -34,6 +37,8 @@ pub(crate) struct CycleLane<'a> {
     pub(crate) router: MappingRouter,
     /// The cursor of an incremental read; `None` for any other lane.
     pub(crate) cursor: Option<CursorCycle>,
+    /// Whether a SensorThings lane checks its server for `MultiDatastreams` it reads none of.
+    pub(crate) unread_check: UnreadCheck,
 }
 
 impl Pipeline {
@@ -71,7 +76,13 @@ impl Pipeline {
         let (shared_tx, shared_rx) = env.channel(Some(ChannelBoundary::between(Stage::Expander, Stage::Resolver)));
         let _ = shared_tx.send(Signal::Meta(run.meta.clone()));
 
-        for CycleLane { input, router, cursor } in lanes {
+        for CycleLane {
+            input,
+            router,
+            cursor,
+            unread_check,
+        } in lanes
+        {
             let ingestor_bank = spawn_ingestor_bank(
                 &input.mapping_binding,
                 self.output.temporal,
@@ -87,7 +98,15 @@ impl Pipeline {
                 input.headers.clone(),
                 self.context.shutdown,
             );
-            let collector = lane_collector(&input.source, cursor, input.format_override, run.start, downloader, self.context.shutdown);
+            let collector = lane_collector(
+                &input.source,
+                cursor,
+                unread_check,
+                input.format_override,
+                run.start,
+                downloader,
+                self.context.shutdown,
+            );
             let collector_rx = spawn_collector_thread(collector, channel_policy, self.context.reporter, Arc::clone(&env.telemetry));
 
             let profiler = create_profiler(

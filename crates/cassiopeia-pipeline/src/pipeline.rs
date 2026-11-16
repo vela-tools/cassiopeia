@@ -5,6 +5,7 @@ use crate::{
     observer::RunObserver,
     pipeline_config::PipelineConfig,
     run_compatibility::check_run_compatibility,
+    unread_checks::UnreadChecks,
 };
 use cassiopeia_common::{context::mode::AtContextMode, file_framing::FileFraming, representation::NgsiLdRepresentation, schema_source::SchemaSource};
 use cassiopeia_manifest::{
@@ -29,6 +30,9 @@ pub struct Pipeline {
     pub(crate) inputs: Vec<InputConfig>,
     /// The cursor stores of the incremental inputs, held for the whole run.
     pub(crate) cursors: CursorStores,
+    /// Whether the run has made its check for `MultiDatastreams` its SensorThings inputs read none
+    /// of, made once per run.
+    pub(crate) unread_checks: UnreadChecks,
     /// Where and how entities are written.
     pub(crate) output: OutputConfig,
     /// The engine knobs: batching, stores, channels, and representations.
@@ -188,6 +192,7 @@ impl Pipeline {
         Ok(Pipeline {
             inputs,
             cursors,
+            unread_checks: UnreadChecks::default(),
             output: OutputConfig {
                 destination,
                 representation,

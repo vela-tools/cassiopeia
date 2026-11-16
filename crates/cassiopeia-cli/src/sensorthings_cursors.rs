@@ -36,7 +36,7 @@ pub struct CursorSummary {
 pub struct CursorPositions {
     /// The service root the positions were read from.
     root: ServiceRoot,
-    /// The positions, by ascending data stream id.
+    /// The positions, Datastreams first, each kind by ascending id.
     positions: Positions,
 }
 
@@ -130,11 +130,15 @@ mod tests {
         sensorthings_cursors::{list_cursors, reset_cursor, reset_target, show_cursor},
         test_cursors::{RIVM, at, commit_cycle, cursor, open},
     };
-    use cassiopeia_sensorthings::{entity_id::EntityId, time_point::TimePoint};
-    use cassiopeia_sensorthings_cursor::reset::{IdText, ResetScope, ResetTarget};
+    use cassiopeia_sensorthings::{entity_id::EntityId, stream_id::StreamId, time_point::TimePoint};
+    use cassiopeia_sensorthings_cursor::{
+        cursor_update::CursorUpdate,
+        reset::{IdText, ResetScope, ResetTarget},
+        seen_observations::SeenObservations,
+    };
     use pretty_assertions::assert_eq;
     use redb::{Database, TableDefinition};
-    use std::{path::Path, time::Duration};
+    use std::{collections::BTreeMap, path::Path, time::Duration};
     use tempfile::TempDir;
 
     /// The other server some stores were read from.
@@ -215,9 +219,9 @@ mod tests {
             shown,
             [
                 "service root: https://api-samenmeten.rivm.nl/v1.0",
-                "data stream  high water            seen  last listed           missing since",
-                "5            2026-11-12T09:30:00Z  1     2026-11-12T11:00:00Z  -",
-                "9            2026-11-12T09:45:00Z  2     2026-11-12T10:00:00Z  2026-11-12T11:00:00Z",
+                "kind        data stream  high water            seen  last listed           missing since",
+                "datastream  5            2026-11-12T09:30:00Z  1     2026-11-12T11:00:00Z  -",
+                "datastream  9            2026-11-12T09:45:00Z  2     2026-11-12T10:00:00Z  2026-11-12T11:00:00Z",
             ]
             .join("\n")
         );
@@ -269,7 +273,7 @@ mod tests {
 
         let refused = reset_cursor(folder.path(), &cursor("rivm-air"), &ResetScope::Datastream(IdText::from("42".to_owned())), None);
 
-        assert_eq!(refusal(refused), "cursor 'rivm-air' holds no position for the data stream '42'");
+        assert_eq!(refusal(refused), "cursor 'rivm-air' holds no position for the Datastream '42'");
         assert_eq!(show_cursor(folder.path(), &cursor("rivm-air")).unwrap().positions(), before.positions());
     }
 
@@ -287,11 +291,14 @@ mod tests {
         )
         .unwrap();
         let after = show_cursor(folder.path(), &cursor("rivm-air")).unwrap();
-        let rewound = after.positions().get(&EntityId::Integer(5)).unwrap();
+        let rewound = after.positions().get(&StreamId::Datastream(EntityId::Integer(5))).unwrap();
 
         assert_eq!(store, folder.path().join("rivm-air.redb"));
         assert_eq!((rewound.high_water(), rewound.seen().is_empty()), (at("08:00"), true));
-        assert_eq!(after.positions().get(&EntityId::Integer(9)), before.positions().get(&EntityId::Integer(9)));
+        assert_eq!(
+            after.positions().get(&StreamId::Datastream(EntityId::Integer(9))),
+            before.positions().get(&StreamId::Datastream(EntityId::Integer(9)))
+        );
     }
 
     #[test]
@@ -337,5 +344,29 @@ mod tests {
             Some("2126-11-12T10:00:00Z".parse().unwrap()),
         );
         assert!(matches!(refused, Err(CliError::ResetTargetAfterNow { .. })), "{refused:?}");
+    }
+
+    #[test]
+    fn a_multi_datastream_is_shown_with_its_kind_and_reset_apart_from_the_datastream_of_its_id() {
+        let folder = TempDir::new().unwrap();
+        let mut update = CursorUpdate::new(at("10:00"), Duration::from_hours(1));
+        let written = |id: i64, time: &str| SeenObservations::from(BTreeMap::from([(EntityId::Integer(id), at(time))]));
+        update.record(StreamId::Datastream(EntityId::Integer(4)), written(40, "09:30"));
+        update.record(StreamId::MultiDatastream(EntityId::Integer(4)), written(41, "09:45"));
+        open(folder.path(), "wind", RIVM).commit(update).unwrap();
+
+        let shown = render_cursor_positions(&show_cursor(folder.path(), &cursor("wind")).unwrap());
+        reset_cursor(folder.path(), &cursor("wind"), &ResetScope::MultiDatastream(IdText::from("4".to_owned())), None).unwrap();
+        let after = show_cursor(folder.path(), &cursor("wind")).unwrap();
+
+        assert_eq!(
+            shown.lines().skip(2).collect::<Vec<_>>(),
+            [
+                "datastream        4            2026-11-12T09:30:00Z  1     2026-11-12T10:00:00Z  -",
+                "multi-datastream  4            2026-11-12T09:45:00Z  1     2026-11-12T10:00:00Z  -",
+            ]
+        );
+        assert_eq!(after.positions().len(), 1);
+        assert!(after.positions().get(&StreamId::Datastream(EntityId::Integer(4))).is_some());
     }
 }

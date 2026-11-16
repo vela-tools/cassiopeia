@@ -21,7 +21,7 @@ pub enum SnapshotError {
     },
 
     /// A line is no JSON object of a kind the snapshot holds.
-    #[error("line {line} of the snapshot is no header, datastream or observation line")]
+    #[error("line {line} of the snapshot is no header, data stream or observation line")]
     Malformed {
         /// The line's number.
         line: LineNumber,
@@ -30,10 +30,10 @@ pub enum SnapshotError {
         source: serde_json::Error,
     },
 
-    /// A datastream line follows an observation line.
-    #[error("line {line} of the snapshot is a datastream line after an observation line, but every datastream line comes first")]
+    /// A data stream line follows an observation line.
+    #[error("line {line} of the snapshot is a data stream line after an observation line, but every data stream line comes first")]
     OrderViolation {
-        /// The datastream line's number.
+        /// The data stream line's number.
         line: LineNumber,
     },
 

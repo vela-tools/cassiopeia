@@ -1,14 +1,22 @@
 use crate::{build_info::default_user_agent, cli::sensorthings::ReadingsArgs, error::Result, shutdown};
 use cassiopeia_cli::sensorthings_readings::{ReadingsListing, list_readings};
 use cassiopeia_collector::downloader::Downloader;
-use cassiopeia_sensorthings::{service::SensorThingsService, settings::sensorthings_settings::SensorThingsSettings};
+use cassiopeia_sensorthings::{
+    service::SensorThingsService,
+    settings::{multi_datastreams::MultiDatastreams, sensorthings_settings::SensorThingsSettings},
+};
 
 /// Runs `sensorthings readings`: lists the readings the server `args` names offers, reading only the
-/// data streams `args` selects, with the run's `User-Agent` and the `--input-header` values on every
-/// request, and every other setting at a run's default.
+/// Datastreams and the `MultiDatastreams` `args` selects, every `MultiDatastream` when it selects
+/// none, with the run's `User-Agent` and the `--input-header` values on every request, and every
+/// other setting at a run's default.
 pub fn list_server_readings(args: &ReadingsArgs) -> Result<ReadingsListing> {
-    // The service owns its root and its filter, while the parsed command line keeps its own.
-    let settings = SensorThingsSettings::builder().datastreams(args.datastreams.clone()).build();
+    // The service owns its root and its filters, while the parsed command line keeps its own.
+    let multi_datastreams = args.multi_datastreams.clone().map_or(MultiDatastreams::Every, MultiDatastreams::Filtered);
+    let settings = SensorThingsSettings::builder()
+        .datastreams(args.datastreams.clone())
+        .multi_datastreams(multi_datastreams)
+        .build();
     let service = SensorThingsService::new(args.root.clone(), settings);
     let downloader = Downloader::new(default_user_agent(), args.headers.request_headers(), shutdown::flag());
     Ok(list_readings(&service, downloader, shutdown::flag())?)
@@ -26,7 +34,7 @@ mod tests {
     };
     use cassiopeia_cli::readings_table::render_readings;
     use clap::Parser;
-    use mockito::ServerGuard;
+    use mockito::{Matcher, Mock, ServerGuard};
     use pretty_assertions::assert_eq;
     use serde_json::{Value, json};
 
@@ -67,6 +75,21 @@ mod tests {
         json!({"value": datastreams}).to_string()
     }
 
+    /// Serves, once, a service root document that lists the collections `names`.
+    fn serve_root(server: &mut ServerGuard, names: &[&str]) -> Mock {
+        let collections: Vec<Value> = names
+            .iter()
+            .map(|name| json!({"name": name, "url": format!("https://h.example/v1.1/{name}")}))
+            .collect();
+        server.mock("GET", "/v1.1").with_body(page(&collections)).expect(1).create()
+    }
+
+    /// The mock of every request for `MultiDatastreams`, which a server whose root lists none is never
+    /// sent.
+    fn untouched_multi_datastreams(server: &mut ServerGuard) -> Mock {
+        server.mock("GET", Matcher::Regex(r"^/v1\.1/MultiDatastreams".to_owned())).expect(0).create()
+    }
+
     #[test]
     fn readings_lists_one_row_per_observed_property() {
         let mut server = mockito::Server::new();
@@ -79,17 +102,21 @@ mod tests {
             ]))
             .expect(1)
             .create();
+        let root = serve_root(&mut server, &["Datastreams"]);
+        let untouched = untouched_multi_datastreams(&mut server);
 
         let listing = list_server_readings(&readings_args(&server, &[])).unwrap();
 
         discovery.assert();
+        root.assert();
+        untouched.assert();
         assert_eq!(
             render_readings(listing.readings()),
-            "reading  unit   unit code  data streams  things with repeats\n\
-             no2      xyzzy  unknown    1             0\n\
-             pm10     ug/m3  GQ         2             0"
+            "reading  unit   unit code  data streams  multi data streams  things with repeats\n\
+             no2      xyzzy  unknown    1             0                   0\n\
+             pm10     ug/m3  GQ         2             0                   0"
         );
-        assert!(listing.limit_reached().is_none());
+        assert_eq!(listing.limits_reached(), &[]);
     }
 
     #[test]
@@ -110,6 +137,7 @@ mod tests {
                 .expect(1)
                 .create(),
         ];
+        serve_root(&mut server, &["Datastreams"]);
 
         let listing = list_server_readings(&readings_args(&server, &["--input-header", "Authorization: Bearer t"])).unwrap();
 
@@ -128,10 +156,59 @@ mod tests {
             .with_body(page(&[]))
             .expect(1)
             .create();
+        serve_root(&mut server, &["Datastreams"]);
 
         let listing = list_server_readings(&readings_args(&server, &["--datastreams", "startswith(name,'ILM_I68-')"])).unwrap();
 
         discovery.assert();
         assert_eq!(listing.readings().as_slice(), []);
+    }
+
+    #[test]
+    fn the_multi_datastreams_option_selects_the_multi_datastreams_read_when_the_root_lists_them() {
+        let mut server = mockito::Server::new();
+        let wind = json!({
+            "@iot.id": 4,
+            "name": "ws-4",
+            "Thing": {"@iot.id": 1, "Locations": []},
+            "ObservedProperties": [{"@iot.id": 11, "name": "windSpeed"}, {"@iot.id": 12, "name": "windDirection"}],
+            "unitOfMeasurements": [{"symbol": "m/s"}, {"symbol": "deg"}],
+            "multiObservationDataTypes": ["OM_Measurement", "OM_Measurement"],
+        });
+        let mocks = [
+            server
+                .mock("GET", METADATA)
+                .with_body(page(&[datastream(1, 1, "pm10", "ug/m3")]))
+                .expect(1)
+                .create(),
+            serve_root(&mut server, &["Datastreams", "MultiDatastreams"]),
+            server
+                .mock(
+                    "GET",
+                    "/v1.1/MultiDatastreams?$filter=startswith(name,%27ws-%27)&$expand=Thing/Locations,ObservedProperties,Sensor&$orderby=id%20asc&$top=1000",
+                )
+                .with_body(page(&[wind]))
+                .expect(1)
+                .create(),
+        ];
+
+        let listing = list_server_readings(&readings_args(&server, &["--multi-datastreams", "startswith(name,'ws-')"])).unwrap();
+
+        mocks.iter().for_each(Mock::assert);
+        assert_eq!(
+            render_readings(listing.readings()).lines().skip(1).collect::<Vec<_>>(),
+            [
+                "pm10           ug/m3  GQ         1             0                   0",
+                "windDirection  deg    DD         0             1                   0",
+                "windSpeed      m/s    MTS        0             1                   0",
+            ]
+        );
+    }
+
+    #[test]
+    fn a_blank_multi_datastreams_option_is_refused_naming_it() {
+        let error = Cli::try_parse_from(["cassiopeia", "sensorthings", "readings", "https://h.example/v1.1", "--multi-datastreams", " "]).unwrap_err();
+
+        assert!(error.to_string().contains("a `multiDatastreams` filter is an OData expression"), "{error}");
     }
 }

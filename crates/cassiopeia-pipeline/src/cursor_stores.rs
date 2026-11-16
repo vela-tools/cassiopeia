@@ -103,7 +103,7 @@ mod tests {
         input_config::{InputConfig, build_input_config},
     };
     use cassiopeia_manifest::input::ManifestInput;
-    use cassiopeia_sensorthings::{cursor_name::CursorName, entity_id::EntityId, service_root::ServiceRoot};
+    use cassiopeia_sensorthings::{cursor_name::CursorName, entity_id::EntityId, service_root::ServiceRoot, stream_id::StreamId};
     use cassiopeia_sensorthings_cursor::{
         cursor_store::CursorStore,
         cursor_store_error::CursorStoreError,
@@ -142,7 +142,10 @@ mod tests {
     /// The update of a cycle that wrote the Observation 1 of data stream 5 at `time`.
     fn update(time: DateTime<Utc>) -> CursorUpdate {
         let mut update = CursorUpdate::new(time, Duration::from_secs(3600));
-        update.record(EntityId::Integer(5), SeenObservations::from(BTreeMap::from([(EntityId::Integer(1), time)])));
+        update.record(
+            StreamId::Datastream(EntityId::Integer(5)),
+            SeenObservations::from(BTreeMap::from([(EntityId::Integer(1), time)])),
+        );
         update
     }
 
@@ -188,7 +191,13 @@ mod tests {
         stores.commit(cycle).unwrap();
 
         let next = stores.start_cycle().unwrap();
-        assert_eq!(next.unclaimed[&name("air")].get(&EntityId::Integer(5)).unwrap().high_water(), time);
+        assert_eq!(
+            next.unclaimed[&name("air")]
+                .get(&StreamId::Datastream(EntityId::Integer(5)))
+                .unwrap()
+                .high_water(),
+            time
+        );
         assert!(next.unclaimed[&name("noise")].is_empty());
     }
 }

@@ -1,9 +1,9 @@
 use crate::{cursor_store_error::CursorStoreError, position::Position, positions::Positions};
-use cassiopeia_sensorthings::{cursor_name::CursorName, entity_id::EntityId};
+use cassiopeia_sensorthings::{cursor_name::CursorName, stream_id::StreamId};
 use redb::{ReadableTable, Table, TableDefinition};
 use std::collections::BTreeMap;
 
-/// The table of a store's positions: each data stream id, encoded as `MessagePack`, maps to its
+/// The table of a store's positions: each data stream, its kind and id encoded as `MessagePack`, maps to its
 /// position, encoded as `MessagePack` with named fields, so a later format can read what an earlier
 /// one wrote.
 pub(crate) const POSITIONS: TableDefinition<&[u8], &[u8]> = TableDefinition::new("positions");
@@ -25,7 +25,7 @@ pub(crate) fn read_positions(table: &impl ReadableTable<&'static [u8], &'static 
         .map_err(CursorStoreError::storage(cursor))?
         .map(|entry| {
             let (key, value) = entry.map_err(CursorStoreError::storage(cursor))?;
-            let datastream: EntityId = rmp_serde::from_slice(key.value()).map_err(unreadable)?;
+            let datastream: StreamId = rmp_serde::from_slice(key.value()).map_err(unreadable)?;
             let position: Position = rmp_serde::from_slice(value.value()).map_err(unreadable)?;
             Ok((datastream, position))
         })
@@ -63,7 +63,7 @@ mod tests {
         positions_table::{POSITIONS, read_positions, write_positions},
         seen_observations::SeenObservations,
     };
-    use cassiopeia_sensorthings::{cursor_name::CursorName, entity_id::EntityId};
+    use cassiopeia_sensorthings::{cursor_name::CursorName, entity_id::EntityId, stream_id::StreamId};
     use chrono::DateTime;
     use pretty_assertions::assert_eq;
     use redb::{Database, ReadableDatabase};
@@ -76,9 +76,12 @@ mod tests {
         let cursor = CursorName::try_from("rivm-air".to_owned()).unwrap();
         let time = DateTime::parse_from_rfc3339("2026-11-12T09:30:00.250Z").unwrap().to_utc();
         let mut update = CursorUpdate::new(time, Duration::from_secs(3600));
-        update.record(EntityId::Integer(5), SeenObservations::from(BTreeMap::from([(EntityId::Integer(70), time)])));
         update.record(
-            EntityId::Text("t-5".into()),
+            StreamId::Datastream(EntityId::Integer(5)),
+            SeenObservations::from(BTreeMap::from([(EntityId::Integer(70), time)])),
+        );
+        update.record(
+            StreamId::MultiDatastream(EntityId::Text("t-5".into())),
             SeenObservations::from(BTreeMap::from([(EntityId::Text("o-1".into()), time)])),
         );
         let positions = update.apply(Positions::default());

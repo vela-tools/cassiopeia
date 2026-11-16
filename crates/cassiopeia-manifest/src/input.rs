@@ -283,7 +283,7 @@ mod tests {
     use cassiopeia_csv_dialect::{dialect_byte::DialectByte, preamble::Preamble};
     use cassiopeia_sensorthings::{
         service_root::ServiceRootError,
-        settings::{datastream_filter::DatastreamFilter, sensorthings_settings::SensorThingsSettings},
+        settings::{sensorthings_settings::SensorThingsSettings, stream_filter::StreamFilter},
     };
     use pretty_assertions::assert_eq;
     use secrecy::SecretString;
@@ -474,7 +474,7 @@ mod tests {
         .unwrap();
 
         let settings = input.sensorthings().as_ref().unwrap().settings();
-        assert_eq!(settings.datastreams().as_ref().map(DatastreamFilter::as_str), Some("endswith(name,'-pm10')"));
+        assert_eq!(settings.datastreams().as_ref().map(StreamFilter::as_str), Some("endswith(name,'-pm10')"));
         assert_eq!(settings.page_size().get(), 10);
     }
 

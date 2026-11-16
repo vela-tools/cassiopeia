@@ -9,7 +9,7 @@ use chrono::{DateTime, Utc};
 const LIST_HEADINGS: [&str; 5] = ["cursor", "service root", "data streams", "oldest high water", "newest high water"];
 
 /// The headings of a cursor's positions, in column order.
-const POSITION_HEADINGS: [&str; 5] = ["data stream", "high water", "seen", "last listed", "missing since"];
+const POSITION_HEADINGS: [&str; 6] = ["kind", "data stream", "high water", "seen", "last listed", "missing since"];
 
 /// What a column shows for an instant a cursor does not hold.
 const UNSET: &str = "-";
@@ -35,14 +35,16 @@ pub fn render_cursor_list(cursors: &[CursorSummary]) -> String {
 }
 
 /// Renders `cursor`: a line naming the service root its positions were read from, then a table of
-/// one row per data stream, by ascending id, with its id as `cursor reset --datastream` takes it, its
+/// one row per data stream, Datastreams first, each kind by ascending id, with its kind, `datastream`
+/// or `multi-datastream`, its id as `cursor reset --datastream` or `--multi-datastream` takes it, its
 /// high-water mark, how many Observations it has seen within the lookback, the start of the last
 /// cycle that listed it, and the start of the first cycle that no longer listed it.
 #[must_use]
 pub fn render_cursor_positions(cursor: &CursorPositions) -> String {
     let rows = cursor.positions().iter().map(|(datastream, position)| {
         [
-            datastream.to_string(),
+            datastream.kind().to_string(),
+            datastream.id().to_string(),
             instant_text(position.high_water()),
             position.seen().len().to_string(),
             instant_text(position.last_listed()),
@@ -64,7 +66,7 @@ mod tests {
         sensorthings_cursors::{list_cursors, show_cursor},
         test_cursors::{RIVM, commit_cycle, cursor},
     };
-    use cassiopeia_sensorthings::{entity_id::EntityId, service_root::ServiceRoot};
+    use cassiopeia_sensorthings::{entity_id::EntityId, service_root::ServiceRoot, stream_id::StreamId};
     use cassiopeia_sensorthings_cursor::{cursor_store::CursorStore, cursor_update::CursorUpdate, seen_observations::SeenObservations};
     use chrono::DateTime;
     use pretty_assertions::assert_eq;
@@ -92,7 +94,7 @@ mod tests {
         let store = CursorStore::open(folder.path(), cursor("a"), root).unwrap();
         let mut update = CursorUpdate::new(time, Duration::from_hours(1));
         update.record(
-            EntityId::Text("t-5".into()),
+            StreamId::Datastream(EntityId::Text("t-5".into())),
             SeenObservations::from(BTreeMap::from([(EntityId::Text("o-1".into()), time)])),
         );
         store.commit(update).unwrap();
@@ -102,7 +104,7 @@ mod tests {
 
         assert_eq!(
             shown.lines().nth(2),
-            Some("t-5          2026-11-12T09:30:00.250Z  1     2026-11-12T09:30:00.250Z  -")
+            Some("datastream  t-5          2026-11-12T09:30:00.250Z  1     2026-11-12T09:30:00.250Z  -")
         );
     }
 
@@ -113,7 +115,7 @@ mod tests {
 
         assert_eq!(
             render_cursor_positions(&show_cursor(folder.path(), &cursor("a")).unwrap()),
-            "service root: https://api-samenmeten.rivm.nl/v1.0\ndata stream  high water  seen  last listed  missing since"
+            "service root: https://api-samenmeten.rivm.nl/v1.0\nkind  data stream  high water  seen  last listed  missing since"
         );
     }
 }

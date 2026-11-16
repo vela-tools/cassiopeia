@@ -1,4 +1,4 @@
-use cassiopeia_sensorthings::{cursor_name::CursorName, entity_id::EntityId, service_root::ServiceRoot};
+use cassiopeia_sensorthings::{cursor_name::CursorName, service_root::ServiceRoot, stream_id::StreamId};
 use cassiopeia_sensorthings_cursor::{cursor_update::CursorUpdate, positions::Positions};
 use chrono::{DateTime, Utc};
 use getset::{CopyGetters, Getters};
@@ -19,9 +19,9 @@ pub struct DatastreamsMissing {
     /// The cursor that keeps the positions.
     #[getset(get = "pub")]
     cursor: CursorName,
-    /// The ids of the first missing data streams, by ascending id: at most three.
+    /// The first missing data streams, Datastreams first, each kind by ascending id: at most three.
     #[getset(get = "pub")]
-    named: Vec<EntityId>,
+    named: Vec<StreamId>,
     /// How many data streams are missing.
     #[getset(get_copy = "pub")]
     count: NonZeroUsize,
@@ -64,7 +64,7 @@ impl DatastreamsMissing {
 #[cfg(test)]
 mod tests {
     use crate::sensorthings::datastreams_missing::DatastreamsMissing;
-    use cassiopeia_sensorthings::{cursor_name::CursorName, entity_id::EntityId, service_root::ServiceRoot};
+    use cassiopeia_sensorthings::{cursor_name::CursorName, entity_id::EntityId, service_root::ServiceRoot, stream_id::StreamId};
     use cassiopeia_sensorthings_cursor::{cursor_update::CursorUpdate, positions::Positions, seen_observations::SeenObservations};
     use chrono::{DateTime, Utc};
     use pretty_assertions::assert_eq;
@@ -82,6 +82,11 @@ mod tests {
         ServiceRoot::try_from(Url::parse("https://h.example/v1.1").unwrap()).unwrap()
     }
 
+    /// The Datastream `id`.
+    fn stream(id: i64) -> StreamId {
+        StreamId::Datastream(EntityId::Integer(id))
+    }
+
     fn cursor() -> CursorName {
         CursorName::try_from("rivm-air".to_owned()).unwrap()
     }
@@ -90,7 +95,7 @@ mod tests {
     fn listing(cycle_start: &str, listed: &[i64]) -> CursorUpdate {
         let mut update = CursorUpdate::new(at(cycle_start), LOOKBACK);
         for datastream in listed {
-            update.record(EntityId::Integer(*datastream), SeenObservations::default());
+            update.record(stream(*datastream), SeenObservations::default());
         }
         update
     }
@@ -101,7 +106,7 @@ mod tests {
         let mut update = CursorUpdate::new(at("09:00"), LOOKBACK);
         for datastream in datastreams {
             let written = SeenObservations::from(BTreeMap::from([(EntityId::Integer(*datastream), at("08:00"))]));
-            update.record(EntityId::Integer(*datastream), written);
+            update.record(stream(*datastream), written);
         }
         update.apply(Positions::default())
     }
@@ -120,7 +125,7 @@ mod tests {
 
         assert_eq!(missing.root(), &root());
         assert_eq!(missing.cursor(), &cursor());
-        assert_eq!(missing.named(), &[EntityId::Integer(1), EntityId::Integer(2), EntityId::Integer(3)]);
+        assert_eq!(missing.named(), &[stream(1), stream(2), stream(3)]);
         assert_eq!(missing.count().get(), 5);
         assert_eq!(missing.since(), at("10:00"));
     }
@@ -131,7 +136,21 @@ mod tests {
 
         let missing = DatastreamsMissing::of(&root(), &cursor(), &missed, &listing("11:00", &[]), at("11:00")).unwrap();
 
-        assert_eq!(missing.named(), &[EntityId::Integer(5), EntityId::Integer(9)]);
+        assert_eq!(missing.named(), &[stream(5), stream(9)]);
         assert_eq!(missing.since(), at("10:00"));
+    }
+
+    #[test]
+    fn missing_multi_datastreams_are_named_after_missing_datastreams() {
+        let mut update = CursorUpdate::new(at("09:00"), LOOKBACK);
+        let written = |id: i64| SeenObservations::from(BTreeMap::from([(EntityId::Integer(id), at("08:00"))]));
+        update.record(StreamId::MultiDatastream(EntityId::Integer(4)), written(40));
+        update.record(stream(4), written(41));
+        let held = update.apply(Positions::default());
+
+        let missing = DatastreamsMissing::of(&root(), &cursor(), &held, &listing("10:00", &[]), at("10:00")).unwrap();
+
+        assert_eq!(missing.named(), &[stream(4), StreamId::MultiDatastream(EntityId::Integer(4))]);
+        assert_eq!(missing.count().get(), 2);
     }
 }

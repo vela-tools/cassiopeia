@@ -1,42 +1,42 @@
-use crate::{datastream_span::ended_before, entity_id::EntityId, read_window::ReadWindow};
+use crate::{datastream_span::ended_before, read_window::ReadWindow, stream_id::StreamId, stream_kind::StreamKind};
 use serde_json::{Map, Value};
 use std::collections::{BTreeSet, btree_set};
 
-/// The data streams a range read requests the Observations of, gathered one served Datastream at a
-/// time from its metadata discovery.
+/// The data streams a range read requests the Observations of, gathered one served data stream at a
+/// time from its metadata discoveries.
 ///
-/// They are requested by ascending id, each once, however the server ordered or repeated them. A
-/// Datastream's `phenomenonTime` covers all its Observations, so one that ends before the window
-/// holds no reading of it and is not requested; one without a readable `phenomenonTime` is. A
-/// Datastream without a readable id cannot be addressed, so it is not requested either, and the
-/// ingestor refuses its line, naming it.
+/// They are requested Datastreams first and then `MultiDatastreams`, each kind by ascending id, each
+/// data stream once, however the server ordered or repeated them. A data stream's `phenomenonTime`
+/// covers all its Observations, so one that ends before the window holds no reading of it and is not
+/// requested; one without a readable `phenomenonTime` is. A data stream without a readable id cannot
+/// be addressed, so it is not requested either, and the ingestor refuses its line, naming it.
 #[derive(Debug, Default)]
 pub struct RangeDatastreams {
-    /// The ids of the data streams requested.
-    ids: BTreeSet<EntityId>,
+    /// The data streams requested.
+    ids: BTreeSet<StreamId>,
 }
 
 impl RangeDatastreams {
-    /// Adds the Datastream `datastream` as the server served it, unless it holds no reading of
-    /// `window`.
-    pub fn add(&mut self, datastream: &Map<String, Value>, window: ReadWindow) {
-        if let Some(id) = EntityId::of(datastream)
+    /// Adds the data stream of kind `kind` the server served as `datastream`, unless it holds no
+    /// reading of `window`.
+    pub fn add(&mut self, kind: StreamKind, datastream: &Map<String, Value>, window: ReadWindow) {
+        if let Some(id) = StreamId::of(kind, datastream)
             && !ended_before(datastream, window.from())
         {
             self.ids.insert(id);
         }
     }
 
-    /// The ids of the data streams to request, ascending.
+    /// The data streams to request, Datastreams first, each kind by ascending id.
     #[must_use]
-    pub fn into_ids(self) -> btree_set::IntoIter<EntityId> {
+    pub fn into_ids(self) -> btree_set::IntoIter<StreamId> {
         self.ids.into_iter()
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use crate::{entity_id::EntityId, range_datastreams::RangeDatastreams, read_window::ReadWindow};
+    use crate::{entity_id::EntityId, range_datastreams::RangeDatastreams, read_window::ReadWindow, stream_id::StreamId, stream_kind::StreamKind};
     use chrono::{DateTime, Utc};
     use pretty_assertions::assert_eq;
     use serde_json::{Map, Value, json};
@@ -58,9 +58,9 @@ mod tests {
     fn requested(served: &[Value]) -> Vec<EntityId> {
         let mut datastreams = RangeDatastreams::default();
         for datastream in served {
-            datastreams.add(&object(datastream.clone()), window());
+            datastreams.add(StreamKind::Datastream, &object(datastream.clone()), window());
         }
-        datastreams.into_ids().collect()
+        datastreams.into_ids().map(|stream| stream.id().clone()).collect()
     }
 
     #[test]
@@ -104,5 +104,28 @@ mod tests {
     #[test]
     fn a_stream_without_a_readable_id_is_not_requested() {
         assert_eq!(requested(&[json!({"name": "no id"}), json!({"@iot.id": 1.5})]), []);
+    }
+
+    #[test]
+    fn datastreams_are_requested_before_multi_datastreams_and_a_shared_id_names_two() {
+        let mut datastreams = RangeDatastreams::default();
+        for (kind, id) in [
+            (StreamKind::MultiDatastream, 4),
+            (StreamKind::Datastream, 9),
+            (StreamKind::MultiDatastream, 2),
+            (StreamKind::Datastream, 4),
+        ] {
+            datastreams.add(kind, &object(json!({"@iot.id": id})), window());
+        }
+
+        assert_eq!(
+            datastreams.into_ids().collect::<Vec<_>>(),
+            [
+                StreamId::Datastream(EntityId::Integer(4)),
+                StreamId::Datastream(EntityId::Integer(9)),
+                StreamId::MultiDatastream(EntityId::Integer(2)),
+                StreamId::MultiDatastream(EntityId::Integer(4)),
+            ]
+        );
     }
 }

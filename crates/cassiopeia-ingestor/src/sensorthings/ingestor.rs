@@ -5,7 +5,8 @@ use crate::{
     sensorthings::{
         error::SensorThingsIngestError,
         ingest_losses::SensorThingsLosses,
-        record_builder::{reading, server_member, thing_record},
+        observation_readings::observation_readings,
+        record_builder::{server_member, thing_record},
         thing_index::{IndexedDatastream, IndexedThing, ThingIndex, ThingIndexBuilder},
     },
 };
@@ -31,8 +32,8 @@ use std::{fs::File, io::BufReader, sync::Arc};
 /// Ingestor for a SensorThings snapshot file.
 ///
 /// The header is read when the ingestor is built, so the read mode is known before any record is,
-/// and a run can refuse a snapshot its output cannot keep. The datastream lines are then indexed,
-/// since every record needs its Thing, unit, `ObservedProperty` and `Sensor`, and the observation
+/// and a run can refuse a snapshot its output cannot keep. The data stream lines are then indexed,
+/// since every record needs its Thing, units, `ObservedProperty` and `Sensor`, and the observation
 /// lines are streamed, never held.
 pub struct SensorThingsIngestor {
     /// The snapshot's header.
@@ -137,24 +138,24 @@ impl Ingestor for SensorThingsIngestor {
     }
 }
 
-/// The record of one Thing of a latest snapshot, with the newest reading of each of its data streams.
+/// The record of one Thing of a latest snapshot, with the newest readings of each of its data
+/// streams: one of a Datastream, and one per element of a `MultiDatastream`.
 fn latest_record(server: Value, thing: IndexedThing, losses: &mut SensorThingsLosses) -> Result<Record, SensorThingsIngestError> {
     let mut readings = Map::new();
     for datastream in thing.datastreams {
-        let IndexedDatastream { key, parts, latest } = datastream;
+        let IndexedDatastream { id, readings: keyed, latest } = datastream;
         let Some((observation, line)) = latest else {
             continue;
         };
-        if let Some(reading) = reading(observation, line, parts, losses)? {
-            readings.insert(key.to_string(), reading);
-        }
+        let keyed = keyed.into_iter().map(|reading| (reading.key.to_string(), reading.parts));
+        readings.extend(observation_readings(observation, line, &id, keyed, losses)?);
     }
     Ok(thing_record(server, thing.members, thing.location, readings))
 }
 
-/// The record of one Observation of a range or incremental snapshot, or `None` when its
-/// `phenomenonTime` names no instant, since a record of one Observation without its reading
-/// describes nothing.
+/// The record of one Observation of a range or incremental snapshot, holding its reading of a
+/// Datastream or its readings of the elements of a `MultiDatastream`, or `None` when it gives no
+/// reading, since a record of one Observation without its readings describes nothing.
 fn observation_record(
     server: &Value,
     index: &ThingIndex,
@@ -171,11 +172,11 @@ fn observation_record(
     };
     // Every record owns its data, so each Observation's record takes its own copy of what it shares
     // with the other readings of its data stream and Thing.
-    let Some(reading) = reading(observation, line, datastream.parts.clone(), losses)? else {
+    let keyed = datastream.readings.iter().map(|reading| (reading.key.to_string(), reading.parts.clone()));
+    let readings = observation_readings(observation, line, &datastream.id, keyed, losses)?;
+    if readings.is_empty() {
         return Ok(None);
-    };
-    let mut readings = Map::new();
-    readings.insert(datastream.key.to_string(), reading);
+    }
     Ok(Some(thing_record(server.clone(), thing.members.clone(), thing.location.clone(), readings)))
 }
 
@@ -184,7 +185,7 @@ fn next_observation(lines: &mut SnapshotReader<BufReader<File>>) -> Result<Optio
     match lines.next().transpose()? {
         None => Ok(None),
         Some(SnapshotLine::Observation(observation)) => Ok(Some((observation, lines.line()))),
-        // The reader refuses a datastream line after an observation line before it yields one.
+        // The reader refuses a data stream line after an observation line before it yields one.
         Some(SnapshotLine::Datastream(_)) => Err(SnapshotError::OrderViolation { line: lines.line() }.into()),
     }
 }
@@ -198,7 +199,7 @@ mod tests {
             error::{SensorThingsIngestError, StaEntity},
             ingest_losses::{FeatureOfInterestName, GeometryEncoding, SensorThingsLosses, UnreadableFeatureOfInterest, UnreadableLocation},
             ingestor::SensorThingsIngestor,
-            reading_keys::RenamedReading,
+            reading_keys::{ReadingSource, RenamedReading},
         },
     };
     use cassiopeia_common::{channel::ChannelSender, format::DataFormat, signal::Signal};
@@ -208,7 +209,7 @@ mod tests {
         payload::{BytesPayload, CollectedPayload, FilePayload, ProfiledPayload},
         record::Record,
     };
-    use cassiopeia_sensorthings::{entity_id::EntityId, read_kind::ReadKind};
+    use cassiopeia_sensorthings::{entity_id::EntityId, read_kind::ReadKind, stream_id::StreamId};
     use mediatype::media_type;
     use pretty_assertions::assert_eq;
     use serde_json::{Map, Value, json};
@@ -390,13 +391,13 @@ mod tests {
         assert_eq!(losses.renamed_readings().total(), 1);
         assert_eq!(
             losses.renamed_readings().named()[0].to_string(),
-            "Thing 12512 reads data stream 9 as `readings['pm10@9']`"
+            "Thing 12512 reads Datastream 9 as `readings['pm10@9']`"
         );
         assert!(matches!(
             &losses.renamed_readings().named()[0],
             RenamedReading {
                 thing: EntityId::Integer(12512),
-                datastream: EntityId::Integer(9),
+                source: ReadingSource::Datastream(EntityId::Integer(9)),
                 ..
             }
         ));
@@ -512,10 +513,10 @@ mod tests {
         assert!(matches!(
             error,
             IngestorError::SensorThings(SensorThingsIngestError::ObservedPropertyMissing {
-                datastream: EntityId::Integer(5)
+                datastream: StreamId::Datastream(EntityId::Integer(5))
             })
         ));
-        assert!(error.to_string().contains("data stream 5"), "{error}");
+        assert!(error.to_string().contains("Datastream 5"), "{error}");
     }
 
     #[test]
@@ -890,7 +891,7 @@ mod tests {
 
         assert!(matches!(
             error,
-            IngestorError::SensorThings(SensorThingsIngestError::UnknownDatastream { line, datastream: EntityId::Integer(7) }) if line.get() == 3
+            IngestorError::SensorThings(SensorThingsIngestError::UnknownDatastream { line, datastream: StreamId::Datastream(EntityId::Integer(7)) }) if line.get() == 3
         ));
     }
 
@@ -936,5 +937,207 @@ mod tests {
             SensorThingsIngestor::from_payload(payload, 100),
             Err(IngestorError::SensorThings(SensorThingsIngestError::RequiresFile))
         ));
+    }
+
+    /// The observation type of a measurement (OGC 18-088 section 8.2.4, Table 12).
+    const MEASUREMENT: &str = "http://www.opengis.net/def/observationType/OGC-OM/2.0/OM_Measurement";
+
+    /// A data stream line of the `MultiDatastream` `id` of `thing`, observing each of `properties`, a
+    /// name with its unit's symbol, expanded with `observations`.
+    fn multi_datastream(id: i64, properties: &[(&str, &str)], thing: &Value, observations: &Value) -> Value {
+        json!({"multiDatastream": {
+            "@iot.id": id,
+            "name": format!("ws-{id}"),
+            "description": "Weather station",
+            "ObservedProperties": properties.iter().enumerate().map(|(index, (name, _))| json!({"@iot.id": 10 + index, "name": name})).collect::<Vec<_>>(),
+            "unitOfMeasurements": properties.iter().map(|(_, symbol)| json!({"symbol": symbol})).collect::<Vec<_>>(),
+            "multiObservationDataTypes": properties.iter().map(|_| MEASUREMENT).collect::<Vec<_>>(),
+            "Thing": thing,
+            "Observations": observations,
+        }})
+    }
+
+    /// An Observation at `time` of a `MultiDatastream` with the result array `result`.
+    fn multi_observation(id: i64, time: &str, result: &Value) -> Value {
+        json!({"@iot.id": id, "phenomenonTime": time, "result": result})
+    }
+
+    /// The observation line of `observation`, an Observation of the `MultiDatastream` `id`.
+    fn multi_observation_line(observation: &Value, id: i64) -> Value {
+        json!({"observation": observation, "multiDatastream": id})
+    }
+
+    /// The wind `MultiDatastream` 4: wind speed in `m/s` and wind direction in degrees.
+    const WIND: [(&str, &str); 2] = [("windSpeed", "m/s"), ("windDirection", "deg")];
+
+    #[test]
+    fn a_latest_snapshot_reads_each_element_of_a_multi_datastream_beside_the_datastreams() {
+        let text = snapshot(
+            "latest",
+            &[
+                datastream(json!(1), "pm10", rivm_thing(), json!([observation(70, "2026-11-12T09:00:00Z", 18.2)])),
+                multi_datastream(
+                    4,
+                    &WIND,
+                    &rivm_thing(),
+                    &json!([multi_observation(501, "2026-11-12T09:50:00Z", &json!([4.2, 270]))]),
+                ),
+            ],
+        );
+
+        let (records, losses) = read(&text);
+
+        assert_eq!(records.len(), 1);
+        let readings = &records[0]["readings"];
+        assert_eq!(readings["pm10"]["result"], json!(18.2));
+        assert_eq!(readings["windSpeed"]["result"], json!(4.2));
+        assert_eq!(readings["windSpeed"]["unit"]["symbol"], json!("m/s"));
+        assert_eq!(readings["windDirection"]["result"], json!(270));
+        assert_eq!(readings["windDirection"]["unit"]["symbol"], json!("deg"));
+        assert_eq!(
+            readings["windSpeed"]["multiDatastream"],
+            json!({"id": 4, "name": "ws-4", "description": "Weather station", "observationType": MEASUREMENT, "position": 1})
+        );
+        assert_eq!(readings["windDirection"]["observedProperty"], json!({"id": 11, "name": "windDirection"}));
+        assert_eq!(readings["windDirection"]["id"], json!(501));
+        assert!(readings["windSpeed"].get("datastream").is_none());
+        assert_eq!(losses, SensorThingsLosses::default());
+    }
+
+    #[test]
+    fn a_range_snapshot_gives_one_record_per_multi_datastream_observation_with_every_element() {
+        let text = snapshot(
+            "range",
+            &[
+                multi_datastream(4, &WIND, &rivm_thing(), &Value::Null),
+                multi_observation_line(&multi_observation(501, "2026-11-12T08:00:00Z", &json!([4.2, 270])), 4),
+                multi_observation_line(&multi_observation(502, "2026-11-12T09:00:00Z", &json!([5.1, 280])), 4),
+                multi_observation_line(&multi_observation(503, "2026-11-12T10:00:00Z", &json!([3.9, 260])), 4),
+            ],
+        );
+
+        let (records, _) = read(&text);
+
+        let shown: Vec<(Value, Value, Value)> = records
+            .iter()
+            .map(|record| {
+                let readings = &record["readings"];
+                (
+                    readings["windSpeed"]["id"].clone(),
+                    readings["windSpeed"]["result"].clone(),
+                    readings["windDirection"]["result"].clone(),
+                )
+            })
+            .collect();
+        assert_eq!(
+            shown,
+            [
+                (json!(501), json!(4.2), json!(270)),
+                (json!(502), json!(5.1), json!(280)),
+                (json!(503), json!(3.9), json!(260))
+            ]
+        );
+    }
+
+    #[test]
+    fn a_name_a_datastream_and_an_element_share_is_kept_by_the_datastream() {
+        let text = snapshot(
+            "latest",
+            &[
+                multi_datastream(
+                    4,
+                    &[("temperature", "Cel"), ("humidity", "%")],
+                    &rivm_thing(),
+                    &json!([multi_observation(501, "2026-11-12T09:50:00Z", &json!([11.5, 80]))]),
+                ),
+                datastream(json!(9), "temperature", rivm_thing(), json!([observation(90, "2026-11-12T09:55:00Z", 12.0)])),
+            ],
+        );
+
+        let (records, losses) = read(&text);
+
+        let readings = records[0]["readings"].as_object().unwrap();
+        assert_eq!(readings.keys().collect::<Vec<_>>(), ["temperature@4/1", "humidity", "temperature"]);
+        assert_eq!(readings["temperature"]["result"], json!(12.0));
+        assert_eq!(readings["temperature@4/1"]["result"], json!(11.5));
+        assert_eq!(losses.renamed_readings().total(), 1);
+        assert_eq!(
+            losses.renamed_readings().named()[0].to_string(),
+            "Thing 12512 reads element 1 of MultiDatastream 4 as `readings['temperature@4/1']`"
+        );
+    }
+
+    #[test]
+    fn a_result_too_short_gives_no_readings_and_is_counted() {
+        let text = snapshot(
+            "range",
+            &[
+                multi_datastream(4, &WIND, &rivm_thing(), &Value::Null),
+                multi_observation_line(&multi_observation(501, "2026-11-12T08:00:00Z", &json!([4.2])), 4),
+                multi_observation_line(&multi_observation(502, "2026-11-12T09:00:00Z", &json!(4.2)), 4),
+            ],
+        );
+
+        let (records, losses) = read(&text);
+
+        assert_eq!(records, Vec::<Value>::new());
+        assert_eq!(losses.unreadable_multi_results().total(), 2);
+        assert_eq!(losses.unreadable_multi_results().named()[0].to_string(), "Observation 501 of MultiDatastream 4");
+    }
+
+    #[test]
+    fn a_null_element_gives_no_reading_of_it() {
+        let text = snapshot(
+            "range",
+            &[
+                multi_datastream(4, &WIND, &rivm_thing(), &Value::Null),
+                multi_observation_line(&multi_observation(501, "2026-11-12T08:00:00Z", &json!([null, 270])), 4),
+            ],
+        );
+
+        let (records, losses) = read(&text);
+
+        assert_eq!(records[0]["readings"].as_object().unwrap().keys().collect::<Vec<_>>(), ["windDirection"]);
+        assert_eq!(losses, SensorThingsLosses::default());
+    }
+
+    #[test]
+    fn mismatched_units_fail_the_source_naming_the_multi_datastream() {
+        let mut line = multi_datastream(4, &WIND, &rivm_thing(), &Value::Null);
+        line["multiDatastream"]["unitOfMeasurements"] = json!([{"symbol": "m/s"}, {"symbol": "deg"}, {"symbol": "K"}]);
+
+        let error = read_batches(&snapshot("range", &[line]), 100).unwrap_err();
+
+        assert!(
+            matches!(
+                &error,
+                IngestorError::SensorThings(SensorThingsIngestError::ElementCountsDiffer { multi_datastream: EntityId::Integer(4), line, .. }) if line.get() == 2
+            ),
+            "{error:?}"
+        );
+        assert!(
+            error
+                .to_string()
+                .contains("MultiDatastream 4 with 2 ObservedProperties, 3 `unitOfMeasurements`"),
+            "{error}"
+        );
+    }
+
+    #[test]
+    fn a_datastream_and_a_multi_datastream_that_share_an_id_are_two_data_streams() {
+        let text = snapshot(
+            "range",
+            &[
+                datastream(json!(4), "pm10", rivm_thing(), Value::Null),
+                multi_datastream(4, &WIND, &rivm_thing(), &Value::Null),
+                json!({"observation": observation(1, "2026-11-12T08:00:00Z", 18.2), "datastream": 4}),
+                multi_observation_line(&multi_observation(2, "2026-11-12T08:00:00Z", &json!([4.2, 270])), 4),
+            ],
+        );
+
+        let (records, _) = read(&text);
+
+        let keys: Vec<Vec<&String>> = records.iter().map(|record| record["readings"].as_object().unwrap().keys().collect()).collect();
+        assert_eq!(keys, [vec!["pm10"], vec!["windSpeed", "windDirection"]]);
     }
 }

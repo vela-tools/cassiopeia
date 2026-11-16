@@ -24,7 +24,7 @@ pub struct SnapshotReader<R> {
 /// The part of a snapshot a reader is in.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Section {
-    /// Between the header and the first observation line, where datastream lines belong.
+    /// Between the header and the first observation line, where data stream lines belong.
     Datastreams,
     /// Past the first observation line, where only observation lines belong.
     Observations,
@@ -110,6 +110,8 @@ mod tests {
             reader::SnapshotReader,
             writer::SnapshotWriter,
         },
+        stream_id::StreamId,
+        stream_kind::StreamKind,
     };
     use chrono::{TimeZone, Utc};
     use pretty_assertions::assert_eq;
@@ -139,16 +141,24 @@ mod tests {
             ReadKind::Range,
             Utc.with_ymd_and_hms(2026, 11, 12, 10, 0, 0).unwrap(),
         );
-        let datastreams = [object(json!({"@iot.id": 5, "name": "pm10"})), object(json!({"@iot.id": 9, "name": "no2"}))];
+        let datastreams = [
+            DatastreamLine::new(StreamKind::Datastream, object(json!({"@iot.id": 5, "name": "pm10"}))),
+            DatastreamLine::new(StreamKind::Datastream, object(json!({"@iot.id": 9, "name": "no2"}))),
+            DatastreamLine::new(StreamKind::MultiDatastream, object(json!({"@iot.id": 5, "name": "ws-7"}))),
+        ];
         let observations = [
-            (object(json!({"@iot.id": 1, "result": 1.5})), EntityId::Integer(5)),
-            (object(json!({"@iot.id": 2, "result": 2.5})), EntityId::Integer(5)),
-            (object(json!({"@iot.id": 3, "result": 3.5})), EntityId::Integer(9)),
+            (object(json!({"@iot.id": 1, "result": 1.5})), StreamId::Datastream(EntityId::Integer(5))),
+            (object(json!({"@iot.id": 2, "result": 2.5})), StreamId::Datastream(EntityId::Integer(5))),
+            (object(json!({"@iot.id": 3, "result": 3.5})), StreamId::Datastream(EntityId::Integer(9))),
+            (
+                object(json!({"@iot.id": 4, "result": [4.2, 270]})),
+                StreamId::MultiDatastream(EntityId::Integer(5)),
+            ),
         ];
 
         let mut writer = SnapshotWriter::start(Vec::new(), &header).unwrap();
         for datastream in &datastreams {
-            writer.datastream(&DatastreamLine::new(datastream.clone())).unwrap();
+            writer.datastream(datastream).unwrap();
         }
         let mut writer = writer.into_observations();
         for (observation, datastream) in &observations {
@@ -158,7 +168,7 @@ mod tests {
 
         let expected: Vec<SnapshotLine> = datastreams
             .into_iter()
-            .map(|datastream| SnapshotLine::Datastream(DatastreamLine::new(datastream)))
+            .map(SnapshotLine::Datastream)
             .chain(
                 observations
                     .into_iter()
@@ -179,6 +189,7 @@ mod tests {
     #[test]
     fn a_malformed_snapshot_is_refused() {
         let datastream = r#"{"datastream":{"@iot.id":5}}"#;
+        let multi = r#"{"multiDatastream":{"@iot.id":4}}"#;
         let observation = r#"{"observation":{"@iot.id":1},"datastream":5}"#;
 
         assert!(matches!(read_all(""), Err(SnapshotError::MissingHeader)));
@@ -190,6 +201,10 @@ mod tests {
         assert!(matches!(
             read_all(&format!("{HEADER}\n{datastream}\n{observation}\n{observation}\n{datastream}\n")),
             Err(SnapshotError::OrderViolation { line }) if line.get() == 5
+        ));
+        assert!(matches!(
+            read_all(&format!("{HEADER}\n{datastream}\n{observation}\n{multi}\n")),
+            Err(SnapshotError::OrderViolation { line }) if line.get() == 4
         ));
         assert!(matches!(
             read_all(&format!("{HEADER}\n{{\"thing\":{{}}}}\n")),

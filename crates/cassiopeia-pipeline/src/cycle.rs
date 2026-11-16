@@ -97,12 +97,14 @@ impl Pipeline {
         let memory_sampler = MemorySampler::start(Arc::clone(&telemetry));
 
         let mut cursors = self.cursors.start_cycle()?;
+        let unread_check = self.unread_checks.claim();
         let lanes = loaded
             .into_iter()
             .map(|(input, router)| CycleLane {
                 input,
                 router,
                 cursor: cursors.claim(&input.source),
+                unread_check,
             })
             .collect();
         let resolved_count = self.run_phase1(lanes, &template_resolver, &fragment_resolver, run, &controller, Arc::clone(&telemetry))?;

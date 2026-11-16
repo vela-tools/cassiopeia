@@ -3,12 +3,12 @@ use cassiopeia_collector::sensorthings::limit_reached::LimitReached;
 use cassiopeia_sensorthings::offered_readings::offered_reading::OfferedReading;
 
 /// The number of columns of the readings table.
-const COLUMNS: usize = 5;
+const COLUMNS: usize = 6;
 
 /// The headings of the readings table, in column order.
-const HEADINGS: [&str; COLUMNS] = ["reading", "unit", "unit code", "data streams", "things with repeats"];
+const HEADINGS: [&str; COLUMNS] = ["reading", "unit", "unit code", "data streams", "multi data streams", "things with repeats"];
 
-/// What the unit columns show for a reading whose data streams have units without text.
+/// What the unit columns show for a reading whose units have no text.
 const NO_UNIT: &str = "none";
 
 /// Renders `readings` as a table: a heading row, then one row per reading in the order given, with
@@ -21,12 +21,12 @@ pub fn render_readings(readings: &[OfferedReading]) -> String {
     render_table(HEADINGS, readings.iter().map(cells))
 }
 
-/// The note that `limit` stopped the read before it read every data stream, so the listing covers
+/// The note that `limit` stopped a discovery before it read every data stream, so the listing covers
 /// only the data streams read before it.
 #[must_use]
 pub fn render_limit_note(limit: &LimitReached) -> String {
     format!(
-        "{} stopped the read of `{}` before it read every data stream, so the listing covers only the data streams read before it; {}. Select fewer data streams with `--datastreams`.",
+        "{} stopped the read of `{}` before it read every data stream, so the listing covers only the data streams read before it; {}. Select fewer data streams with `--datastreams` or `--multi-datastreams`.",
         limit.limit(),
         limit.root(),
         limit.unread()
@@ -43,6 +43,7 @@ fn cells(reading: &OfferedReading) -> [String; COLUMNS] {
         listed(&reading.units().iter().map(ToString::to_string).collect::<Vec<_>>()),
         listed(&codes),
         reading.datastreams().to_string(),
+        reading.multi_datastreams().to_string(),
         reading.things_with_repeats().to_string(),
     ]
 }
@@ -67,12 +68,16 @@ mod tests {
     use std::collections::BTreeSet;
     use url::Url;
 
-    fn reading(name: &str, units: &[&str], codes: &[UnitResolution], datastreams: usize, things_with_repeats: usize) -> OfferedReading {
+    /// A reading `name` with `units` resolved to `codes`, held by data streams counted as Datastreams,
+    /// `MultiDatastreams` and Things with repeats.
+    fn reading(name: &str, units: &[&str], codes: &[UnitResolution], counts: (usize, usize, usize)) -> OfferedReading {
+        let (datastreams, multi_datastreams, things_with_repeats) = counts;
         OfferedReading::builder()
             .name(ObservedPropertyName::from(Box::<str>::from(name)))
             .units(units.iter().map(|&unit| Box::from(unit)).collect())
             .codes(codes.iter().copied().collect::<BTreeSet<_>>())
             .datastreams(datastreams)
+            .multi_datastreams(multi_datastreams)
             .things_with_repeats(things_with_repeats)
             .build()
     }
@@ -80,15 +85,15 @@ mod tests {
     #[test]
     fn every_column_is_as_wide_as_its_widest_cell() {
         let readings = [
-            reading("no2", &["xyzzy"], &[UnitResolution::Unknown], 1, 0),
-            reading("pm10_kal", &["ug/m3"], &[UnitResolution::Code(UnitCode::Gq)], 398, 12),
+            reading("no2", &["xyzzy"], &[UnitResolution::Unknown], (1, 0, 0)),
+            reading("pm10_kal", &["ug/m3"], &[UnitResolution::Code(UnitCode::Gq)], (398, 2, 12)),
         ];
 
         assert_eq!(
             render_readings(&readings),
-            "reading   unit   unit code  data streams  things with repeats\n\
-             no2       xyzzy  unknown    1             0\n\
-             pm10_kal  ug/m3  GQ         398           12"
+            "reading   unit   unit code  data streams  multi data streams  things with repeats\n\
+             no2       xyzzy  unknown    1             0                   0\n\
+             pm10_kal  ug/m3  GQ         398           2                   12"
         );
     }
 
@@ -99,21 +104,27 @@ mod tests {
             UnitResolution::Code(UnitCode::Kel),
             UnitResolution::Code(UnitCode::Cel),
         ];
-        let rendered = render_readings(&[reading("temperature", &["K", "\u{b0}C", "x"], &codes, 3, 0)]);
+        let rendered = render_readings(&[reading("temperature", &["K", "\u{b0}C", "x"], &codes, (3, 0, 0))]);
 
-        assert_eq!(rendered.lines().nth(1), Some("temperature  K, x, \u{b0}C  CEL, KEL, unknown  3             0"));
+        assert_eq!(
+            rendered.lines().nth(1),
+            Some("temperature  K, x, \u{b0}C  CEL, KEL, unknown  3             0                   0")
+        );
     }
 
     #[test]
     fn a_reading_without_unit_text_shows_none() {
-        let rendered = render_readings(&[reading("status", &[], &[], 2, 1)]);
+        let rendered = render_readings(&[reading("status", &[], &[], (2, 0, 1))]);
 
-        assert_eq!(rendered.lines().nth(1), Some("status   none  none       2             1"));
+        assert_eq!(rendered.lines().nth(1), Some("status   none  none       2             0                   1"));
     }
 
     #[test]
     fn a_server_without_readings_lists_the_headings_alone() {
-        assert_eq!(render_readings(&[]), "reading  unit  unit code  data streams  things with repeats");
+        assert_eq!(
+            render_readings(&[]),
+            "reading  unit  unit code  data streams  multi data streams  things with repeats"
+        );
     }
 
     #[test]
@@ -124,7 +135,7 @@ mod tests {
 
         assert_eq!(
             render_limit_note(&limit),
-            "`limits.pages: 1000` stopped the read of `https://h.example/v1.1` before it read every data stream, so the listing covers only the data streams read before it; the next link `https://h.example/v1.1/Datastreams?$skip=1000` was not followed. Select fewer data streams with `--datastreams`."
+            "`limits.pages: 1000` stopped the read of `https://h.example/v1.1` before it read every data stream, so the listing covers only the data streams read before it; the next link `https://h.example/v1.1/Datastreams?$skip=1000` was not followed. Select fewer data streams with `--datastreams` or `--multi-datastreams`."
         );
     }
 }

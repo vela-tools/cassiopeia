@@ -6,7 +6,8 @@ use crate::{
         page_reader::PageReader,
         range_empty::RangeEmpty,
         snapshot_failure::unwritable,
-        traversal::{TraversalEnd, traverse},
+        stream_discovery::discover_streams,
+        traversal::TraversalEnd,
     },
 };
 use cassiopeia_common::cycle_start::CycleStart;
@@ -18,16 +19,17 @@ use cassiopeia_sensorthings::{
     snapshot::{line::DatastreamLine, writer::SnapshotWriter},
 };
 use cassiopeia_sensorthings_cursor::seen_observations::SeenObservations;
-use std::{io::Write, ops::ControlFlow, path::Path};
+use std::{io::Write, path::Path};
 
 /// Reads every reading of `range` in the cycle that started at `cycle_start` from the data streams
 /// `service` selects into `snapshot`, after its header, and returns what the read met that the cycle
 /// carries on past.
 ///
 /// When the range holds no reading this cycle, nothing is requested and the snapshot is its header
-/// alone. Otherwise the metadata discovery comes first, and every Datastream it serves is written as
-/// it was served. Then each data stream that may hold a reading of the window is read on its own, by
-/// ascending id, oldest reading first, and each Observation is written as it was served, with its
+/// alone. Otherwise the metadata discoveries come first, of the Datastreams and then of the
+/// `MultiDatastreams` the settings select, and every data stream they serve is written as it was
+/// served. Then each data stream that may hold a reading of the window is read on its own,
+/// Datastreams first, each kind by ascending id, oldest reading first, and each Observation is written as it was served, with its
 /// `FeatureOfInterest` when the settings request features of interest. A page limit stops one data
 /// stream's read and the read goes on with the next; the observation limit stops the whole read.
 ///
@@ -55,18 +57,14 @@ pub(crate) fn read_range<W: Write>(
     };
     let settings = service.settings();
     let mut datastreams = RangeDatastreams::default();
-    let discovery = traverse(
-        reader,
-        metadata_discovery_request(service.root(), settings),
-        settings.limits().pages(),
-        |datastream| {
-            datastreams.add(&datastream, window);
-            snapshot.datastream(&DatastreamLine::new(datastream)).map_err(unwritable(path))?;
-            Ok::<_, CollectorError>(ControlFlow::Continue(()))
-        },
-    )?;
-    if let TraversalEnd::LimitReached(limit) = discovery {
-        warnings.limit_reached(limit);
+    let discoveries = discover_streams(reader, service, metadata_discovery_request, |kind, served| {
+        datastreams.add(kind, &served, window);
+        snapshot.datastream(&DatastreamLine::new(kind, served)).map_err(unwritable(path))
+    })?;
+    for (_, end) in discoveries {
+        if let TraversalEnd::LimitReached(limit) = end {
+            warnings.limit_reached(limit);
+        }
     }
     let mut sink = ObservationSink::new(snapshot.into_observations(), settings.limits().observations(), path);
     // A range read keeps nothing between cycles, so no Observation is seen before it is read.
@@ -474,5 +472,108 @@ mod tests {
         let discovered: Vec<Value> = lines[1..4].iter().map(|line| line["datastream"]["@iot.id"].clone()).collect();
         assert_eq!(discovered, [json!(9), json!(5), json!(7)]);
         assert_eq!(observation_lines(&lines), [(json!(51), json!(5)), (json!(71), json!(7)), (json!(91), json!(9))]);
+    }
+
+    /// The path and query of the metadata discovery of every `MultiDatastream`.
+    const MULTI_METADATA: &str = "/v1.1/MultiDatastreams?$expand=Thing/Locations,ObservedProperties,Sensor&$orderby=id%20asc&$top=1000";
+
+    /// The path and query of the observations request of the `MultiDatastream` `id` between
+    /// `bounds`.
+    fn multi_observations_path(id: u64, bounds: (&str, &str)) -> String {
+        observations_path(id, bounds).replacen("/v1.1/Datastreams(", "/v1.1/MultiDatastreams(", 1)
+    }
+
+    /// Served `MultiDatastream` Observations `ids`, each with a two-value result.
+    fn multi_observations(ids: &[u64]) -> Vec<Value> {
+        ids.iter()
+            .map(|id| json!({"@iot.id": id, "phenomenonTime": format!("2026-11-12T{:02}:00:00Z", id % 10), "result": [id, 270]}))
+            .collect()
+    }
+
+    /// Each observation line of a snapshot as the id of its Observation and the member that names
+    /// its data stream, in file order.
+    fn named_streams(lines: &[Value]) -> Vec<(Value, Value)> {
+        lines
+            .iter()
+            .filter_map(|line| line.as_object())
+            .filter(|line| line.contains_key("observation"))
+            .map(|line| {
+                let stream: serde_json::Map<String, Value> = line
+                    .iter()
+                    .filter(|(key, _)| *key != "observation")
+                    .map(|(key, value)| (key.clone(), value.clone()))
+                    .collect();
+                (line["observation"]["@iot.id"].clone(), Value::Object(stream))
+            })
+            .collect()
+    }
+
+    #[test]
+    fn multi_datastreams_are_read_after_datastreams_each_kind_by_ascending_id() {
+        let mut server = mockito::Server::new();
+        let multi: Vec<Value> = [4, 2].iter().map(|id| json!({"@iot.id": id, "name": format!("ws-{id}")})).collect();
+        let mocks = [
+            discovery(&mut server, &[5]),
+            serve(&mut server, MULTI_METADATA, page(&multi, None)),
+            serve(&mut server, &observations_path(5, LAST_DAY), page(&observations(&[51]), None)),
+            serve(&mut server, &multi_observations_path(2, LAST_DAY), page(&multi_observations(&[21]), None)),
+            serve(
+                &mut server,
+                &multi_observations_path(4, LAST_DAY),
+                page(&multi_observations(&[41, 42, 43]), None),
+            ),
+        ];
+
+        let (result, payloads) = collect(collector(
+            &server,
+            &range_read(r#"{"last": "24h"}"#, r#", "multiDatastreams": true"#),
+            RequestHeaders::default(),
+            &RUNNING,
+        ));
+
+        result.unwrap();
+        mocks.iter().for_each(Mock::assert);
+        let lines = snapshot_lines(payloads);
+        assert_eq!(lines[2], json!({"multiDatastream": {"@iot.id": 4, "name": "ws-4"}}));
+        assert_eq!(
+            named_streams(&lines),
+            [
+                (json!(51), json!({"datastream": 5})),
+                (json!(21), json!({"multiDatastream": 2})),
+                (json!(41), json!({"multiDatastream": 4})),
+                (json!(42), json!({"multiDatastream": 4})),
+                (json!(43), json!({"multiDatastream": 4})),
+            ]
+        );
+    }
+
+    #[test]
+    fn one_observation_limit_counts_the_observations_of_both_kinds() {
+        let mut server = mockito::Server::new();
+        let mocks = [
+            discovery(&mut server, &[1]),
+            serve(&mut server, MULTI_METADATA, page(&[json!({"@iot.id": 4})], None)),
+            serve(&mut server, &observations_path(1, LAST_DAY), page(&observations(&[1, 2]), None)),
+            serve(&mut server, &multi_observations_path(4, LAST_DAY), page(&multi_observations(&[3, 4]), None)),
+        ];
+
+        let (result, payloads) = collect(collector(
+            &server,
+            &range_read(r#"{"last": "24h"}"#, r#", "multiDatastreams": true, "limits": {"observations": 3}"#),
+            RequestHeaders::default(),
+            &RUNNING,
+        ));
+
+        mocks.iter().for_each(Mock::assert);
+        assert_eq!(
+            result.unwrap().limits_reached(),
+            [LimitReached::new(
+                root(&server),
+                CollectLimit::Observations(ObservationLimit::try_from(3).unwrap()),
+                Url::parse(&format!("{}{}", server.url(), multi_observations_path(4, LAST_DAY))).unwrap(),
+            )]
+        );
+        let written: Vec<Value> = named_streams(&snapshot_lines(payloads)).into_iter().map(|(id, _)| id).collect();
+        assert_eq!(written, [json!(1), json!(2), json!(3)]);
     }
 }
