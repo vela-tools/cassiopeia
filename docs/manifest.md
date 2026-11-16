@@ -268,7 +268,7 @@ sensorthings: {
 },
 ~~~
 
-A range or incremental read then adds `$expand=FeatureOfInterest` to each data stream's Observations request, and a latest read adds `;$expand=FeatureOfInterest` inside the newest Observation's expansion. Each reading carries a `featureOfInterest` with the FeatureOfInterest's `id`, `name`, `description` and `properties`, and the GeoJSON geometry of its `feature`. A FeatureOfInterest that is not GeoJSON gives no `feature`, and one `ingest-features-of-interest-unreadable` warning per source names the first one and counts the readings. A mapping places each reading where it was taken, and series output then writes one `location` instance per reading:
+A range or incremental read then expands each Observation's FeatureOfInterest in each data stream's Observations request, selecting the members a reading reads from a version 1.1 server (see [Features of interest](source-formats.md#features-of-interest)), and a latest read adds `;$expand=FeatureOfInterest` inside the newest Observation's expansion. Each reading carries a `featureOfInterest` with the FeatureOfInterest's `id`, `name`, `description` and `properties`, and the GeoJSON geometry of its `feature`. A FeatureOfInterest that is not GeoJSON gives no `feature`, and one `ingest-features-of-interest-unreadable` warning per source names the first one and counts the readings. A mapping places each reading where it was taken, and series output then writes one `location` instance per reading:
 
 ~~~json5
 location: {

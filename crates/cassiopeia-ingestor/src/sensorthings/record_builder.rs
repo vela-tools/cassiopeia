@@ -9,15 +9,13 @@ use crate::sensorthings::{
 use cassiopeia_ir::record::Record;
 use cassiopeia_sensorthings::{
     entity_id::{EntityId, ID_MEMBER},
+    observation_members::{CARRIED_OBSERVATION_MEMBERS, RESULT_MEMBER},
     phenomenon_time::{PHENOMENON_TIME_MEMBER, PhenomenonTime},
     service_root::ServiceRoot,
     snapshot::line_number::LineNumber,
     stream_kind::StreamKind,
 };
 use serde_json::{Map, Value};
-
-/// The Observation members a reading carries as served, besides its id, result and times.
-const OBSERVATION_MEMBERS: [&str; 4] = ["resultTime", "validTime", "resultQuality", "parameters"];
 
 /// What a reading carries of the data stream it belongs to.
 #[derive(Clone)]
@@ -138,11 +136,11 @@ impl ObservationParts {
         };
 
         observation.remove(ID_MEMBER);
-        let result = observation.remove("result").and_then(present);
+        let result = observation.remove(RESULT_MEMBER).and_then(present);
         let mut shared = Map::new();
         shared.insert("time".to_owned(), Value::from(time.instant_text()));
         shared.insert(PHENOMENON_TIME_MEMBER.to_owned(), Value::String(text));
-        for member in OBSERVATION_MEMBERS {
+        for member in CARRIED_OBSERVATION_MEMBERS {
             move_member(&mut shared, member, &mut observation, member);
         }
         if let Some(feature) = feature_of_interest(&mut observation, line, losses)? {

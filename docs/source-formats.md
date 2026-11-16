@@ -426,10 +426,10 @@ Every attempt at one scheduled run starts from the same instant, so a retried at
 **The requests.** The read first sends the request [Listing a server's readings](#listing-a-servers-readings) sends, with the input's `datastreams` and `pageSize`. It lists every selected Datastream with its Thing, the Thing's Locations, its ObservedProperty, and its Sensor, without Observations, and the read writes each Datastream into the snapshot. Then it reads the Observations of each data stream with a request of its own:
 
 ~~~text
-{root}/Datastreams({id})/Observations?$filter=phenomenonTime%20ge%20{from}%20and%20phenomenonTime%20lt%20{to}&$orderby=phenomenonTime%20asc,id%20asc&$top={pageSize}
+{root}/Datastreams({id})/Observations?$filter=phenomenonTime%20ge%20{from}%20and%20phenomenonTime%20lt%20{to}&$orderby=phenomenonTime%20asc,id%20asc&$select=id,phenomenonTime,result,resultTime,validTime,resultQuality,parameters&$top={pageSize}
 ~~~
 
-The bounds are written in UTC with a `Z`, with a fraction only when they have one, such as `2026-11-11T10:00:00Z` or `2026-11-11T10:00:00.250Z`. A data stream's id is written as `(56776)` for an integer id, or as `('o''neil')` for a text id: in single quotes, with each `'` doubled, percent-encoded where a path cannot hold a character. With `featuresOfInterest: true`, each request also carries `$expand=FeatureOfInterest` after `$orderby` (see [Features of interest](#features-of-interest)). Each request is followed page by page under the rules of [Reading a server](#reading-a-server). With `historicalLocations: true`, the HistoricalLocations of each listed Thing are read after the Observations (see [Historical locations](#historical-locations)).
+The bounds are written in UTC with a `Z`, with a fraction only when they have one, such as `2026-11-11T10:00:00Z` or `2026-11-11T10:00:00.250Z`. A data stream's id is written as `(56776)` for an integer id, or as `('o''neil')` for a text id: in single quotes, with each `'` doubled, percent-encoded where a path cannot hold a character. `$select` asks for the Observation members a record reads and for no other (OGC 18-088 section 9.3.2.2). Without it, a server serves each Observation with links to itself, to its data stream and to its FeatureOfInterest, which no record reads and which make up most of a page. The selection names `id` and `phenomenonTime`, which the request orders by, because some servers refuse a request that orders by a property it does not select. With `featuresOfInterest: true`, each request also expands each Observation's FeatureOfInterest with `$expand`, between `$orderby` and `$select` (see [Features of interest](#features-of-interest)). Each request is followed page by page under the rules of [Reading a server](#reading-a-server). A next link is followed as the server wrote it, so a server whose next link leaves out `$select`, as RIVM Samen Meten's does, serves the later pages with their links. The records are the same. With `historicalLocations: true`, the HistoricalLocations of each listed Thing are read after the Observations (see [Historical locations](#historical-locations)).
 
 **What is read.** The data streams are read one after the other, the Datastreams and then the MultiDatastreams, each by ascending id, whatever order the server listed them in. A data stream's `phenomenonTime` covers all of its Observations, so a data stream whose `phenomenonTime` ends before the range is not requested. One without a `phenomenonTime` is requested. The Observations of each data stream come oldest first, then by id, and each is written once: when a page repeats an Observation the read already wrote, because the server gained rows between pages, the repeat is dropped. The read stops reading Observations once it has written `limits.observations` of them in a cycle, of both kinds together, keeps what it wrote, and reports `collect-limit-reached` with the page that holds the first Observation it did not write. HistoricalLocations are not counted. `limits.pages` stops one data stream's request, and the read goes on with the next one.
 
@@ -676,13 +676,13 @@ sensorthings: {
 },
 ~~~
 
-**The requests.** A range or incremental read adds `$expand=FeatureOfInterest` to each data stream's Observations request:
+**The requests.** A range or incremental read expands the FeatureOfInterest of each Observation in each data stream's Observations request. An expanded entity is served whole, however the Observation is selected (OGC 18-088 section 9.3.2.2), and some servers, FROST-Server among them, serve it with its own link. A read of a version 1.1 server therefore selects the FeatureOfInterest's members as well, in parentheses (section 9.3.2.1):
 
 ~~~text
-{root}/Datastreams({id})/Observations?$filter=phenomenonTime%20ge%20{from}%20and%20phenomenonTime%20lt%20{to}&$orderby=phenomenonTime%20asc,id%20asc&$expand=FeatureOfInterest&$top={pageSize}
+{root}/Datastreams({id})/Observations?$filter=phenomenonTime%20ge%20{from}%20and%20phenomenonTime%20lt%20{to}&$orderby=phenomenonTime%20asc,id%20asc&$expand=FeatureOfInterest($select=id,name,description,properties,encodingType,feature)&$select=id,phenomenonTime,result,resultTime,validTime,resultQuality,parameters&$top={pageSize}
 ~~~
 
-A latest read expands it inside the newest Observation, as OGC 18-088 section 9.3.2.1 allows:
+A FeatureOfInterest has `properties` from version 1.1 on (section 8.2.8), and a version 1.0 server may refuse a request that selects a member it does not define. A read of a version 1.0 server therefore expands each FeatureOfInterest without a selection, `$expand=FeatureOfInterest`, and keeps it as the server serves it. A latest read expands it inside the newest Observation, as OGC 18-088 section 9.3.2.1 allows:
 
 ~~~text
 {root}/Datastreams?$filter={datastreams}&$expand=Thing/Locations,ObservedProperty,Sensor,Observations($orderby=phenomenonTime%20desc;$top=1;$expand=FeatureOfInterest)&$orderby=id%20asc&$top={pageSize}
@@ -861,7 +861,7 @@ A range or incremental read lists the selected MultiDatastreams:
 {root}/MultiDatastreams?$filter={multiDatastreams}&$expand=Thing/Locations,ObservedProperties,Sensor&$orderby=id%20asc&$top={pageSize}
 ~~~
 
-It then reads the Observations of each with `{root}/MultiDatastreams({id})/Observations`, under the filter, order, paging and limits of a Datastream's Observations request. `$filter` is sent only for an expression, and `featuresOfInterest: true` expands each FeatureOfInterest as it does for a Datastream. A range read reads the Datastreams, then the MultiDatastreams, each by ascending id. An incremental read reads the data streams of both kinds furthest behind first. `limits.observations` counts the Observations of both kinds. A server without the extension answers the MultiDatastreams request with an HTTP error, and the input fails with that answer, as for any failed request.
+It then reads the Observations of each with `{root}/MultiDatastreams({id})/Observations`, under the filter, order, selection, paging and limits of a Datastream's Observations request. `$filter` is sent only for an expression, and `featuresOfInterest: true` expands each FeatureOfInterest as it does for a Datastream. A range read reads the Datastreams, then the MultiDatastreams, each by ascending id. An incremental read reads the data streams of both kinds furthest behind first. `limits.observations` counts the Observations of both kinds. A server without the extension answers the MultiDatastreams request with an HTTP error, and the input fails with that answer, as for any failed request.
 
 **Readings.** Each value of a MultiDatastream Observation's `result` is one reading, keyed by the `name` of the ObservedProperty at its position:
 

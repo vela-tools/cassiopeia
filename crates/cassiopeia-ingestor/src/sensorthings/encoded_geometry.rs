@@ -1,4 +1,5 @@
 use crate::sensorthings::{ingest_losses::GeometryEncoding, null_members::present};
+use cassiopeia_sensorthings::encoding_type::ENCODING_TYPE_MEMBER;
 use serde_json::{Map, Value};
 
 /// The media types an `encodingType` names `GeoJSON` with: the one RFC 7946 registers, and the older
@@ -24,7 +25,7 @@ pub(super) enum EncodedGeometry {
 /// A `GeoJSON` `Feature` gives its `geometry` (RFC 7946 section 3.2), and any other `GeoJSON` object
 /// is the geometry itself.
 pub(super) fn encoded_geometry(entity: &mut Map<String, Value>, member: &str) -> EncodedGeometry {
-    match entity.get("encodingType") {
+    match entity.get(ENCODING_TYPE_MEMBER) {
         Some(Value::String(encoding)) if is_geojson(encoding) => {}
         Some(Value::String(encoding)) => return EncodedGeometry::Unreadable(GeometryEncoding::Stated(encoding.as_str().into())),
         Some(Value::Null | Value::Bool(_) | Value::Number(_) | Value::Array(_) | Value::Object(_)) | None => {

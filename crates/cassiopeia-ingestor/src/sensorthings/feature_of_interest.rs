@@ -5,16 +5,11 @@ use crate::sensorthings::{
     record_builder::record_members,
     served_id::optional_served_id,
 };
-use cassiopeia_sensorthings::snapshot::line_number::LineNumber;
+use cassiopeia_sensorthings::{
+    feature_of_interest_members::{CARRIED_FEATURE_OF_INTEREST_MEMBERS, FEATURE_MEMBER, FEATURE_OF_INTEREST_MEMBER},
+    snapshot::line_number::LineNumber,
+};
 use serde_json::{Map, Value};
-
-/// The member an Observation carries its `FeatureOfInterest` in when a read expands it (OGC 18-088
-/// section 9.3.2.1).
-const FEATURE_OF_INTEREST_MEMBER: &str = "FeatureOfInterest";
-
-/// The `FeatureOfInterest` members a reading's `featureOfInterest` carries, besides its id and its
-/// feature.
-const FEATURE_OF_INTEREST_MEMBERS: [&str; 3] = ["name", "description", "properties"];
 
 /// The `featureOfInterest` of the reading of the served `observation`, read on `line` and taken out
 /// of the Observation: its id when it has one, its members, and the geometry of its `feature`; or
@@ -37,8 +32,8 @@ pub(super) fn feature_of_interest(
         return Ok(None);
     };
     let id = optional_served_id(&served, line, StaEntity::FeatureOfInterest)?;
-    let feature = encoded_geometry(&mut served, "feature");
-    let mut members = record_members(served, id.as_ref(), &FEATURE_OF_INTEREST_MEMBERS);
+    let feature = encoded_geometry(&mut served, FEATURE_MEMBER);
+    let mut members = record_members(served, id.as_ref(), &CARRIED_FEATURE_OF_INTEREST_MEMBERS);
     match feature {
         EncodedGeometry::Geometry(geometry) => {
             members.insert("feature".to_owned(), geometry);
