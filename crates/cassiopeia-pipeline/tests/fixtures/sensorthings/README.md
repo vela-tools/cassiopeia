@@ -1,6 +1,6 @@
 # SensorThings fixtures
 
-The SensorThings snapshot tests in `src/end_to_end/sensorthings.rs`, `src/end_to_end/features_of_interest.rs`, `src/end_to_end/sensors.rs`, `src/end_to_end/locations.rs`, `src/end_to_end/historical_locations.rs`, `src/end_to_end/multi_datastreams.rs`, `src/end_to_end/things.rs` and `src/end_to_end/data_stream_extents.rs` read these files from disk. The suite never contacts a server.
+The SensorThings snapshot tests in `src/end_to_end/sensorthings.rs`, `src/end_to_end/features_of_interest.rs`, `src/end_to_end/sensors.rs`, `src/end_to_end/locations.rs`, `src/end_to_end/historical_locations.rs`, `src/end_to_end/multi_datastreams.rs`, `src/end_to_end/things.rs`, `src/end_to_end/data_stream_extents.rs` and `src/end_to_end/series_validation.rs` read these files from disk. The suite never contacts a server.
 
 | File | Content |
 | --- | --- |

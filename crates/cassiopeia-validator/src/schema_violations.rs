@@ -5,7 +5,7 @@ use std::fmt::{Display, Formatter, Result as FmtResult};
 
 /// The number of violations retained per entity, so a wildly nonconforming entity cannot produce an
 /// unbounded list.
-const MAX_VIOLATIONS_PER_ENTITY: usize = 10;
+pub(crate) const MAX_VIOLATIONS_PER_ENTITY: usize = 10;
 
 /// Whether the retained violations are all of them.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
@@ -40,12 +40,21 @@ impl SchemaViolations {
     /// Collects the violations one known-invalid entity has, capped.
     #[must_use]
     pub fn collect(validator: &JsonSchemaValidator, entity: &Value) -> SchemaViolations {
-        let mut violations: Vec<SchemaViolation> = validator
-            .iter_errors(entity)
-            .take(MAX_VIOLATIONS_PER_ENTITY + 1)
-            .map(SchemaViolation::from_error)
-            .collect();
+        SchemaViolations::capped(
+            validator
+                .iter_errors(entity)
+                .take(MAX_VIOLATIONS_PER_ENTITY + 1)
+                .map(SchemaViolation::from_error)
+                .collect(),
+        )
+    }
 
+    /// Keeps the first [`MAX_VIOLATIONS_PER_ENTITY`] of `violations`, and notes whether any were left
+    /// out.
+    ///
+    /// Gathering one violation past the cap is enough to know the list was cut, so a caller stops
+    /// keeping violations there.
+    pub(crate) fn capped(mut violations: Vec<SchemaViolation>) -> SchemaViolations {
         if violations.len() > MAX_VIOLATIONS_PER_ENTITY {
             violations.truncate(MAX_VIOLATIONS_PER_ENTITY);
             return SchemaViolations {
@@ -67,6 +76,12 @@ impl SchemaViolations {
     #[must_use]
     pub fn violations(&self) -> &[SchemaViolation] {
         &self.violations
+    }
+
+    /// Whether there are none.
+    #[must_use]
+    pub const fn is_empty(&self) -> bool {
+        self.violations.is_empty()
     }
 
     /// Whether the kept violations are all of them.

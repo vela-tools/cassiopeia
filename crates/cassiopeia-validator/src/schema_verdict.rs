@@ -1,4 +1,5 @@
-use crate::{error::ValidatorError, report::ValidationReportEntry};
+use crate::{carried_members::CarriedMembers, error::ValidatorError, report::ValidationReportEntry};
+use std::mem;
 
 /// How much information a schema check should produce for a nonconformant entity.
 ///
@@ -23,7 +24,11 @@ pub enum SchemaVerdict {
     /// No schema file exists for this entity type; nothing was checked.
     Absent,
 
-    /// A schema exists and the entity conforms.
+    /// A schema exists and the entity conforms to every rule decided on it.
+    ///
+    /// A member the schema requires at the top level is not decided on an entity checked with
+    /// [`RequiredMembers::Carried`](crate::required_members::RequiredMembers::Carried): one the
+    /// entity lacks is carried with its outcome instead.
     Conformant,
 
     /// A schema exists and the entity violates it.
@@ -49,7 +54,8 @@ pub enum ValidationDiagnostics {
     },
 }
 
-/// The verdict and any diagnostics requested for one entity.
+/// The verdict and any diagnostics requested for one entity, with the members its schema requires
+/// at the top level that it lacks, when those are carried rather than decided on it.
 ///
 /// Constructors enforce that absent and conformant outcomes never carry diagnostics and that only a
 /// nonconformant outcome can carry error or report details.
@@ -57,6 +63,7 @@ pub enum ValidationDiagnostics {
 pub struct ValidationOutcome {
     verdict: SchemaVerdict,
     diagnostics: ValidationDiagnostics,
+    carried: CarriedMembers,
 }
 
 impl ValidationOutcome {
@@ -66,6 +73,7 @@ impl ValidationOutcome {
         ValidationOutcome {
             verdict: SchemaVerdict::Absent,
             diagnostics: ValidationDiagnostics::None,
+            carried: CarriedMembers::none(),
         }
     }
 
@@ -75,6 +83,7 @@ impl ValidationOutcome {
         ValidationOutcome {
             verdict: SchemaVerdict::Conformant,
             diagnostics: ValidationDiagnostics::None,
+            carried: CarriedMembers::none(),
         }
     }
 
@@ -84,6 +93,7 @@ impl ValidationOutcome {
         ValidationOutcome {
             verdict: SchemaVerdict::Nonconformant,
             diagnostics,
+            carried: CarriedMembers::none(),
         }
     }
 
@@ -91,6 +101,17 @@ impl ValidationOutcome {
     #[must_use]
     pub const fn verdict(&self) -> SchemaVerdict {
         self.verdict
+    }
+
+    /// The same outcome, carrying the members the checked entity lacks.
+    #[must_use]
+    pub fn carrying(self, carried: CarriedMembers) -> ValidationOutcome {
+        ValidationOutcome { carried, ..self }
+    }
+
+    /// Takes the members carried with the outcome, leaving none.
+    pub fn take_carried(&mut self) -> CarriedMembers {
+        mem::take(&mut self.carried)
     }
 
     /// Consumes the outcome and returns its diagnostics.

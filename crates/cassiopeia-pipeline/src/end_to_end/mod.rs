@@ -13,6 +13,7 @@ mod record_merges;
 mod relationships;
 mod sensors;
 mod sensorthings;
+mod series_validation;
 mod station_mappings;
 mod things;
 mod unit_codes;

@@ -6,8 +6,10 @@
 //! is opt-in per type). The [`SchemaValidator`](schema_validator::SchemaValidator) is the standard
 //! implementation, backed by the [`jsonschema`] crate.
 
+pub mod carried_members;
 pub mod error;
 pub mod report;
+pub mod required_members;
 pub mod retriever;
 pub mod schema_file;
 pub mod schema_location;
@@ -22,6 +24,7 @@ pub mod validator;
 #[cfg(test)]
 mod tests {
     use crate::{
+        required_members::RequiredMembers,
         schema_validator::SchemaValidator,
         schema_validator_config::SchemaValidatorConfig,
         schema_verdict::{DiagnosticsLevel, SchemaVerdict},
@@ -45,7 +48,7 @@ mod tests {
         });
         let entity = NgsiLdEntity::new("urn:ngsi-ld:Unknown:1".parse::<Urn>().unwrap(), NameBuf::new("Unknown").unwrap());
 
-        let outcome = validator.check(&entity, DiagnosticsLevel::None).unwrap();
+        let outcome = validator.check(&entity, DiagnosticsLevel::None, RequiredMembers::Decided).unwrap();
         assert_eq!(outcome.verdict(), SchemaVerdict::Absent);
     }
 }

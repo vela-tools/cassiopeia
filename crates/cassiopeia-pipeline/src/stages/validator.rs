@@ -2,210 +2,83 @@ use crate::{
     error::PipelineError,
     pipeline_stage::PipelineStage,
     stages::{
-        nonconformant_types::NonconformantTypes,
+        enforcement::{EnforcedBatch, Enforcement, ValidationSettings},
+        forwarded::Forwarded,
         pump::{BatchSender, PumpConfig, PumpProcessor, run_pump_stage},
         stage_env::StageEnv,
         stream_outcome::StreamOutcome,
-        validation_abort::abort_error,
-        validation_decision::{Decision, Reporting, decide, diagnostics_level},
-        validation_report::ReportCollector,
     },
 };
-use cassiopeia_common::{
-    batch::Batch,
-    channel::ChannelReceiver,
-    signal::Signal,
-    stage::Stage,
-    telemetry::{channel_boundary::ChannelBoundary, run::RunTelemetry},
-};
-use cassiopeia_manifest::output::validation_mode::ValidationMode;
+use cassiopeia_common::{batch::Batch, channel::ChannelReceiver, signal::Signal, stage::Stage, telemetry::channel_boundary::ChannelBoundary};
 use cassiopeia_ngsi_ld::entity::NgsiLdEntity;
-use cassiopeia_reporter::{guard::StageGuard, reporter::Reporter};
-use cassiopeia_validator::{
-    schema_validator::SchemaValidator,
-    schema_verdict::{DiagnosticsLevel, ValidationDiagnostics},
-    validator::Validator,
-};
-use std::{mem, ops::ControlFlow, path::PathBuf, sync::Arc};
+use cassiopeia_reporter::guard::StageGuard;
+use cassiopeia_validator::{carried_members::CarriedMembers, schema_validator::SchemaValidator, schema_verdict::ValidationOutcome, validator::Validator};
+use std::{marker::PhantomData, ops::ControlFlow};
 
-/// How the validator stage behaves: how strictly a verdict is enforced, where its report goes, and the
-/// stage it forwards to (the fold for a series run, the writer otherwise).
-pub(crate) struct ValidationSettings {
-    /// How strictly a verdict is enforced before an entity is written.
-    pub(crate) mode: ValidationMode,
-    /// Where a JSON validation report is written when any entity fails, if requested.
-    pub(crate) report_path: Option<PathBuf>,
-    /// The stage the validator's output queue drains to, naming the channel boundary.
-    pub(crate) downstream: Stage,
-}
-
-/// One batch's verdicts, tallied as the batch is walked.
-///
-/// The three counts are distinct on purpose: a passing entity advances the progress bar, a warned
-/// one is completed without advancing it (its warning already showed there), and both are forwarded.
-#[derive(Default)]
-struct BatchTally {
-    /// Entities that conformed and advance the stage's progress.
-    passed: u64,
-    /// Entities forwarded despite a warning, counted as completed but not as processed.
-    warned: u64,
-}
-
-/// Checks each entity against its JSON Schema and applies the run's [`ValidationMode`]: in the
-/// relaxed mode a failure only warns and the entity is still written; in the fail-fast modes a
-/// schema-backed failure (and, under the strict mode, a missing schema) emits an error signal that
-/// tears the pipeline down. Failures are optionally recorded in the report written once the stream
-/// ends.
-///
-/// Warnings are grouped by (reason, entity type) across the whole run and reported once at the end,
-/// so a stream in which every entity is nonconformant costs one line per type rather than one per
-/// entity.
-struct ValidatorProcessor {
+/// Checks each entity against its JSON Schema and enforces the run's validation mode on the verdict,
+/// forwarding each entity it lets through as `O`, which decides where the members a schema requires
+/// at the top level are decided.
+struct ValidatorProcessor<O> {
     /// The schema validator that renders the verdict on each entity.
     validator: SchemaValidator,
-    /// How strictly a verdict is enforced.
-    validation_mode: ValidationMode,
-    /// The failure accumulator, present only when a report path was requested.
-    collector: Option<ReportCollector>,
-    /// How much work a nonconformant result needs for this run's policy and output.
-    diagnostics_level: DiagnosticsLevel,
-    /// The entity types warned about, grouped by why, flushed when the stream ends.
-    warned_types: NonconformantTypes,
-    /// The reporter warnings and the final report-write outcome are logged to.
-    reporter: &'static dyn Reporter,
-    /// The run telemetry an aborting or warning verdict is counted into, so the run summary's error
-    /// and warning totals match the exit status.
-    telemetry: Arc<RunTelemetry>,
+    /// The run's validation mode, applied to each verdict.
+    enforcement: Enforcement,
+    /// What each entity let through is forwarded as.
+    forwarded: PhantomData<O>,
 }
 
-impl PumpProcessor for ValidatorProcessor {
+impl<O: Forwarded> PumpProcessor for ValidatorProcessor<O> {
     type In = NgsiLdEntity;
-    type Out = NgsiLdEntity;
+    type Out = O;
 
-    fn process(&mut self, batch: Batch<NgsiLdEntity>, stage: &StageGuard, tx: &BatchSender<NgsiLdEntity>) -> ControlFlow<()> {
-        if let Some(collector) = &mut self.collector {
-            collector.observe(batch.count());
-        }
+    fn process(&mut self, batch: Batch<NgsiLdEntity>, stage: &StageGuard, tx: &BatchSender<O>) -> ControlFlow<()> {
+        self.enforcement.observe(batch.count());
 
         // The service span covers the schema check only; the handoff downstream is output wait.
         let service = stage.service_span();
-        let verdicts = self.validator.validate_batch(&batch, self.diagnostics_level);
+        let verdicts = self.validator.validate_batch(&batch, self.enforcement.diagnostics_level(), O::REQUIRED_MEMBERS);
         drop(service);
 
-        let mut forwarded = Batch::with_capacity(batch.len());
-        let mut tally = BatchTally::default();
-        let mut abort = None;
-
-        for (entity, verdict) in batch.into_iter().zip(verdicts) {
-            match decide(self.validation_mode, &verdict) {
-                Decision::Forward => {
-                    tally.passed += 1;
-                    forwarded.push(entity);
-                }
-                Decision::Warn(reason) => {
-                    tally.warned += 1;
-                    self.warned_types.record(reason, &entity);
-                    if let (Some(collector), Ok(outcome)) = (self.collector.as_mut(), verdict)
-                        && let ValidationDiagnostics::Report { entry, .. } = outcome.into_diagnostics()
-                    {
-                        collector.record(entry);
-                    }
-                    forwarded.push(entity);
-                }
-                Decision::Abort => {
-                    // Entities decided before this one are still forwarded below; the rest of the
-                    // batch is dropped. Fail-fast is at batch granularity.
-                    abort = Some(abort_error(verdict, &entity, self.collector.as_mut()));
-                    break;
-                }
+        let mut enforced = EnforcedBatch::with_capacity(batch.len());
+        for (entity, mut verdict) in batch.into_iter().zip(verdicts) {
+            let carried = verdict.as_mut().map_or_else(|_| CarriedMembers::none(), ValidationOutcome::take_carried);
+            if enforced
+                .admit(&mut self.enforcement, entity, verdict, |entity| O::forward(entity, carried))
+                .is_break()
+            {
+                break;
             }
         }
-
-        let sent = self.report_and_send(forwarded, &tally, stage, tx);
-
-        match abort {
-            Some(error) => {
-                stage.fail(1);
-                self.telemetry.add_errors(1);
-                let _ = tx.send(Signal::Error(error));
-                ControlFlow::Break(())
-            }
-            None => sent,
-        }
+        enforced.send(&self.enforcement, stage, tx)
     }
 
-    fn finalize(&mut self, _outcome: StreamOutcome, _stage: &StageGuard, _tx: &BatchSender<NgsiLdEntity>) {
-        let warned = mem::replace(&mut self.warned_types, NonconformantTypes::new());
-        if !warned.is_empty() {
-            warned.report(self.reporter);
-        }
-        if let Some(collector) = &mut self.collector {
-            collector.write(self.reporter);
-        }
-    }
-}
-
-impl ValidatorProcessor {
-    /// Records one batch's tally and hands the entities that survived it downstream.
-    fn report_and_send(&self, batch: Batch<NgsiLdEntity>, tally: &BatchTally, stage: &StageGuard, tx: &BatchSender<NgsiLdEntity>) -> ControlFlow<()> {
-        if tally.warned > 0 {
-            stage.warn_inc_by(tally.warned);
-            self.telemetry.add_warnings(tally.warned);
-        }
-        if batch.is_empty() {
-            return ControlFlow::Continue(());
-        }
-
-        if stage.measure_output_wait(|| tx.send(Signal::Data(batch)).is_ok()) {
-            stage.inc_by(tally.passed);
-            // A warned entity is still forwarded, so it completes the stage's work, but it is not
-            // counted as processed on the bar (`warn_inc_by` already reflected it there).
-            stage.complete(tally.warned);
-            ControlFlow::Continue(())
-        } else {
-            stage.fail(tally.passed.saturating_add(tally.warned));
-            ControlFlow::Break(())
-        }
+    fn finalize(&mut self, _outcome: StreamOutcome, _stage: &StageGuard, _tx: &BatchSender<O>) {
+        self.enforcement.finish();
     }
 }
 
 /// Spawns the validator, which checks each entity against its JSON Schema and applies the run's
-/// validation mode. Entities arrive already grouped; each group is checked across a Rayon pool, then
-/// walked in order to apply the mode.
-pub(crate) fn spawn_validator_thread(
+/// validation mode, forwarding each entity it lets through as `O`. Entities arrive already grouped;
+/// each group is checked across a Rayon pool, then walked in order to apply the mode.
+pub(crate) fn spawn_validator_thread<O: Forwarded>(
     receiver: ChannelReceiver<Signal<Batch<NgsiLdEntity>, PipelineError>>,
     validator: SchemaValidator,
     processed_count: u64,
     settings: ValidationSettings,
     env: StageEnv,
-) -> ChannelReceiver<Signal<Batch<NgsiLdEntity>, PipelineError>> {
-    let ValidationSettings {
-        mode: validation_mode,
-        report_path,
-        downstream,
-    } = settings;
-    let reporting = if report_path.is_some() { Reporting::Enabled } else { Reporting::Disabled };
-    let diagnostics_level = diagnostics_level(validation_mode, reporting);
-    let collector = report_path.map(ReportCollector::new);
-    let reporter = env.reporter;
-    let telemetry = Arc::clone(&env.telemetry);
-
+) -> ChannelReceiver<Signal<Batch<O>, PipelineError>> {
     run_pump_stage(
         ValidatorProcessor {
             validator,
-            validation_mode,
-            collector,
-            diagnostics_level,
-            warned_types: NonconformantTypes::new(),
-            reporter,
-            telemetry,
+            enforcement: Enforcement::new(settings, &env),
+            forwarded: PhantomData,
         },
         receiver,
         PumpConfig {
             stage: PipelineStage::Validator,
             set_length: Some(processed_count),
             expected_stops: 1,
-            boundary: ChannelBoundary::between(Stage::Validator, downstream),
+            boundary: ChannelBoundary::between(Stage::Validator, O::DOWNSTREAM),
             env,
         },
     )
@@ -216,10 +89,7 @@ mod tests {
     use crate::{
         controller::RunController,
         error::PipelineError,
-        stages::{
-            stage_env::StageEnv,
-            validator::{ValidationSettings, spawn_validator_thread},
-        },
+        stages::{enforcement::ValidationSettings, stage_env::StageEnv, validator::spawn_validator_thread},
         test_reporter::RecordingReporter,
     };
     use cassiopeia_common::{
@@ -227,7 +97,6 @@ mod tests {
         channel::{ChannelPolicy, channel},
         representation::NgsiLdRepresentation,
         signal::Signal,
-        stage::Stage,
         telemetry::run::RunTelemetry,
     };
     use cassiopeia_diagnostic::code::{diagnostic_code::DiagnosticCode, schema_code::SchemaCode};
@@ -290,19 +159,9 @@ mod tests {
             custom_schemas: HashMap::new(),
             representation: NgsiLdRepresentation::Normalized,
         });
-        let output = spawn_validator_thread(
-            rx,
-            validator,
-            0,
-            ValidationSettings {
-                mode,
-                report_path: None,
-                downstream: Stage::Writer,
-            },
-            env,
-        )
-        .into_iter()
-        .collect();
+        let output = spawn_validator_thread::<NgsiLdEntity>(rx, validator, 0, ValidationSettings { mode, report: None }, env)
+            .into_iter()
+            .collect();
 
         let counters = telemetry.snapshot().counters;
         StageRun {

@@ -1,5 +1,6 @@
 use crate::{
     error::Result,
+    required_members::RequiredMembers,
     schema_verdict::{DiagnosticsLevel, ValidationOutcome},
 };
 use cassiopeia_ngsi_ld::entity::NgsiLdEntity;
@@ -10,7 +11,8 @@ use cassiopeia_ngsi_ld::entity::NgsiLdEntity;
 /// concurrently across many threads.
 pub trait Validator: Send + Sync {
     /// Checks a single entity against its schema, returning an absent, conformant, or nonconformant
-    /// outcome with the requested level of diagnostics.
+    /// outcome with the requested level of diagnostics, deciding the members the schema requires at
+    /// the top level where `required` says.
     ///
     /// A nonconformance is reported inside the verdict, not as an error: `Ok` covers every case the
     /// schema itself decides.
@@ -18,7 +20,7 @@ pub trait Validator: Send + Sync {
     /// # Errors
     /// Returns a [`ValidatorError`](crate::error::ValidatorError) only for an infrastructure failure:
     /// the entity's schema cannot be read, parsed, or compiled, or the entity cannot be serialized.
-    fn check(&self, entity: &NgsiLdEntity, diagnostics: DiagnosticsLevel) -> Result<ValidationOutcome>;
+    fn check(&self, entity: &NgsiLdEntity, diagnostics: DiagnosticsLevel, required: RequiredMembers) -> Result<ValidationOutcome>;
 
     /// Checks a batch of entities, one result per entity in input order.
     ///
@@ -28,8 +30,8 @@ pub trait Validator: Send + Sync {
     /// # Errors
     /// Each element carries the same result [`check`](Validator::check) would return for that entity;
     /// the batch call itself never fails.
-    fn validate_batch(&self, entities: &[NgsiLdEntity], diagnostics: DiagnosticsLevel) -> Vec<Result<ValidationOutcome>> {
-        entities.iter().map(|entity| self.check(entity, diagnostics)).collect()
+    fn validate_batch(&self, entities: &[NgsiLdEntity], diagnostics: DiagnosticsLevel, required: RequiredMembers) -> Vec<Result<ValidationOutcome>> {
+        entities.iter().map(|entity| self.check(entity, diagnostics, required)).collect()
     }
 }
 
@@ -37,6 +39,7 @@ pub trait Validator: Send + Sync {
 mod tests {
     use crate::{
         error::Result,
+        required_members::RequiredMembers,
         schema_verdict::{DiagnosticsLevel, SchemaVerdict, ValidationOutcome},
         validator::Validator,
     };
@@ -48,7 +51,7 @@ mod tests {
     struct AlwaysAbsent;
 
     impl Validator for AlwaysAbsent {
-        fn check(&self, _entity: &NgsiLdEntity, _diagnostics: DiagnosticsLevel) -> Result<ValidationOutcome> {
+        fn check(&self, _entity: &NgsiLdEntity, _diagnostics: DiagnosticsLevel, _required: RequiredMembers) -> Result<ValidationOutcome> {
             Ok(ValidationOutcome::absent())
         }
     }
@@ -61,7 +64,7 @@ mod tests {
     fn the_default_batch_returns_one_result_per_entity_in_order() {
         let entities = vec![entity("urn:ngsi-ld:Sensor:1", "Sensor"), entity("urn:ngsi-ld:Sensor:2", "Sensor")];
 
-        let results = AlwaysAbsent.validate_batch(&entities, DiagnosticsLevel::None);
+        let results = AlwaysAbsent.validate_batch(&entities, DiagnosticsLevel::None, RequiredMembers::Decided);
 
         assert_eq!(results.len(), 2);
         assert!(

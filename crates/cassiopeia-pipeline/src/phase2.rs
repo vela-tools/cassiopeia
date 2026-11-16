@@ -6,15 +6,19 @@ use crate::{
     stages::{
         aggregator::spawn_aggregator_thread,
         assembler::spawn_assembler_thread,
+        enforcement::ValidationSettings,
         extractor::spawn_extractor_thread,
+        record_entity::RecordEntity,
         stage_env::StageEnv,
         transformer::spawn_transformer_thread,
-        validator::{ValidationSettings, spawn_validator_thread},
+        validation_report::SharedReport,
+        validator::spawn_validator_thread,
         writer::spawn_writer_thread,
     },
 };
-use cassiopeia_common::{stage::Stage, telemetry::run::RunTelemetry};
+use cassiopeia_common::telemetry::run::RunTelemetry;
 use cassiopeia_mapping::template::resolver::TemplateResolver;
+use cassiopeia_ngsi_ld::entity::NgsiLdEntity;
 use cassiopeia_resolver::{entity_source::EntitySource, fragment_resolver::FragmentResolver};
 use cassiopeia_validator::schema_validator::SchemaValidator;
 use cassiopeia_writer::writer::Writer;
@@ -57,24 +61,34 @@ impl Pipeline {
         let assembler_rx = spawn_assembler_thread(Box::new(fragment_resolver), emitted_count, batch_size, &env);
         let extractor_rx = spawn_extractor_thread(assembler_rx, template_resolver, emitted_count, self.config.extraction, mode, env.clone());
         let transformer_rx = spawn_transformer_thread(extractor_rx, emitted_count, mode, env.clone());
-        // A series run inserts the aggregator between the validator and the writer; a current-state run
-        // wires the validator straight to the writer, so it pays nothing for the fold.
-        let validator_downstream = if series { Stage::Aggregator } else { Stage::Writer };
-        let validator_rx = spawn_validator_thread(
-            transformer_rx,
-            validator,
-            emitted_count,
-            ValidationSettings {
-                mode: self.output.validation_mode,
-                report_path: self.output.validation_report_path.clone(),
-                downstream: validator_downstream,
-            },
-            env.clone(),
-        );
+        let validation_mode = self.output.validation_mode;
+        let report = self.output.validation_report_path.clone().map(SharedReport::new);
+        // A series run inserts the aggregator between the validator and the writer, and the members
+        // a schema requires at the top level are decided there, on the entity the run writes; a
+        // current-state run wires the validator straight to the writer, so it pays nothing for the
+        // fold.
         let writer_input = if series {
-            spawn_aggregator_thread(validator_rx, resolved_count, env.clone())
+            let validator_rx = spawn_validator_thread::<RecordEntity>(
+                transformer_rx,
+                validator,
+                emitted_count,
+                ValidationSettings {
+                    mode: validation_mode,
+                    // The validator and the fold record into the one report, written by whichever
+                    // of them ends last.
+                    report: report.clone(),
+                },
+                env.clone(),
+            );
+            spawn_aggregator_thread(validator_rx, resolved_count, ValidationSettings { mode: validation_mode, report }, env.clone())
         } else {
-            validator_rx
+            spawn_validator_thread::<NgsiLdEntity>(
+                transformer_rx,
+                validator,
+                emitted_count,
+                ValidationSettings { mode: validation_mode, report },
+                env.clone(),
+            )
         };
         let writer_rx = spawn_writer_thread(writer_input, writer, resolved_count, env);
 

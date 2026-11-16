@@ -31,17 +31,18 @@ const TRACK_TIMES: [&str; 3] = ["2026-11-16T07:58:00Z", "2026-11-16T08:08:00Z", 
 const READING_TIMES: [&str; 3] = ["2026-11-16T08:00:00Z", "2026-11-16T08:10:00Z", "2026-11-16T08:20:00Z"];
 
 /// Runs the track snapshot `snapshot` through the mapping that writes the bus's track as `location`
-/// instances, on `store`, into series output.
+/// instances, on `store`, into series output, validating against the published
+/// `AirQualityObserved` schema.
 ///
-/// Each record is validated on its own before series output gathers its instances, and the record
-/// of an Observation has no `historicalLocation`, so its entity has no `location`, which the
-/// `AirQualityObserved` schema requires; the run validates against a schema that accepts anything.
+/// The record of an Observation has no `historicalLocation`, so its entity has no `location`, and
+/// the record of a `HistoricalLocation` has no `readings`, so its entity has no `dateObserved`: the
+/// schema requires both, and the entity written holds both.
 fn run(store: StoreKind, snapshot: &Path) -> RunOutcome {
     let (result, outcome) = attempt_file_end_to_end(
         store,
         snapshot,
         &fixture("tracked-air-quality-observed.json5"),
-        &RunSchemas::Permissive(&["dataModel.Environment/AirQualityObserved"]),
+        &RunSchemas::Folder(&fixture("schemas")),
         SERIES_OUTPUT,
     );
     result.unwrap();

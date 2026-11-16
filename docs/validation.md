@@ -55,6 +55,22 @@ output: {
 
 Every validation option lives under one `output.validation` object: the mode above, the custom schema and representation below, plus a `report` path. Each is optional and falls back to its own default when omitted.
 
+## Series output
+
+With `output.temporal.representation: "series"`, each record of an ID gives one instance of the entity the run writes, and the run folds the instances of one ID into one EntityTemporal (see [Temporal output](output.md#temporal-output)). The schema is applied to the entity of each record, before the fold, since a schema describes one value per attribute rather than an array of instances.
+
+A member the schema requires at the entity's top level is the exception, because it may come from only some of an entity's records. The record of a moving station's position holds its `location` and no reading, and the record of a reading holds its `dateObserved` and no `location`, yet the entity written holds both. A series run therefore checks such a member on the entity it writes: the entity conforms when at least one of its records carries the member. A member that none of its records carries is one violation of that entity, decided by the mode as any violation is. `fail-when-schema` and `fail` abort the run, naming the entity and the member:
+
+~~~text
+× Entity urn:ngsi-ld:AirQualityObserved:bus-12 of type 'AirQualityObserved' does not conform to its schema: 1 violation(s), first at '': "location" is a required property
+~~~
+
+`warn` writes the entity and counts it once under `schema-nonconformant`, and the report lists the member once, against that entity.
+
+Every other rule applies to the entity of each record, so a value of the wrong type is reported for the record that carries it, and `warn` counts each such record. To tell the members a record lacks from its other violations, a series run reads every violation of a record that fails its schema, in every mode. A run that fails or is cancelled does not write the entity it was still folding, since records of that entity may not have arrived.
+
+In a current-state run, the entity of a record is the entity written, so every rule is checked on it.
+
 ## Validation representation
 
 Validation checks the **simplified (key-values)** representation by default. That is the shape a Smart Data Model JSON Schema describes. The schema constrains `temperature` as the bare number `23.0`, not as the normalized Property wrapper with its `type` and `value` members. Checking the normalized form against a key-values schema would report failures caused only by structure. See the [spec-level note on why schemas validate key-values](ngsi-ld/representation.md#why-validation-uses-simplified).
