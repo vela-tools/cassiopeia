@@ -10,6 +10,8 @@ use strum::Display;
 pub enum SnapshotLine {
     /// A data stream as discovery served it.
     Datastream(DatastreamLine),
+    /// A Thing as a latest read that lists Things served it.
+    Thing(ThingLine),
     /// An Observation as a range or incremental read served it.
     Observation(ObservationLine),
     /// A `HistoricalLocation` as a range or incremental read served it.
@@ -17,13 +19,16 @@ pub enum SnapshotLine {
 }
 
 /// The kind of a line after the header, in the order a snapshot holds them: every data stream line
-/// first, then every observation line, then every historicalLocation line. A kind is displayed with
-/// its article, so a message can name a line of it.
+/// first, then every thing line, then every observation line, then every historicalLocation line. A
+/// kind is displayed with its article, so a message can name a line of it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Display)]
 pub enum LineKind {
     /// A data stream line.
     #[strum(serialize = "a data stream")]
     Datastream,
+    /// A thing line.
+    #[strum(serialize = "a thing")]
+    Thing,
     /// An observation line.
     #[strum(serialize = "an observation")]
     Observation,
@@ -45,6 +50,17 @@ pub enum DatastreamLine {
     Datastream(Map<String, Value>),
     /// A `MultiDatastream`'s JSON as the server sent it, with its `ObservedProperties`.
     MultiDatastream(Map<String, Value>),
+}
+
+/// A Thing as a latest read that lists Things served it, with its Locations, which a Thing with no
+/// data stream is read from.
+///
+/// The line is `{"thing": {...}}`.
+#[derive(Debug, Clone, PartialEq, Getters, Serialize)]
+pub struct ThingLine {
+    /// The Thing's JSON as the server sent it.
+    #[getset(get = "pub")]
+    thing: Map<String, Value>,
 }
 
 /// An Observation as a range or incremental read served it, with the data stream it belongs to,
@@ -81,7 +97,8 @@ pub struct HistoricalLocationLine {
 
 /// A line after the header as it is read: an observation line names its data stream by id under
 /// the member of its kind, while a data stream line holds the data stream itself under that member,
-/// and a historicalLocation line names its Thing by id under `thing`.
+/// and a historicalLocation line names its Thing by id under `thing`, while a thing line holds the
+/// Thing itself under it.
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct RawLine {
@@ -89,7 +106,7 @@ pub(crate) struct RawLine {
     datastream: Option<Value>,
     multi_datastream: Option<Value>,
     historical_location: Option<Map<String, Value>>,
-    thing: Option<EntityId>,
+    thing: Option<Value>,
 }
 
 impl SnapshotLine {
@@ -98,6 +115,7 @@ impl SnapshotLine {
     pub const fn kind(&self) -> LineKind {
         match self {
             SnapshotLine::Datastream(_) => LineKind::Datastream,
+            SnapshotLine::Thing(_) => LineKind::Thing,
             SnapshotLine::Observation(_) => LineKind::Observation,
             SnapshotLine::HistoricalLocation(_) => LineKind::HistoricalLocation,
         }
@@ -138,6 +156,20 @@ impl DatastreamLine {
             DatastreamLine::Datastream(served) => (StreamKind::Datastream, served),
             DatastreamLine::MultiDatastream(served) => (StreamKind::MultiDatastream, served),
         }
+    }
+}
+
+impl ThingLine {
+    /// A line for a Thing as the server sent it.
+    #[must_use]
+    pub const fn new(thing: Map<String, Value>) -> ThingLine {
+        ThingLine { thing }
+    }
+
+    /// Consumes the line and returns the Thing's JSON.
+    #[must_use]
+    pub fn into_thing(self) -> Map<String, Value> {
+        self.thing
     }
 }
 
@@ -183,13 +215,22 @@ impl TryFrom<RawLine> for SnapshotLine {
         match (historical_location, thing) {
             (None, None) => stream_line(observation, datastream, multi_datastream),
             (Some(historical_location), Some(thing)) => match (observation, datastream, multi_datastream) {
-                (None, None, None) => Ok(SnapshotLine::HistoricalLocation(HistoricalLocationLine::new(historical_location, thing))),
+                (None, None, None) => Ok(SnapshotLine::HistoricalLocation(HistoricalLocationLine::new(
+                    historical_location,
+                    EntityId::deserialize(&thing)?,
+                ))),
                 (Some(_), _, _) | (_, Some(_), _) | (_, _, Some(_)) => Err(serde_json::Error::custom(
                     "a historicalLocation line holds a HistoricalLocation and the id of its Thing alone",
                 )),
             },
             (Some(_), None) => Err(serde_json::Error::custom("a historicalLocation line names its Thing as `thing`")),
-            (None, Some(_)) => Err(serde_json::Error::custom("only a historicalLocation line names a `thing`")),
+            (None, Some(thing)) => match (observation, datastream, multi_datastream, thing) {
+                (None, None, None, Value::Object(served)) => Ok(SnapshotLine::Thing(ThingLine::new(served))),
+                (None, None, None, Value::Null | Value::Bool(_) | Value::Number(_) | Value::String(_) | Value::Array(_)) => {
+                    Err(serde_json::Error::custom("a thing line holds the Thing as a JSON object"))
+                }
+                (Some(_), _, _, _) | (_, Some(_), _, _) | (_, _, Some(_), _) => Err(serde_json::Error::custom("a thing line holds a Thing alone")),
+            },
         }
     }
 }
@@ -209,7 +250,9 @@ fn stream_line(observation: Option<Map<String, Value>>, datastream: Option<Value
             "an observation line names its data stream as `datastream` or `multiDatastream`",
         )),
         (None, Some(_), None) | (None, None, Some(_)) => Err(serde_json::Error::custom("a data stream line holds the data stream as a JSON object")),
-        (None, None, None) => Err(serde_json::Error::custom("a line holds a data stream, an observation or a historicalLocation")),
+        (None, None, None) => Err(serde_json::Error::custom(
+            "a line holds a data stream, a thing, an observation or a historicalLocation",
+        )),
     }
 }
 
@@ -226,7 +269,7 @@ fn observation_line(observation: Map<String, Value>, kind: StreamKind, id: &Valu
 mod tests {
     use crate::{
         entity_id::EntityId,
-        snapshot::line::{DatastreamLine, HistoricalLocationLine, LineKind, ObservationLine, RawLine, SnapshotLine},
+        snapshot::line::{DatastreamLine, HistoricalLocationLine, LineKind, ObservationLine, RawLine, SnapshotLine, ThingLine},
         stream_id::StreamId,
         stream_kind::StreamKind,
     };
@@ -307,6 +350,45 @@ mod tests {
     }
 
     #[test]
+    fn thing_lines_hold_their_thing_as_thing() {
+        let thing = object(json!({"@iot.id": 12520, "name": "ILM_I75", "Locations": [{"@iot.id": 36190}]}));
+        let line = SnapshotLine::Thing(ThingLine::new(thing));
+
+        assert_eq!(
+            serde_json::to_value(&line).unwrap(),
+            json!({"thing": {"@iot.id": 12520, "name": "ILM_I75", "Locations": [{"@iot.id": 36190}]}})
+        );
+        assert_eq!(
+            read(r#"{"thing": {"@iot.id": 12520, "name": "ILM_I75", "Locations": [{"@iot.id": 36190}]}}"#).unwrap(),
+            line
+        );
+        assert_eq!(read(r#"{"thing": {}}"#).unwrap(), SnapshotLine::Thing(ThingLine::new(Map::new())));
+    }
+
+    #[test]
+    fn a_thing_line_hands_back_its_thing() {
+        let line = ThingLine::new(object(json!({"@iot.id": "station-9"})));
+
+        assert_eq!(line.thing(), &object(json!({"@iot.id": "station-9"})));
+        assert_eq!(line.into_thing(), object(json!({"@iot.id": "station-9"})));
+    }
+
+    #[test]
+    fn a_thing_line_that_holds_no_object_or_more_than_its_thing_is_refused() {
+        for text in [
+            r#"{"thing": 12520}"#,
+            r#"{"thing": "ILM_I75"}"#,
+            r#"{"thing": null}"#,
+            r#"{"thing": [{}]}"#,
+            r#"{"thing": {}, "datastream": {}}"#,
+            r#"{"thing": {}, "multiDatastream": {}}"#,
+            r#"{"thing": {}, "observation": {}}"#,
+        ] {
+            assert!(read(text).is_err(), "{text}");
+        }
+    }
+
+    #[test]
     fn a_historical_location_line_hands_back_its_parts() {
         let line = HistoricalLocationLine::new(object(json!({"@iot.id": 88})), EntityId::Integer(12512));
 
@@ -332,15 +414,18 @@ mod tests {
     #[test]
     fn each_line_names_its_kind_in_the_order_a_snapshot_holds_them() {
         let datastream = SnapshotLine::Datastream(DatastreamLine::new(StreamKind::Datastream, Map::new()));
+        let thing = SnapshotLine::Thing(ThingLine::new(Map::new()));
         let observation = SnapshotLine::Observation(ObservationLine::new(Map::new(), StreamId::Datastream(EntityId::Integer(5))));
         let historical = SnapshotLine::HistoricalLocation(HistoricalLocationLine::new(Map::new(), EntityId::Integer(12512)));
 
         assert_eq!(
-            [datastream.kind(), observation.kind(), historical.kind()],
-            [LineKind::Datastream, LineKind::Observation, LineKind::HistoricalLocation]
+            [datastream.kind(), thing.kind(), observation.kind(), historical.kind()],
+            [LineKind::Datastream, LineKind::Thing, LineKind::Observation, LineKind::HistoricalLocation]
         );
-        assert!(LineKind::Datastream < LineKind::Observation && LineKind::Observation < LineKind::HistoricalLocation);
+        assert!(LineKind::Datastream < LineKind::Thing && LineKind::Thing < LineKind::Observation);
+        assert!(LineKind::Observation < LineKind::HistoricalLocation);
         assert_eq!(LineKind::HistoricalLocation.to_string(), "a historicalLocation");
+        assert_eq!(LineKind::Thing.to_string(), "a thing");
         assert_eq!(LineKind::Observation.to_string(), "an observation");
     }
 

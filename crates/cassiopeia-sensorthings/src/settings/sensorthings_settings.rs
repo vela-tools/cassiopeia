@@ -1,13 +1,15 @@
 use crate::{
     settings::{
         collect_limits::CollectLimits,
+        entity_filter::EntityFilter,
         features_of_interest::FeaturesOfInterest,
+        filter_setting::FilterSetting,
         historical_locations::HistoricalLocations,
         multi_datastreams::MultiDatastreams,
         page_size::PageSize,
         read_mode::ReadMode,
         request_delay::RequestDelay,
-        stream_filter::StreamFilter,
+        things::Things,
     },
     stream_kind::StreamKind,
 };
@@ -19,8 +21,9 @@ use typed_builder::TypedBuilder;
 ///
 /// Every member is optional. Without one, every Datastream and no `MultiDatastream` is read with
 /// `read: "latest"`, in pages of 1000, up to the default limits, without a wait between requests,
-/// without features of interest and without `HistoricalLocations`. A command that reads a server builds the settings it reads with,
-/// each member it does not state at that default.
+/// without features of interest, without `HistoricalLocations` and without a Thing beyond those of
+/// the data streams read. A command that reads a server builds the settings it reads with, each
+/// member it does not state at that default.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Default, Serialize, Deserialize, Getters, CopyGetters, TypedBuilder)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct SensorThingsSettings {
@@ -28,7 +31,7 @@ pub struct SensorThingsSettings {
     #[serde(default, deserialize_with = "datastream_filter", skip_serializing_if = "Option::is_none")]
     #[getset(get = "pub")]
     #[builder(default)]
-    datastreams: Option<StreamFilter>,
+    datastreams: Option<EntityFilter>,
 
     /// The `MultiDatastreams` read; none unless the block selects some.
     #[serde(default)]
@@ -71,6 +74,12 @@ pub struct SensorThingsSettings {
     #[getset(get_copy = "pub")]
     #[builder(default)]
     historical_locations: HistoricalLocations,
+
+    /// Which Things a latest read lists by themselves, besides the Things of its data streams.
+    #[serde(default)]
+    #[getset(get = "pub")]
+    #[builder(default)]
+    things: Things,
 }
 
 impl SensorThingsSettings {
@@ -87,7 +96,7 @@ impl SensorThingsSettings {
     /// The filter that selects the data streams of `kind` a read reads, or `None` when it reads every
     /// one of them it reads at all.
     #[must_use]
-    pub const fn filter(&self, kind: StreamKind) -> Option<&StreamFilter> {
+    pub const fn filter(&self, kind: StreamKind) -> Option<&EntityFilter> {
         match (kind, &self.multi_datastreams) {
             (StreamKind::Datastream, _) => self.datastreams.as_ref(),
             (StreamKind::MultiDatastream, MultiDatastreams::Filtered(filter)) => Some(filter),
@@ -98,9 +107,9 @@ impl SensorThingsSettings {
 
 /// Reads the `datastreams` member: a filter over Datastreams, or `null` for none, so a refusal names
 /// the member it refuses.
-fn datastream_filter<'de, D: Deserializer<'de>>(deserializer: D) -> Result<Option<StreamFilter>, D::Error> {
+fn datastream_filter<'de, D: Deserializer<'de>>(deserializer: D) -> Result<Option<EntityFilter>, D::Error> {
     Option::<String>::deserialize(deserializer)?
-        .map(|text| StreamFilter::new(StreamKind::Datastream, text))
+        .map(|text| EntityFilter::new(FilterSetting::Datastreams, text))
         .transpose()
         .map_err(D::Error::custom)
 }
@@ -110,13 +119,15 @@ mod tests {
     use crate::{
         read_kind::ReadKind,
         settings::{
+            entity_filter::EntityFilter,
             features_of_interest::FeaturesOfInterest,
+            filter_setting::FilterSetting,
             historical_locations::HistoricalLocations,
             multi_datastreams::MultiDatastreams,
             read_mode::ReadMode,
             request_delay::RequestDelay,
             sensorthings_settings::SensorThingsSettings,
-            stream_filter::StreamFilter,
+            things::Things,
         },
         stream_kind::StreamKind,
     };
@@ -140,6 +151,7 @@ mod tests {
         assert_eq!(settings.multi_datastreams(), &MultiDatastreams::None);
         assert_eq!(settings.features_of_interest(), FeaturesOfInterest::Omitted);
         assert_eq!(settings.historical_locations(), HistoricalLocations::Omitted);
+        assert_eq!(settings.things(), &Things::OfDatastreams);
         assert_eq!(settings.kinds().collect::<Vec<_>>(), [StreamKind::Datastream]);
         assert_eq!(settings, SensorThingsSettings::default());
     }
@@ -147,20 +159,24 @@ mod tests {
     #[test]
     fn stated_settings_are_read() {
         let settings = settings(
-            r#"{"read": {"range": {"last": "24h"}}, "pageSize": 200, "datastreams": "x eq 1", "multiDatastreams": "y eq 2", "delay": "200ms", "limits": {"pages": 10, "observations": 1000}, "featuresOfInterest": true, "historicalLocations": true}"#,
+            r#"{"read": {"range": {"last": "24h"}}, "pageSize": 200, "datastreams": "x eq 1", "multiDatastreams": "y eq 2", "delay": "200ms", "limits": {"pages": 10, "observations": 1000}, "featuresOfInterest": true, "historicalLocations": true, "things": "startswith(name,'ILM_')"}"#,
         )
         .unwrap();
 
         assert_eq!(settings.read().kind(), ReadKind::Range);
         assert_eq!(settings.page_size().get(), 200);
-        assert_eq!(settings.datastreams().as_ref().map(StreamFilter::as_str), Some("x eq 1"));
-        assert_eq!(settings.filter(StreamKind::Datastream).map(StreamFilter::as_str), Some("x eq 1"));
-        assert_eq!(settings.filter(StreamKind::MultiDatastream).map(StreamFilter::as_str), Some("y eq 2"));
+        assert_eq!(settings.datastreams().as_ref().map(EntityFilter::as_str), Some("x eq 1"));
+        assert_eq!(settings.filter(StreamKind::Datastream).map(EntityFilter::as_str), Some("x eq 1"));
+        assert_eq!(settings.filter(StreamKind::MultiDatastream).map(EntityFilter::as_str), Some("y eq 2"));
         assert_eq!(settings.delay().map(RequestDelay::get), Some(Duration::from_millis(200)));
         assert_eq!(settings.limits().pages().get(), 10);
         assert_eq!(settings.limits().observations().get(), 1000);
         assert_eq!(settings.features_of_interest(), FeaturesOfInterest::Requested);
         assert_eq!(settings.historical_locations(), HistoricalLocations::Requested);
+        assert_eq!(
+            settings.things(),
+            &Things::Filtered(EntityFilter::new(FilterSetting::Things, "startswith(name,'ILM_')".to_owned()).unwrap())
+        );
     }
 
     #[test]
@@ -193,6 +209,8 @@ mod tests {
             r#"{"historicalLocation": true}"#,
             r#"{"multiDatastreams": 1}"#,
             r#"{"multiDatastream": true}"#,
+            r#"{"things": 1}"#,
+            r#"{"thing": true}"#,
         ] {
             assert!(settings(json).is_err(), "{json}");
         }
@@ -202,14 +220,16 @@ mod tests {
     fn a_refused_filter_names_its_setting() {
         let datastreams = settings(r#"{"datastreams": " "}"#).unwrap_err();
         let multi = settings(r#"{"multiDatastreams": " "}"#).unwrap_err();
+        let things = settings(r#"{"things": " "}"#).unwrap_err();
 
         assert!(datastreams.to_string().contains("a `datastreams` filter"), "{datastreams}");
         assert!(multi.to_string().contains("a `multiDatastreams` filter"), "{multi}");
+        assert!(things.to_string().contains("a `things` filter"), "{things}");
     }
 
     #[test]
     fn built_settings_default_every_member_they_do_not_state() {
-        let filter = StreamFilter::new(StreamKind::Datastream, "endswith(name,'-pm10')".to_owned()).unwrap();
+        let filter = EntityFilter::new(FilterSetting::Datastreams, "endswith(name,'-pm10')".to_owned()).unwrap();
 
         let built = SensorThingsSettings::builder().datastreams(Some(filter)).build();
 
@@ -220,7 +240,7 @@ mod tests {
     #[test]
     fn stated_settings_round_trip_through_serialization() {
         let stated =
-            settings(r#"{"read": {"range": {"last": "1h"}}, "datastreams": "endswith(name,'-pm10')", "multiDatastreams": true, "pageSize": 10, "delay": "200ms", "featuresOfInterest": true, "historicalLocations": true}"#)
+            settings(r#"{"read": {"range": {"last": "1h"}}, "datastreams": "endswith(name,'-pm10')", "multiDatastreams": true, "pageSize": 10, "delay": "200ms", "featuresOfInterest": true, "historicalLocations": true, "things": true}"#)
                 .unwrap();
 
         let json = serde_json::to_string(&stated).unwrap();

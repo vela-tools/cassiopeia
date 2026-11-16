@@ -13,6 +13,7 @@ mod relationships;
 mod sensors;
 mod sensorthings;
 mod station_mappings;
+mod things;
 mod unit_codes;
 mod unreadable_geometries;
 mod value_conversions;

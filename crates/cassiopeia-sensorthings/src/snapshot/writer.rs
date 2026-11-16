@@ -1,17 +1,24 @@
 use crate::snapshot::{
     header::SnapshotHeader,
-    line::{DatastreamLine, HistoricalLocationLine, ObservationLine},
+    line::{DatastreamLine, HistoricalLocationLine, ObservationLine, ThingLine},
 };
 use serde::Serialize;
 use std::io::{self, Write};
 
 /// Writes the header and the data stream lines of a snapshot.
 ///
-/// Every data stream line, of either kind, comes before the first observation line, so the writer
-/// hands over to an [`ObservationWriter`] once the data streams are written, and a snapshot it writes is always in the
-/// order a reader accepts. It writes only what it is given, and a header holds no credential, so a
-/// snapshot never holds a request header or a credential.
+/// Every data stream line, of either kind, comes before the first thing line and the first
+/// observation line, so the writer hands over to a [`ThingWriter`] or an [`ObservationWriter`] once
+/// the data streams are written, and a snapshot it writes is always in the order a reader accepts. It
+/// writes only what it is given, and a header holds no credential, so a snapshot never holds a
+/// request header or a credential.
 pub struct SnapshotWriter<W> {
+    /// Where the snapshot is written.
+    target: W,
+}
+
+/// Writes the thing lines of a latest snapshot, after its data stream lines.
+pub struct ThingWriter<W> {
     /// Where the snapshot is written.
     target: W,
 }
@@ -57,7 +64,34 @@ impl<W: Write> SnapshotWriter<W> {
         ObservationWriter { target: self.target }
     }
 
-    /// Ends a snapshot without observation lines, as a latest read writes it, and returns its target.
+    /// Ends the data stream lines of a latest snapshot, so thing lines can follow.
+    #[must_use]
+    pub fn into_things(self) -> ThingWriter<W> {
+        ThingWriter { target: self.target }
+    }
+
+    /// Ends a snapshot of its header and data stream lines alone, as a range read whose range holds
+    /// no reading writes it, and returns its target.
+    ///
+    /// # Errors
+    ///
+    /// Returns the [`io::Error`] flushing the target failed with.
+    pub fn finish(self) -> io::Result<W> {
+        finish(self.target)
+    }
+}
+
+impl<W: Write> ThingWriter<W> {
+    /// Writes one thing line.
+    ///
+    /// # Errors
+    ///
+    /// Returns the [`io::Error`] writing to the target failed with.
+    pub fn thing(&mut self, line: &ThingLine) -> io::Result<()> {
+        write_line(&mut self.target, line)
+    }
+
+    /// Ends a latest snapshot, which holds no observation line, and returns its target.
     ///
     /// # Errors
     ///
@@ -133,7 +167,7 @@ mod tests {
         service_root::ServiceRoot,
         snapshot::{
             header::SnapshotHeader,
-            line::{DatastreamLine, HistoricalLocationLine, ObservationLine},
+            line::{DatastreamLine, HistoricalLocationLine, ObservationLine, ThingLine},
             writer::SnapshotWriter,
         },
         stream_id::StreamId,
@@ -166,11 +200,28 @@ mod tests {
             .datastream(&DatastreamLine::new(StreamKind::Datastream, object(json!({"@iot.id": 5}))))
             .unwrap();
 
-        let written = String::from_utf8(writer.finish().unwrap()).unwrap();
+        let written = String::from_utf8(writer.into_things().finish().unwrap()).unwrap();
 
         assert_eq!(
             written,
             "{\"sensorthingsSnapshot\":1,\"serviceRoot\":\"https://h.example/v1.1\",\"version\":\"v1.1\",\"read\":\"latest\",\"collectedAt\":\"2026-11-12T10:00:00Z\"}\n{\"datastream\":{\"@iot.id\":5}}\n"
+        );
+    }
+
+    #[test]
+    fn thing_lines_follow_the_datastream_lines_of_a_latest_snapshot() {
+        let mut writer = SnapshotWriter::start(Vec::new(), &header(ReadKind::Latest)).unwrap();
+        writer
+            .datastream(&DatastreamLine::new(StreamKind::Datastream, object(json!({"@iot.id": 5}))))
+            .unwrap();
+        let mut writer = writer.into_things();
+        writer.thing(&ThingLine::new(object(json!({"@iot.id": 12520, "name": "ILM_I75"})))).unwrap();
+
+        let written = String::from_utf8(writer.finish().unwrap()).unwrap();
+
+        assert!(
+            written.ends_with("\n{\"datastream\":{\"@iot.id\":5}}\n{\"thing\":{\"@iot.id\":12520,\"name\":\"ILM_I75\"}}\n"),
+            "{written}"
         );
     }
 

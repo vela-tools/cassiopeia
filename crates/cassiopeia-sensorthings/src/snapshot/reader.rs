@@ -107,7 +107,7 @@ mod tests {
         snapshot::{
             error::SnapshotError,
             header::SnapshotHeader,
-            line::{DatastreamLine, HistoricalLocationLine, LineKind, ObservationLine, SnapshotLine},
+            line::{DatastreamLine, HistoricalLocationLine, LineKind, ObservationLine, SnapshotLine, ThingLine},
             reader::SnapshotReader,
             writer::SnapshotWriter,
         },
@@ -223,7 +223,7 @@ mod tests {
             Err(SnapshotError::OrderViolation { line, .. }) if line.get() == 4
         ));
         assert!(matches!(
-            read_all(&format!("{HEADER}\n{{\"thing\":{{}}}}\n")),
+            read_all(&format!("{HEADER}\n{{\"thing\":12512}}\n")),
             Err(SnapshotError::Malformed { line, .. }) if line.get() == 2
         ));
     }
@@ -246,6 +246,28 @@ mod tests {
         assert!(matches!(
             read_all(&format!("{HEADER}\n{datastream}\n{historical}\n{observation}\n")),
             Err(SnapshotError::OrderViolation { line, kind: LineKind::Observation, after: LineKind::HistoricalLocation }) if line.get() == 4
+        ));
+    }
+
+    #[test]
+    fn thing_lines_follow_the_data_stream_lines() {
+        let datastream = r#"{"datastream":{"@iot.id":5}}"#;
+        let thing = r#"{"thing":{"@iot.id":12520,"name":"ILM_I75"}}"#;
+
+        let (_, lines) = read_all(&format!("{HEADER}\n{datastream}\n{thing}\n{thing}\n")).unwrap();
+        assert_eq!(
+            lines.iter().map(SnapshotLine::kind).collect::<Vec<_>>(),
+            [LineKind::Datastream, LineKind::Thing, LineKind::Thing]
+        );
+        assert_eq!(
+            lines[1],
+            SnapshotLine::Thing(ThingLine::new(object(json!({"@iot.id": 12520, "name": "ILM_I75"}))))
+        );
+        let (_, without) = read_all(&format!("{HEADER}\n{thing}\n")).unwrap();
+        assert_eq!(without.len(), 1);
+        assert!(matches!(
+            read_all(&format!("{HEADER}\n{datastream}\n{thing}\n{datastream}\n")),
+            Err(SnapshotError::OrderViolation { line, kind: LineKind::Datastream, after: LineKind::Thing }) if line.get() == 4
         ));
     }
 

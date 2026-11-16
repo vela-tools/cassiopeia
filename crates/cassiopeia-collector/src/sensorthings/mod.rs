@@ -1,11 +1,11 @@
 //! Collecting a SensorThings API server: the requests of one cycle, followed page by page, written
 //! into a snapshot file the profiler and the ingestor read as they would a local one, and the
 //! metadata discovery a command reads the same way. Datastreams and the `MultiDatastreams` an input
-//! selects, and the `HistoricalLocations` of their Things when the input asks for them, are read
-//! through the same traversal, paging, limits and pacing. An incremental read
-//! resumes from the positions its cursor committed and leaves the update of the cycle for the
-//! pipeline to commit, and a run checks once whether its server holds `MultiDatastreams` an input
-//! reads none of.
+//! selects, the `HistoricalLocations` of their Things when the input asks for them, and the Things a
+//! latest read lists by themselves, are read through the same traversal, paging, limits and pacing.
+//! An incremental read resumes from the positions its cursor committed and leaves the update of the
+//! cycle for the pipeline to commit, and a run checks once whether its server holds
+//! `MultiDatastreams` an input reads none of.
 
 pub mod collection_listing;
 pub mod collector;

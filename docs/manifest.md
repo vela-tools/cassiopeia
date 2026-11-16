@@ -222,11 +222,12 @@ inputs: [
 | `multiDatastreams` | The MultiDatastreams read, for a server with the MultiDatastream extension: `false` for none, the default; `true` for every one; or an OData `$filter` expression over MultiDatastreams, such as `startswith(name,'ws-')`, sent and checked as `datastreams` is. A MultiDatastream has `ObservedProperties` where a Datastream has an `ObservedProperty`, so each has a filter of its own. Below. |
 | `read` | `"latest"`, the default: the newest reading of every selected data stream. Or `{ range: { ... } }`: every reading of a time range. Or `{ incremental: { ... } }`: every reading gained since the last successful cycle. Both are below. |
 | `pageSize` | The `$top` of every request, 1 to 10000. The default is 1000. A server may serve fewer items a page. |
-| `limits.pages` | The most pages one request is followed for, at least 1. The default is 1000. A latest read sends one request for each kind of data stream it reads; a range or incremental read sends one for each kind's discovery and one for each data stream, and with `historicalLocations: true` one for each Thing. |
+| `limits.pages` | The most pages one request is followed for, at least 1. The default is 1000. A latest read sends one request for each kind of data stream it reads, and with `things` one for the Things; a range or incremental read sends one for each kind's discovery and one for each data stream, and with `historicalLocations: true` one for each Thing. |
 | `limits.observations` | The most Observations one cycle writes, at least 1, of Datastreams and MultiDatastreams together. The default is 500000. A range or incremental read stops reading Observations when it has written this many. HistoricalLocations are not counted, and are read after it stops. A latest read collects at most one Observation per data stream, so `limits.pages` alone bounds it. |
 | `delay` | A wait between consecutive requests, such as `"200ms"`, at most `"60s"`. The default is none. |
 | `featuresOfInterest` | `true` to read every Observation with its FeatureOfInterest, the place the reading was taken at. The default is `false`. Below. |
 | `historicalLocations` | `true` to read, in a range or incremental read, the HistoricalLocations of every Thing a listed data stream belongs to: the places the Thing was known at, and when. The default is `false`. A latest read refuses it. Below. |
+| `things` | The Things a latest read lists by themselves, besides the Things of the data streams it reads, which finds a Thing that has no data stream: `false` for none, the default; `true` for every one; or an OData `$filter` expression over Things, such as `startswith(name,'ILM_')`, sent and checked as `datastreams` is. A range or incremental read refuses it. Below. |
 
 A range read takes one of two forms:
 
@@ -306,6 +307,17 @@ sensorthings: {
 
 A range or incremental read then requests, after the Observations, the HistoricalLocations of each Thing a listed data stream belongs to, by ascending Thing id, each with its Locations, within the read's bounds. Each HistoricalLocation gives a record with the Thing's members and a `historicalLocation`: its `id`, its `time`, and the geometry of its GeoJSON Location with the lowest id as `location`. An incremental read keeps a position for each Thing beside those of its data streams. A HistoricalLocation whose `time` names no instant, or that has no GeoJSON Location, gives no record, and one `ingest-historical-locations-unreadable` warning per source names the first one. A latest read reads none, because its record's `location` already is the Thing's last known place, so `historicalLocations: true` with `read: "latest"`, or without `read`, is refused. [Historical locations](source-formats.md#historical-locations) gives the requests, the records, and a mapping that writes a Thing's track.
 
+`things` lists the Things that have no data stream, such as a station whose sensors are not connected yet, for a mapping that keeps an inventory of a server's stations:
+
+~~~json5
+sensorthings: {
+    datastreams: "startswith(name,'ILM_')",
+    things: "startswith(name,'ILM_')",
+},
+~~~
+
+A latest read then lists the Things after its data streams, each with its Locations, and each Thing that no data stream names gives a record with `server`, `thing`, `location` and `locations`, without `readings`, after the others. A Thing a data stream names gives one record, as without `things`. A range or incremental read lists no Thing, because it gives one record per Observation and a Thing without data streams has none, so `things: true` or an expression with a range or incremental read is refused. [Things without data streams](source-formats.md#things-without-data-streams) gives the request, the snapshot line, the records, and an inventory mapping.
+
 Without a `sensorthings` block, a remote SensorThings input reads every Datastream and no MultiDatastream with the defaults. An unknown key in the block is refused. Credentials for a server go in [`headers`](#per-input-headers). [Reading a server](source-formats.md#reading-a-server) describes the requests, the paging, and how servers differ.
 
 These are refused when the manifest loads:
@@ -318,7 +330,8 @@ These are refused when the manifest loads:
 - an `incremental` read without a `cursor`, with a cursor name outside its characters or length, with an unknown key, with an `initial` that is neither an RFC 3339 instant nor a span, or a span of zero, or with a `lookback` longer than `"7d"`;
 - a `featuresOfInterest` or a `historicalLocations` other than `true` or `false`;
 - `historicalLocations: true` on a latest read, which reads no HistoricalLocations. The error names the setting;
-- a `datastreams` that is blank or holds a line break or another control character, and a `multiDatastreams` that is not `true`, `false`, or such an expression. The error names the setting;
+- `things: true` or an expression on a range or incremental read, which lists no Thing. The error names the setting and the read;
+- a `datastreams` that is blank or holds a line break or another control character, and a `multiDatastreams` or a `things` that is not `true`, `false`, or such an expression. The error names the setting;
 - two inputs whose incremental reads name the same cursor, because each would move the positions the other resumes from. The error names the cursor.
 
 A range or incremental read without `output.temporal.representation: "series"` is refused when the run is built, before any request. It gives one record per Observation, and current-state output keeps one record per entity, so it would keep one reading of each Thing. A scheduled `read: "latest"` into a broker with `operation: "temporal"` is refused when the run is built. Every cycle would send the newest reading of every data stream again, and the temporal API would store each unchanged reading once more. A one-shot latest read into the temporal API is allowed, and so is a scheduled latest read into a broker with `operation: "upsert"`.
