@@ -5,7 +5,8 @@ use crate::sensorthings::{
     location::thing_location,
     null_members::present,
     reading_keys::{ReadingKey, RenamedReading, reading_keys},
-    record_builder::record_members,
+    record_builder::{DatastreamParts, record_members},
+    sensor::sensor,
     served_id::{optional_served_id, served_id},
 };
 use cassiopeia_sensorthings::{
@@ -39,12 +40,8 @@ pub(super) struct IndexedThing {
 pub(super) struct IndexedDatastream {
     /// The key its readings are found under in a record's `readings`.
     pub(super) key: ReadingKey,
-    /// The reading's `unit`: the data stream's `unitOfMeasurement`, when it has one.
-    pub(super) unit: Option<Value>,
-    /// The reading's `datastream`: the data stream's id and members.
-    pub(super) members: Map<String, Value>,
-    /// The reading's `observedProperty`: the `ObservedProperty`'s id and members.
-    pub(super) observed_property: Map<String, Value>,
+    /// What each of its readings carries of it.
+    pub(super) parts: DatastreamParts,
     /// The newest Observation a latest read expanded into the datastream line, with that line.
     pub(super) latest: Option<(Map<String, Value>, LineNumber)>,
 }
@@ -78,9 +75,7 @@ struct PendingThing {
 struct PendingDatastream {
     id: EntityId,
     name: Box<str>,
-    unit: Option<Value>,
-    members: Map<String, Value>,
-    observed_property: Map<String, Value>,
+    parts: DatastreamParts,
     latest: Option<(Map<String, Value>, LineNumber)>,
 }
 
@@ -94,7 +89,8 @@ impl ThingIndexBuilder {
     /// # Errors
     ///
     /// Returns [`SensorThingsIngestError`] when the data stream, its Thing or a Location has no
-    /// readable id, or the data stream has no Thing or no named `ObservedProperty`.
+    /// readable id, its `ObservedProperty` or its `Sensor` has an id that is neither an integer nor a
+    /// text, or the data stream has no Thing or no named `ObservedProperty`.
     pub(super) fn add(&mut self, line: DatastreamLine, number: LineNumber, losses: &mut SensorThingsLosses) -> Result<(), SensorThingsIngestError> {
         let mut served = line.into_datastream();
         let id = served_id(&served, number, StaEntity::Datastream)?;
@@ -112,11 +108,15 @@ impl ThingIndexBuilder {
             return Err(SensorThingsIngestError::ObservedPropertyUnnamed { datastream: id });
         };
         let observed_id = optional_served_id(&observed, number, StaEntity::ObservedProperty)?;
+        let sensor = sensor(&mut served, number)?;
         let latest = newest_observation(served.remove("Observations")).map(|observation| (observation, number));
         let datastream = PendingDatastream {
-            unit: served.remove("unitOfMeasurement").and_then(present),
-            members: record_members(served, Some(&id), &DATASTREAM_MEMBERS),
-            observed_property: record_members(observed, observed_id.as_ref(), &OBSERVED_PROPERTY_MEMBERS),
+            parts: DatastreamParts {
+                unit: served.remove("unitOfMeasurement").and_then(present),
+                members: record_members(served, Some(&id), &DATASTREAM_MEMBERS),
+                observed_property: record_members(observed, observed_id.as_ref(), &OBSERVED_PROPERTY_MEMBERS),
+                sensor,
+            },
             name,
             latest,
             // The set keeps the id to skip a repeated line, while the data stream keeps it to be
@@ -180,9 +180,7 @@ impl ThingIndexBuilder {
                         positions.insert(datastream.id, (thing_position, position));
                         IndexedDatastream {
                             key,
-                            unit: datastream.unit,
-                            members: datastream.members,
-                            observed_property: datastream.observed_property,
+                            parts: datastream.parts,
                             latest: datastream.latest,
                         }
                     })

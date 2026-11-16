@@ -135,7 +135,7 @@ mod tests {
     use url::Url;
 
     /// The path and query of the metadata discovery request with the default settings.
-    const METADATA: &str = "/v1.1/Datastreams?$expand=Thing/Locations,ObservedProperty&$orderby=id%20asc&$top=1000";
+    const METADATA: &str = "/v1.1/Datastreams?$expand=Thing/Locations,ObservedProperty,Sensor&$orderby=id%20asc&$top=1000";
 
     /// The settings of an incremental read through the cursor `rivm-air`, with the members `extra`
     /// beside `read`.
@@ -286,6 +286,35 @@ mod tests {
         let position = positions.get(&id(5)).unwrap();
         assert_eq!(position.high_water(), at("09:30"));
         assert_eq!(position.seen(), &seen(&[(1, "09:00"), (2, "09:30")]));
+    }
+
+    #[test]
+    fn an_incremental_read_keeps_each_sensor_inside_its_datastream_line() {
+        let mut server = mockito::Server::new();
+        let answered = Answered::default();
+        let datastream = json!({
+            "@iot.id": 5,
+            "name": "stream 5",
+            "Sensor": {"@iot.id": 7, "name": "PM-200", "metadata": "https://sensors.example.org/pm-200.pdf"},
+        });
+        let discovered = server
+            .mock("GET", METADATA)
+            .with_body(json!({ "value": [&datastream] }).to_string())
+            .expect(1)
+            .create();
+        serve_observations(&mut server, 5, &[(1, "09:00")], &answered);
+
+        let (result, payloads) = collect(resuming_collector(
+            &server,
+            &incremental(""),
+            CursorCycle::new(Positions::default(), CursorUpdateSlot::default()),
+        ));
+
+        result.unwrap();
+        discovered.assert();
+        let lines = snapshot_lines(payloads);
+        assert_eq!(lines[1], json!({ "datastream": datastream }));
+        assert_eq!(lines[2]["observation"]["@iot.id"], 1);
     }
 
     #[test]

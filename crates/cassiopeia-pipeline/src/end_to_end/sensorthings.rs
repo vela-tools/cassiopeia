@@ -186,7 +186,7 @@ fn a_remote_latest_read_writes_one_entity_per_thing() {
         let discovery = server
             .mock(
                 "GET",
-                "/v1.0/Datastreams?$expand=Thing/Locations,ObservedProperty,Observations($orderby=phenomenonTime%20desc;$top=1)&$orderby=id%20asc&$top=1000",
+                "/v1.0/Datastreams?$expand=Thing/Locations,ObservedProperty,Sensor,Observations($orderby=phenomenonTime%20desc;$top=1)&$orderby=id%20asc&$top=1000",
             )
             .with_body(&page)
             .expect(1)
@@ -253,7 +253,7 @@ fn an_incremental_snapshot_into_current_state_output_is_refused() {
 
 /// The path and query of the metadata discovery request of a range read of the mock server's
 /// `/v1.0` root with the default settings.
-const RANGE_METADATA: &str = "/v1.0/Datastreams?$expand=Thing/Locations,ObservedProperty&$orderby=id%20asc&$top=1000";
+const RANGE_METADATA: &str = "/v1.0/Datastreams?$expand=Thing/Locations,ObservedProperty,Sensor&$orderby=id%20asc&$top=1000";
 
 /// The one Thing the RIVM range fixture holds, as its entity is named when read from the mock server.
 pub(crate) const MOCK_RANGE_THING: &str = "urn:ngsi-ld:AirQualityObserved:sta-127001-12512";

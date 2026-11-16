@@ -1,0 +1,40 @@
+{
+    version: "v4",
+    dataModel: "dataModel.Environment/AirQualityObserved",
+    identity: {
+        entityName: "sta-{{ server.host }}-{{ thing.id }}",
+    },
+    attributes: {
+        name: { source: "{{ thing.name }}" },
+        location: { type: "GeoProperty", source: "{{ location }}" },
+        dateObserved: {
+            source: "{% if readings.pm10 %}{{ readings.pm10.time }}{% elif readings.no2 %}{{ readings.no2.time }}{% endif %}",
+            transformation: "datetime",
+        },
+        pm10: {
+            source: "{{ readings.pm10.result }}",
+            transformation: "float",
+            properties: {
+                observedAt: { source: "{{ readings.pm10.time }}", transformation: "datetime" },
+            },
+        },
+        no2: {
+            source: "{{ readings.no2.result }}",
+            transformation: "float",
+            properties: {
+                observedAt: { source: "{{ readings.no2.time }}", transformation: "datetime" },
+            },
+        },
+        refDevice: {
+            type: "Relationship",
+            syntheticEntity: {
+                dataModel: "dataModel.Device/Device",
+                identity: { entityName: "sta-{{ server.host }}-sensor-{{ readings.pm10.sensor.id }}" },
+                attributes: {
+                    name: { source: "{{ readings.pm10.sensor.name }}" },
+                    description: { source: "{{ readings.pm10.sensor.description }}" },
+                },
+            },
+        },
+    },
+}

@@ -358,7 +358,7 @@ Listing both a collection and one nested in it yields records from both, in docu
 
 ## SensorThings API
 
-Cassiopeia reads [OGC SensorThings API](https://www.ogc.org/standards/sensorthings/) data, versions 1.0 and 1.1, from a server or from a **snapshot file**: the Datastreams and Observations one read of a SensorThings server collected, written as JSON Lines. A server serves its readings as nested JSON whose shape changes with the request, so every read of a server is written into a snapshot first, and the ingestor joins each reading with its Thing, Location, data stream and ObservedProperty. A mapping then reads one record shape, whichever server the readings came from, and whether they were read from the server or replayed from a file.
+Cassiopeia reads [OGC SensorThings API](https://www.ogc.org/standards/sensorthings/) data, versions 1.0 and 1.1, from a server or from a **snapshot file**: the Datastreams and Observations one read of a SensorThings server collected, written as JSON Lines. A server serves its readings as nested JSON whose shape changes with the request, so every read of a server is written into a snapshot first, and the ingestor joins each reading with its Thing, Location, data stream, ObservedProperty and Sensor. A mapping then reads one record shape, whichever server the readings came from, and whether they were read from the server or replayed from a file.
 
 ### Reading a server
 
@@ -385,10 +385,10 @@ Each cycle writes what it read into a snapshot whose `serviceRoot` is the root a
 **The request.** A latest read sends one request, and follows it page by page:
 
 ~~~text
-{root}/Datastreams?$filter={datastreams}&$expand=Thing/Locations,ObservedProperty,Observations($orderby=phenomenonTime%20desc;$top=1)&$orderby=id%20asc&$top={pageSize}
+{root}/Datastreams?$filter={datastreams}&$expand=Thing/Locations,ObservedProperty,Sensor,Observations($orderby=phenomenonTime%20desc;$top=1)&$orderby=id%20asc&$top={pageSize}
 ~~~
 
-It selects every data stream with its Thing, the Thing's Locations, its ObservedProperty, and its newest Observation, in id order. `$filter` is sent only when `datastreams` is set. Its value is sent as written, percent-encoded, with a space as `%20` and `'` as `%27`. The Locations are expanded by path, `Thing/Locations`, because some servers ignore an `$expand` nested in parentheses, such as `Thing($expand=Locations)`. With `featuresOfInterest: true`, the newest Observation is also expanded with its FeatureOfInterest (see [Features of interest](#features-of-interest)).
+It selects every data stream with its Thing, the Thing's Locations, its ObservedProperty, its Sensor, and its newest Observation, in id order. `$filter` is sent only when `datastreams` is set. Its value is sent as written, percent-encoded, with a space as `%20` and `'` as `%27`. The Locations are expanded by path, `Thing/Locations`, because some servers ignore an `$expand` nested in parentheses, such as `Thing($expand=Locations)`. With `featuresOfInterest: true`, the newest Observation is also expanded with its FeatureOfInterest (see [Features of interest](#features-of-interest)).
 
 **Paging.** A server answers with pages of at most `pageSize` items. Every page but the last links to the next one with `@iot.nextLink`. Cassiopeia follows each link as the server wrote it, resolved against the page it came from, and adds nothing to it (OGC 18-088 section 9.3.3.6). The input fails without sending the request:
 
@@ -423,7 +423,7 @@ sensorthings: {
 
 Every attempt at one scheduled run starts from the same instant, so a retried attempt reads the same range, and each later run reads from its own start. When the start is not before the end, as for a `from` after the cycle start, the read requests nothing, its snapshot holds its header alone, and one `collect-range-empty` warning names the range.
 
-**The requests.** The read first sends the request [Listing a server's readings](#listing-a-servers-readings) sends, with the input's `datastreams` and `pageSize`. It lists every selected Datastream with its Thing, the Thing's Locations, and its ObservedProperty, without Observations, and the read writes each Datastream into the snapshot. Then it reads the Observations of each data stream with a request of its own:
+**The requests.** The read first sends the request [Listing a server's readings](#listing-a-servers-readings) sends, with the input's `datastreams` and `pageSize`. It lists every selected Datastream with its Thing, the Thing's Locations, its ObservedProperty, and its Sensor, without Observations, and the read writes each Datastream into the snapshot. Then it reads the Observations of each data stream with a request of its own:
 
 ~~~text
 {root}/Datastreams({id})/Observations?$filter=phenomenonTime%20ge%20{from}%20and%20phenomenonTime%20lt%20{to}&$orderby=phenomenonTime%20asc,id%20asc&$top={pageSize}
@@ -523,7 +523,7 @@ A snapshot is UTF-8 JSON Lines: one JSON object per line, each line ended by `\n
 | `read` | How the read chose its readings: `latest`, the newest reading of every data stream; `range`, every reading of a time range; or `incremental`, every reading since the last read. |
 | `collectedAt` | The instant the read started. |
 
-Every Datastream follows, one per line, as the server served it, with its Thing, the Thing's Locations, and its ObservedProperty. In a `latest` read, each one also carries its newest Observation:
+Every Datastream follows, one per line, as the server served it, with its Thing, the Thing's Locations, its ObservedProperty, and its Sensor. In a `latest` read, each one also carries its newest Observation:
 
 ~~~json
 {"datastream":{"@iot.id":56776,"name":"ILM_I68-13-pm10","unitOfMeasurement":{"symbol":"ug/m3","definition":"https://qudt.org/vocab/unit/MicroGM-PER-M3"},"Thing":{"@iot.id":12512,"name":"ILM_I68","Locations":[{"@iot.id":36182,"encodingType":"application/vnd.geo+json","location":{"type":"Point","coordinates":[5.608,51.313]}}]},"ObservedProperty":{"@iot.id":1,"name":"pm10","definition":"https://www.eea.europa.eu/help/glossary/eea-glossary/pm10"},"Observations":[{"@iot.id":98765,"phenomenonTime":"2026-11-12T09:00:00Z/2026-11-12T10:00:00Z","result":21.4}]}}
@@ -536,6 +536,8 @@ In a `range` or `incremental` read, every Observation follows the Datastreams, o
 ~~~
 
 A read with `featuresOfInterest: true` keeps each FeatureOfInterest inside its Observation, as the server served it: in each observation line of a `range` or `incremental` read, and in each Datastream's `Observations` of a `latest` read. A snapshot recorded without features of interest still reads, and its readings have no `featureOfInterest`.
+
+Each Datastream keeps its Sensor inside its line, as the server served it. A snapshot recorded without Sensors still reads, and its readings have no `sensor`.
 
 The source fails when its first line is no header, the header names another snapshot format or a version its service root does not end with, a line is no JSON object of these kinds, or a datastream line follows an observation line. The error names the line. A snapshot holds no request header or credential, so it can be shared or kept as a test fixture.
 
@@ -576,6 +578,7 @@ Every record has this shape. The ids, names, units and definitions are RIVM Same
 | `.datastream` | The data stream's `id`, `name`, `description`, `observationType`, and `properties`. |
 | `.observedProperty` | The ObservedProperty's `id`, `name`, `definition`, `description`, and `properties`. |
 | `.featureOfInterest` | The FeatureOfInterest the Observation was made at, when the read requested it. See [Features of interest](#features-of-interest). |
+| `.sensor` | The Sensor of the data stream, when the server served one. See [Sensors](#sensors). |
 
 Ids keep the JSON type the server sent: an integer id stays a number and a text id stays text. An id of any other type fails the source, naming its line. A member the server leaves out or sends as `null` is absent from the record, at any depth, because NGSI-LD allows no `null` and an absent field produces no attribute. A data stream without a Thing, or without an ObservedProperty with a `name`, fails the source, naming the data stream.
 
@@ -621,7 +624,7 @@ sensorthings: {
 A latest read expands it inside the newest Observation, as OGC 18-088 section 9.3.2.1 allows:
 
 ~~~text
-{root}/Datastreams?$filter={datastreams}&$expand=Thing/Locations,ObservedProperty,Observations($orderby=phenomenonTime%20desc;$top=1;$expand=FeatureOfInterest)&$orderby=id%20asc&$top={pageSize}
+{root}/Datastreams?$filter={datastreams}&$expand=Thing/Locations,ObservedProperty,Sensor,Observations($orderby=phenomenonTime%20desc;$top=1;$expand=FeatureOfInterest)&$orderby=id%20asc&$top={pageSize}
 ~~~
 
 Without `featuresOfInterest`, or with `false`, every request is sent without the expansion. Each expansion asks the server for one more join per Observation, which a slow server may not answer within its time limit, and for a fixed station it repeats the Thing's Location on every reading, so leave the setting off for stations. A server that ignores an `$expand` nested in parentheses, as RIVM Samen Meten does, serves the newest Observation of a latest read without its FeatureOfInterest. Its readings then have no `featureOfInterest`, and the run goes on.
@@ -658,6 +661,47 @@ location: {
 
 A FeatureOfInterest need not be a place the Thing was at: it can be a river reach or a sample. A latest record holds one reading per data stream, each with a FeatureOfInterest of its own. The mapping therefore chooses the place: the Thing's `location`, or a reading's `featureOfInterest.feature`.
 
+### Sensors
+
+Each data stream links the Sensor that makes its readings (OGC 18-088 section 8.2.5): the instrument or procedure, with a `name`, a `description`, an `encodingType`, and `metadata`, which is often the URL of a datasheet or of a SensorML description. Every discovery request expands it beside the ObservedProperty, so a read asks for each Sensor once per data stream, whatever the number of its Observations, and the snapshot keeps it inside its Datastream line.
+
+**The member.** Each reading of a data stream served with its Sensor has a `sensor`:
+
+~~~json
+"sensor": {
+    "id": 7,
+    "name": "PM-200",
+    "description": "Optical particulate matter sensor",
+    "encodingType": "application/pdf",
+    "metadata": "https://sensors.example.org/pm-200.pdf"
+}
+~~~
+
+| Member | Content |
+| --- | --- |
+| `sensor.id`, `.name`, `.description`, `.encodingType`, `.properties` | The Sensor's members, as served. |
+| `sensor.metadata` | The Sensor's `metadata`, as served: text or JSON. Cassiopeia does not fetch or parse what it points to. |
+
+Ids keep the JSON type the server sent, and a member that is absent or `null` is left out, as for every member of a record, so a Sensor served without an id has no `id`. An id that is neither an integer nor a text fails the source, naming its line. A data stream served without a Sensor gives readings without `sensor`, and the read goes on.
+
+**Mapping.** Smart Data Models describe an instrument as a `Device`, and observation models such as `AirQualityObserved` link it through `refDevice`. A mapping links each observation to a `Device` that describes the Sensor of one of its readings with a [synthetic entity](mapping.md#emit-a-related-entity):
+
+~~~json5
+refDevice: {
+    type: "Relationship",
+    syntheticEntity: {
+        dataModel: "dataModel.Device/Device",
+        identity: { entityName: "sta-{{ server.host }}-sensor-{{ readings.pm10.sensor.id }}" },
+        attributes: {
+            name: { source: "{{ readings.pm10.sensor.name }}" },
+            description: { source: "{{ readings.pm10.sensor.description }}" },
+        },
+    },
+},
+~~~
+
+For Sensor 7 of `https://h.example/v1.1`, the Device is `urn:ngsi-ld:Device:sta-hexample-sensor-7`. A record without `readings.pm10`, or whose reading has no `sensor`, writes neither the Device nor the link, and the observation is still written.
+
 ### Reading times
 
 `time` is the instant a reading's `phenomenonTime` stands for, written in UTC: the instant itself, or the end of a `start/end` interval, when the reading was complete. It keeps at most six fractional digits, the microsecond precision NGSI-LD uses, and leaves out a fraction of zero, so `2026-11-12T11:00:00.000Z` becomes `2026-11-12T11:00:00Z` and `2026-11-12T12:00:00+02:00` becomes `2026-11-12T10:00:00Z`. Use it as an attribute's `observedAt`.
@@ -689,10 +733,10 @@ status   none          none       12            0
 | `data streams` | The number of data streams of the name. |
 | `things with repeats` | The number of Things that hold more than one data stream of the name. Their extra data streams are read under `<name>@<data stream id>` keys (see [Reading keys](#reading-keys)). |
 
-`--datastreams` selects the data streams listed with a filter, as `datastreams` does in an input's `sensorthings` block, and `--input-header` sends a header with every request, as an input's `headers` do. The service root carries no credentials. The command reads the server as a run does, with every other setting at its default: it follows one request page by page under the rules of [Paging](#reading-a-server) and fails with a run's errors. The request asks for each Datastream with its Thing, the Thing's Locations, and its ObservedProperty, without Observations:
+`--datastreams` selects the data streams listed with a filter, as `datastreams` does in an input's `sensorthings` block, and `--input-header` sends a header with every request, as an input's `headers` do. The service root carries no credentials. The command reads the server as a run does, with every other setting at its default: it follows one request page by page under the rules of [Paging](#reading-a-server) and fails with a run's errors. The request asks for each Datastream with its Thing, the Thing's Locations, its ObservedProperty, and its Sensor, without Observations:
 
 ~~~text
-{root}/Datastreams?$filter={datastreams}&$expand=Thing/Locations,ObservedProperty&$orderby=id%20asc&$top=1000
+{root}/Datastreams?$filter={datastreams}&$expand=Thing/Locations,ObservedProperty,Sensor&$orderby=id%20asc&$top=1000
 ~~~
 
 When `limits.pages` stops the read, the table lists the data streams read before it, and a note on standard error names the next link that was not followed. A data stream without a Thing, or without an ObservedProperty with a `name`, fails the command and is named, as it fails a run. RIVM Samen Meten holds tens of thousands of data streams, so select them by name there, as for a read.

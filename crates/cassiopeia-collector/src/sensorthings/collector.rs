@@ -195,10 +195,10 @@ mod tests {
 
     /// The path and query of the latest discovery request with the default settings.
     const LATEST: &str =
-        "/v1.1/Datastreams?$expand=Thing/Locations,ObservedProperty,Observations($orderby=phenomenonTime%20desc;$top=1)&$orderby=id%20asc&$top=1000";
+        "/v1.1/Datastreams?$expand=Thing/Locations,ObservedProperty,Sensor,Observations($orderby=phenomenonTime%20desc;$top=1)&$orderby=id%20asc&$top=1000";
 
     /// The path and query of the latest discovery request that requests features of interest.
-    const LATEST_WITH_FEATURES: &str = "/v1.1/Datastreams?$expand=Thing/Locations,ObservedProperty,Observations($orderby=phenomenonTime%20desc;$top=1;$expand=FeatureOfInterest)&$orderby=id%20asc&$top=1000";
+    const LATEST_WITH_FEATURES: &str = "/v1.1/Datastreams?$expand=Thing/Locations,ObservedProperty,Sensor,Observations($orderby=phenomenonTime%20desc;$top=1;$expand=FeatureOfInterest)&$orderby=id%20asc&$top=1000";
 
     /// A shutdown flag the stop test sets once the first page is served.
     static STOPPED_AFTER_PAGE_ONE: AtomicBool = AtomicBool::new(false);
@@ -275,6 +275,29 @@ mod tests {
         let discovery = serve(&mut server, LATEST_WITH_FEATURES, json!({ "value": [&datastream] }).to_string());
 
         let (result, payloads) = collect(collector(&server, r#"{"featuresOfInterest": true}"#, RequestHeaders::default(), &RUNNING));
+
+        result.unwrap();
+        discovery.assert();
+        assert_eq!(snapshot_lines(payloads)[1], json!({ "datastream": datastream }));
+    }
+
+    #[test]
+    fn a_latest_read_keeps_each_sensor_inside_its_data_stream() {
+        let mut server = mockito::Server::new();
+        let datastream = json!({
+            "@iot.id": 56776,
+            "name": "station-1 pm10",
+            "Sensor": {
+                "@iot.id": 7,
+                "name": "PM-200",
+                "encodingType": "application/pdf",
+                "metadata": "https://sensors.example.org/pm-200.pdf",
+            },
+            "Observations": [{"@iot.id": 70, "phenomenonTime": "2026-11-12T09:59:00Z", "result": 18.2}],
+        });
+        let discovery = serve(&mut server, LATEST, json!({ "value": [&datastream] }).to_string());
+
+        let (result, payloads) = collect(collector(&server, "{}", RequestHeaders::default(), &RUNNING));
 
         result.unwrap();
         discovery.assert();

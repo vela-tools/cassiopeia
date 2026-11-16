@@ -57,7 +57,7 @@ mod tests {
     use url::Url;
 
     /// The path and query of the metadata discovery request with the default settings.
-    const METADATA: &str = "/v1.1/Datastreams?$expand=Thing/Locations,ObservedProperty&$orderby=id%20asc&$top=1000";
+    const METADATA: &str = "/v1.1/Datastreams?$expand=Thing/Locations,ObservedProperty,Sensor&$orderby=id%20asc&$top=1000";
 
     /// A shutdown flag never set, as in a run nobody stops.
     static RUNNING: AtomicBool = AtomicBool::new(false);
@@ -115,7 +115,7 @@ mod tests {
         let discovery = server
             .mock(
                 "GET",
-                "/v1.1/Datastreams?$filter=startswith(name,%27ILM_I68-%27)&$expand=Thing/Locations,ObservedProperty&$orderby=id%20asc&$top=10",
+                "/v1.1/Datastreams?$filter=startswith(name,%27ILM_I68-%27)&$expand=Thing/Locations,ObservedProperty,Sensor&$orderby=id%20asc&$top=10",
             )
             .with_body(page(&[1], None))
             .expect(1)
