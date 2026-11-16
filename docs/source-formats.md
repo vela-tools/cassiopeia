@@ -385,7 +385,7 @@ Each cycle writes what it read into a snapshot whose `serviceRoot` is the root a
 **The request.** A latest read sends one request, and follows it page by page:
 
 ~~~text
-{root}/Datastreams?$filter={datastreams}&$expand=Thing/Locations,ObservedProperty,Sensor,Observations($orderby=phenomenonTime%20desc;$top=1)&$orderby=id%20asc&$top={pageSize}
+{root}/Datastreams?$filter={datastreams}&$top={pageSize}&$expand=Thing/Locations,ObservedProperty,Sensor,Observations($orderby=phenomenonTime%20desc;$top=1)&$orderby=id%20asc
 ~~~
 
 It selects every Datastream with its Thing, the Thing's Locations, its ObservedProperty, its Sensor, and its newest Observation, in id order. `$filter` is sent only when `datastreams` is set. Its value is sent as written, percent-encoded, with a space as `%20` and `'` as `%27`. The Locations are expanded by path, `Thing/Locations`, because some servers ignore an `$expand` nested in parentheses, such as `Thing($expand=Locations)`. With `featuresOfInterest: true`, the newest Observation is also expanded with its FeatureOfInterest (see [Features of interest](#features-of-interest)). A read that selects MultiDatastreams sends the same request to the MultiDatastreams collection as well (see [MultiDatastreams](#multidatastreams)). With `things`, a latest read then lists Things by themselves, which finds a Thing that has no data stream (see [Things without data streams](#things-without-data-streams)).
@@ -403,6 +403,8 @@ A body that is not a page of a collection, a JSON object with a `value` array, f
 
 - FROST-Server applies every filter, serves up to 10000 items a page by default, and answers the request as written.
 - RIVM Samen Meten (`https://api-samenmeten.rivm.nl/v1.0`) applies a `datastreams` filter only to a Datastream's own properties, such as `endswith(name,'-pm10')` or `startswith(name,'ILM_')`. A filter on `ObservedProperty` or `Thing`, such as `ObservedProperty/name eq 'pm10'`, gives one data stream, every data stream, or none, without an error. RIVM also ignores the parentheses of a filter: it reads `(a or b) and c` as `a or b and c`, so write a filter that needs none, such as conditions joined by `or`. RIVM serves at most 200 items a page. Finding the newest Observation of each data stream takes it up to half a second, so a latest page of 200 times out. Set `pageSize: 10` for a latest read of RIVM. It holds tens of thousands of data streams, so select them by name, and set a `delay` to spare the public service.
+- 52°North SensorThings API 3.3.8 serves SensorThings API 1.1 with text ids, such as `1ad2407f-053e-413a-b78e-b3c6293af62e`, and without the MultiDatastream extension: its root lists no MultiDatastreams. It applies every filter Cassiopeia sends. It links a full page to a next one, even when no item is left, and its next links percent-encode the whole query, which it reads back, but join the options of an expansion with `&` where OGC 18-088 section 9.3.2.1 has `;`, such as `Thing($expand=Locations($top=100)&$top=100)`, and it answers such a link with `400 Bad Request`. It writes the `Thing/Locations` of a discovery that way, so a read whose data streams take more than one page fails: set `pageSize` above the number of data streams the read selects. A read of Observations without features of interest pages as written. With `featuresOfInterest: true`, a latest read fails, because the server breaks off its answer with an error of its own and the read finds that the body is not JSON. A range or incremental read gets no FeatureOfInterest by default, and its readings have no `featureOfInterest`, without an error: the server leaves an expanded entity out of an Observation whose members are selected, unless its setting `server.feature.implicitExpand`, `SERVER_FEATURE_IMPLICITEXPAND` in its container, is `true`. With the setting, its next link nests the FeatureOfInterest's selection with `&`, so set `pageSize` above the number of Observations a data stream holds in the range.
+- istSOS4 1.3 serves SensorThings API 1.1 with integer ids, under its own path, such as `http://localhost:8018/istsos4/v1.1`, and without the MultiDatastream extension: its root lists no MultiDatastreams, and it answers the `MultiDatastreams` collection with `400 Bad Request`. It builds a next link from the first `$top=` of the request, so Cassiopeia writes the `$top` of a discovery before the `$top=1` of the newest Observation a latest read expands. It applies every filter Cassiopeia sends, and refuses a navigation property in `$select`, which Cassiopeia does not send.
 
 ### Reading a time range
 
@@ -691,10 +693,10 @@ sensorthings: {
 A FeatureOfInterest has `properties` from version 1.1 on (section 8.2.8), and a version 1.0 server may refuse a request that selects a member it does not define. A read of a version 1.0 server therefore expands each FeatureOfInterest without a selection, `$expand=FeatureOfInterest`, and keeps it as the server serves it. A latest read expands it inside the newest Observation, as OGC 18-088 section 9.3.2.1 allows:
 
 ~~~text
-{root}/Datastreams?$filter={datastreams}&$expand=Thing/Locations,ObservedProperty,Sensor,Observations($orderby=phenomenonTime%20desc;$top=1;$expand=FeatureOfInterest)&$orderby=id%20asc&$top={pageSize}
+{root}/Datastreams?$filter={datastreams}&$top={pageSize}&$expand=Thing/Locations,ObservedProperty,Sensor,Observations($orderby=phenomenonTime%20desc;$top=1;$expand=FeatureOfInterest)&$orderby=id%20asc
 ~~~
 
-Without `featuresOfInterest`, or with `false`, every request is sent without the expansion. Each expansion asks the server for one more join per Observation, which a slow server may not answer within its time limit, and for a fixed station it repeats the Thing's Location on every reading, so leave the setting off for stations. A server that ignores an `$expand` nested in parentheses, as RIVM Samen Meten does, serves the newest Observation of a latest read without its FeatureOfInterest. Its readings then have no `featureOfInterest`, and the run goes on.
+Without `featuresOfInterest`, or with `false`, every request is sent without the expansion. Each expansion asks the server for one more join per Observation, which a slow server may not answer within its time limit, and for a fixed station it repeats the Thing's Location on every reading, so leave the setting off for stations. A server that ignores an `$expand` nested in parentheses, as RIVM Samen Meten does, serves the newest Observation of a latest read without its FeatureOfInterest. Its readings then have no `featureOfInterest`, and the run goes on. OGC 18-088 section 9.3.2.2 selects an expanded entity implicitly, which 52°North SensorThings API 3.3.8 does only when its `implicitExpand` setting is on: otherwise it serves the Observations of a range or incremental read without their FeatureOfInterest, and their readings have no `featureOfInterest` (see [Servers differ](#reading-a-server)).
 
 **The member.** Each reading of an Observation served with its FeatureOfInterest has a `featureOfInterest`:
 
@@ -814,7 +816,7 @@ Only a latest read lists Things. A range or incremental read gives one record pe
 **The request.** After its data stream requests, a latest read lists the Things, each with its Locations, in id order:
 
 ~~~text
-{root}/Things?$filter={things}&$expand=Locations&$orderby=id%20asc&$top={pageSize}
+{root}/Things?$filter={things}&$top={pageSize}&$expand=Locations&$orderby=id%20asc
 ~~~
 
 `$filter` is sent only for an expression, percent-encoded as a `datastreams` filter is. The request is followed page by page under the rules of [Reading a server](#reading-a-server): `delay` spaces it from the requests before it, and `limits.pages` stops it, keeping the Things it listed, with one `collect-limit-reached` warning that names the next link. Without `things`, no Things request is sent. RIVM Samen Meten holds tens of thousands of Things, so select them by an expression there.
@@ -917,7 +919,7 @@ The end of an interval is the instant after its `/`, and an instant holds no `/`
 
 ### MultiDatastreams
 
-A MultiDatastream, of the MultiDatastream extension of the SensorThings API (OGC 18-088 section 12), groups properties measured together into one data stream, such as the wind speed and wind direction of a weather station, or the temperature, conductivity and depth of a water sensor. Each of its Observations holds one `result` array, whose values correspond, in order, to the MultiDatastream's `ObservedProperties`, to its `unitOfMeasurements`, and to its `multiObservationDataTypes`. FROST-Server serves the extension when it is enabled.
+A MultiDatastream, of the MultiDatastream extension of the SensorThings API (OGC 18-088 section 12), groups properties measured together into one data stream, such as the wind speed and wind direction of a weather station, or the temperature, conductivity and depth of a water sensor. Each of its Observations holds one `result` array, whose values correspond, in order, to the MultiDatastream's `ObservedProperties`, to its `unitOfMeasurements`, and to its `multiObservationDataTypes`. FROST-Server serves the extension when it is enabled. 52°North SensorThings API 3.3.8 and istSOS4 1.3 do not serve it.
 
 **The setting.** `datastreams` selects Datastreams only. `multiDatastreams` selects the MultiDatastreams a read reads:
 
@@ -940,13 +942,13 @@ A filter written for Datastreams can name `ObservedProperty`, which a MultiDatas
 **The requests.** A read that selects MultiDatastreams sends the requests it sends for Datastreams to the MultiDatastreams collection as well, with `ObservedProperties` in place of `ObservedProperty`. A latest read sends:
 
 ~~~text
-{root}/MultiDatastreams?$filter={multiDatastreams}&$expand=Thing/Locations,ObservedProperties,Sensor,Observations($orderby=phenomenonTime%20desc;$top=1)&$orderby=id%20asc&$top={pageSize}
+{root}/MultiDatastreams?$filter={multiDatastreams}&$top={pageSize}&$expand=Thing/Locations,ObservedProperties,Sensor,Observations($orderby=phenomenonTime%20desc;$top=1)&$orderby=id%20asc
 ~~~
 
 A range or incremental read lists the selected MultiDatastreams:
 
 ~~~text
-{root}/MultiDatastreams?$filter={multiDatastreams}&$expand=Thing/Locations,ObservedProperties,Sensor&$orderby=id%20asc&$top={pageSize}
+{root}/MultiDatastreams?$filter={multiDatastreams}&$top={pageSize}&$expand=Thing/Locations,ObservedProperties,Sensor&$orderby=id%20asc
 ~~~
 
 It then reads the Observations of each with `{root}/MultiDatastreams({id})/Observations`, under the filter, order, selection, paging and limits of a Datastream's Observations request. `$filter` is sent only for an expression, and `featuresOfInterest: true` expands each FeatureOfInterest as it does for a Datastream. A range read reads the Datastreams, then the MultiDatastreams, each by ascending id. An incremental read reads the data streams of both kinds furthest behind first. `limits.observations` counts the Observations of both kinds. A server without the extension answers the MultiDatastreams request with an HTTP error, and the input fails with that answer, as for any failed request.
@@ -1040,7 +1042,7 @@ windSpeed      m/s           MTS        0             8                   0
 `--datastreams` selects the Datastreams listed with a filter, as `datastreams` does in an input's `sensorthings` block, `--multi-datastreams` selects the MultiDatastreams listed, as `multiDatastreams` does, and `--input-header` sends a header with every request, as an input's `headers` do. The service root carries no credentials. The command reads the server as a run does, with every other setting at its default: it follows one request page by page under the rules of [Paging](#reading-a-server) and fails with a run's errors. The request asks for each Datastream with its Thing, the Thing's Locations, its ObservedProperty, and its Sensor, without Observations:
 
 ~~~text
-{root}/Datastreams?$filter={datastreams}&$expand=Thing/Locations,ObservedProperty,Sensor&$orderby=id%20asc&$top=1000
+{root}/Datastreams?$filter={datastreams}&$top=1000&$expand=Thing/Locations,ObservedProperty,Sensor&$orderby=id%20asc
 ~~~
 
 The command then reads the server's service root, and when the root lists the MultiDatastreams collection, it lists every MultiDatastream, or those `--multi-datastreams` selects, with the listing request of [MultiDatastreams](#multidatastreams), each value a reading under the name of its ObservedProperty. A server whose root lists no MultiDatastreams is sent no MultiDatastreams request.
