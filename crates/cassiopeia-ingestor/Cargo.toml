@@ -33,7 +33,7 @@ indexmap = "2.14.2"
 kml = { version = "0.15.0", features = ["geo-types"] }
 ndarray = "0.17.2"
 netcdf-core = "0.12.1"
-netcdf-reader = { version = "0.12.1", default-features = false, features = ["cf", "netcdf4"] }
+netcdf-reader = { version = "0.13.0", default-features = false, features = ["cf", "netcdf4"] }
 num-traits = "0.2.19"
 parking_lot = "0.13.0"
 quick-xml = { version = "0.42.0", features = ["encoding"] }
