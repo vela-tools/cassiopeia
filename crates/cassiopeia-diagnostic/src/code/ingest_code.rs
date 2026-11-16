@@ -31,6 +31,9 @@ pub enum IngestCode {
     /// Observations of SensorThings `MultiDatastreams` hold a `result` that is no array with one value
     /// per `ObservedProperty`, so they gave no readings.
     MultiResultsUnreadable,
+    /// SensorThings `HistoricalLocations` hold a `time` that names no instant, or no Location in
+    /// `GeoJSON`, so they gave no records.
+    HistoricalLocationsUnreadable,
     /// The source could not be fetched or opened.
     SourceUnavailable,
     /// The payload's format could not be determined from its content.
@@ -60,5 +63,6 @@ mod tests {
         assert_eq!(IngestCode::FeaturesOfInterestUnreadable.to_string(), "features-of-interest-unreadable");
         assert_eq!(IngestCode::PhenomenonTimesUnreadable.to_string(), "phenomenon-times-unreadable");
         assert_eq!(IngestCode::MultiResultsUnreadable.to_string(), "multi-results-unreadable");
+        assert_eq!(IngestCode::HistoricalLocationsUnreadable.to_string(), "historical-locations-unreadable");
     }
 }

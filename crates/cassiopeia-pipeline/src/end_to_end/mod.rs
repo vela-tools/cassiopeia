@@ -2,6 +2,7 @@ mod features_of_interest;
 mod geo_properties;
 mod geojson_collections;
 mod harness;
+mod historical_locations;
 mod incremental_reads;
 mod json_collections;
 mod local_contexts;

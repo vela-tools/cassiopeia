@@ -1,5 +1,6 @@
 use crate::snapshot::{
     header::{EXPECTED_HEADER, SNAPSHOT_FORMAT},
+    line::LineKind,
     line_number::LineNumber,
 };
 use serde_json::Value;
@@ -21,7 +22,7 @@ pub enum SnapshotError {
     },
 
     /// A line is no JSON object of a kind the snapshot holds.
-    #[error("line {line} of the snapshot is no header, data stream or observation line")]
+    #[error("line {line} of the snapshot is no header, data stream, observation or historicalLocation line")]
     Malformed {
         /// The line's number.
         line: LineNumber,
@@ -30,11 +31,19 @@ pub enum SnapshotError {
         source: serde_json::Error,
     },
 
-    /// A data stream line follows an observation line.
-    #[error("line {line} of the snapshot is a data stream line after an observation line, but every data stream line comes first")]
+    /// A line follows a line of a kind that comes after its own: a data stream line follows an
+    /// observation line or a historicalLocation line, or an observation line follows a
+    /// historicalLocation line.
+    #[error(
+        "line {line} of the snapshot is {kind} line after {after} line, but every data stream line comes first, then every observation line, then every historicalLocation line"
+    )]
     OrderViolation {
-        /// The data stream line's number.
+        /// The line's number.
         line: LineNumber,
+        /// The line's kind.
+        kind: LineKind,
+        /// The kind of the line before it, which comes after its own.
+        after: LineKind,
     },
 
     /// The file could not be read, or holds text that is not UTF-8.
@@ -44,7 +53,7 @@ pub enum SnapshotError {
 
 #[cfg(test)]
 mod tests {
-    use crate::snapshot::{error::SnapshotError, line_number::LineNumber};
+    use crate::snapshot::{error::SnapshotError, line::LineKind, line_number::LineNumber};
     use serde_json::json;
 
     #[test]
@@ -63,8 +72,15 @@ mod tests {
     fn an_order_violation_names_its_line() {
         let error = SnapshotError::OrderViolation {
             line: LineNumber::FIRST.next().next().next().next(),
+            kind: LineKind::Datastream,
+            after: LineKind::HistoricalLocation,
         };
 
-        assert!(error.to_string().starts_with("line 5 of the snapshot"));
+        assert!(
+            error
+                .to_string()
+                .starts_with("line 5 of the snapshot is a data stream line after a historicalLocation line"),
+            "{error}"
+        );
     }
 }

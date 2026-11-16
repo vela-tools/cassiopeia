@@ -72,9 +72,19 @@ pub(super) fn server_member(root: &ServiceRoot) -> Value {
     Value::Object(server)
 }
 
+/// What a record of a Thing holds beside the Thing's own parts.
+pub(super) enum RecordContent {
+    /// The record's `readings`: those of one Observation, or the newest of each of the Thing's data
+    /// streams, left out when there are none.
+    Readings(Map<String, Value>),
+    /// The record's `historicalLocation`: one place the Thing was known at, and when.
+    HistoricalLocation(Map<String, Value>),
+}
+
 /// A record of one Thing: the `server`, the `thing`, its `location` when it has one, its
-/// `locations` when it has any, and its `readings` when there are any.
-pub(super) fn thing_record(server: Value, thing: Map<String, Value>, locations: ThingLocations, readings: Map<String, Value>) -> Record {
+/// `locations` when it has any, and then its `readings` when there are any, or its
+/// `historicalLocation`.
+pub(super) fn thing_record(server: Value, thing: Map<String, Value>, locations: ThingLocations, content: RecordContent) -> Record {
     let mut data = Map::new();
     data.insert("server".to_owned(), server);
     data.insert("thing".to_owned(), Value::Object(thing));
@@ -84,8 +94,15 @@ pub(super) fn thing_record(server: Value, thing: Map<String, Value>, locations: 
     if !locations.locations.is_empty() {
         data.insert("locations".to_owned(), Value::Array(locations.locations));
     }
-    if !readings.is_empty() {
-        data.insert("readings".to_owned(), Value::Object(readings));
+    match content {
+        RecordContent::Readings(readings) => {
+            if !readings.is_empty() {
+                data.insert("readings".to_owned(), Value::Object(readings));
+            }
+        }
+        RecordContent::HistoricalLocation(historical_location) => {
+            data.insert("historicalLocation".to_owned(), Value::Object(historical_location));
+        }
     }
     Record::new(None, data)
 }

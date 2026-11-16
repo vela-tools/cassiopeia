@@ -1,6 +1,6 @@
 use crate::snapshot::{
     header::SnapshotHeader,
-    line::{DatastreamLine, ObservationLine},
+    line::{DatastreamLine, HistoricalLocationLine, ObservationLine},
 };
 use serde::Serialize;
 use std::io::{self, Write};
@@ -17,7 +17,16 @@ pub struct SnapshotWriter<W> {
 }
 
 /// Writes the observation lines of a snapshot, after its data stream lines.
+///
+/// Every observation line comes before the first historicalLocation line, so the writer hands over
+/// to a [`HistoricalLocationWriter`] once the Observations are written.
 pub struct ObservationWriter<W> {
+    /// Where the snapshot is written.
+    target: W,
+}
+
+/// Writes the historicalLocation lines of a snapshot, after its observation lines.
+pub struct HistoricalLocationWriter<W> {
     /// Where the snapshot is written.
     target: W,
 }
@@ -68,6 +77,32 @@ impl<W: Write> ObservationWriter<W> {
         write_line(&mut self.target, line)
     }
 
+    /// Ends the observation lines, so historicalLocation lines can follow.
+    #[must_use]
+    pub fn into_historical_locations(self) -> HistoricalLocationWriter<W> {
+        HistoricalLocationWriter { target: self.target }
+    }
+
+    /// Ends the snapshot and returns its target.
+    ///
+    /// # Errors
+    ///
+    /// Returns the [`io::Error`] flushing the target failed with.
+    pub fn finish(self) -> io::Result<W> {
+        finish(self.target)
+    }
+}
+
+impl<W: Write> HistoricalLocationWriter<W> {
+    /// Writes one historicalLocation line.
+    ///
+    /// # Errors
+    ///
+    /// Returns the [`io::Error`] writing to the target failed with.
+    pub fn historical_location(&mut self, line: &HistoricalLocationLine) -> io::Result<()> {
+        write_line(&mut self.target, line)
+    }
+
     /// Ends the snapshot and returns its target.
     ///
     /// # Errors
@@ -98,7 +133,7 @@ mod tests {
         service_root::ServiceRoot,
         snapshot::{
             header::SnapshotHeader,
-            line::{DatastreamLine, ObservationLine},
+            line::{DatastreamLine, HistoricalLocationLine, ObservationLine},
             writer::SnapshotWriter,
         },
         stream_id::StreamId,
@@ -149,5 +184,20 @@ mod tests {
         let written = String::from_utf8(writer.finish().unwrap()).unwrap();
 
         assert!(written.ends_with("\n{\"observation\":{\"@iot.id\":1},\"datastream\":5}\n"), "{written}");
+    }
+
+    #[test]
+    fn historical_location_lines_follow_the_observation_lines() {
+        let mut writer = SnapshotWriter::start(Vec::new(), &header(ReadKind::Range))
+            .unwrap()
+            .into_observations()
+            .into_historical_locations();
+        writer
+            .historical_location(&HistoricalLocationLine::new(object(json!({"@iot.id": 88})), EntityId::Integer(12512)))
+            .unwrap();
+
+        let written = String::from_utf8(writer.finish().unwrap()).unwrap();
+
+        assert!(written.ends_with("\n{\"historicalLocation\":{\"@iot.id\":88},\"thing\":12512}\n"), "{written}");
     }
 }

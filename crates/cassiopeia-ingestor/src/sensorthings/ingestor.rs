@@ -4,9 +4,10 @@ use crate::{
     record_batches::RecordBatches,
     sensorthings::{
         error::SensorThingsIngestError,
+        historical_location::historical_location,
         ingest_losses::SensorThingsLosses,
         observation_readings::observation_readings,
-        record_builder::{server_member, thing_record},
+        record_builder::{RecordContent, server_member, thing_record},
         thing_index::{IndexedDatastream, IndexedThing, ThingIndex, ThingIndexBuilder},
     },
 };
@@ -20,7 +21,7 @@ use cassiopeia_sensorthings::{
     snapshot::{
         error::SnapshotError,
         header::SnapshotHeader,
-        line::{ObservationLine, SnapshotLine},
+        line::{HistoricalLocationLine, LineKind, ObservationLine, SnapshotLine},
         line_number::LineNumber,
         reader::SnapshotReader,
     },
@@ -34,7 +35,7 @@ use std::{fs::File, io::BufReader, sync::Arc};
 /// The header is read when the ingestor is built, so the read mode is known before any record is,
 /// and a run can refuse a snapshot its output cannot keep. The data stream lines are then indexed,
 /// since every record needs its Thing, units, `ObservedProperty` and `Sensor`, and the observation
-/// lines are streamed, never held.
+/// lines and the historicalLocation lines after them are streamed, never held.
 pub struct SensorThingsIngestor {
     /// The snapshot's header.
     header: SnapshotHeader,
@@ -104,20 +105,26 @@ impl Ingestor for SensorThingsIngestor {
         let server = server_member(header.service_root());
 
         let mut index = ThingIndexBuilder::default();
-        let mut first_observation = None;
+        let mut first_record_line = None;
         while let Some(line) = lines.next() {
-            match line.map_err(SensorThingsIngestError::from)? {
-                SnapshotLine::Datastream(datastream) => index.add(datastream, lines.line(), &mut losses)?,
-                SnapshotLine::Observation(observation) => {
-                    first_observation = Some((observation, lines.line()));
-                    break;
+            let record_line = match line.map_err(SensorThingsIngestError::from)? {
+                SnapshotLine::Datastream(datastream) => {
+                    index.add(datastream, lines.line(), &mut losses)?;
+                    continue;
                 }
-            }
+                SnapshotLine::Observation(observation) => RecordLine::Observation(observation),
+                SnapshotLine::HistoricalLocation(historical_location) => RecordLine::HistoricalLocation(historical_location),
+            };
+            first_record_line = Some((record_line, lines.line()));
+            break;
         }
         let index = index.finish(&mut losses);
 
-        match (header.read().records(), first_observation) {
-            (SnapshotRecords::PerThing, Some((_, line))) => return Err(SensorThingsIngestError::UnexpectedObservation { line }.into()),
+        match (header.read().records(), first_record_line) {
+            (SnapshotRecords::PerThing, Some((RecordLine::Observation(_), line))) => return Err(SensorThingsIngestError::UnexpectedObservation { line }.into()),
+            (SnapshotRecords::PerThing, Some((RecordLine::HistoricalLocation(_), line))) => {
+                return Err(SensorThingsIngestError::UnexpectedHistoricalLocation { line }.into());
+            }
             (SnapshotRecords::PerThing, None) => {
                 for thing in index.into_things() {
                     // Each Thing is one record, which owns its copy of the server.
@@ -126,15 +133,41 @@ impl Ingestor for SensorThingsIngestor {
             }
             (SnapshotRecords::PerObservation, first) => {
                 let mut next = first;
-                while let Some((observation, line)) = next {
-                    if let Some(record) = observation_record(&server, &index, observation, line, &mut losses)? {
+                while let Some((record_line, line)) = next {
+                    let kind = record_line.kind();
+                    let record = match record_line {
+                        RecordLine::Observation(observation) => observation_record(&server, &index, observation, line, &mut losses)?,
+                        RecordLine::HistoricalLocation(historical_location) => {
+                            historical_location_record(&server, &index, historical_location, line, &mut losses)?
+                        }
+                    };
+                    if let Some(record) = record {
                         batches.push(record)?;
                     }
-                    next = next_observation(&mut lines)?;
+                    next = next_record_line(&mut lines, kind)?;
                 }
             }
         }
         batches.finish()
+    }
+}
+
+/// A line of a range or incremental snapshot that gives a record: an observation line, or a
+/// historicalLocation line after them.
+enum RecordLine {
+    /// An observation line.
+    Observation(ObservationLine),
+    /// A historicalLocation line.
+    HistoricalLocation(HistoricalLocationLine),
+}
+
+impl RecordLine {
+    /// The kind of the line.
+    const fn kind(&self) -> LineKind {
+        match self {
+            RecordLine::Observation(_) => LineKind::Observation,
+            RecordLine::HistoricalLocation(_) => LineKind::HistoricalLocation,
+        }
     }
 }
 
@@ -150,7 +183,7 @@ fn latest_record(server: Value, thing: IndexedThing, losses: &mut SensorThingsLo
         let keyed = keyed.into_iter().map(|reading| (reading.key.to_string(), reading.parts));
         readings.extend(observation_readings(observation, line, &id, keyed, losses)?);
     }
-    Ok(thing_record(server, thing.members, thing.locations, readings))
+    Ok(thing_record(server, thing.members, thing.locations, RecordContent::Readings(readings)))
 }
 
 /// The record of one Observation of a range or incremental snapshot, holding its reading of a
@@ -177,16 +210,55 @@ fn observation_record(
     if readings.is_empty() {
         return Ok(None);
     }
-    Ok(Some(thing_record(server.clone(), thing.members.clone(), thing.locations.clone(), readings)))
+    Ok(Some(thing_record(
+        server.clone(),
+        thing.members.clone(),
+        thing.locations.clone(),
+        RecordContent::Readings(readings),
+    )))
 }
 
-/// The next observation line and its number, or `None` past the last line.
-fn next_observation(lines: &mut SnapshotReader<BufReader<File>>) -> Result<Option<(ObservationLine, LineNumber)>, SensorThingsIngestError> {
+/// The record of one `HistoricalLocation` of a range or incremental snapshot, holding its Thing's
+/// parts, as a record of its Observations does, and the `historicalLocation`, or `None` when it
+/// gives none, which reading it counts as a loss.
+fn historical_location_record(
+    server: &Value,
+    index: &ThingIndex,
+    line: HistoricalLocationLine,
+    number: LineNumber,
+    losses: &mut SensorThingsLosses,
+) -> Result<Option<Record>, SensorThingsIngestError> {
+    let (as_served, thing_id) = line.into_parts();
+    let Some(thing) = index.thing(&thing_id) else {
+        return Err(SensorThingsIngestError::UnknownThing { line: number, thing: thing_id });
+    };
+    let Some(historical_location) = historical_location(as_served, &thing_id, number, losses)? else {
+        return Ok(None);
+    };
+    // Every record owns its data, so each HistoricalLocation's record takes its own copy of what it
+    // shares with the other records of its Thing.
+    Ok(Some(thing_record(
+        server.clone(),
+        thing.members.clone(),
+        thing.locations.clone(),
+        RecordContent::HistoricalLocation(historical_location),
+    )))
+}
+
+/// The next line that gives a record and its number, or `None` past the last line, after a line of
+/// kind `after`.
+fn next_record_line(lines: &mut SnapshotReader<BufReader<File>>, after: LineKind) -> Result<Option<(RecordLine, LineNumber)>, SensorThingsIngestError> {
     match lines.next().transpose()? {
         None => Ok(None),
-        Some(SnapshotLine::Observation(observation)) => Ok(Some((observation, lines.line()))),
-        // The reader refuses a data stream line after an observation line before it yields one.
-        Some(SnapshotLine::Datastream(_)) => Err(SnapshotError::OrderViolation { line: lines.line() }.into()),
+        Some(SnapshotLine::Observation(observation)) => Ok(Some((RecordLine::Observation(observation), lines.line()))),
+        Some(SnapshotLine::HistoricalLocation(historical_location)) => Ok(Some((RecordLine::HistoricalLocation(historical_location), lines.line()))),
+        // The reader refuses a data stream line after a line of a later kind before it yields one.
+        Some(SnapshotLine::Datastream(_)) => Err(SnapshotError::OrderViolation {
+            line: lines.line(),
+            kind: LineKind::Datastream,
+            after,
+        }
+        .into()),
     }
 }
 
@@ -197,7 +269,16 @@ mod tests {
         ingestor::Ingestor,
         sensorthings::{
             error::{SensorThingsIngestError, StaEntity},
-            ingest_losses::{FeatureOfInterestName, GeometryEncoding, SensorThingsLosses, UnreadableFeatureOfInterest, UnreadableLocation},
+            ingest_losses::{
+                FeatureOfInterestName,
+                GeometryEncoding,
+                HistoricalLocationFault,
+                HistoricalLocationName,
+                SensorThingsLosses,
+                UnreadableFeatureOfInterest,
+                UnreadableHistoricalLocation,
+                UnreadableLocation,
+            },
             ingestor::SensorThingsIngestor,
             reading_keys::{ReadingSource, RenamedReading},
         },
@@ -209,7 +290,12 @@ mod tests {
         payload::{BytesPayload, CollectedPayload, FilePayload, ProfiledPayload},
         record::Record,
     };
-    use cassiopeia_sensorthings::{entity_id::EntityId, read_kind::ReadKind, stream_id::StreamId};
+    use cassiopeia_sensorthings::{
+        entity_id::EntityId,
+        read_kind::ReadKind,
+        snapshot::{error::SnapshotError, line::LineKind},
+        stream_id::StreamId,
+    };
     use mediatype::media_type;
     use pretty_assertions::assert_eq;
     use serde_json::{Map, Value, json};
@@ -1267,5 +1353,199 @@ mod tests {
 
         let keys: Vec<Vec<&String>> = records.iter().map(|record| record["readings"].as_object().unwrap().keys().collect()).collect();
         assert_eq!(keys, [vec!["pm10"], vec!["windSpeed", "windDirection"]]);
+    }
+
+    /// The `GeoJSON` Location `id` of a Point at `coordinates`.
+    fn geojson_location(id: i64, coordinates: [f64; 2]) -> Value {
+        json!({"@iot.id": id, "encodingType": "application/geo+json", "location": {"type": "Point", "coordinates": coordinates}})
+    }
+
+    /// The historicalLocation line of `HistoricalLocation` `id` of the Thing `thing`, known at `time`
+    /// at `locations`.
+    fn historical_location_line(id: i64, time: &str, locations: Value, thing: &Value) -> Value {
+        let mut line = json!({"historicalLocation": {"@iot.id": id, "time": time}, "thing": thing});
+        line["historicalLocation"]["Locations"] = locations;
+        line
+    }
+
+    /// A range snapshot of the RIVM Thing's Datastream 56776 with one Observation, followed by
+    /// `historical_locations`.
+    fn with_historical_locations(historical_locations: &[Value]) -> String {
+        let mut lines = vec![
+            datastream(json!(56776), "pm10", rivm_thing(), Value::Null),
+            json!({"observation": observation(98765, "2026-11-12T09:00:00Z", 21.4), "datastream": 56776}),
+        ];
+        lines.extend_from_slice(historical_locations);
+        snapshot("range", &lines)
+    }
+
+    #[test]
+    fn each_historical_location_gives_a_record_of_its_thing_after_the_observations_oldest_first() {
+        let thing = json!(12512);
+        let text = with_historical_locations(&[
+            historical_location_line(88, "2026-11-12T08:04:00Z", json!([geojson_location(36190, [5.4797, 51.4433])]), &thing),
+            historical_location_line(89, "2026-11-12T08:34:00.250Z", json!([geojson_location(36191, [5.4801, 51.441])]), &thing),
+            historical_location_line(90, "2026-11-12T11:04:00+02:00", json!([geojson_location(36192, [5.49, 51.45])]), &thing),
+        ]);
+
+        let (records, losses) = read(&text);
+
+        assert_eq!(records.len(), 4);
+        assert!(records[0].get("readings").is_some());
+        assert!(records[0].get("historicalLocation").is_none());
+        let historical = |id: i64, time: &str, coordinates: [f64; 2]| {
+            json!({
+                "server": {"url": "https://api-samenmeten.rivm.nl/v1.0", "host": "api-samenmeten.rivm.nl", "version": "v1.0"},
+                "thing": {"id": 12512, "name": "ILM_I68", "description": "ILM_I68"},
+                "location": {"type": "Point", "coordinates": [5.608, 51.313]},
+                "locations": [{"id": 36182, "encodingType": "application/vnd.geo+json", "location": {"type": "Point", "coordinates": [5.608, 51.313]}}],
+                "historicalLocation": {"id": id, "time": time, "location": {"type": "Point", "coordinates": coordinates}},
+            })
+        };
+        assert_eq!(
+            records[1..],
+            [
+                historical(88, "2026-11-12T08:04:00Z", [5.4797, 51.4433]),
+                historical(89, "2026-11-12T08:34:00.250Z", [5.4801, 51.441]),
+                historical(90, "2026-11-12T09:04:00Z", [5.49, 51.45]),
+            ]
+        );
+        assert_eq!(losses, SensorThingsLosses::default());
+    }
+
+    #[test]
+    fn a_historical_location_with_a_text_and_a_geojson_location_gives_the_geojson_geometry() {
+        let text = with_historical_locations(&[historical_location_line(
+            88,
+            "2026-11-12T08:04:00Z",
+            json!([
+                {"@iot.id": 36189, "encodingType": "text/plain", "location": "Stationsplein, platform 2"},
+                geojson_location(36190, [5.4797, 51.4433]),
+            ]),
+            &json!(12512),
+        )]);
+
+        let (records, losses) = read(&text);
+
+        assert_eq!(
+            records[1]["historicalLocation"]["location"],
+            json!({"type": "Point", "coordinates": [5.4797, 51.4433]})
+        );
+        assert_eq!(losses, SensorThingsLosses::default());
+    }
+
+    #[test]
+    fn unreadable_historical_locations_give_no_record_and_one_loss_names_the_first() {
+        let thing = json!(12512);
+        let text = with_historical_locations(&[
+            historical_location_line(88, "2026-11-12", json!([geojson_location(36190, [5.4797, 51.4433])]), &thing),
+            historical_location_line(
+                89,
+                "2026-11-12T08:34:00Z",
+                json!([{"@iot.id": 36191, "encodingType": "text/plain", "location": "Stationsplein"}]),
+                &thing,
+            ),
+            historical_location_line(90, "2026-11-12T09:04:00Z", json!([geojson_location(36192, [5.49, 51.45])]), &thing),
+        ]);
+
+        let (records, losses) = read(&text);
+
+        let ids: Vec<&Value> = records
+            .iter()
+            .filter_map(|record| record.get("historicalLocation"))
+            .map(|historical| &historical["id"])
+            .collect();
+        assert_eq!(ids, [&json!(90)]);
+        let tally = losses.unreadable_historical_locations();
+        assert_eq!(
+            tally.named(),
+            [UnreadableHistoricalLocation {
+                historical_location: HistoricalLocationName::Id(EntityId::Integer(88)),
+                thing: EntityId::Integer(12512),
+                fault: HistoricalLocationFault::Time("2026-11-12".into()),
+            }]
+        );
+        assert_eq!(tally.total(), 2);
+    }
+
+    #[test]
+    fn an_incremental_snapshot_gives_historical_location_records_without_observations() {
+        let thing = json!("bus-12");
+        let mut moving = rivm_thing();
+        moving["@iot.id"] = thing.clone();
+        let text = snapshot(
+            "incremental",
+            &[
+                datastream(json!(56776), "pm10", moving, Value::Null),
+                historical_location_line(88, "2026-11-12T08:04:00Z", json!([geojson_location(36190, [5.4797, 51.4433])]), &thing),
+            ],
+        );
+
+        let (records, _) = read(&text);
+
+        assert_eq!(records.len(), 1);
+        assert_eq!(records[0]["thing"]["id"], thing);
+        assert_eq!(records[0]["historicalLocation"]["id"], 88);
+        assert!(records[0].get("readings").is_none());
+    }
+
+    #[test]
+    fn a_historical_location_of_an_unknown_thing_fails_naming_its_line() {
+        let text = with_historical_locations(&[historical_location_line(
+            88,
+            "2026-11-12T08:04:00Z",
+            json!([geojson_location(36190, [5.0, 51.0])]),
+            &json!(7),
+        )]);
+
+        let error = read_batches(&text, 100).unwrap_err();
+
+        assert!(
+            matches!(
+                error,
+                IngestorError::SensorThings(SensorThingsIngestError::UnknownThing { line, thing: EntityId::Integer(7) }) if line.get() == 4
+            ),
+            "{error:?}"
+        );
+    }
+
+    #[test]
+    fn a_data_stream_line_after_a_historical_location_line_fails_naming_the_line() {
+        let thing = json!(12512);
+        let text = with_historical_locations(&[
+            historical_location_line(88, "2026-11-12T08:04:00Z", json!([geojson_location(36190, [5.0, 51.0])]), &thing),
+            datastream(json!(56777), "no2", rivm_thing(), Value::Null),
+        ]);
+
+        let error = read_batches(&text, 100).unwrap_err();
+
+        assert!(
+            matches!(
+                error,
+                IngestorError::SensorThings(SensorThingsIngestError::Snapshot(SnapshotError::OrderViolation {
+                    line,
+                    kind: LineKind::Datastream,
+                    after: LineKind::HistoricalLocation
+                })) if line.get() == 5
+            ),
+            "{error:?}"
+        );
+        assert!(error.to_string().contains("line 5 of the snapshot"), "{error}");
+    }
+
+    #[test]
+    fn a_historical_location_line_in_a_latest_snapshot_fails() {
+        let text = snapshot(
+            "latest",
+            &[
+                datastream(json!(5), "pm10", rivm_thing(), json!([])),
+                historical_location_line(88, "2026-11-12T08:04:00Z", json!([geojson_location(36190, [5.0, 51.0])]), &json!(12512)),
+            ],
+        );
+
+        assert!(matches!(
+            read_batches(&text, 100),
+            Err(IngestorError::SensorThings(SensorThingsIngestError::UnexpectedHistoricalLocation { line })) if line.get() == 3
+        ));
     }
 }

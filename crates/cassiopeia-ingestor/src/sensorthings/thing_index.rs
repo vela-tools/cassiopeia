@@ -52,8 +52,8 @@ pub(super) struct IndexedReading {
 
 /// The snapshot's Things and data streams, built from its data stream lines.
 pub(super) struct ThingIndex {
-    /// The Things, in the order the snapshot first names them.
-    things: Vec<IndexedThing>,
+    /// The Things by id, in the order the snapshot first names them.
+    things: IndexMap<EntityId, IndexedThing>,
     /// Where each data stream is: its Thing's position and its own position under that Thing.
     positions: HashMap<StreamId, (usize, usize)>,
 }
@@ -178,11 +178,12 @@ impl ThingIndexBuilder {
                         }
                     })
                     .collect();
-                IndexedThing {
+                let thing = IndexedThing {
                     members: pending.members,
                     locations: pending.locations,
                     datastreams,
-                }
+                };
+                (thing_id, thing)
             })
             .collect();
         ThingIndex { things, positions }
@@ -191,15 +192,20 @@ impl ThingIndexBuilder {
 
 impl ThingIndex {
     /// The Things, in the order the snapshot first names them.
-    pub(super) fn into_things(self) -> Vec<IndexedThing> {
-        self.things
+    pub(super) fn into_things(self) -> impl Iterator<Item = IndexedThing> {
+        self.things.into_values()
     }
 
     /// The data stream `id` and the Thing it belongs to.
     pub(super) fn datastream(&self, id: &StreamId) -> Option<(&IndexedThing, &IndexedDatastream)> {
         let &(thing, datastream) = self.positions.get(id)?;
-        let thing = self.things.get(thing)?;
+        let (_, thing) = self.things.get_index(thing)?;
         Some((thing, thing.datastreams.get(datastream)?))
+    }
+
+    /// The Thing `id`, when a data stream line holds it.
+    pub(super) fn thing(&self, id: &EntityId) -> Option<&IndexedThing> {
+        self.things.get(id)
     }
 }
 

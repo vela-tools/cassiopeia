@@ -5,7 +5,11 @@ use crate::{
 };
 use cassiopeia_common::{context::mode::AtContextMode, format::DataFormat, input::Input, request_header::RequestHeaders, schema_source::SchemaSource};
 use cassiopeia_csv_dialect::statement::DialectStatement;
-use cassiopeia_sensorthings::{service::SensorThingsService, service_root::ServiceRoot, settings::sensorthings_settings::SensorThingsSettings};
+use cassiopeia_sensorthings::{
+    service::SensorThingsService,
+    service_root::ServiceRoot,
+    settings::{historical_locations::HistoricalLocations, read_mode::ReadMode, sensorthings_settings::SensorThingsSettings},
+};
 use getset::Getters;
 use serde::{Deserialize, Serialize};
 use std::{
@@ -193,7 +197,8 @@ impl From<ManifestInput> for ManifestInputRaw {
 /// A remote source is the server's service root, and every request is built on it, so it must be one,
 /// and it must read nothing from the environment: credentials go in `headers`, which keeps every URL
 /// a read requests, logs and writes free of them. Without settings, a remote input reads with the
-/// defaults. A local source is a snapshot, read as it was collected, so it takes no settings; and
+/// defaults. A latest read reads no `HistoricalLocations`, since its record's `location` already is the
+/// Thing's last known place, so settings that ask one for them are refused. A local source is a snapshot, read as it was collected, so it takes no settings; and
 /// settings on an input of another format describe nothing the source is.
 fn sensorthings_service(
     source: &Input,
@@ -223,7 +228,12 @@ fn sensorthings_service(
                 url: Box::new(url.clone()),
                 source,
             })?;
-            Ok(Some(SensorThingsService::new(root, settings.unwrap_or_default())))
+            let settings = settings.unwrap_or_default();
+            if let (ReadMode::Latest, HistoricalLocations::Requested) = (settings.read(), settings.historical_locations()) {
+                // The error names the URL, while the input keeps its own.
+                return Err(ManifestError::HistoricalLocationsOnLatestRead { url: Box::new(url.clone()) });
+            }
+            Ok(Some(SensorThingsService::new(root, settings)))
         }
     }
 }
@@ -283,7 +293,7 @@ mod tests {
     use cassiopeia_csv_dialect::{dialect_byte::DialectByte, preamble::Preamble};
     use cassiopeia_sensorthings::{
         service_root::ServiceRootError,
-        settings::{sensorthings_settings::SensorThingsSettings, stream_filter::StreamFilter},
+        settings::{historical_locations::HistoricalLocations, sensorthings_settings::SensorThingsSettings, stream_filter::StreamFilter},
     };
     use pretty_assertions::assert_eq;
     use secrecy::SecretString;
@@ -487,6 +497,39 @@ mod tests {
             .unwrap_err();
 
             assert!(error.to_string().contains("must declare 'format: \"sensorthings\"'"), "{error}");
+        }
+    }
+
+    #[test]
+    fn historical_locations_are_refused_on_a_latest_read_naming_the_setting() {
+        for read in ["", r#", "read": "latest""#] {
+            let error = parse(&format!(
+                r#"{{"source": "https://h.example/v1.1", "format": "sensorthings", "mapping": "m.json5", "sensorthings": {{"historicalLocations": true{read}}}}}"#
+            ))
+            .unwrap_err();
+
+            assert!(
+                error
+                    .to_string()
+                    .contains("The SensorThings input 'https://h.example/v1.1' sets 'historicalLocations: true' with 'read: \"latest\"'"),
+                "{error}"
+            );
+        }
+    }
+
+    #[test]
+    fn historical_locations_are_kept_on_a_range_or_incremental_read() {
+        for read in [r#"{"range": {"last": "24h"}}"#, r#"{"incremental": {"cursor": "bus-12"}}"#] {
+            let input = parse(&format!(
+                r#"{{"source": "https://h.example/v1.1", "format": "sensorthings", "mapping": "m.json5", "sensorthings": {{"historicalLocations": true, "read": {read}}}}}"#
+            ))
+            .unwrap();
+
+            assert_eq!(
+                input.sensorthings().as_ref().unwrap().settings().historical_locations(),
+                HistoricalLocations::Requested,
+                "{read}"
+            );
         }
     }
 

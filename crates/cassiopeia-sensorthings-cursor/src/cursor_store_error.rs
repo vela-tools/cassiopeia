@@ -1,8 +1,8 @@
 use crate::reset::IdText;
 use cassiopeia_sensorthings::{
     cursor_name::CursorName,
+    read_stream::ReadStreamKind,
     service_root::{ServiceRoot, ServiceRootError},
-    stream_kind::StreamKind,
 };
 use rmp_serde::{decode, encode};
 use std::{io, path::PathBuf};
@@ -116,15 +116,15 @@ pub enum CursorStoreError {
         source: encode::Error,
     },
 
-    /// A reset names a data stream the store holds no position for.
-    #[error("cursor '{cursor}' holds no position for the {} '{datastream}'", kind.entity())]
-    UnknownDatastream {
+    /// A reset names a data stream or a Thing the store holds no position for.
+    #[error("cursor '{cursor}' holds no position for the {} '{id}'", kind.entity())]
+    UnknownStream {
         /// The cursor.
         cursor: CursorName,
-        /// The kind of data stream the reset named.
-        kind: StreamKind,
-        /// The data stream id, as the reset named it.
-        datastream: IdText,
+        /// The kind of stream the reset named.
+        kind: ReadStreamKind,
+        /// The id of the data stream or the Thing, as the reset named it.
+        id: IdText,
     },
 
     /// The database failed.

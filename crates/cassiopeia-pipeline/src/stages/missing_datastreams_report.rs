@@ -57,8 +57,8 @@ mod tests {
         code::{collect_code::CollectCode, diagnostic_code::DiagnosticCode},
         context_field::ContextField,
     };
-    use cassiopeia_sensorthings::{cursor_name::CursorName, entity_id::EntityId, service_root::ServiceRoot, stream_id::StreamId};
-    use cassiopeia_sensorthings_cursor::{cursor_update::CursorUpdate, positions::Positions, seen_observations::SeenObservations};
+    use cassiopeia_sensorthings::{cursor_name::CursorName, entity_id::EntityId, read_stream::ReadStream, service_root::ServiceRoot, stream_id::StreamId};
+    use cassiopeia_sensorthings_cursor::{cursor_update::CursorUpdate, positions::Positions, seen_entities::SeenEntities};
     use chrono::{DateTime, Utc};
     use pretty_assertions::assert_eq;
     use std::{collections::BTreeMap, time::Duration};
@@ -73,8 +73,8 @@ mod tests {
     fn warnings_missing(datastreams: &[i64]) -> CollectionWarnings {
         let mut first = CursorUpdate::new(at("2026-11-12T09:00:00Z"), Duration::from_secs(3600));
         for datastream in datastreams {
-            let written = SeenObservations::from(BTreeMap::from([(EntityId::Integer(*datastream), at("2026-11-12T08:00:00Z"))]));
-            first.record(StreamId::Datastream(EntityId::Integer(*datastream)), written);
+            let written = SeenEntities::from(BTreeMap::from([(EntityId::Integer(*datastream), at("2026-11-12T08:00:00Z"))]));
+            first.record(ReadStream::Data(StreamId::Datastream(EntityId::Integer(*datastream))), written);
         }
         let committed = first.apply(Positions::default());
         let cycle_start = at("2026-11-12T10:00:00Z");

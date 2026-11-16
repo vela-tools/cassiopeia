@@ -648,8 +648,8 @@ Inspect and reset the cursors of incremental reads
 ###### **Subcommands:**
 
 * `list` — List the SensorThings cursors in the cursors folder
-* `show` — Show the position a cursor keeps for each data stream
-* `reset` — Reset a cursor, so the next cycle reads its data streams again from a chosen point
+* `show` — Show the position a cursor keeps for each data stream and each Thing
+* `reset` — Reset a cursor, so the next cycle reads its data streams and Things again from a chosen point
 
 
 
@@ -665,9 +665,9 @@ Prints one row per cursor: its name, the service root its positions were read fr
 
 ## `cassiopeia sensorthings cursor show`
 
-Show the position a cursor keeps for each data stream.
+Show the position a cursor keeps for each data stream and each Thing.
 
-Prints the service root, then one row per data stream, Datastreams first: its kind, `datastream` or `multi-datastream`, its id, its high-water mark, the number of Observations it has seen within the lookback, the start of the last cycle that listed it, and the start of the first cycle that no longer listed it, `-` while it is listed.
+Prints the service root, then one row per position, Datastreams first, then MultiDatastreams, then Things: its kind, `datastream`, `multi-datastream` or `thing`, its id, its high-water mark, the number of Observations or HistoricalLocations it has seen within the lookback, the start of the last cycle that listed it, and the start of the first cycle that no longer listed it, `-` while it is listed.
 
 **Usage:** `cassiopeia sensorthings cursor show <CURSOR>`
 
@@ -679,9 +679,9 @@ Prints the service root, then one row per data stream, Datastreams first: its ki
 
 ## `cassiopeia sensorthings cursor reset`
 
-Reset a cursor, so the next cycle reads its data streams again from a chosen point.
+Reset a cursor, so the next cycle reads its data streams and Things again from a chosen point.
 
-Without `--to`, removes the positions, so the next cycle starts each data stream at the input's `initial` point. With `--to`, sets their high-water marks to the target and forgets the Observations they have seen, so the next cycle reads each from the target minus the lookback.
+Without `--to`, removes the positions, so the next cycle starts each data stream and Thing at the input's `initial` point. With `--to`, sets their high-water marks to the target and forgets the Observations and HistoricalLocations they have seen, so the next cycle reads each from the target minus the lookback.
 
 **Usage:** `cassiopeia sensorthings cursor reset [OPTIONS] <CURSOR>`
 
@@ -691,8 +691,9 @@ Without `--to`, removes the positions, so the next cycle starts each data stream
 
 ###### **Options:**
 
-* `--datastream <ID>` — Reset only the Datastream with this id, as `cursor show` prints it; every data stream when neither this nor `--multi-datastream` is given
+* `--datastream <ID>` — Reset only the Datastream with this id, as `cursor show` prints it; every data stream and Thing when none of this, `--multi-datastream` and `--thing` is given
 * `--multi-datastream <ID>` — Reset only the MultiDatastream with this id, as `cursor show` prints it. A Datastream with the same id keeps its position
+* `--thing <ID>` — Reset only the position of the HistoricalLocations of the Thing with this id, as `cursor show` prints it. The data streams of the Thing keep theirs
 * `--to <INSTANT|DURATION>` — Set the high-water marks to this RFC 3339 instant, or to this span before now, such as `1h`; remove the positions when absent. A target after now is refused
 
 

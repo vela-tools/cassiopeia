@@ -1,7 +1,7 @@
 use crate::sensorthings::{
     encoded_geometry::{EncodedGeometry, encoded_geometry},
     error::{SensorThingsIngestError, StaEntity},
-    ingest_losses::{SensorThingsLosses, UnreadableLocation},
+    ingest_losses::{LowestLocation, SensorThingsLosses, UnreadableLocation},
     null_members::present,
     record_builder::record_members,
     served_id::served_id,
@@ -16,13 +16,14 @@ const LOCATION_MEMBER: &str = "location";
 /// 18-088 section 8.2.2).
 const LOCATION_MEMBERS: [&str; 4] = ["name", "description", "encodingType", "properties"];
 
-/// What a record carries of a Thing's Locations.
+/// What a record carries of a Thing's Locations, or what a `historicalLocation` carries of a
+/// `HistoricalLocation`'s.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub(super) struct ThingLocations {
-    /// The record's `location`: the geometry of the Thing's `GeoJSON` Location with the lowest id,
-    /// when that Location holds one.
+    /// The record's `location`: the geometry of the `GeoJSON` Location with the lowest id, when that
+    /// Location holds one.
     pub(super) location: Option<Value>,
-    /// The record's `locations`: every Location of the Thing, in id order.
+    /// The record's `locations`: every Location, in id order.
     pub(super) locations: Vec<Value>,
 }
 
@@ -38,13 +39,9 @@ struct ReadLocation {
     members: Map<String, Value>,
 }
 
-/// The Locations of the Thing `thing` whose served `Locations` are `locations`, read on `line`.
-///
-/// A Thing may have several Locations, each in its own encoding (OGC 18-088 section 8.2.1, Table 4).
-/// Its `location` is the geometry of its `GeoJSON` Location with the lowest id, read by the rules of
-/// [`encoded_geometry`], and a Thing that has Locations and none in `GeoJSON` is counted as a loss
-/// naming its Location with the lowest id. Ids are ordered as [`EntityId`] orders them. A Thing
-/// without Locations has neither.
+/// The Locations of the Thing `thing` whose served `Locations` are `locations`, read on `line` as
+/// [`read_locations`] reads them, counting a Thing that has Locations and none in `GeoJSON` as a loss
+/// that names its Location with the lowest id.
 ///
 /// # Errors
 ///
@@ -56,8 +53,35 @@ pub(super) fn thing_locations(
     line: LineNumber,
     losses: &mut SensorThingsLosses,
 ) -> Result<ThingLocations, SensorThingsIngestError> {
+    let (read, lowest) = read_locations(locations, line)?;
+    if let Some(LowestLocation { location, encoding }) = lowest {
+        losses.unreadable_location(UnreadableLocation {
+            // The loss is reported after the Thing's own id has gone into its record.
+            thing: thing.clone(),
+            location,
+            encoding,
+        });
+    }
+    Ok(read)
+}
+
+/// The served Locations `locations`, read on `line`, of a Thing or of a `HistoricalLocation`, and,
+/// when there are Locations and none in `GeoJSON`, the one with the lowest id with the encoding it
+/// names.
+///
+/// A Thing may have several Locations, each in its own encoding (OGC 18-088 section 8.2.1, Table 4),
+/// and a `HistoricalLocation` names the Locations of its Thing at its time (section 8.2.3). Their
+/// `location` is the geometry of their `GeoJSON` Location with the lowest id, read by the rules of
+/// [`encoded_geometry`], so a Thing's record and its `HistoricalLocations` choose a place by one rule.
+/// Ids are ordered as [`EntityId`] orders them. No Locations give neither.
+///
+/// # Errors
+///
+/// Returns [`SensorThingsIngestError::IdUnreadable`] when a Location has no readable id, since the
+/// Locations cannot be ordered without it.
+pub(super) fn read_locations(locations: Option<Value>, line: LineNumber) -> Result<(ThingLocations, Option<LowestLocation>), SensorThingsIngestError> {
     let Some(Value::Array(served)) = locations.and_then(present) else {
-        return Ok(ThingLocations::default());
+        return Ok((ThingLocations::default(), None));
     };
     let mut read = served
         .into_iter()
@@ -69,6 +93,7 @@ pub(super) fn thing_locations(
     // The lowest `GeoJSON` Location decides `location`, whether or not it holds a geometry.
     let lowest_geojson = read.iter().position(|location| !matches!(location.geometry, EncodedGeometry::Unreadable(_)));
     let mut location = None;
+    let mut lowest = None;
     let mut locations = Vec::with_capacity(read.len());
     for (
         position,
@@ -95,18 +120,13 @@ pub(super) fn thing_locations(
                     members.insert(LOCATION_MEMBER.to_owned(), served);
                 }
                 if position == 0 && lowest_geojson.is_none() {
-                    losses.unreadable_location(UnreadableLocation {
-                        // The loss is reported after the Thing's own id has gone into its record.
-                        thing: thing.clone(),
-                        location: id,
-                        encoding,
-                    });
+                    lowest = Some(LowestLocation { location: id, encoding });
                 }
             }
         }
         locations.push(Value::Object(members));
     }
-    Ok(ThingLocations { location, locations })
+    Ok((ThingLocations { location, locations }, lowest))
 }
 
 /// Reads one served Location on `line`.

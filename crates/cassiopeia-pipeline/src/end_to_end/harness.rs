@@ -28,8 +28,8 @@ pub(crate) enum RunBinding {
 
 /// The schemas an end-to-end run validates its entities against.
 pub(crate) enum RunSchemas<'a> {
-    /// An accept-anything schema for each of these entity types, so the only warnings left are the
-    /// ones under test.
+    /// An accept-anything schema for each of these entity types, or Smart Data Models paths such as
+    /// `dataModel.Environment/AirQualityObserved`, so the only warnings left are the ones under test.
     Permissive(&'a [&'a str]),
     /// The schemas of this folder, laid out as the validator looks them up.
     Folder(&'a Path),
@@ -110,10 +110,12 @@ fn schemas_folder(root: &Path, schemas: &RunSchemas<'_>) -> PathBuf {
     match schemas {
         RunSchemas::Permissive(entity_types) => {
             let folder = root.join("schemas");
-            fs::create_dir_all(&folder).unwrap();
             for entity_type in *entity_types {
-                fs::write(folder.join(format!("{entity_type}.json")), r#"{"type": "object"}"#).unwrap();
+                let schema = folder.join(format!("{entity_type}.json"));
+                fs::create_dir_all(schema.parent().unwrap()).unwrap();
+                fs::write(schema, r#"{"type": "object"}"#).unwrap();
             }
+            fs::create_dir_all(&folder).unwrap();
             folder
         }
         RunSchemas::Folder(folder) => folder.to_path_buf(),

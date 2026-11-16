@@ -40,6 +40,7 @@ pub(crate) mod unknown_unit_code_report;
 pub(crate) mod unread_multi_datastreams_report;
 pub(crate) mod unreadable_expiry_report;
 pub(crate) mod unreadable_features_of_interest_report;
+pub(crate) mod unreadable_historical_locations_report;
 pub(crate) mod unreadable_locations_report;
 pub(crate) mod unreadable_multi_results_report;
 pub(crate) mod unreadable_phenomenon_times_report;

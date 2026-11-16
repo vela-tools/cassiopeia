@@ -35,6 +35,9 @@ pub struct SensorThingsLosses {
     /// The Observations of `MultiDatastreams` whose `result` is no array with one value per
     /// `ObservedProperty`, which gave no readings.
     unreadable_multi_results: LossTally<UnreadableMultiResult>,
+    /// The `HistoricalLocations` whose `time` names no instant, or that have no Location in `GeoJSON`,
+    /// which gave no records.
+    unreadable_historical_locations: LossTally<UnreadableHistoricalLocation>,
 }
 
 /// A Thing that has Locations and none in `GeoJSON`, with its Location with the lowest id and the
@@ -48,6 +51,54 @@ pub struct UnreadableLocation {
     pub location: EntityId,
     /// What that Location states about its encoding.
     pub encoding: GeometryEncoding,
+}
+
+/// Of Locations none of which is `GeoJSON`, the one with the lowest id, with the encoding it names.
+#[derive(Debug, Clone, PartialEq, Eq, Display)]
+#[display("Location {location} {encoding}")]
+pub struct LowestLocation {
+    /// The Location with the lowest id.
+    pub location: EntityId,
+    /// What that Location states about its encoding.
+    pub encoding: GeometryEncoding,
+}
+
+/// A `HistoricalLocation` that gave no record, with its Thing and what could not be read of it.
+#[derive(Debug, Clone, PartialEq, Eq, Display)]
+#[display("{historical_location} of Thing {thing} {fault}")]
+pub struct UnreadableHistoricalLocation {
+    /// The `HistoricalLocation`.
+    pub historical_location: HistoricalLocationName,
+    /// The id of its Thing.
+    pub thing: EntityId,
+    /// What could not be read.
+    pub fault: HistoricalLocationFault,
+}
+
+/// How a loss names a `HistoricalLocation`: by its id, or as one served without an id.
+#[derive(Debug, Clone, PartialEq, Eq, Display)]
+pub enum HistoricalLocationName {
+    /// The `HistoricalLocation`'s id.
+    #[display("HistoricalLocation {_0}")]
+    Id(EntityId),
+    /// The `HistoricalLocation` was served without an `@iot.id`.
+    #[display("a HistoricalLocation without an id")]
+    WithoutId,
+}
+
+/// Why a `HistoricalLocation` gave no record.
+#[derive(Debug, Clone, PartialEq, Eq, Display)]
+pub enum HistoricalLocationFault {
+    /// Its `time` names no instant with a date, a time and a UTC offset: the text it holds, or the
+    /// JSON of a `time` that is no text.
+    #[display("has the `time` `{_0}`, which names no instant")]
+    Time(Box<str>),
+    /// It has no Location, though OGC 18-088 gives every `HistoricalLocation` one (section 8.2.3).
+    #[display("has no Location")]
+    NoLocation,
+    /// None of its Locations is `GeoJSON`.
+    #[display("has no GeoJSON Location: {_0}")]
+    NoGeoJsonLocation(LowestLocation),
 }
 
 /// A `FeatureOfInterest` that is no `GeoJSON`, with the encoding it named.
@@ -155,6 +206,7 @@ impl Default for SensorThingsLosses {
             unreadable_features_of_interest: LossTally::new(NAMED_FIRST),
             unreadable_phenomenon_times: LossTally::new(NAMED_FIRST),
             unreadable_multi_results: LossTally::new(NAMED_FIRST),
+            unreadable_historical_locations: LossTally::new(NAMED_FIRST),
         }
     }
 }
@@ -190,6 +242,12 @@ impl SensorThingsLosses {
         &self.unreadable_multi_results
     }
 
+    /// The `HistoricalLocations` that gave no record.
+    #[must_use]
+    pub const fn unreadable_historical_locations(&self) -> &LossTally<UnreadableHistoricalLocation> {
+        &self.unreadable_historical_locations
+    }
+
     /// Counts a renamed reading.
     pub fn rename(&mut self, renamed: RenamedReading) {
         self.renamed_readings.record(renamed);
@@ -214,6 +272,11 @@ impl SensorThingsLosses {
     pub fn unreadable_multi_result(&mut self, result: UnreadableMultiResult) {
         self.unreadable_multi_results.record(result);
     }
+
+    /// Counts a `HistoricalLocation` that gave no record.
+    pub fn unreadable_historical_location(&mut self, historical_location: UnreadableHistoricalLocation) {
+        self.unreadable_historical_locations.record(historical_location);
+    }
 }
 
 #[cfg(test)]
@@ -221,10 +284,14 @@ mod tests {
     use crate::sensorthings::ingest_losses::{
         FeatureOfInterestName,
         GeometryEncoding,
+        HistoricalLocationFault,
+        HistoricalLocationName,
         LossTally,
+        LowestLocation,
         ObservationName,
         SensorThingsLosses,
         UnreadableFeatureOfInterest,
+        UnreadableHistoricalLocation,
         UnreadableLocation,
         UnreadableMultiResult,
     };
@@ -250,6 +317,44 @@ mod tests {
         assert_eq!(losses.unreadable_features_of_interest().total(), 0);
         assert_eq!(losses.unreadable_phenomenon_times().unnamed(), 0);
         assert_eq!(losses.unreadable_multi_results().total(), 0);
+        assert_eq!(losses.unreadable_historical_locations().total(), 0);
+    }
+
+    #[test]
+    fn an_unreadable_historical_location_names_itself_its_thing_and_its_fault_and_only_the_first_is_named() {
+        let unreadable = |historical_location, fault| UnreadableHistoricalLocation {
+            historical_location,
+            thing: EntityId::Integer(12512),
+            fault,
+        };
+        let time = unreadable(
+            HistoricalLocationName::Id(EntityId::Integer(88)),
+            HistoricalLocationFault::Time("2026-11-12".into()),
+        );
+        let text = unreadable(
+            HistoricalLocationName::WithoutId,
+            HistoricalLocationFault::NoGeoJsonLocation(LowestLocation {
+                location: EntityId::Integer(36191),
+                encoding: GeometryEncoding::Stated("text/plain".into()),
+            }),
+        );
+        let none = unreadable(HistoricalLocationName::Id(EntityId::Text("hl-9".into())), HistoricalLocationFault::NoLocation);
+        let mut losses = SensorThingsLosses::default();
+        for loss in [time.clone(), text.clone(), none.clone()] {
+            losses.unreadable_historical_location(loss);
+        }
+
+        assert_eq!(
+            time.to_string(),
+            "HistoricalLocation 88 of Thing 12512 has the `time` `2026-11-12`, which names no instant"
+        );
+        assert_eq!(
+            text.to_string(),
+            "a HistoricalLocation without an id of Thing 12512 has no GeoJSON Location: Location 36191 encodes it as `text/plain`"
+        );
+        assert_eq!(none.to_string(), "HistoricalLocation hl-9 of Thing 12512 has no Location");
+        assert_eq!(losses.unreadable_historical_locations().named(), [time]);
+        assert_eq!(losses.unreadable_historical_locations().total(), 3);
     }
 
     #[test]

@@ -1,5 +1,5 @@
-use crate::instant_text::instant_text;
-use chrono::{DateTime, SubsecRound, Utc};
+use crate::{instant_text::instant_text, served_instant::served_instant};
+use chrono::{DateTime, Utc};
 use serde_json::{Map, Value};
 use std::str::FromStr;
 use thiserror::Error;
@@ -7,10 +7,6 @@ use thiserror::Error;
 /// The member a served Observation carries its `phenomenonTime` in (OGC 18-088 section 8.2.7, Table
 /// 18), and a served Datastream the span of its Observations' (section 8.2.4, Table 10).
 pub const PHENOMENON_TIME_MEMBER: &str = "phenomenonTime";
-
-/// How many fractional digits of a second an instant keeps: NGSI-LD times are precise to the
-/// microsecond (ETSI GS CIM 009 v1.9.1 clause 4.6.3).
-const FRACTION_DIGITS: u16 = 6;
 
 /// An Observation's `phenomenonTime` and the instant it stands for (OGC 18-088 section 8.2.7,
 /// Table 18).
@@ -79,21 +75,11 @@ impl FromStr for PhenomenonTime {
     type Err = UnreadablePhenomenonTime;
 
     fn from_str(text: &str) -> Result<PhenomenonTime, UnreadablePhenomenonTime> {
-        let end = text.split_once('/').map_or(Some(text), |(start, end)| instant(start).map(|_| end));
-        end.and_then(instant)
+        let end = text.split_once('/').map_or(Some(text), |(start, end)| served_instant(start).map(|_| end));
+        end.and_then(served_instant)
             .map(|instant| PhenomenonTime { text: text.into(), instant })
             .ok_or_else(|| UnreadablePhenomenonTime { text: text.into() })
     }
-}
-
-/// The instant an RFC 3339 date and time with a UTC offset names, in UTC, truncated to microseconds.
-///
-/// A text without a time or without an offset names no instant, and an ISO 8601 duration is no
-/// instant either, so an interval written as a start and a duration is unreadable.
-fn instant(text: &str) -> Option<DateTime<Utc>> {
-    DateTime::parse_from_rfc3339(text)
-        .ok()
-        .map(|instant| instant.with_timezone(&Utc).trunc_subsecs(FRACTION_DIGITS))
 }
 
 #[cfg(test)]
@@ -125,11 +111,6 @@ mod tests {
     #[test]
     fn fractions_are_truncated_to_microseconds() {
         assert_eq!(instant_of("2026-11-12T10:00:00.123456789Z"), "2026-11-12T10:00:00.123456Z");
-    }
-
-    #[test]
-    fn a_zero_fraction_is_left_out() {
-        assert_eq!(instant_of("2026-11-12T11:00:00.000Z"), "2026-11-12T11:00:00Z");
     }
 
     #[test]
