@@ -224,6 +224,7 @@ inputs: [
 | `limits.pages` | The most pages one request is followed for, at least 1. The default is 1000. A latest read sends one request; a range or incremental read sends one for its discovery and one for each data stream. |
 | `limits.observations` | The most Observations one cycle writes, at least 1. The default is 500000. A range or incremental read stops when it has written this many. A latest read collects at most one Observation per data stream, so `limits.pages` alone bounds it. |
 | `delay` | A wait between consecutive requests, such as `"200ms"`, at most `"60s"`. The default is none. |
+| `featuresOfInterest` | `true` to read every Observation with its FeatureOfInterest, the place the reading was taken at. The default is `false`. Below. |
 
 A range read takes one of two forms:
 
@@ -255,6 +256,30 @@ read: { incremental: { cursor: "rivm-air", initial: "2026-11-01T00:00:00Z", look
 
 [Reading new readings](source-formats.md#reading-new-readings) describes the positions a cursor keeps, when they move, and what each destination receives.
 
+`featuresOfInterest: true` reads each reading with the place it was taken at, for a Thing that moves, such as a sensor on a bus:
+
+~~~json5
+sensorthings: {
+    datastreams: "startswith(name,'bus-')",
+    read: { range: { last: "24h" } },
+    featuresOfInterest: true,
+},
+~~~
+
+A range or incremental read then adds `$expand=FeatureOfInterest` to each data stream's Observations request, and a latest read adds `;$expand=FeatureOfInterest` inside the newest Observation's expansion. Each reading carries a `featureOfInterest` with the FeatureOfInterest's `id`, `name`, `description` and `properties`, and the GeoJSON geometry of its `feature`. A FeatureOfInterest that is not GeoJSON gives no `feature`, and one `ingest-features-of-interest-unreadable` warning per source names the first one and counts the readings. A mapping places each reading where it was taken, and series output then writes one `location` instance per reading:
+
+~~~json5
+location: {
+    type: "GeoProperty",
+    source: "{{ readings.pm10.featureOfInterest.feature }}",
+    properties: {
+        observedAt: { source: "{{ readings.pm10.time }}", transformation: "datetime" },
+    },
+},
+~~~
+
+[Features of interest](source-formats.md#features-of-interest) gives the requests, the member, and the servers that ignore the latest read's expansion.
+
 Without a `sensorthings` block, a remote SensorThings input reads every data stream with the defaults. An unknown key in the block is refused. Credentials for a server go in [`headers`](#per-input-headers). [Reading a server](source-formats.md#reading-a-server) describes the requests, the paging, and how servers differ.
 
 These are refused when the manifest loads:
@@ -265,6 +290,7 @@ These are refused when the manifest loads:
 - a service root that reads an environment variable (`${NAME}`), so that no URL a read requests, logs, or writes carries a secret;
 - a `range` without `last` or `from`, with both, with `to` beside `last` or alone, with a `last` of zero, or with a `from` that is not before its `to`;
 - an `incremental` read without a `cursor`, with a cursor name outside its characters or length, with an unknown key, with an `initial` that is neither an RFC 3339 instant nor a span, or a span of zero, or with a `lookback` longer than `"7d"`;
+- a `featuresOfInterest` other than `true` or `false`;
 - two inputs whose incremental reads name the same cursor, because each would move the positions the other resumes from. The error names the cursor.
 
 A range or incremental read without `output.temporal.representation: "series"` is refused when the run is built, before any request. It gives one record per Observation, and current-state output keeps one record per entity, so it would keep one reading of each Thing. A scheduled `read: "latest"` into a broker with `operation: "temporal"` is refused when the run is built. Every cycle would send the newest reading of every data stream again, and the temporal API would store each unchanged reading once more. A one-shot latest read into the temporal API is allowed, and so is a scheduled latest read into a broker with `operation: "upsert"`.

@@ -388,7 +388,7 @@ Each cycle writes what it read into a snapshot whose `serviceRoot` is the root a
 {root}/Datastreams?$filter={datastreams}&$expand=Thing/Locations,ObservedProperty,Observations($orderby=phenomenonTime%20desc;$top=1)&$orderby=id%20asc&$top={pageSize}
 ~~~
 
-It selects every data stream with its Thing, the Thing's Locations, its ObservedProperty, and its newest Observation, in id order. `$filter` is sent only when `datastreams` is set. Its value is sent as written, percent-encoded, with a space as `%20` and `'` as `%27`. The Locations are expanded by path, `Thing/Locations`, because some servers ignore an `$expand` nested in parentheses, such as `Thing($expand=Locations)`.
+It selects every data stream with its Thing, the Thing's Locations, its ObservedProperty, and its newest Observation, in id order. `$filter` is sent only when `datastreams` is set. Its value is sent as written, percent-encoded, with a space as `%20` and `'` as `%27`. The Locations are expanded by path, `Thing/Locations`, because some servers ignore an `$expand` nested in parentheses, such as `Thing($expand=Locations)`. With `featuresOfInterest: true`, the newest Observation is also expanded with its FeatureOfInterest (see [Features of interest](#features-of-interest)).
 
 **Paging.** A server answers with pages of at most `pageSize` items. Every page but the last links to the next one with `@iot.nextLink`. Cassiopeia follows each link as the server wrote it, resolved against the page it came from, and adds nothing to it (OGC 18-088 section 9.3.3.6). The input fails without sending the request:
 
@@ -429,7 +429,7 @@ Every attempt at one scheduled run starts from the same instant, so a retried at
 {root}/Datastreams({id})/Observations?$filter=phenomenonTime%20ge%20{from}%20and%20phenomenonTime%20lt%20{to}&$orderby=phenomenonTime%20asc,id%20asc&$top={pageSize}
 ~~~
 
-The bounds are written in UTC with a `Z`, with a fraction only when they have one, such as `2026-11-11T10:00:00Z` or `2026-11-11T10:00:00.250Z`. A data stream's id is written as `(56776)` for an integer id, or as `('o''neil')` for a text id: in single quotes, with each `'` doubled, percent-encoded where a path cannot hold a character. Each request is followed page by page under the rules of [Reading a server](#reading-a-server).
+The bounds are written in UTC with a `Z`, with a fraction only when they have one, such as `2026-11-11T10:00:00Z` or `2026-11-11T10:00:00.250Z`. A data stream's id is written as `(56776)` for an integer id, or as `('o''neil')` for a text id: in single quotes, with each `'` doubled, percent-encoded where a path cannot hold a character. With `featuresOfInterest: true`, each request also carries `$expand=FeatureOfInterest` after `$orderby` (see [Features of interest](#features-of-interest)). Each request is followed page by page under the rules of [Reading a server](#reading-a-server).
 
 **What is read.** The data streams are read one after the other, by ascending id, whatever order the server listed them in. A Datastream's `phenomenonTime` covers all of its Observations, so a data stream whose `phenomenonTime` ends before the range is not requested. One without a `phenomenonTime` is requested. The Observations of each data stream come oldest first, then by id, and each is written once: when a page repeats an Observation the read already wrote, because the server gained rows between pages, the repeat is dropped. The read stops once it has written `limits.observations` Observations in a cycle, keeps what it wrote, and reports `collect-limit-reached` with the page that holds the first Observation it did not write. `limits.pages` stops one data stream's request, and the read goes on with the next one.
 
@@ -535,6 +535,8 @@ In a `range` or `incremental` read, every Observation follows the Datastreams, o
 {"observation":{"@iot.id":98766,"phenomenonTime":"2026-11-12T10:00:00Z","resultTime":null,"result":19.8},"datastream":56776}
 ~~~
 
+A read with `featuresOfInterest: true` keeps each FeatureOfInterest inside its Observation, as the server served it: in each observation line of a `range` or `incremental` read, and in each Datastream's `Observations` of a `latest` read. A snapshot recorded without features of interest still reads, and its readings have no `featureOfInterest`.
+
 The source fails when its first line is no header, the header names another snapshot format or a version its service root does not end with, a line is no JSON object of these kinds, or a datastream line follows an observation line. The error names the line. A snapshot holds no request header or credential, so it can be shared or kept as a test fixture.
 
 A snapshot is detected from its header line, which must end within the file's first 4 KiB, so it needs no declared format. The snapshot check runs before the JSON check, and a SensorThings response such as `{"value":[...]}` has no header, so it is still read as JSON. A file declared `format: "sensorthings"` whose first line is no header fails, with an error that quotes a header.
@@ -573,6 +575,7 @@ Every record has this shape. The ids, names, units and definitions are RIVM Same
 | `.unit` | The data stream's `unitOfMeasurement`. |
 | `.datastream` | The data stream's `id`, `name`, `description`, `observationType`, and `properties`. |
 | `.observedProperty` | The ObservedProperty's `id`, `name`, `definition`, `description`, and `properties`. |
+| `.featureOfInterest` | The FeatureOfInterest the Observation was made at, when the read requested it. See [Features of interest](#features-of-interest). |
 
 Ids keep the JSON type the server sent: an integer id stays a number and a text id stays text. An id of any other type fails the source, naming its line. A member the server leaves out or sends as `null` is absent from the record, at any depth, because NGSI-LD allows no `null` and an absent field produces no attribute. A data stream without a Thing, or without an ObservedProperty with a `name`, fails the source, naming the data stream.
 
@@ -596,6 +599,64 @@ A key that is not a plain name is read with brackets: `{{ readings['PM2.5'].resu
 `location` is the GeoJSON geometry of the Thing's Location with the lowest id. Integer ids come before text ids, integers by value and texts by their bytes. A Location whose `location` is a GeoJSON `Feature` gives the Feature's `geometry`.
 
 GeoJSON is the only Location encoding the SensorThings API defines. A Location is read when its `encodingType` is `application/geo+json` or the older `application/vnd.geo+json`, compared without regard to case or parameters. A Thing whose Location has another encoding, or none, has no `location`, and one `ingest-locations-unreadable` warning per source names the first such Thing and its `encodingType` and counts every one.
+
+### Features of interest
+
+`location` is the place of the Thing as the server serves it when the read runs. That fits a station that stays where it is. A Thing that moves, such as a sensor on a bus, a bicycle or a boat, or a kit a volunteer carries around, takes each reading at a place of its own, which SensorThings records as the FeatureOfInterest of the Observation (OGC 18-088 section 8.2.8). Set `featuresOfInterest: true` to read it:
+
+~~~json5
+sensorthings: {
+    datastreams: "startswith(name,'bus-')",
+    read: { range: { last: "24h" } },
+    featuresOfInterest: true,
+},
+~~~
+
+**The requests.** A range or incremental read adds `$expand=FeatureOfInterest` to each data stream's Observations request:
+
+~~~text
+{root}/Datastreams({id})/Observations?$filter=phenomenonTime%20ge%20{from}%20and%20phenomenonTime%20lt%20{to}&$orderby=phenomenonTime%20asc,id%20asc&$expand=FeatureOfInterest&$top={pageSize}
+~~~
+
+A latest read expands it inside the newest Observation, as OGC 18-088 section 9.3.2.1 allows:
+
+~~~text
+{root}/Datastreams?$filter={datastreams}&$expand=Thing/Locations,ObservedProperty,Observations($orderby=phenomenonTime%20desc;$top=1;$expand=FeatureOfInterest)&$orderby=id%20asc&$top={pageSize}
+~~~
+
+Without `featuresOfInterest`, or with `false`, every request is sent without the expansion. Each expansion asks the server for one more join per Observation, which a slow server may not answer within its time limit, and for a fixed station it repeats the Thing's Location on every reading, so leave the setting off for stations. A server that ignores an `$expand` nested in parentheses, as RIVM Samen Meten does, serves the newest Observation of a latest read without its FeatureOfInterest. Its readings then have no `featureOfInterest`, and the run goes on.
+
+**The member.** Each reading of an Observation served with its FeatureOfInterest has a `featureOfInterest`:
+
+~~~json
+"featureOfInterest": {
+    "id": 4711,
+    "name": "Line 12, Stationsplein",
+    "description": "Position of the bus when the reading was taken",
+    "feature": { "type": "Point", "coordinates": [5.4797, 51.4433] }
+}
+~~~
+
+| Member | Content |
+| --- | --- |
+| `featureOfInterest.id`, `.name`, `.description`, `.properties` | The FeatureOfInterest's members, as served. |
+| `featureOfInterest.feature` | The GeoJSON geometry of its `feature`, read as a Location is: when its `encodingType` is `application/geo+json` or `application/vnd.geo+json`, compared without regard to case or parameters. A GeoJSON `Feature` gives its `geometry`. |
+
+Ids keep the JSON type the server sent, and a member that is absent or `null` is left out, as for every member of a record, so a FeatureOfInterest served without an id has no `id`. An id that is neither an integer nor a text fails the source, naming its line. A FeatureOfInterest with another encoding, or none, gives no `feature`, and one `ingest-features-of-interest-unreadable` warning per source names the first such FeatureOfInterest, by its id when it has one, and its `encodingType`, and counts the readings that have one. The record's `location` is unchanged: it stays the place of the Thing.
+
+**Mapping.** A mapping places each reading where it was taken. Into output with `output.temporal.representation: "series"`, a range or incremental read of a moving Thing then writes one `location` instance per reading:
+
+~~~json5
+location: {
+    type: "GeoProperty",
+    source: "{{ readings.pm10.featureOfInterest.feature }}",
+    properties: {
+        observedAt: { source: "{{ readings.pm10.time }}", transformation: "datetime" },
+    },
+},
+~~~
+
+A FeatureOfInterest need not be a place the Thing was at: it can be a river reach or a sample. A latest record holds one reading per data stream, each with a FeatureOfInterest of its own. The mapping therefore chooses the place: the Thing's `location`, or a reading's `featureOfInterest.feature`.
 
 ### Reading times
 

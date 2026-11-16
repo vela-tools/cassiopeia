@@ -27,8 +27,9 @@ use std::{io::Write, ops::ControlFlow, path::Path};
 /// When the range holds no reading this cycle, nothing is requested and the snapshot is its header
 /// alone. Otherwise the metadata discovery comes first, and every Datastream it serves is written as
 /// it was served. Then each data stream that may hold a reading of the window is read on its own, by
-/// ascending id, oldest reading first. A page limit stops one data stream's read and the read goes on
-/// with the next; the observation limit stops the whole read.
+/// ascending id, oldest reading first, and each Observation is written as it was served, with its
+/// `FeatureOfInterest` when the settings request features of interest. A page limit stops one data
+/// stream's read and the read goes on with the next; the observation limit stops the whole read.
 ///
 /// # Errors
 ///
@@ -71,7 +72,7 @@ pub(crate) fn read_range<W: Write>(
     // A range read keeps nothing between cycles, so no Observation is seen before it is read.
     let unseen = SeenObservations::default();
     for datastream in datastreams.into_ids() {
-        let request = observations_request(service.root(), &datastream, window, settings.page_size());
+        let request = observations_request(service.root(), &datastream, window, settings.page_size(), settings.features_of_interest());
         let end = read_observations(reader, request, settings.limits().pages(), &datastream, &unseen, &mut sink, |_, _| {})?;
         if next_stream(end, &mut warnings).is_break() {
             break;
@@ -117,6 +118,15 @@ mod tests {
     fn observations_path(id: u64, bounds: (&str, &str)) -> String {
         format!(
             "/v1.1/Datastreams({id})/Observations?$filter=phenomenonTime%20ge%20{}%20and%20phenomenonTime%20lt%20{}&$orderby=phenomenonTime%20asc,id%20asc&$top=1000",
+            bounds.0, bounds.1
+        )
+    }
+
+    /// The path and query of the observations request of the data stream `id` between `bounds` that
+    /// requests every Observation with its `FeatureOfInterest`.
+    fn observations_with_features_path(id: u64, bounds: (&str, &str)) -> String {
+        format!(
+            "/v1.1/Datastreams({id})/Observations?$filter=phenomenonTime%20ge%20{}%20and%20phenomenonTime%20lt%20{}&$orderby=phenomenonTime%20asc,id%20asc&$expand=FeatureOfInterest&$top=1000",
             bounds.0, bounds.1
         )
     }
@@ -183,6 +193,61 @@ mod tests {
             lines[3],
             json!({"observation": {"@iot.id": 11, "phenomenonTime": "2026-11-12T01:00:00Z", "result": 11}, "datastream": 1})
         );
+    }
+
+    #[test]
+    fn a_range_read_of_features_of_interest_keeps_each_inside_its_observation() {
+        let mut server = mockito::Server::new();
+        let observation = json!({
+            "@iot.id": 11,
+            "phenomenonTime": "2026-11-12T01:00:00Z",
+            "result": 11,
+            "FeatureOfInterest": {
+                "@iot.id": 4711,
+                "name": "Line 12, Stationsplein",
+                "encodingType": "application/geo+json",
+                "feature": {"type": "Point", "coordinates": [5.4797, 51.4433]},
+            },
+        });
+        let mocks = [
+            discovery(&mut server, &[1]),
+            serve(
+                &mut server,
+                &observations_with_features_path(1, LAST_DAY),
+                page(slice::from_ref(&observation), None),
+            ),
+        ];
+
+        let (result, payloads) = collect(collector(
+            &server,
+            &range_read(r#"{"last": "24h"}"#, r#", "featuresOfInterest": true"#),
+            RequestHeaders::default(),
+            &RUNNING,
+        ));
+
+        result.unwrap();
+        mocks.iter().for_each(Mock::assert);
+        let lines = snapshot_lines(payloads);
+        assert_eq!(lines[2], json!({"observation": observation, "datastream": 1}));
+    }
+
+    #[test]
+    fn a_range_read_that_omits_features_of_interest_sends_no_expansion() {
+        let mut server = mockito::Server::new();
+        let mocks = [
+            discovery(&mut server, &[1]),
+            serve(&mut server, &observations_path(1, LAST_DAY), page(&observations(&[11]), None)),
+        ];
+
+        let (result, _) = collect(collector(
+            &server,
+            &range_read(r#"{"last": "24h"}"#, r#", "featuresOfInterest": false"#),
+            RequestHeaders::default(),
+            &RUNNING,
+        ));
+
+        result.unwrap();
+        mocks.iter().for_each(Mock::assert);
     }
 
     #[test]

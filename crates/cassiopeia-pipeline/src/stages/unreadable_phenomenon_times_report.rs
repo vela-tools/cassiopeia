@@ -1,10 +1,6 @@
+use crate::stages::source_warning::report_source_warning;
 use cassiopeia_common::input::Input;
-use cassiopeia_diagnostic::{
-    code::{diagnostic_code::DiagnosticCode, ingest_code::IngestCode},
-    context_field::ContextField,
-    diagnostic_builder::DiagnosticBuilder,
-    severity::Severity,
-};
+use cassiopeia_diagnostic::code::ingest_code::IngestCode;
 use cassiopeia_ingestor::sensorthings::ingest_losses::LossTally;
 use cassiopeia_reporter::reporter::DiagnosticSink;
 use std::num::NonZeroU64;
@@ -30,18 +26,7 @@ pub(crate) fn report_unreadable_phenomenon_times(sink: &dyn DiagnosticSink, sour
     let (Some(total), Some(first)) = (NonZeroU64::new(times.total()), times.named().first()) else {
         return 0;
     };
-    sink.report(
-        &DiagnosticBuilder::new(
-            Severity::Warning,
-            DiagnosticCode::Ingest(IngestCode::PhenomenonTimesUnreadable),
-            headline(source, first, total),
-        )
-        // The diagnostic outlives the ingestor that names the source.
-        .with_context(ContextField::Source(source.clone()))
-        .with_occurrences(total)
-        .build(),
-    );
-    total.get()
+    report_source_warning(sink, source, IngestCode::PhenomenonTimesUnreadable, headline(source, first, total), total)
 }
 
 #[cfg(test)]

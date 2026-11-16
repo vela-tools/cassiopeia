@@ -1,10 +1,6 @@
+use crate::stages::source_warning::report_source_warning;
 use cassiopeia_common::input::Input;
-use cassiopeia_diagnostic::{
-    code::{diagnostic_code::DiagnosticCode, ingest_code::IngestCode},
-    context_field::ContextField,
-    diagnostic_builder::DiagnosticBuilder,
-    severity::Severity,
-};
+use cassiopeia_diagnostic::code::ingest_code::IngestCode;
 use cassiopeia_ingestor::sensorthings::{ingest_losses::LossTally, reading_keys::RenamedReading};
 use cassiopeia_reporter::reporter::DiagnosticSink;
 use std::num::NonZeroU64;
@@ -37,18 +33,7 @@ pub(crate) fn report_renamed_readings(sink: &dyn DiagnosticSink, source: &Input,
     let Some(total) = NonZeroU64::new(renamed.total()) else {
         return 0;
     };
-    sink.report(
-        &DiagnosticBuilder::new(
-            Severity::Warning,
-            DiagnosticCode::Ingest(IngestCode::ReadingsRenamed),
-            headline(source, renamed, total),
-        )
-        // The diagnostic outlives the ingestor that names the source.
-        .with_context(ContextField::Source(source.clone()))
-        .with_occurrences(total)
-        .build(),
-    );
-    total.get()
+    report_source_warning(sink, source, IngestCode::ReadingsRenamed, headline(source, renamed, total), total)
 }
 
 #[cfg(test)]

@@ -24,6 +24,9 @@ pub enum StaEntity {
     /// An Observation.
     #[strum(serialize = "an Observation")]
     Observation,
+    /// The `FeatureOfInterest` of an Observation.
+    #[strum(serialize = "a FeatureOfInterest")]
+    FeatureOfInterest,
 }
 
 /// Why a SensorThings snapshot cannot be read into records.

@@ -1,3 +1,4 @@
+mod features_of_interest;
 mod geo_properties;
 mod geojson_collections;
 mod harness;

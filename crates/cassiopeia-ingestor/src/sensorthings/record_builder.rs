@@ -1,12 +1,13 @@
 use crate::sensorthings::{
     error::{SensorThingsIngestError, StaEntity},
+    feature_of_interest::feature_of_interest,
     ingest_losses::SensorThingsLosses,
     null_members::move_member,
     served_id::optional_served_id,
 };
 use cassiopeia_ir::record::Record;
 use cassiopeia_sensorthings::{
-    entity_id::ID_MEMBER,
+    entity_id::{EntityId, ID_MEMBER},
     phenomenon_time::{PHENOMENON_TIME_MEMBER, PhenomenonTime},
     service_root::ServiceRoot,
     snapshot::line_number::LineNumber,
@@ -24,6 +25,19 @@ pub(super) struct DatastreamParts {
     pub(super) members: Map<String, Value>,
     /// The `ObservedProperty`'s id and members.
     pub(super) observed_property: Map<String, Value>,
+}
+
+/// The members a record carries of a served entity: its `id`, then each of `keys` it has.
+pub(super) fn record_members(mut served: Map<String, Value>, id: Option<&EntityId>, keys: &[&str]) -> Map<String, Value> {
+    let mut members = Map::new();
+    if let Some(id) = id {
+        members.insert("id".to_owned(), id.json());
+    }
+    served.remove(ID_MEMBER);
+    for key in keys {
+        move_member(&mut members, key, &mut served, key);
+    }
+    members
 }
 
 /// A record's `server`: the service root, its host without port, and its version.
@@ -52,13 +66,14 @@ pub(super) fn thing_record(server: Value, thing: Map<String, Value>, location: O
     Record::new(None, data)
 }
 
-/// The reading of one served Observation, read on `line`, with what it carries of its data stream,
-/// or `None` when its `phenomenonTime` names no instant, which is counted as a loss.
+/// The reading of one served Observation, read on `line`, with its `featureOfInterest` when the read
+/// expanded it and what it carries of its data stream, or `None` when its `phenomenonTime` names no
+/// instant, which is counted as a loss.
 ///
 /// # Errors
 ///
-/// Returns [`SensorThingsIngestError::IdUnreadable`] when the Observation has an id that is neither
-/// an integer nor a text.
+/// Returns [`SensorThingsIngestError::IdUnreadable`] when the Observation or its `FeatureOfInterest`
+/// has an id that is neither an integer nor a text.
 pub(super) fn reading(
     mut observation: Map<String, Value>,
     line: LineNumber,
@@ -91,6 +106,9 @@ pub(super) fn reading(
     reading.insert(PHENOMENON_TIME_MEMBER.to_owned(), Value::String(text));
     for member in OBSERVATION_MEMBERS {
         move_member(&mut reading, member, &mut observation, member);
+    }
+    if let Some(feature) = feature_of_interest(&mut observation, line, losses)? {
+        reading.insert("featureOfInterest".to_owned(), feature);
     }
     if let Some(unit) = datastream.unit {
         reading.insert("unit".to_owned(), unit);

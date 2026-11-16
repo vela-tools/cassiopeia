@@ -1,10 +1,6 @@
+use crate::stages::source_warning::report_source_warning;
 use cassiopeia_common::input::Input;
-use cassiopeia_diagnostic::{
-    code::{diagnostic_code::DiagnosticCode, ingest_code::IngestCode},
-    context_field::ContextField,
-    diagnostic_builder::DiagnosticBuilder,
-    severity::Severity,
-};
+use cassiopeia_diagnostic::code::ingest_code::IngestCode;
 use cassiopeia_ingestor::sensorthings::ingest_losses::{LossTally, UnreadableLocation};
 use cassiopeia_reporter::reporter::DiagnosticSink;
 use std::num::NonZeroU64;
@@ -31,18 +27,7 @@ pub(crate) fn report_unreadable_locations(sink: &dyn DiagnosticSink, source: &In
     let (Some(total), Some(first)) = (NonZeroU64::new(locations.total()), locations.named().first()) else {
         return 0;
     };
-    sink.report(
-        &DiagnosticBuilder::new(
-            Severity::Warning,
-            DiagnosticCode::Ingest(IngestCode::LocationsUnreadable),
-            headline(source, first, total),
-        )
-        // The diagnostic outlives the ingestor that names the source.
-        .with_context(ContextField::Source(source.clone()))
-        .with_occurrences(total)
-        .build(),
-    );
-    total.get()
+    report_source_warning(sink, source, IngestCode::LocationsUnreadable, headline(source, first, total), total)
 }
 
 #[cfg(test)]
@@ -50,7 +35,7 @@ mod tests {
     use crate::{stages::unreadable_locations_report::report_unreadable_locations, test_reporter::RecordingReporter};
     use cassiopeia_common::input::Input;
     use cassiopeia_diagnostic::code::{diagnostic_code::DiagnosticCode, ingest_code::IngestCode};
-    use cassiopeia_ingestor::sensorthings::ingest_losses::{LocationEncoding, SensorThingsLosses, UnreadableLocation};
+    use cassiopeia_ingestor::sensorthings::ingest_losses::{GeometryEncoding, SensorThingsLosses, UnreadableLocation};
     use cassiopeia_sensorthings::entity_id::EntityId;
     use pretty_assertions::assert_eq;
     use std::path::PathBuf;
@@ -60,7 +45,7 @@ mod tests {
         for &thing in things {
             losses.unreadable_location(UnreadableLocation {
                 thing: EntityId::Integer(thing),
-                encoding: LocationEncoding::Stated("text/plain".into()),
+                encoding: GeometryEncoding::Stated("text/plain".into()),
             });
         }
         losses
