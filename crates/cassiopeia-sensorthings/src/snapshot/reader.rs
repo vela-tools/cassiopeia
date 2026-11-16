@@ -1,7 +1,7 @@
 use crate::snapshot::{
     error::SnapshotError,
     header::SnapshotHeader,
-    line::{RawLine, SnapshotLine},
+    line::{LineKind, RawLine, SnapshotLine},
     line_number::LineNumber,
 };
 use std::io::BufRead;
@@ -9,7 +9,7 @@ use std::io::BufRead;
 /// Reads a snapshot line by line, so a snapshot of any size is read in the memory of one line.
 ///
 /// The reader yields every line after the header, in file order, and stops at the first line it
-/// cannot read.
+/// cannot read, or at the first line of a kind that comes before the kind of a line already read.
 pub struct SnapshotReader<R> {
     /// The snapshot's text.
     source: R,
@@ -24,10 +24,9 @@ pub struct SnapshotReader<R> {
 /// The part of a snapshot a reader is in.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Section {
-    /// Between the header and the first observation line, where data stream lines belong.
-    Datastreams,
-    /// Past the first observation line, where only observation lines belong.
-    Observations,
+    /// Among the lines of a kind: the kind of the line read last, or data stream lines right after
+    /// the header. A line of this kind or of a later one belongs here.
+    Lines(LineKind),
     /// Past the last line, or past a line that could not be read.
     Ended,
 }
@@ -50,7 +49,7 @@ impl<R: BufRead> SnapshotReader<R> {
         let reader = SnapshotReader {
             source,
             line: LineNumber::FIRST,
-            section: Section::Datastreams,
+            section: Section::Lines(LineKind::Datastream),
             text,
         };
         Ok((header, reader))
@@ -73,10 +72,12 @@ impl<R: BufRead> SnapshotReader<R> {
         let read = serde_json::from_str::<RawLine>(&self.text)
             .and_then(SnapshotLine::try_from)
             .map_err(|source| SnapshotError::Malformed { line, source })?;
-        match (&read, self.section) {
-            (SnapshotLine::Datastream(_), Section::Observations) => return Err(SnapshotError::OrderViolation { line }),
-            (SnapshotLine::Observation(_), Section::Datastreams) => self.section = Section::Observations,
-            (SnapshotLine::Datastream(_), Section::Datastreams | Section::Ended) | (SnapshotLine::Observation(_), Section::Observations | Section::Ended) => {}
+        if let Section::Lines(after) = self.section {
+            let kind = read.kind();
+            if kind < after {
+                return Err(SnapshotError::OrderViolation { line, kind, after });
+            }
+            self.section = Section::Lines(kind);
         }
         Ok(Some(read))
     }
@@ -106,7 +107,7 @@ mod tests {
         snapshot::{
             error::SnapshotError,
             header::SnapshotHeader,
-            line::{DatastreamLine, ObservationLine, SnapshotLine},
+            line::{DatastreamLine, HistoricalLocationLine, LineKind, ObservationLine, SnapshotLine},
             reader::SnapshotReader,
             writer::SnapshotWriter,
         },
@@ -160,9 +161,19 @@ mod tests {
         for datastream in &datastreams {
             writer.datastream(datastream).unwrap();
         }
+        let historical_locations = [
+            (object(json!({"@iot.id": 88, "time": "2026-11-12T09:04:00Z"})), EntityId::Integer(12512)),
+            (object(json!({"@iot.id": 89, "time": "2026-11-12T09:34:00Z"})), EntityId::Integer(12512)),
+        ];
         let mut writer = writer.into_observations();
         for (observation, datastream) in &observations {
             writer.observation(&ObservationLine::new(observation.clone(), datastream.clone())).unwrap();
+        }
+        let mut writer = writer.into_historical_locations();
+        for (historical_location, thing) in &historical_locations {
+            writer
+                .historical_location(&HistoricalLocationLine::new(historical_location.clone(), thing.clone()))
+                .unwrap();
         }
         let written = String::from_utf8(writer.finish().unwrap()).unwrap();
 
@@ -173,6 +184,11 @@ mod tests {
                 observations
                     .into_iter()
                     .map(|(observation, datastream)| SnapshotLine::Observation(ObservationLine::new(observation, datastream))),
+            )
+            .chain(
+                historical_locations
+                    .into_iter()
+                    .map(|(historical_location, thing)| SnapshotLine::HistoricalLocation(HistoricalLocationLine::new(historical_location, thing))),
             )
             .collect();
         assert_eq!(read_all(&written).unwrap(), (header, expected));
@@ -200,15 +216,36 @@ mod tests {
         ));
         assert!(matches!(
             read_all(&format!("{HEADER}\n{datastream}\n{observation}\n{observation}\n{datastream}\n")),
-            Err(SnapshotError::OrderViolation { line }) if line.get() == 5
+            Err(SnapshotError::OrderViolation { line, kind: LineKind::Datastream, after: LineKind::Observation }) if line.get() == 5
         ));
         assert!(matches!(
             read_all(&format!("{HEADER}\n{datastream}\n{observation}\n{multi}\n")),
-            Err(SnapshotError::OrderViolation { line }) if line.get() == 4
+            Err(SnapshotError::OrderViolation { line, .. }) if line.get() == 4
         ));
         assert!(matches!(
             read_all(&format!("{HEADER}\n{{\"thing\":{{}}}}\n")),
             Err(SnapshotError::Malformed { line, .. }) if line.get() == 2
+        ));
+    }
+
+    #[test]
+    fn historical_location_lines_come_last() {
+        let datastream = r#"{"datastream":{"@iot.id":5}}"#;
+        let observation = r#"{"observation":{"@iot.id":1},"datastream":5}"#;
+        let historical = r#"{"historicalLocation":{"@iot.id":88},"thing":12512}"#;
+
+        let (_, lines) = read_all(&format!("{HEADER}\n{datastream}\n{historical}\n{historical}\n")).unwrap();
+        assert_eq!(
+            lines.iter().map(SnapshotLine::kind).collect::<Vec<_>>(),
+            [LineKind::Datastream, LineKind::HistoricalLocation, LineKind::HistoricalLocation]
+        );
+        assert!(matches!(
+            read_all(&format!("{HEADER}\n{datastream}\n{observation}\n{historical}\n{datastream}\n")),
+            Err(SnapshotError::OrderViolation { line, kind: LineKind::Datastream, after: LineKind::HistoricalLocation }) if line.get() == 5
+        ));
+        assert!(matches!(
+            read_all(&format!("{HEADER}\n{datastream}\n{historical}\n{observation}\n")),
+            Err(SnapshotError::OrderViolation { line, kind: LineKind::Observation, after: LineKind::HistoricalLocation }) if line.get() == 4
         ));
     }
 

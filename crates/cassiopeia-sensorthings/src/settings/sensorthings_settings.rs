@@ -2,6 +2,7 @@ use crate::{
     settings::{
         collect_limits::CollectLimits,
         features_of_interest::FeaturesOfInterest,
+        historical_locations::HistoricalLocations,
         multi_datastreams::MultiDatastreams,
         page_size::PageSize,
         read_mode::ReadMode,
@@ -17,8 +18,8 @@ use typed_builder::TypedBuilder;
 /// How a remote SensorThings input is read: the `sensorthings` block of a manifest input.
 ///
 /// Every member is optional. Without one, every Datastream and no `MultiDatastream` is read with
-/// `read: "latest"`, in pages of 1000, up to the default limits, without a wait between requests and
-/// without features of interest. A command that reads a server builds the settings it reads with,
+/// `read: "latest"`, in pages of 1000, up to the default limits, without a wait between requests,
+/// without features of interest and without `HistoricalLocations`. A command that reads a server builds the settings it reads with,
 /// each member it does not state at that default.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Default, Serialize, Deserialize, Getters, CopyGetters, TypedBuilder)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -64,6 +65,12 @@ pub struct SensorThingsSettings {
     #[getset(get_copy = "pub")]
     #[builder(default)]
     features_of_interest: FeaturesOfInterest,
+
+    /// Whether a range or incremental read requests the `HistoricalLocations` of every Thing it lists.
+    #[serde(default)]
+    #[getset(get_copy = "pub")]
+    #[builder(default)]
+    historical_locations: HistoricalLocations,
 }
 
 impl SensorThingsSettings {
@@ -101,8 +108,10 @@ fn datastream_filter<'de, D: Deserializer<'de>>(deserializer: D) -> Result<Optio
 #[cfg(test)]
 mod tests {
     use crate::{
+        read_kind::ReadKind,
         settings::{
             features_of_interest::FeaturesOfInterest,
+            historical_locations::HistoricalLocations,
             multi_datastreams::MultiDatastreams,
             read_mode::ReadMode,
             request_delay::RequestDelay,
@@ -130,6 +139,7 @@ mod tests {
         assert_eq!(settings.datastreams(), &None);
         assert_eq!(settings.multi_datastreams(), &MultiDatastreams::None);
         assert_eq!(settings.features_of_interest(), FeaturesOfInterest::Omitted);
+        assert_eq!(settings.historical_locations(), HistoricalLocations::Omitted);
         assert_eq!(settings.kinds().collect::<Vec<_>>(), [StreamKind::Datastream]);
         assert_eq!(settings, SensorThingsSettings::default());
     }
@@ -137,11 +147,11 @@ mod tests {
     #[test]
     fn stated_settings_are_read() {
         let settings = settings(
-            r#"{"read": "latest", "pageSize": 200, "datastreams": "x eq 1", "multiDatastreams": "y eq 2", "delay": "200ms", "limits": {"pages": 10, "observations": 1000}, "featuresOfInterest": true}"#,
+            r#"{"read": {"range": {"last": "24h"}}, "pageSize": 200, "datastreams": "x eq 1", "multiDatastreams": "y eq 2", "delay": "200ms", "limits": {"pages": 10, "observations": 1000}, "featuresOfInterest": true, "historicalLocations": true}"#,
         )
         .unwrap();
 
-        assert_eq!(settings.read(), &ReadMode::Latest);
+        assert_eq!(settings.read().kind(), ReadKind::Range);
         assert_eq!(settings.page_size().get(), 200);
         assert_eq!(settings.datastreams().as_ref().map(StreamFilter::as_str), Some("x eq 1"));
         assert_eq!(settings.filter(StreamKind::Datastream).map(StreamFilter::as_str), Some("x eq 1"));
@@ -150,6 +160,7 @@ mod tests {
         assert_eq!(settings.limits().pages().get(), 10);
         assert_eq!(settings.limits().observations().get(), 1000);
         assert_eq!(settings.features_of_interest(), FeaturesOfInterest::Requested);
+        assert_eq!(settings.historical_locations(), HistoricalLocations::Requested);
     }
 
     #[test]
@@ -178,6 +189,8 @@ mod tests {
             r#"{"limits": {"pages": 0}}"#,
             r#"{"featuresOfInterest": "yes"}"#,
             r#"{"featureOfInterest": true}"#,
+            r#"{"historicalLocations": "yes"}"#,
+            r#"{"historicalLocation": true}"#,
             r#"{"multiDatastreams": 1}"#,
             r#"{"multiDatastream": true}"#,
         ] {
@@ -207,7 +220,7 @@ mod tests {
     #[test]
     fn stated_settings_round_trip_through_serialization() {
         let stated =
-            settings(r#"{"datastreams": "endswith(name,'-pm10')", "multiDatastreams": true, "pageSize": 10, "delay": "200ms", "featuresOfInterest": true}"#)
+            settings(r#"{"read": {"range": {"last": "1h"}}, "datastreams": "endswith(name,'-pm10')", "multiDatastreams": true, "pageSize": 10, "delay": "200ms", "featuresOfInterest": true, "historicalLocations": true}"#)
                 .unwrap();
 
         let json = serde_json::to_string(&stated).unwrap();

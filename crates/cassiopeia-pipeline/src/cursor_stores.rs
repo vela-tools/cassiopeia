@@ -103,12 +103,12 @@ mod tests {
         input_config::{InputConfig, build_input_config},
     };
     use cassiopeia_manifest::input::ManifestInput;
-    use cassiopeia_sensorthings::{cursor_name::CursorName, entity_id::EntityId, service_root::ServiceRoot, stream_id::StreamId};
+    use cassiopeia_sensorthings::{cursor_name::CursorName, entity_id::EntityId, read_stream::ReadStream, service_root::ServiceRoot, stream_id::StreamId};
     use cassiopeia_sensorthings_cursor::{
         cursor_store::CursorStore,
         cursor_store_error::CursorStoreError,
         cursor_update::CursorUpdate,
-        seen_observations::SeenObservations,
+        seen_entities::SeenEntities,
     };
     use chrono::{DateTime, Utc};
     use pretty_assertions::assert_eq;
@@ -143,8 +143,8 @@ mod tests {
     fn update(time: DateTime<Utc>) -> CursorUpdate {
         let mut update = CursorUpdate::new(time, Duration::from_secs(3600));
         update.record(
-            StreamId::Datastream(EntityId::Integer(5)),
-            SeenObservations::from(BTreeMap::from([(EntityId::Integer(1), time)])),
+            ReadStream::Data(StreamId::Datastream(EntityId::Integer(5))),
+            SeenEntities::from(BTreeMap::from([(EntityId::Integer(1), time)])),
         );
         update
     }
@@ -193,7 +193,7 @@ mod tests {
         let next = stores.start_cycle().unwrap();
         assert_eq!(
             next.unclaimed[&name("air")]
-                .get(&StreamId::Datastream(EntityId::Integer(5)))
+                .get(&ReadStream::Data(StreamId::Datastream(EntityId::Integer(5))))
                 .unwrap()
                 .high_water(),
             time

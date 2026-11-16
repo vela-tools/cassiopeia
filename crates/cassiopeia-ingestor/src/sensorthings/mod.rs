@@ -1,16 +1,18 @@
 //! Reading a SensorThings snapshot file into records.
 //!
 //! A snapshot holds the data streams a read discovered, Datastreams and `MultiDatastreams`, each with
-//! its Thing, the Thing's Locations, what it observes and its `Sensor`, and the Observations the read
-//! took, each with its `FeatureOfInterest` when the read expanded it. A Datastream gives each of its
-//! Observations one reading, and a `MultiDatastream` one per element, by position. A record joins
-//! readings with all of these, so a mapping reads one documented shape: `server`, `thing`,
-//! `location`, `locations` and `readings`.
+//! its Thing, the Thing's Locations, what it observes and its `Sensor`, the Observations the read
+//! took, each with its `FeatureOfInterest` when the read expanded it, and the `HistoricalLocations` of
+//! its Things when the read requested them. A Datastream gives each of its Observations one reading,
+//! and a `MultiDatastream` one per element, by position. A record joins readings with all of these,
+//! or a `HistoricalLocation` with its Thing, so a mapping reads one documented shape: `server`,
+//! `thing`, `location`, `locations`, and `readings` or `historicalLocation`.
 
 pub mod element_position;
 mod encoded_geometry;
 pub mod error;
 mod feature_of_interest;
+mod historical_location;
 pub mod ingest_losses;
 pub mod ingestor;
 mod location;

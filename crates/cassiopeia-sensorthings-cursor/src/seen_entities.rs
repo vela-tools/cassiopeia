@@ -4,35 +4,36 @@ use derive_more::From;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
-/// Written Observations by id, each with the reading time it was written for: the Observations a
-/// position has seen, or those one cycle wrote for a data stream.
+/// Written entities by id, each with the time it was written for: the Observations of a data stream
+/// with their reading times, or the `HistoricalLocations` of a Thing with their `time`, that a
+/// position has seen, or that one cycle wrote for its stream.
 ///
-/// A late upload carries an earlier `phenomenonTime` than readings already written, and no entity
-/// carries an insertion time (OGC 18-088 section 8.1, Table 2), so only its id tells it apart from a
-/// reading written before.
+/// A late upload carries an earlier time than entities already written, and no entity carries an
+/// insertion time (OGC 18-088 section 8.1, Table 2), so only its id tells it apart from one written
+/// before.
 #[derive(Debug, Clone, PartialEq, Eq, Default, From, Serialize, Deserialize)]
 #[serde(transparent)]
-pub struct SeenObservations(BTreeMap<EntityId, DateTime<Utc>>);
+pub struct SeenEntities(BTreeMap<EntityId, DateTime<Utc>>);
 
-impl SeenObservations {
-    /// Adds the Observation `id`, written for the reading time `time`.
+impl SeenEntities {
+    /// Adds the entity `id`, written for the time `time`.
     pub fn insert(&mut self, id: EntityId, time: DateTime<Utc>) {
         self.0.insert(id, time);
     }
 
-    /// Whether the Observation `id` is among these.
+    /// Whether the entity `id` is among these.
     #[must_use]
     pub fn contains(&self, id: &EntityId) -> bool {
         self.0.contains_key(id)
     }
 
-    /// The latest reading time among these, or `None` when there are none.
+    /// The latest time among these, or `None` when there are none.
     #[must_use]
     pub fn latest(&self) -> Option<DateTime<Utc>> {
         self.0.values().max().copied()
     }
 
-    /// How many Observations these are.
+    /// How many entities these are.
     #[must_use]
     pub fn len(&self) -> usize {
         self.0.len()
@@ -44,12 +45,12 @@ impl SeenObservations {
         self.0.is_empty()
     }
 
-    /// Adds every Observation of `written`.
-    pub(crate) fn join(&mut self, written: SeenObservations) {
+    /// Adds every entity of `written`.
+    pub(crate) fn join(&mut self, written: SeenEntities) {
         self.0.extend(written.0);
     }
 
-    /// Keeps only the Observations whose reading time is at or after `earliest`.
+    /// Keeps only the entities whose time is at or after `earliest`.
     pub(crate) fn keep_from(&mut self, earliest: DateTime<Utc>) {
         self.0.retain(|_, time| *time >= earliest);
     }
@@ -57,7 +58,7 @@ impl SeenObservations {
 
 #[cfg(test)]
 mod tests {
-    use crate::seen_observations::SeenObservations;
+    use crate::seen_entities::SeenEntities;
     use cassiopeia_sensorthings::entity_id::EntityId;
     use chrono::{DateTime, Utc};
     use pretty_assertions::assert_eq;
@@ -67,8 +68,8 @@ mod tests {
         DateTime::parse_from_rfc3339(text).unwrap().to_utc()
     }
 
-    fn seen(observations: &[(i64, &str)]) -> SeenObservations {
-        SeenObservations::from(
+    fn seen(observations: &[(i64, &str)]) -> SeenEntities {
+        SeenEntities::from(
             observations
                 .iter()
                 .map(|(id, time)| (EntityId::Integer(*id), instant(time)))
@@ -81,7 +82,7 @@ mod tests {
         let observations = seen(&[(1, "2026-11-12T09:30:00Z"), (2, "2026-11-12T08:00:00Z")]);
 
         assert_eq!(observations.latest(), Some(instant("2026-11-12T09:30:00Z")));
-        assert_eq!(SeenObservations::default().latest(), None);
+        assert_eq!(SeenEntities::default().latest(), None);
     }
 
     #[test]

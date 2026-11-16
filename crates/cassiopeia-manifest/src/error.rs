@@ -87,6 +87,16 @@ pub enum ManifestError {
         url: Box<MaskedUrl>,
     },
 
+    /// A remote SensorThings input asked a latest read for the `HistoricalLocations` of its Things, which
+    /// only a range or an incremental read reads.
+    #[error(
+        "The SensorThings input '{url}' sets 'historicalLocations: true' with 'read: \"latest\"'; only a range or an incremental read reads HistoricalLocations, because a latest record's 'location' already is its Thing's last known place"
+    )]
+    HistoricalLocationsOnLatestRead {
+        /// The source, masked. Boxed so a URL does not enlarge every `Result` in the crate.
+        url: Box<MaskedUrl>,
+    },
+
     /// Two inputs read incrementally through one cursor, so each would move the positions the other
     /// resumes from.
     #[error("The cursor '{0}' is named by more than one input; each incremental input keeps its positions in a cursor of its own")]

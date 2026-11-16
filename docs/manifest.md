@@ -222,10 +222,11 @@ inputs: [
 | `multiDatastreams` | The MultiDatastreams read, for a server with the MultiDatastream extension: `false` for none, the default; `true` for every one; or an OData `$filter` expression over MultiDatastreams, such as `startswith(name,'ws-')`, sent and checked as `datastreams` is. A MultiDatastream has `ObservedProperties` where a Datastream has an `ObservedProperty`, so each has a filter of its own. Below. |
 | `read` | `"latest"`, the default: the newest reading of every selected data stream. Or `{ range: { ... } }`: every reading of a time range. Or `{ incremental: { ... } }`: every reading gained since the last successful cycle. Both are below. |
 | `pageSize` | The `$top` of every request, 1 to 10000. The default is 1000. A server may serve fewer items a page. |
-| `limits.pages` | The most pages one request is followed for, at least 1. The default is 1000. A latest read sends one request for each kind of data stream it reads; a range or incremental read sends one for each kind's discovery and one for each data stream. |
-| `limits.observations` | The most Observations one cycle writes, at least 1, of Datastreams and MultiDatastreams together. The default is 500000. A range or incremental read stops when it has written this many. A latest read collects at most one Observation per data stream, so `limits.pages` alone bounds it. |
+| `limits.pages` | The most pages one request is followed for, at least 1. The default is 1000. A latest read sends one request for each kind of data stream it reads; a range or incremental read sends one for each kind's discovery and one for each data stream, and with `historicalLocations: true` one for each Thing. |
+| `limits.observations` | The most Observations one cycle writes, at least 1, of Datastreams and MultiDatastreams together. The default is 500000. A range or incremental read stops reading Observations when it has written this many. HistoricalLocations are not counted, and are read after it stops. A latest read collects at most one Observation per data stream, so `limits.pages` alone bounds it. |
 | `delay` | A wait between consecutive requests, such as `"200ms"`, at most `"60s"`. The default is none. |
 | `featuresOfInterest` | `true` to read every Observation with its FeatureOfInterest, the place the reading was taken at. The default is `false`. Below. |
+| `historicalLocations` | `true` to read, in a range or incremental read, the HistoricalLocations of every Thing a listed data stream belongs to: the places the Thing was known at, and when. The default is `false`. A latest read refuses it. Below. |
 
 A range read takes one of two forms:
 
@@ -293,6 +294,18 @@ sensorthings: {
 
 A read then sends the requests it sends for Datastreams to the MultiDatastreams collection as well, and each value of a MultiDatastream Observation becomes a reading of its own, keyed by the name of the ObservedProperty at its position. A server without the extension answers the MultiDatastreams requests with an error, and the input fails. A run whose input reads no MultiDatastreams checks once whether its server holds any, and one `collect-multi-datastreams-unread` warning names a server that does. [MultiDatastreams](source-formats.md#multidatastreams) gives the requests, the readings, and their keys.
 
+`historicalLocations: true` reads where each Thing has been, for a Thing that moves, such as a bus:
+
+~~~json5
+sensorthings: {
+    datastreams: "startswith(name,'bus-')",
+    read: { range: { last: "24h" } },
+    historicalLocations: true,
+},
+~~~
+
+A range or incremental read then requests, after the Observations, the HistoricalLocations of each Thing a listed data stream belongs to, by ascending Thing id, each with its Locations, within the read's bounds. Each HistoricalLocation gives a record with the Thing's members and a `historicalLocation`: its `id`, its `time`, and the geometry of its GeoJSON Location with the lowest id as `location`. An incremental read keeps a position for each Thing beside those of its data streams. A HistoricalLocation whose `time` names no instant, or that has no GeoJSON Location, gives no record, and one `ingest-historical-locations-unreadable` warning per source names the first one. A latest read reads none, because its record's `location` already is the Thing's last known place, so `historicalLocations: true` with `read: "latest"`, or without `read`, is refused. [Historical locations](source-formats.md#historical-locations) gives the requests, the records, and a mapping that writes a Thing's track.
+
 Without a `sensorthings` block, a remote SensorThings input reads every Datastream and no MultiDatastream with the defaults. An unknown key in the block is refused. Credentials for a server go in [`headers`](#per-input-headers). [Reading a server](source-formats.md#reading-a-server) describes the requests, the paging, and how servers differ.
 
 These are refused when the manifest loads:
@@ -303,7 +316,8 @@ These are refused when the manifest loads:
 - a service root that reads an environment variable (`${NAME}`), so that no URL a read requests, logs, or writes carries a secret;
 - a `range` without `last` or `from`, with both, with `to` beside `last` or alone, with a `last` of zero, or with a `from` that is not before its `to`;
 - an `incremental` read without a `cursor`, with a cursor name outside its characters or length, with an unknown key, with an `initial` that is neither an RFC 3339 instant nor a span, or a span of zero, or with a `lookback` longer than `"7d"`;
-- a `featuresOfInterest` other than `true` or `false`;
+- a `featuresOfInterest` or a `historicalLocations` other than `true` or `false`;
+- `historicalLocations: true` on a latest read, which reads no HistoricalLocations. The error names the setting;
 - a `datastreams` that is blank or holds a line break or another control character, and a `multiDatastreams` that is not `true`, `false`, or such an expression. The error names the setting;
 - two inputs whose incremental reads name the same cursor, because each would move the positions the other resumes from. The error names the cursor.
 

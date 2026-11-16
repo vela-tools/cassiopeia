@@ -21,21 +21,22 @@ pub enum CursorSubcommand {
     /// marks, `-` for a cursor without positions. A cursor of another kind of input is left out.
     List,
 
-    /// Show the position a cursor keeps for each data stream.
+    /// Show the position a cursor keeps for each data stream and each Thing.
     ///
-    /// Prints the service root, then one row per data stream, Datastreams first: its kind,
-    /// `datastream` or `multi-datastream`, its id, its high-water mark, the
-    /// number of Observations it has seen within the lookback, the start of the last cycle that
-    /// listed it, and the start of the first cycle that no longer listed it, `-` while it is listed.
+    /// Prints the service root, then one row per position, Datastreams first, then
+    /// `MultiDatastreams`, then Things: its kind, `datastream`, `multi-datastream` or `thing`, its
+    /// id, its high-water mark, the number of Observations or `HistoricalLocations` it has seen within
+    /// the lookback, the start of the last cycle that listed it, and the start of the first cycle that
+    /// no longer listed it, `-` while it is listed.
     #[command(arg_required_else_help = true)]
     Show(CursorArg),
 
-    /// Reset a cursor, so the next cycle reads its data streams again from a chosen point.
+    /// Reset a cursor, so the next cycle reads its data streams and Things again from a chosen point.
     ///
-    /// Without `--to`, removes the positions, so the next cycle starts each data stream at the
-    /// input's `initial` point. With `--to`, sets their high-water marks to the target and forgets
-    /// the Observations they have seen, so the next cycle reads each from the target minus the
-    /// lookback.
+    /// Without `--to`, removes the positions, so the next cycle starts each data stream and Thing at
+    /// the input's `initial` point. With `--to`, sets their high-water marks to the target and
+    /// forgets the Observations and `HistoricalLocations` they have seen, so the next cycle reads each
+    /// from the target minus the lookback.
     #[command(arg_required_else_help = true)]
     Reset(ResetArgs),
 }
@@ -54,15 +55,20 @@ pub struct ResetArgs {
     #[command(flatten)]
     pub cursor: CursorArg,
 
-    /// Reset only the Datastream with this id, as `cursor show` prints it; every data stream when
-    /// neither this nor `--multi-datastream` is given.
-    #[arg(long, value_name = "ID", conflicts_with = "multi_datastream")]
+    /// Reset only the Datastream with this id, as `cursor show` prints it; every data stream and
+    /// Thing when none of this, `--multi-datastream` and `--thing` is given.
+    #[arg(long, value_name = "ID", conflicts_with_all = ["multi_datastream", "thing"])]
     pub datastream: Option<IdText>,
 
     /// Reset only the `MultiDatastream` with this id, as `cursor show` prints it. A Datastream with
     /// the same id keeps its position.
-    #[arg(long, value_name = "ID")]
+    #[arg(long, value_name = "ID", conflicts_with = "thing")]
     pub multi_datastream: Option<IdText>,
+
+    /// Reset only the position of the `HistoricalLocations` of the Thing with this id, as `cursor
+    /// show` prints it. The data streams of the Thing keep theirs.
+    #[arg(long, value_name = "ID")]
+    pub thing: Option<IdText>,
 
     /// Set the high-water marks to this RFC 3339 instant, or to this span before now, such as `1h`;
     /// remove the positions when absent. A target after now is refused.
@@ -72,14 +78,15 @@ pub struct ResetArgs {
 
 impl ResetArgs {
     /// What the reset applies to: the Datastream `--datastream` names, the `MultiDatastream`
-    /// `--multi-datastream` names, or every data stream.
+    /// `--multi-datastream` names, the Thing `--thing` names, or every data stream and Thing.
     #[must_use]
     pub fn scope(&self) -> ResetScope {
         // The scope owns its id text, while the parsed command line keeps its own.
-        match (&self.datastream, &self.multi_datastream) {
-            (Some(id), _) => ResetScope::Datastream(id.clone()),
-            (None, Some(id)) => ResetScope::MultiDatastream(id.clone()),
-            (None, None) => ResetScope::Store,
+        match (&self.datastream, &self.multi_datastream, &self.thing) {
+            (Some(id), _, _) => ResetScope::Datastream(id.clone()),
+            (None, Some(id), _) => ResetScope::MultiDatastream(id.clone()),
+            (None, None, Some(id)) => ResetScope::Thing(id.clone()),
+            (None, None, None) => ResetScope::Store,
         }
     }
 }
@@ -146,6 +153,23 @@ mod tests {
             reset_args(&["rivm-air", "--to", "2026-11-12T08:00:00Z"]).to.map(|to| to.to_string()),
             Some("2026-11-12T08:00:00Z".to_owned())
         );
+    }
+
+    #[test]
+    fn the_reset_command_reads_a_thing() {
+        assert_eq!(
+            reset_args(&["bus", "--thing", "12512"]).scope(),
+            ResetScope::Thing(IdText::from("12512".to_owned()))
+        );
+    }
+
+    #[test]
+    fn a_thing_cannot_be_reset_with_a_data_stream() {
+        for other in ["--datastream", "--multi-datastream"] {
+            let error = refusal(&["reset", "bus", "--thing", "12512", other, "5"]);
+
+            assert!(error.contains("cannot be used with"), "{other}: {error}");
+        }
     }
 
     #[test]

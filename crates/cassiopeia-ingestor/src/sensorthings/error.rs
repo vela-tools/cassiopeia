@@ -35,6 +35,9 @@ pub enum StaEntity {
     /// The `FeatureOfInterest` of an Observation.
     #[strum(serialize = "a FeatureOfInterest")]
     FeatureOfInterest,
+    /// A `HistoricalLocation` of a Thing.
+    #[strum(serialize = "a HistoricalLocation")]
+    HistoricalLocation,
 }
 
 /// Why a SensorThings snapshot cannot be read into records.
@@ -101,11 +104,29 @@ pub enum SensorThingsIngestError {
         datastream: StreamId,
     },
 
+    /// A `HistoricalLocation` names a Thing no data stream line holds.
+    #[error("line {line} of the snapshot is a HistoricalLocation of Thing {thing}, which no data stream line holds")]
+    UnknownThing {
+        /// The historicalLocation line's number.
+        line: LineNumber,
+        /// The id of the Thing the `HistoricalLocation` names.
+        thing: EntityId,
+    },
+
     /// A latest snapshot holds an observation line, though it carries each newest Observation in its
     /// data stream line.
     #[error("line {line} of the snapshot is an observation line, but a latest snapshot holds its Observations in its data stream lines")]
     UnexpectedObservation {
         /// The observation line's number.
+        line: LineNumber,
+    },
+
+    /// A latest snapshot holds a historicalLocation line, though a latest read reads none.
+    #[error(
+        "line {line} of the snapshot is a historicalLocation line, but a latest snapshot holds none: its records' `location` is each Thing's last known place"
+    )]
+    UnexpectedHistoricalLocation {
+        /// The historicalLocation line's number.
         line: LineNumber,
     },
 }
@@ -140,6 +161,19 @@ mod tests {
         assert_eq!(
             error.to_string(),
             "line 2 of the snapshot holds MultiDatastream 4 with 2 ObservedProperties, 3 `unitOfMeasurements` and 2 `multiObservationDataTypes`, so the values of its results cannot be read by position"
+        );
+    }
+
+    #[test]
+    fn a_historical_location_of_an_unknown_thing_names_its_line_and_thing() {
+        let error = SensorThingsIngestError::UnknownThing {
+            line: LineNumber::FIRST.next(),
+            thing: EntityId::Text("bus-12".into()),
+        };
+
+        assert_eq!(
+            error.to_string(),
+            "line 2 of the snapshot is a HistoricalLocation of Thing bus-12, which no data stream line holds"
         );
     }
 

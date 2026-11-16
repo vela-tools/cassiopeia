@@ -1,8 +1,8 @@
 //! What the cursor commands' tests share: cursor stores in a temporary cursors folder, moved by the
 //! cycles a run would commit.
 
-use cassiopeia_sensorthings::{cursor_name::CursorName, entity_id::EntityId, service_root::ServiceRoot, stream_id::StreamId};
-use cassiopeia_sensorthings_cursor::{cursor_store::CursorStore, cursor_update::CursorUpdate, seen_observations::SeenObservations};
+use cassiopeia_sensorthings::{cursor_name::CursorName, entity_id::EntityId, read_stream::ReadStream, service_root::ServiceRoot, stream_id::StreamId};
+use cassiopeia_sensorthings_cursor::{cursor_store::CursorStore, cursor_update::CursorUpdate, seen_entities::SeenEntities};
 use chrono::{DateTime, Utc};
 use std::{collections::BTreeMap, path::Path, time::Duration};
 
@@ -34,8 +34,8 @@ pub(crate) fn commit_cycle(folder: &Path, name: &str, root: &str, cycle_start: &
     for (datastream, written) in listed {
         let written = written.iter().map(|(id, time)| (EntityId::Integer(*id), at(time)));
         update.record(
-            StreamId::Datastream(EntityId::Integer(*datastream)),
-            SeenObservations::from(written.collect::<BTreeMap<_, _>>()),
+            ReadStream::Data(StreamId::Datastream(EntityId::Integer(*datastream))),
+            SeenEntities::from(written.collect::<BTreeMap<_, _>>()),
         );
     }
     open(folder, name, root).commit(update).unwrap();

@@ -17,8 +17,8 @@ use std::{
 /// The extension of a store's file.
 pub(crate) const STORE_EXTENSION: &str = "redb";
 
-/// The cursor store of one SensorThings input: the read positions of its data streams, in one redb
-/// database, `<folder>/<cursor>.redb`.
+/// The cursor store of one SensorThings input: the read positions of its data streams and Things, in
+/// one redb database, `<folder>/<cursor>.redb`.
 ///
 /// An open store holds its file exclusively, against every other open in this process and in any
 /// other, until it is dropped, so two runs never advance one cursor. A commit is durable once it
@@ -148,8 +148,8 @@ impl CursorStore {
     ///
     /// # Errors
     ///
-    /// Returns [`CursorStoreError::UnknownDatastream`] when `scope` names a data stream the store
-    /// holds no position for, and the errors of [`CursorStore::commit`]. The store is then left as it
+    /// Returns [`CursorStoreError::UnknownStream`] when `scope` names a data stream or a Thing the
+    /// store holds no position for, and the errors of [`CursorStore::commit`]. The store is then left as it
     /// was.
     pub fn reset(&self, scope: &ResetScope, target: ResetTarget) -> Result<(), CursorStoreError> {
         self.rewrite(|positions| reset(positions, scope, target, &self.cursor))
@@ -230,11 +230,11 @@ mod tests {
         cursor_update::CursorUpdate,
         positions::Positions,
         reset::{IdText, ResetScope, ResetTarget},
-        seen_observations::SeenObservations,
+        seen_entities::SeenEntities,
         store_metadata::{METADATA, MetadataKey},
         test_metadata::rewrite_metadata,
     };
-    use cassiopeia_sensorthings::{cursor_name::CursorName, entity_id::EntityId, service_root::ServiceRoot, stream_id::StreamId};
+    use cassiopeia_sensorthings::{cursor_name::CursorName, entity_id::EntityId, read_stream::ReadStream, service_root::ServiceRoot, stream_id::StreamId};
     use chrono::{DateTime, Utc};
     use pretty_assertions::assert_eq;
     use redb::{Database, ReadableDatabase, TableDefinition};
@@ -258,8 +258,8 @@ mod tests {
         DateTime::parse_from_rfc3339(&format!("2026-11-12T{time}:00Z")).unwrap().to_utc()
     }
 
-    fn seen(observations: &[(i64, &str)]) -> SeenObservations {
-        SeenObservations::from(
+    fn seen(observations: &[(i64, &str)]) -> SeenEntities {
+        SeenEntities::from(
             observations
                 .iter()
                 .map(|(id, time)| (EntityId::Integer(*id), at(time)))
@@ -280,8 +280,8 @@ mod tests {
     fn store_with_streams_5_and_9(folder: &TempDir) -> CursorStore {
         let store = open(folder).unwrap();
         let mut update = CursorUpdate::new(at("10:00"), LOOKBACK);
-        update.record(StreamId::Datastream(EntityId::Integer(5)), seen(&[(50, "09:30")]));
-        update.record(StreamId::Datastream(EntityId::Integer(9)), seen(&[(90, "09:40")]));
+        update.record(ReadStream::Data(StreamId::Datastream(EntityId::Integer(5))), seen(&[(50, "09:30")]));
+        update.record(ReadStream::Data(StreamId::Datastream(EntityId::Integer(9))), seen(&[(90, "09:40")]));
         store.commit(update).unwrap();
         store
     }
@@ -333,10 +333,10 @@ mod tests {
         let folder = tempfile::tempdir().unwrap();
         let store = open(&folder).unwrap();
         let mut update = CursorUpdate::new(at("10:00"), LOOKBACK);
-        update.record(StreamId::Datastream(EntityId::Integer(5)), seen(&[(50, "09:30")]));
+        update.record(ReadStream::Data(StreamId::Datastream(EntityId::Integer(5))), seen(&[(50, "09:30")]));
         update.record(
-            StreamId::Datastream(EntityId::Text("t-5".into())),
-            SeenObservations::from(BTreeMap::from([(EntityId::Text("o-1".into()), at("09:45"))])),
+            ReadStream::Data(StreamId::Datastream(EntityId::Text("t-5".into()))),
+            SeenEntities::from(BTreeMap::from([(EntityId::Text("o-1".into()), at("09:45"))])),
         );
         store.commit(update).unwrap();
         let committed = store.positions().unwrap();
@@ -352,7 +352,7 @@ mod tests {
         let store = store_with_streams_5_and_9(&folder);
         let committed = store.positions().unwrap();
         let mut update = CursorUpdate::new(at("11:00"), LOOKBACK);
-        update.record(StreamId::Datastream(EntityId::Integer(5)), seen(&[(51, "10:30")]));
+        update.record(ReadStream::Data(StreamId::Datastream(EntityId::Integer(5))), seen(&[(51, "10:30")]));
         drop(update);
         drop(store);
 
@@ -364,10 +364,13 @@ mod tests {
         let folder = tempfile::tempdir().unwrap();
         let store = open(&folder).unwrap();
         let mut update = CursorUpdate::new(at("10:00"), LOOKBACK);
-        update.record(StreamId::Datastream(EntityId::Integer(5)), seen(&[(1, "08:30"), (2, "09:10"), (3, "10:00")]));
+        update.record(
+            ReadStream::Data(StreamId::Datastream(EntityId::Integer(5))),
+            seen(&[(1, "08:30"), (2, "09:10"), (3, "10:00")]),
+        );
         store.commit(update).unwrap();
         let positions = store.positions().unwrap();
-        let position = positions.get(&StreamId::Datastream(EntityId::Integer(5))).unwrap();
+        let position = positions.get(&ReadStream::Data(StreamId::Datastream(EntityId::Integer(5)))).unwrap();
 
         assert_eq!(position.high_water(), at("10:00"));
         assert_eq!(position.seen(), &seen(&[(2, "09:10"), (3, "10:00")]));
@@ -394,8 +397,8 @@ mod tests {
 
         assert_eq!(after.len(), 1);
         assert_eq!(
-            after.get(&StreamId::Datastream(EntityId::Integer(9))),
-            before.get(&StreamId::Datastream(EntityId::Integer(9)))
+            after.get(&ReadStream::Data(StreamId::Datastream(EntityId::Integer(9)))),
+            before.get(&ReadStream::Data(StreamId::Datastream(EntityId::Integer(9))))
         );
     }
 
@@ -411,13 +414,13 @@ mod tests {
             )
             .unwrap();
         let after = store.positions().unwrap();
-        let rewound = after.get(&StreamId::Datastream(EntityId::Integer(5))).unwrap();
+        let rewound = after.get(&ReadStream::Data(StreamId::Datastream(EntityId::Integer(5)))).unwrap();
 
         assert_eq!(rewound.high_water(), at("08:00"));
         assert!(rewound.seen().is_empty());
         assert_eq!(
-            after.get(&StreamId::Datastream(EntityId::Integer(9))),
-            before.get(&StreamId::Datastream(EntityId::Integer(9)))
+            after.get(&ReadStream::Data(StreamId::Datastream(EntityId::Integer(9)))),
+            before.get(&ReadStream::Data(StreamId::Datastream(EntityId::Integer(9))))
         );
     }
 
@@ -428,7 +431,7 @@ mod tests {
         store.reset(&ResetScope::Store, ResetTarget::HighWater(at("08:00"))).unwrap();
         let after = store.positions().unwrap();
 
-        for datastream in [StreamId::Datastream(EntityId::Integer(5)), StreamId::Datastream(EntityId::Integer(9))] {
+        for datastream in [5, 9].map(|id| ReadStream::Data(StreamId::Datastream(EntityId::Integer(id)))) {
             let rewound = after.get(&datastream).unwrap();
 
             assert_eq!((rewound.high_water(), rewound.seen().is_empty()), (at("08:00"), true));
@@ -449,7 +452,34 @@ mod tests {
             refusal(store.reset(&ResetScope::MultiDatastream(IdText::from(Box::<str>::from("5"))), ResetTarget::InitialPoint)),
             "cursor 'rivm-air' holds no position for the MultiDatastream '5'"
         );
+        assert_eq!(
+            refusal(store.reset(&ResetScope::Thing(IdText::from(Box::<str>::from("5"))), ResetTarget::InitialPoint)),
+            "cursor 'rivm-air' holds no position for the Thing '5'"
+        );
         assert_eq!(store.positions().unwrap(), before);
+    }
+
+    #[test]
+    fn a_reset_of_a_thing_keeps_the_data_streams_of_its_id() {
+        let folder = tempfile::tempdir().unwrap();
+        let store = open(&folder).unwrap();
+        let mut update = CursorUpdate::new(at("10:00"), LOOKBACK);
+        update.record(ReadStream::Data(StreamId::Datastream(EntityId::Integer(12512))), seen(&[(40, "09:30")]));
+        update.record(ReadStream::Thing(EntityId::Integer(12512)), seen(&[(88, "09:04")]));
+        store.commit(update).unwrap();
+        let before = store.positions().unwrap();
+
+        store
+            .reset(&ResetScope::Thing(IdText::from(Box::<str>::from("12512"))), ResetTarget::InitialPoint)
+            .unwrap();
+        let after = store.positions().unwrap();
+
+        assert_eq!(after.len(), 1);
+        assert_eq!(
+            after.get(&ReadStream::Data(StreamId::Datastream(EntityId::Integer(12512)))),
+            before.get(&ReadStream::Data(StreamId::Datastream(EntityId::Integer(12512))))
+        );
+        assert_eq!(after.get(&ReadStream::Thing(EntityId::Integer(12512))), None);
     }
 
     #[test]
@@ -457,8 +487,8 @@ mod tests {
         let folder = tempfile::tempdir().unwrap();
         let store = open(&folder).unwrap();
         let mut update = CursorUpdate::new(at("10:00"), LOOKBACK);
-        update.record(StreamId::Datastream(EntityId::Integer(4)), seen(&[(40, "09:30")]));
-        update.record(StreamId::MultiDatastream(EntityId::Integer(4)), seen(&[(41, "09:40")]));
+        update.record(ReadStream::Data(StreamId::Datastream(EntityId::Integer(4))), seen(&[(40, "09:30")]));
+        update.record(ReadStream::Data(StreamId::MultiDatastream(EntityId::Integer(4))), seen(&[(41, "09:40")]));
         store.commit(update).unwrap();
         let before = store.positions().unwrap();
 
@@ -469,10 +499,10 @@ mod tests {
 
         assert_eq!(after.len(), 1);
         assert_eq!(
-            after.get(&StreamId::Datastream(EntityId::Integer(4))),
-            before.get(&StreamId::Datastream(EntityId::Integer(4)))
+            after.get(&ReadStream::Data(StreamId::Datastream(EntityId::Integer(4)))),
+            before.get(&ReadStream::Data(StreamId::Datastream(EntityId::Integer(4))))
         );
-        assert_eq!(after.get(&StreamId::MultiDatastream(EntityId::Integer(4))), None);
+        assert_eq!(after.get(&ReadStream::Data(StreamId::MultiDatastream(EntityId::Integer(4)))), None);
     }
 
     #[test]

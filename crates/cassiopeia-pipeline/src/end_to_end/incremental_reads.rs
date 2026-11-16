@@ -8,7 +8,7 @@ use crate::{
 };
 use cassiopeia_common::store_kind::StoreKind;
 use cassiopeia_diagnostic::code::{diagnostic_code::DiagnosticCode, run_code::RunCode};
-use cassiopeia_sensorthings::{cursor_name::CursorName, entity_id::EntityId, service_root::ServiceRoot, stream_id::StreamId};
+use cassiopeia_sensorthings::{cursor_name::CursorName, entity_id::EntityId, read_stream::ReadStream, service_root::ServiceRoot, stream_id::StreamId};
 use cassiopeia_sensorthings_cursor::{
     cursor_store::CursorStore,
     cursor_store_error::CursorStoreError,
@@ -250,7 +250,9 @@ fn reset(cursors: &Path, target: ResetTarget) {
 
 /// The high-water mark of the PM10 data stream among `positions`, if it has one.
 fn pm10_high_water(positions: &Positions) -> Option<DateTime<Utc>> {
-    positions.get(&StreamId::Datastream(EntityId::Integer(PM10))).map(Position::high_water)
+    positions
+        .get(&ReadStream::Data(StreamId::Datastream(EntityId::Integer(PM10))))
+        .map(Position::high_water)
 }
 
 /// The `observedAt` of every PM10 reading of the fixture Thing a run wrote into files.

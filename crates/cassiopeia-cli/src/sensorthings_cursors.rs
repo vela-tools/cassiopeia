@@ -1,5 +1,5 @@
 use crate::error::{CliError, Result};
-use cassiopeia_sensorthings::{cursor_name::CursorName, service_root::ServiceRoot, time_point::TimePoint};
+use cassiopeia_sensorthings::{cursor_name::CursorName, read_stream::ReadStream, service_root::ServiceRoot, time_point::TimePoint};
 use cassiopeia_sensorthings_cursor::{
     cursor_store::CursorStore,
     cursors_folder::sensorthings_stores,
@@ -25,7 +25,8 @@ pub struct CursorSummary {
     /// How many data streams it holds a position for.
     #[getset(get_copy = "pub")]
     datastreams: usize,
-    /// The oldest and the newest high-water mark of its positions, or `None` when it holds none.
+    /// The oldest and the newest high-water mark of the positions of its data streams, or `None` when
+    /// it holds none.
     #[getset(get = "pub")]
     high_water: Option<RangeInclusive<DateTime<Utc>>>,
 }
@@ -36,7 +37,8 @@ pub struct CursorSummary {
 pub struct CursorPositions {
     /// The service root the positions were read from.
     root: ServiceRoot,
-    /// The positions, Datastreams first, each kind by ascending id.
+    /// The positions, Datastreams first, then `MultiDatastreams`, then Things, each kind by ascending
+    /// id.
     positions: Positions,
 }
 
@@ -67,15 +69,15 @@ pub fn show_cursor(folder: &Path, cursor: &CursorName) -> Result<CursorPositions
 }
 
 /// Resets the positions of the cursor `cursor` of the cursors folder `folder` within `scope`: removes
-/// them without `to`, so their data streams start at the input's initial point again, or sets their
-/// high-water marks to the instant `to` names now and forgets what they have seen. Returns the file
-/// of the store it changed.
+/// them without `to`, so their data streams and Things start at the input's initial point again, or
+/// sets their high-water marks to the instant `to` names now and forgets what they have seen. Returns
+/// the file of the store it changed.
 ///
 /// # Errors
 ///
 /// Returns [`CliError::ResetTargetAfterNow`] when `to` names an instant after now, and
-/// [`CliError::Cursor`] when the folder holds no such cursor, when `scope` names a data stream the
-/// cursor holds no position for, or when the cursor cannot be opened, read or written, as while a
+/// [`CliError::Cursor`] when the folder holds no such cursor, when `scope` names a data stream or a
+/// Thing the cursor holds no position for, or when the cursor cannot be opened, read or written, as while a
 /// running job holds it. The cursor is then left as it was.
 pub fn reset_cursor(folder: &Path, cursor: &CursorName, scope: &ResetScope, to: Option<TimePoint>) -> Result<PathBuf> {
     let target = reset_target(to, Utc::now())?;
@@ -85,17 +87,22 @@ pub fn reset_cursor(folder: &Path, cursor: &CursorName, scope: &ResetScope, to: 
 }
 
 impl CursorSummary {
-    /// The summary of the positions `store` keeps.
+    /// The summary of the positions `store` keeps for data streams; a Thing's position is shown by
+    /// `cursor show`.
     fn of(store: &CursorStore) -> Result<CursorSummary> {
         let positions = store.positions()?;
-        let oldest = positions.iter().map(|(_, position)| position.high_water()).min();
-        let newest = positions.iter().map(|(_, position)| position.high_water()).max();
+        let datastreams = || {
+            positions
+                .iter()
+                .filter(|(stream, _)| matches!(stream, ReadStream::Data(_)))
+                .map(|(_, position)| position.high_water())
+        };
         Ok(CursorSummary {
             // The summary outlives the store it was read from.
             cursor: store.cursor().clone(),
             root: store.service_root().clone(),
-            datastreams: positions.len(),
-            high_water: oldest.zip(newest).map(|(oldest, newest)| oldest..=newest),
+            datastreams: datastreams().count(),
+            high_water: datastreams().min().zip(datastreams().max()).map(|(oldest, newest)| oldest..=newest),
         })
     }
 }
@@ -130,11 +137,11 @@ mod tests {
         sensorthings_cursors::{list_cursors, reset_cursor, reset_target, show_cursor},
         test_cursors::{RIVM, at, commit_cycle, cursor, open},
     };
-    use cassiopeia_sensorthings::{entity_id::EntityId, stream_id::StreamId, time_point::TimePoint};
+    use cassiopeia_sensorthings::{entity_id::EntityId, read_stream::ReadStream, stream_id::StreamId, time_point::TimePoint};
     use cassiopeia_sensorthings_cursor::{
         cursor_update::CursorUpdate,
         reset::{IdText, ResetScope, ResetTarget},
-        seen_observations::SeenObservations,
+        seen_entities::SeenEntities,
     };
     use pretty_assertions::assert_eq;
     use redb::{Database, TableDefinition};
@@ -219,9 +226,9 @@ mod tests {
             shown,
             [
                 "service root: https://api-samenmeten.rivm.nl/v1.0",
-                "kind        data stream  high water            seen  last listed           missing since",
-                "datastream  5            2026-11-12T09:30:00Z  1     2026-11-12T11:00:00Z  -",
-                "datastream  9            2026-11-12T09:45:00Z  2     2026-11-12T10:00:00Z  2026-11-12T11:00:00Z",
+                "kind        id  high water            seen  last listed           missing since",
+                "datastream  5   2026-11-12T09:30:00Z  1     2026-11-12T11:00:00Z  -",
+                "datastream  9   2026-11-12T09:45:00Z  2     2026-11-12T10:00:00Z  2026-11-12T11:00:00Z",
             ]
             .join("\n")
         );
@@ -291,13 +298,13 @@ mod tests {
         )
         .unwrap();
         let after = show_cursor(folder.path(), &cursor("rivm-air")).unwrap();
-        let rewound = after.positions().get(&StreamId::Datastream(EntityId::Integer(5))).unwrap();
+        let rewound = after.positions().get(&ReadStream::Data(StreamId::Datastream(EntityId::Integer(5)))).unwrap();
 
         assert_eq!(store, folder.path().join("rivm-air.redb"));
         assert_eq!((rewound.high_water(), rewound.seen().is_empty()), (at("08:00"), true));
         assert_eq!(
-            after.positions().get(&StreamId::Datastream(EntityId::Integer(9))),
-            before.positions().get(&StreamId::Datastream(EntityId::Integer(9)))
+            after.positions().get(&ReadStream::Data(StreamId::Datastream(EntityId::Integer(9)))),
+            before.positions().get(&ReadStream::Data(StreamId::Datastream(EntityId::Integer(9))))
         );
     }
 
@@ -350,9 +357,9 @@ mod tests {
     fn a_multi_datastream_is_shown_with_its_kind_and_reset_apart_from_the_datastream_of_its_id() {
         let folder = TempDir::new().unwrap();
         let mut update = CursorUpdate::new(at("10:00"), Duration::from_hours(1));
-        let written = |id: i64, time: &str| SeenObservations::from(BTreeMap::from([(EntityId::Integer(id), at(time))]));
-        update.record(StreamId::Datastream(EntityId::Integer(4)), written(40, "09:30"));
-        update.record(StreamId::MultiDatastream(EntityId::Integer(4)), written(41, "09:45"));
+        let written = |id: i64, time: &str| SeenEntities::from(BTreeMap::from([(EntityId::Integer(id), at(time))]));
+        update.record(ReadStream::Data(StreamId::Datastream(EntityId::Integer(4))), written(40, "09:30"));
+        update.record(ReadStream::Data(StreamId::MultiDatastream(EntityId::Integer(4))), written(41, "09:45"));
         open(folder.path(), "wind", RIVM).commit(update).unwrap();
 
         let shown = render_cursor_positions(&show_cursor(folder.path(), &cursor("wind")).unwrap());
@@ -362,11 +369,55 @@ mod tests {
         assert_eq!(
             shown.lines().skip(2).collect::<Vec<_>>(),
             [
-                "datastream        4            2026-11-12T09:30:00Z  1     2026-11-12T10:00:00Z  -",
-                "multi-datastream  4            2026-11-12T09:45:00Z  1     2026-11-12T10:00:00Z  -",
+                "datastream        4   2026-11-12T09:30:00Z  1     2026-11-12T10:00:00Z  -",
+                "multi-datastream  4   2026-11-12T09:45:00Z  1     2026-11-12T10:00:00Z  -",
             ]
         );
         assert_eq!(after.positions().len(), 1);
-        assert!(after.positions().get(&StreamId::Datastream(EntityId::Integer(4))).is_some());
+        assert!(after.positions().get(&ReadStream::Data(StreamId::Datastream(EntityId::Integer(4)))).is_some());
+    }
+
+    #[test]
+    fn a_thing_is_shown_with_its_kind_and_reset_alone() {
+        let folder = TempDir::new().unwrap();
+        let mut update = CursorUpdate::new(at("10:00"), Duration::from_hours(1));
+        let written = |id: i64, time: &str| SeenEntities::from(BTreeMap::from([(EntityId::Integer(id), at(time))]));
+        update.record(ReadStream::Data(StreamId::Datastream(EntityId::Integer(12512))), written(40, "09:30"));
+        update.record(ReadStream::Thing(EntityId::Integer(12512)), written(88, "09:04"));
+        open(folder.path(), "bus", RIVM).commit(update).unwrap();
+
+        let shown = render_cursor_positions(&show_cursor(folder.path(), &cursor("bus")).unwrap());
+        let listed = render_cursor_list(&list_cursors(folder.path()).unwrap());
+        reset_cursor(folder.path(), &cursor("bus"), &ResetScope::Thing(IdText::from("12512".to_owned())), None).unwrap();
+        let after = show_cursor(folder.path(), &cursor("bus")).unwrap();
+
+        assert_eq!(
+            shown.lines().skip(1).collect::<Vec<_>>(),
+            [
+                "kind        id     high water            seen  last listed           missing since",
+                "datastream  12512  2026-11-12T09:30:00Z  1     2026-11-12T10:00:00Z  -",
+                "thing       12512  2026-11-12T09:04:00Z  1     2026-11-12T10:00:00Z  -",
+            ]
+        );
+        assert_eq!(
+            listed.lines().nth(1),
+            Some("bus     https://api-samenmeten.rivm.nl/v1.0  1             2026-11-12T09:30:00Z  2026-11-12T09:30:00Z")
+        );
+        assert_eq!(after.positions().len(), 1);
+        assert!(
+            after
+                .positions()
+                .get(&ReadStream::Data(StreamId::Datastream(EntityId::Integer(12512))))
+                .is_some()
+        );
+        assert_eq!(
+            refusal(reset_cursor(
+                folder.path(),
+                &cursor("bus"),
+                &ResetScope::Thing(IdText::from("12512".to_owned())),
+                None
+            )),
+            "cursor 'bus' holds no position for the Thing '12512'"
+        );
     }
 }

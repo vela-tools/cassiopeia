@@ -4,6 +4,7 @@ use crate::{
     sensorthings::{
         cursor_cycle::CursorCycle,
         datastreams_missing::DatastreamsMissing,
+        historical_location_read::read_historical_locations,
         observation_read::{ObservationSink, next_stream, read_observations},
         page_reader::PageReader,
         snapshot_failure::unwritable,
@@ -14,14 +15,17 @@ use crate::{
 use cassiopeia_common::cycle_start::CycleStart;
 use cassiopeia_sensorthings::{
     incremental_datastreams::IncrementalDatastreams,
+    listed_things::ListedThings,
     phenomenon_time::PhenomenonTime,
+    read_stream::ReadStream,
+    read_window::ReadWindow,
     request::{discovery_request::metadata_discovery_request, observations_request::observations_request},
     service::SensorThingsService,
-    settings::incremental_read::IncrementalRead,
+    settings::{historical_locations::HistoricalLocations, incremental_read::IncrementalRead},
     snapshot::{line::DatastreamLine, writer::SnapshotWriter},
     stream_id::StreamId,
 };
-use cassiopeia_sensorthings_cursor::{cursor_update::CursorUpdate, position::Position, seen_observations::SeenObservations};
+use cassiopeia_sensorthings_cursor::{cursor_update::CursorUpdate, position::Position, seen_entities::SeenEntities};
 use std::{io::Write, path::Path};
 
 /// Reads every reading the data streams `service` selects gained since `cursor`'s committed
@@ -36,14 +40,21 @@ use std::{io::Write, path::Path};
 /// read first, whatever their kind. An Observation the position has seen, or this read already
 /// wrote, is dropped; every other one is written as it was served, with its `FeatureOfInterest` when
 /// the settings request features of interest. A page limit stops one data stream's read and the read
-/// goes on with the next; the observation limit stops the whole read, and what each data stream
-/// wrote up to there moves its position, so the next cycle goes on from there.
+/// goes on with the next; the observation limit stops the reads of Observations, and what each data
+/// stream wrote up to there moves its position, so the next cycle goes on from there.
+///
+/// When the settings request `HistoricalLocations`, those of each Thing a listed data stream belongs to
+/// are read last, by ascending Thing id, oldest first, each with its Locations, from a lookback behind
+/// the Thing's own high-water mark, or from the initial point when the cursor holds no position for
+/// it, to the cycle start. They are dropped and written by the rules of Observations; a page limit
+/// stops one Thing's read, and the observation limit, which counts Observations only, stops none.
 ///
 /// The update records every data stream discovery listed with the Observations written for it, each
-/// by its id and the instant its `phenomenonTime` stands for. A discovery a collection limit cut
-/// short marks no data stream of its kind missing. An Observation without a readable id or
-/// `phenomenonTime` is written but not recorded. The update is left only once the whole read has
-/// succeeded; the read never commits it.
+/// by its id and the instant its `phenomenonTime` stands for, and every Thing read with the
+/// `HistoricalLocations` written for it, each by its id and its `time`. A discovery a collection limit
+/// cut short marks no data stream of its kind missing, and no Thing. An entity without a readable id
+/// or time is written but not recorded. The update is left only once the whole read has succeeded;
+/// the read never commits it.
 ///
 /// # Errors
 ///
@@ -63,12 +74,17 @@ pub(crate) fn read_incremental<W: Write>(
     let (positions, slot) = cursor.into_parts();
     let mut update = CursorUpdate::new(start, incremental.lookback().get());
     let mut datastreams = IncrementalDatastreams::new(start);
+    let mut things = ListedThings::default();
     let discoveries = discover_streams(reader, service, metadata_discovery_request, |kind, served| {
         if let Some(id) = StreamId::of(kind, &served) {
-            let from = incremental.start(positions.get(&id).map(Position::high_water), start);
-            // The update and the reads each keep the data stream.
-            datastreams.add(id.clone(), &served, from);
-            update.record(id, SeenObservations::default());
+            // The reads and the update each keep the data stream.
+            let stream = ReadStream::Data(id.clone());
+            let from = incremental.start(positions.get(&stream).map(Position::high_water), start);
+            datastreams.add(id, &served, from);
+            update.record(stream, SeenEntities::default());
+        }
+        if settings.historical_locations() == HistoricalLocations::Requested {
+            things.add(&served);
         }
         snapshot.datastream(&DatastreamLine::new(kind, served)).map_err(unwritable(path))
     })?;
@@ -83,21 +99,44 @@ pub(crate) fn read_incremental<W: Write>(
         warnings.datastreams_missing(missing);
     }
     let mut sink = ObservationSink::new(snapshot.into_observations(), settings.limits().observations(), path);
-    let unseen = SeenObservations::default();
+    let unseen = SeenEntities::default();
     for (datastream, window) in datastreams.into_reads() {
         let request = observations_request(service.root(), &datastream, window, settings.page_size(), settings.features_of_interest());
-        let seen = positions.get(&datastream).map_or(&unseen, Position::seen);
-        let mut written = SeenObservations::default();
+        // The update keeps the data stream as the stream it moves, while the read names it in each
+        // line.
+        let stream = ReadStream::Data(datastream.clone());
+        let seen = positions.get(&stream).map_or(&unseen, Position::seen);
+        let mut written = SeenEntities::default();
         let end = read_observations(reader, request, settings.limits().pages(), &datastream, seen, &mut sink, |id, observation| {
             if let Some(time) = PhenomenonTime::of(observation) {
                 // The record of what was written keeps the id, while the read keeps it to drop repeats.
                 written.insert(id.clone(), time.instant());
             }
         })?;
-        update.record(datastream, written);
+        update.record(stream, written);
         if next_stream(end, &mut warnings).is_break() {
             break;
         }
+    }
+    let mut sink = sink.into_historical_locations();
+    for thing in things.into_ids() {
+        let stream = ReadStream::Thing(thing);
+        let position = positions.get(&stream);
+        let from = incremental.start(position.map(Position::high_water), start);
+        let written = match ReadWindow::new(from, start) {
+            Ok(window) => read_historical_locations(
+                reader,
+                service,
+                stream.id(),
+                window,
+                position.map_or(&unseen, Position::seen),
+                &mut sink,
+                &mut warnings,
+            )?,
+            // A Thing read from the cycle start on holds no HistoricalLocation this cycle reads.
+            Err(_) => SeenEntities::default(),
+        };
+        update.record(stream, written);
     }
     sink.finish()?;
     slot.fill(update);
@@ -119,11 +158,12 @@ mod tests {
     use cassiopeia_sensorthings::{
         entity_id::EntityId,
         read_kind::ReadKind,
+        read_stream::ReadStream,
         settings::collect_limits::ObservationLimit,
         snapshot::header::SnapshotHeader,
         stream_id::StreamId,
     };
-    use cassiopeia_sensorthings_cursor::{cursor_update::CursorUpdate, positions::Positions, seen_observations::SeenObservations};
+    use cassiopeia_sensorthings_cursor::{cursor_update::CursorUpdate, positions::Positions, seen_entities::SeenEntities};
     use chrono::{DateTime, Utc};
     use mockito::{Matcher, Mock, Request, ServerGuard};
     use pretty_assertions::assert_eq;
@@ -155,13 +195,13 @@ mod tests {
     }
 
     /// The Datastream `id`.
-    fn stream(id: i64) -> StreamId {
-        StreamId::Datastream(EntityId::Integer(id))
+    fn stream(id: i64) -> ReadStream {
+        ReadStream::Data(StreamId::Datastream(EntityId::Integer(id)))
     }
 
     /// The Observations `observations`, each an id with the time it was written for.
-    fn seen(observations: &[(i64, &str)]) -> SeenObservations {
-        SeenObservations::from(
+    fn seen(observations: &[(i64, &str)]) -> SeenEntities {
+        SeenEntities::from(
             observations
                 .iter()
                 .map(|(observation, time)| (id(*observation), at(time)))
@@ -455,7 +495,7 @@ mod tests {
         assert_eq!((missing.root(), missing.cursor().as_str()), (&root(&server), "rivm-air"));
         assert_eq!(
             (missing.named().as_slice(), missing.count().get(), missing.since()),
-            ([stream(2)].as_slice(), 1, cycle_start().instant())
+            ([StreamId::Datastream(id(2))].as_slice(), 1, cycle_start().instant())
         );
         let positions = slot.take().unwrap().apply(held);
         let kept = positions.get(&stream(2)).unwrap();
@@ -637,7 +677,7 @@ mod tests {
         assert_eq!(order, [true, false]);
         assert_eq!(positions.len(), 2);
         assert_eq!(positions.get(&stream(4)).unwrap().high_water(), at("09:40"));
-        let multi = positions.get(&StreamId::MultiDatastream(id(4))).unwrap();
+        let multi = positions.get(&ReadStream::Data(StreamId::MultiDatastream(id(4)))).unwrap();
         assert_eq!((multi.high_water(), multi.seen()), (at("09:20"), &seen(&[(42, "09:20")])));
     }
 
@@ -657,7 +697,7 @@ mod tests {
         serve_observations(&mut server, 4, &[], &answered);
         let mut update = CursorUpdate::new(at("09:00"), Duration::from_hours(1));
         update.record(stream(4), seen(&[(39, "08:30")]));
-        update.record(StreamId::MultiDatastream(id(4)), seen(&[(41, "08:10")]));
+        update.record(ReadStream::Data(StreamId::MultiDatastream(id(4))), seen(&[(41, "08:10")]));
         let held = update.apply(Positions::default());
 
         let (result, payloads) = collect(resuming_collector(
@@ -672,5 +712,122 @@ mod tests {
             panic!("expected one warning, got {:?}", warnings.missing_datastreams());
         };
         assert_eq!(missing.named(), &[StreamId::MultiDatastream(id(4))]);
+    }
+
+    /// Serves the metadata discovery with Datastreams `streams`, each an id and the id of its Thing,
+    /// once.
+    fn discovery_of_things(server: &mut ServerGuard, streams: &[(i64, i64)]) -> Mock {
+        let datastreams: Vec<Value> = streams
+            .iter()
+            .map(|(id, thing)| json!({"@iot.id": id, "name": format!("stream {id}"), "Thing": {"@iot.id": thing}}))
+            .collect();
+        server
+            .mock("GET", METADATA)
+            .with_body(json!({ "value": datastreams }).to_string())
+            .expect(1)
+            .create()
+    }
+
+    /// The `time` bounds the `HistoricalLocations` request `path_and_query` asks for.
+    fn time_bounds(path_and_query: &str) -> (DateTime<Utc>, DateTime<Utc>) {
+        let instant = |text: &str| DateTime::parse_from_rfc3339(text).unwrap().to_utc();
+        let (_, filter) = path_and_query.split_once("$filter=time%20ge%20").unwrap();
+        let (from, rest) = filter.split_once("%20and%20time%20lt%20").unwrap();
+        let (to, _) = rest.split_once('&').unwrap();
+        (instant(from), instant(to))
+    }
+
+    /// Serves the `HistoricalLocations` `held` of the Thing `thing`, each an id and a time, as a server
+    /// does, answering each request with those in its `time` bounds, oldest first, and recording it in
+    /// `answered`.
+    fn serve_historical_locations(server: &mut ServerGuard, thing: i64, held: &[(i64, &str)], answered: &Answered) -> Mock {
+        let held: Vec<(DateTime<Utc>, Value)> = held
+            .iter()
+            .map(|(id, time)| (at(time), json!({"@iot.id": id, "time": at(time).to_rfc3339(), "Locations": []})))
+            .collect();
+        let answered = Arc::clone(&answered.0);
+        server
+            .mock("GET", Matcher::Regex(format!(r"^/v1\.1/Things\({thing}\)/HistoricalLocations\?")))
+            .with_body_from_request(move |request: &Request| {
+                let path = request.path_and_query().to_owned();
+                let (from, to) = time_bounds(&path);
+                answered.lock().unwrap().push(path);
+                let mut answer: Vec<&(DateTime<Utc>, Value)> = held.iter().filter(|(time, _)| from <= *time && *time < to).collect();
+                answer.sort_by_key(|(time, _)| *time);
+                json!({ "value": answer.iter().map(|(_, historical_location)| historical_location).collect::<Vec<_>>() })
+                    .to_string()
+                    .into_bytes()
+            })
+            .create()
+    }
+
+    /// Reads a mock server that holds the Datastream 5 of the Thing 12512, without Observations,
+    /// and the `HistoricalLocations` `held` of that Thing, incrementally from `committed`, reading
+    /// `HistoricalLocations`, and returns the ids of those it wrote in file order, the requests of them
+    /// it sent, and the positions its update moves `committed` to.
+    fn read_history(held: &[(i64, &str)], committed: Positions) -> (Vec<Value>, Vec<String>, Positions) {
+        let mut server = mockito::Server::new();
+        let answered = Answered::default();
+        let history = Answered::default();
+        let mocks = [
+            discovery_of_things(&mut server, &[(5, 12512)]),
+            serve_observations(&mut server, 5, &[], &answered),
+            serve_historical_locations(&mut server, 12512, held, &history),
+        ];
+        let slot = CursorUpdateSlot::default();
+
+        let (result, payloads) = collect(resuming_collector(
+            &server,
+            &incremental(r#", "historicalLocations": true"#),
+            CursorCycle::new(committed.clone(), slot.clone()),
+        ));
+
+        result.unwrap();
+        mocks.iter().for_each(Mock::assert);
+        let written = snapshot_lines(payloads)
+            .iter()
+            .filter_map(|line| line.get("historicalLocation"))
+            .map(|historical_location| historical_location["@iot.id"].clone())
+            .collect();
+        (written, history.requests(), slot.take().unwrap().apply(committed))
+    }
+
+    #[test]
+    fn a_second_cycle_reads_the_historical_locations_a_thing_gained_since_the_first_alone() {
+        let thing = ReadStream::Thing(id(12512));
+        let first_held = [(88, "08:04"), (89, "08:34")];
+
+        let (first, first_requests, after_first) = read_history(&first_held, Positions::default());
+
+        assert_eq!(first, [json!(88), json!(89)]);
+        assert_eq!(
+            first_requests,
+            [
+                "/v1.1/Things(12512)/HistoricalLocations?$filter=time%20ge%202026-11-11T10:00:00Z%20and%20time%20lt%202026-11-12T10:00:00Z&$expand=Locations&$orderby=time%20asc,id%20asc&$top=1000"
+            ]
+        );
+        let position = after_first.get(&thing).unwrap();
+        assert_eq!(position.high_water(), at("08:34"));
+        assert_eq!(position.seen(), &seen(&first_held));
+
+        let (second, second_requests, after_second) = read_history(&[(88, "08:04"), (89, "08:34"), (90, "09:10"), (91, "07:50")], after_first);
+
+        assert_eq!(second, [json!(91), json!(90)]);
+        assert_eq!(
+            second_requests.iter().map(|request| time_bounds(request)).collect::<Vec<_>>(),
+            [(at("07:34"), at("10:00"))]
+        );
+        let position = after_second.get(&thing).unwrap();
+        assert_eq!(position.high_water(), at("09:10"));
+        assert_eq!(position.seen(), &seen(&[(89, "08:34"), (90, "09:10")]));
+    }
+
+    #[test]
+    fn a_listed_thing_without_historical_locations_gets_no_position_and_its_data_stream_keeps_its_own() {
+        let (written, _, positions) = read_history(&[], Positions::default());
+
+        assert_eq!(written, Vec::<Value>::new());
+        assert_eq!(positions.get(&ReadStream::Thing(id(12512))), None);
+        assert_eq!(positions.len(), 0);
     }
 }

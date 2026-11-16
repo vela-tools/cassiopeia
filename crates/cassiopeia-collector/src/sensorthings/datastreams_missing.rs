@@ -64,8 +64,8 @@ impl DatastreamsMissing {
 #[cfg(test)]
 mod tests {
     use crate::sensorthings::datastreams_missing::DatastreamsMissing;
-    use cassiopeia_sensorthings::{cursor_name::CursorName, entity_id::EntityId, service_root::ServiceRoot, stream_id::StreamId};
-    use cassiopeia_sensorthings_cursor::{cursor_update::CursorUpdate, positions::Positions, seen_observations::SeenObservations};
+    use cassiopeia_sensorthings::{cursor_name::CursorName, entity_id::EntityId, read_stream::ReadStream, service_root::ServiceRoot, stream_id::StreamId};
+    use cassiopeia_sensorthings_cursor::{cursor_update::CursorUpdate, positions::Positions, seen_entities::SeenEntities};
     use chrono::{DateTime, Utc};
     use pretty_assertions::assert_eq;
     use std::{collections::BTreeMap, time::Duration};
@@ -95,7 +95,7 @@ mod tests {
     fn listing(cycle_start: &str, listed: &[i64]) -> CursorUpdate {
         let mut update = CursorUpdate::new(at(cycle_start), LOOKBACK);
         for datastream in listed {
-            update.record(stream(*datastream), SeenObservations::default());
+            update.record(ReadStream::Data(stream(*datastream)), SeenEntities::default());
         }
         update
     }
@@ -105,8 +105,8 @@ mod tests {
     fn positions(datastreams: &[i64]) -> Positions {
         let mut update = CursorUpdate::new(at("09:00"), LOOKBACK);
         for datastream in datastreams {
-            let written = SeenObservations::from(BTreeMap::from([(EntityId::Integer(*datastream), at("08:00"))]));
-            update.record(stream(*datastream), written);
+            let written = SeenEntities::from(BTreeMap::from([(EntityId::Integer(*datastream), at("08:00"))]));
+            update.record(ReadStream::Data(stream(*datastream)), written);
         }
         update.apply(Positions::default())
     }
@@ -143,9 +143,9 @@ mod tests {
     #[test]
     fn missing_multi_datastreams_are_named_after_missing_datastreams() {
         let mut update = CursorUpdate::new(at("09:00"), LOOKBACK);
-        let written = |id: i64| SeenObservations::from(BTreeMap::from([(EntityId::Integer(id), at("08:00"))]));
-        update.record(StreamId::MultiDatastream(EntityId::Integer(4)), written(40));
-        update.record(stream(4), written(41));
+        let written = |id: i64| SeenEntities::from(BTreeMap::from([(EntityId::Integer(id), at("08:00"))]));
+        update.record(ReadStream::Data(StreamId::MultiDatastream(EntityId::Integer(4))), written(40));
+        update.record(ReadStream::Data(stream(4)), written(41));
         let held = update.apply(Positions::default());
 
         let missing = DatastreamsMissing::of(&root(), &cursor(), &held, &listing("10:00", &[]), at("10:00")).unwrap();

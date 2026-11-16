@@ -12,7 +12,7 @@ The format can be set on a manifest input with `format`, or through the equivale
 | --- | --- | --- | --- |
 | CSV | One record per data row | Column names become fields | No |
 | JSON | One record per object in a top-level array, or per item of a listed nested array | The object is used as-is | Nested arrays of objects become collections |
-| SensorThings API | One record per Thing of a latest read, or per Observation of a range or incremental read | `server`, `thing`, `location`, and `readings` | No |
+| SensorThings API | One record per Thing of a latest read, or per Observation, and per HistoricalLocation when they are read, of a range or incremental read | `server`, `thing`, `location`, `locations`, and `readings` or `historicalLocation` | No |
 | GeoJSON | One record per feature | `id`, `properties`, `geometry`, `bbox`, and `featureCollection` | No |
 | KML or KMZ | One record per placemark | `properties` and `geometry` | Folders become collections |
 | XML | Determined by the repeated-child convention | Folded element tree with `@` and `#` keys | No |
@@ -358,7 +358,7 @@ Listing both a collection and one nested in it yields records from both, in docu
 
 ## SensorThings API
 
-Cassiopeia reads [OGC SensorThings API](https://www.ogc.org/standards/sensorthings/) data, versions 1.0 and 1.1, from a server or from a **snapshot file**: the data streams, Datastreams and MultiDatastreams, and the Observations one read of a SensorThings server collected, written as JSON Lines. A server serves its readings as nested JSON whose shape changes with the request, so every read of a server is written into a snapshot first, and the ingestor joins each reading with its Thing, Location, data stream, ObservedProperty and Sensor. A mapping then reads one record shape, whichever server the readings came from, and whether they were read from the server or replayed from a file.
+Cassiopeia reads [OGC SensorThings API](https://www.ogc.org/standards/sensorthings/) data, versions 1.0 and 1.1, from a server or from a **snapshot file**: the data streams, Datastreams and MultiDatastreams, the Observations, and the HistoricalLocations of their Things, that one read of a SensorThings server collected, written as JSON Lines. A server serves its readings as nested JSON whose shape changes with the request, so every read of a server is written into a snapshot first, and the ingestor joins each reading with its Thing, Location, data stream, ObservedProperty and Sensor. A mapping then reads one record shape, whichever server the readings came from, and whether they were read from the server or replayed from a file.
 
 ### Reading a server
 
@@ -429,9 +429,9 @@ Every attempt at one scheduled run starts from the same instant, so a retried at
 {root}/Datastreams({id})/Observations?$filter=phenomenonTime%20ge%20{from}%20and%20phenomenonTime%20lt%20{to}&$orderby=phenomenonTime%20asc,id%20asc&$top={pageSize}
 ~~~
 
-The bounds are written in UTC with a `Z`, with a fraction only when they have one, such as `2026-11-11T10:00:00Z` or `2026-11-11T10:00:00.250Z`. A data stream's id is written as `(56776)` for an integer id, or as `('o''neil')` for a text id: in single quotes, with each `'` doubled, percent-encoded where a path cannot hold a character. With `featuresOfInterest: true`, each request also carries `$expand=FeatureOfInterest` after `$orderby` (see [Features of interest](#features-of-interest)). Each request is followed page by page under the rules of [Reading a server](#reading-a-server).
+The bounds are written in UTC with a `Z`, with a fraction only when they have one, such as `2026-11-11T10:00:00Z` or `2026-11-11T10:00:00.250Z`. A data stream's id is written as `(56776)` for an integer id, or as `('o''neil')` for a text id: in single quotes, with each `'` doubled, percent-encoded where a path cannot hold a character. With `featuresOfInterest: true`, each request also carries `$expand=FeatureOfInterest` after `$orderby` (see [Features of interest](#features-of-interest)). Each request is followed page by page under the rules of [Reading a server](#reading-a-server). With `historicalLocations: true`, the HistoricalLocations of each listed Thing are read after the Observations (see [Historical locations](#historical-locations)).
 
-**What is read.** The data streams are read one after the other, the Datastreams and then the MultiDatastreams, each by ascending id, whatever order the server listed them in. A data stream's `phenomenonTime` covers all of its Observations, so a data stream whose `phenomenonTime` ends before the range is not requested. One without a `phenomenonTime` is requested. The Observations of each data stream come oldest first, then by id, and each is written once: when a page repeats an Observation the read already wrote, because the server gained rows between pages, the repeat is dropped. The read stops once it has written `limits.observations` Observations in a cycle, of both kinds together, keeps what it wrote, and reports `collect-limit-reached` with the page that holds the first Observation it did not write. `limits.pages` stops one data stream's request, and the read goes on with the next one.
+**What is read.** The data streams are read one after the other, the Datastreams and then the MultiDatastreams, each by ascending id, whatever order the server listed them in. A data stream's `phenomenonTime` covers all of its Observations, so a data stream whose `phenomenonTime` ends before the range is not requested. One without a `phenomenonTime` is requested. The Observations of each data stream come oldest first, then by id, and each is written once: when a page repeats an Observation the read already wrote, because the server gained rows between pages, the repeat is dropped. The read stops reading Observations once it has written `limits.observations` of them in a cycle, of both kinds together, keeps what it wrote, and reports `collect-limit-reached` with the page that holds the first Observation it did not write. HistoricalLocations are not counted. `limits.pages` stops one data stream's request, and the read goes on with the next one.
 
 **Series output.** A range read gives one record per Observation, so it runs only into output with `output.temporal.representation: "series"`. A run without it is refused with `run-misconfigured` when it is built, before any request (see [Records per read](#records-per-read)).
 
@@ -469,7 +469,7 @@ An incremental read reads every reading each selected data stream gained since t
 
 `cursor` names the cursor that keeps how far the read has read each data stream, `initial` is where a data stream without a position starts, and `lookback` is how far behind its high-water mark each data stream is read again. [SensorThings settings](manifest.md#sensorthings-settings) lists their forms and defaults.
 
-**Positions.** A cursor keeps one position per data stream: its high-water mark, the latest reading time written for it, and the Observations written within the lookback behind that mark. A Datastream and a MultiDatastream that share an id keep a position each. A cursor is a store named `<cursor>.redb` in the cursors folder, and it records the server it was read from, so an input that reads another server through it is refused, and the error names both servers. Two inputs of one manifest that name one cursor are refused when the manifest loads.
+**Positions.** A cursor keeps one position per data stream: its high-water mark, the latest reading time written for it, and the Observations written within the lookback behind that mark. A Datastream and a MultiDatastream that share an id keep a position each. With `historicalLocations: true`, it also keeps one position per Thing, by the `time` of its HistoricalLocations (see [Historical locations](#historical-locations)). A cursor is a store named `<cursor>.redb` in the cursors folder, and it records the server it was read from, so an input that reads another server through it is refused, and the error names both servers. Two inputs of one manifest that name one cursor are refused when the manifest loads.
 
 **The requests.** The read first lists the selected data streams, as a range read does, and writes each into the snapshot, whose header records `read: "incremental"`. Then it reads the Observations of each data stream with the request of [Reading a time range](#reading-a-time-range), from a lookback behind its high-water mark, or from `initial` when the cursor holds no position for it, to the cycle start. A reading stamped at or after the cycle start, a forecast among them, waits for a later cycle. The data streams furthest behind are read first, whatever their kind: by ascending start, then Datastreams before MultiDatastreams, then by ascending id. A data stream whose own `phenomenonTime` ends before its start is not requested. An Observation the position already holds, or one this read already wrote, is dropped. Every other one is written.
 
@@ -477,7 +477,7 @@ An incremental read reads every reading each selected data stream gained since t
 
 **Late readings.** A reading uploaded within the lookback behind its data stream's high-water mark is read once. A reading uploaded later than that is never read: SensorThings gives no entity an insertion time (OGC 18-088 section 8.1), so such a reading cannot be told apart from one already read without reading the whole history again. Choose `lookback` from the server's usual upload delay. A longer lookback requests more Observations every cycle, and drops the ones it already wrote.
 
-**Missing data streams.** A data stream the cursor holds a position for that discovery no longer lists keeps its position, and resumes from it when it is listed again. One `collect-datastreams-missing` warning per server names up to three such data streams by their kind and id, such as `Datastream 56776` or `MultiDatastream 4`, counts them, and gives the earliest cycle start since which one is missing. When `limits.pages` stops the discovery of one kind of data stream, no data stream of that kind is reported missing.
+**Missing data streams.** A data stream the cursor holds a position for that discovery no longer lists keeps its position, and resumes from it when it is listed again. One `collect-datastreams-missing` warning per server names up to three such data streams by their kind and id, such as `Datastream 56776` or `MultiDatastream 4`, counts them, and gives the earliest cycle start since which one is missing. When `limits.pages` stops the discovery of one kind of data stream, no data stream of that kind is reported missing. A Thing none of whose data streams is listed keeps its position too, and resumes from it when it is listed again; the warning names its data streams, not the Thing.
 
 **Delivery.** What an incremental read writes once depends on the destination:
 
@@ -498,13 +498,14 @@ cassiopeia sensorthings cursor list
 cassiopeia sensorthings cursor show rivm-air
 cassiopeia sensorthings cursor reset rivm-air --datastream 56776 --to 6h
 cassiopeia sensorthings cursor reset weather --multi-datastream 4
+cassiopeia sensorthings cursor reset bus --thing 12512
 ~~~
 
 - `list` prints one row per SensorThings cursor: its name, its server, how many data streams it holds a position for, and the oldest and newest of their high-water marks. A cursor of another kind of input is left out.
-- `show` prints the cursor's server, then one row per data stream, Datastreams first: its kind, `datastream` or `multi-datastream`, its id, its high-water mark, how many Observations it has seen within the lookback, the start of the last cycle that listed it, and the start of the first cycle that no longer listed it, or `-` while it is listed.
+- `show` prints the cursor's server, then one row per position, Datastreams first, then MultiDatastreams, then Things: its kind, `datastream`, `multi-datastream` or `thing`, its id, its high-water mark, how many Observations or HistoricalLocations it has seen within the lookback, the start of the last cycle that listed it, and the start of the first cycle that no longer listed it, or `-` while it is listed.
 - `reset` without `--to` removes the positions, so the next cycle starts each data stream at `initial` again. Use it to start over.
 - `reset --to` takes an RFC 3339 instant, or a span before now such as `6h`. It sets the high-water marks there and forgets the Observations the data streams have seen, so the next cycle reads each from the target minus the lookback, and writes those readings again. Use it after fixing a mapping, or when the server reloads its history. A target after now is refused, because the data streams would then skip every reading made before it.
-- `--datastream` limits a reset to one Datastream, and `--multi-datastream` to one MultiDatastream, its id written as `show` prints it. A Datastream and a MultiDatastream that share an id are reset apart, and the two options cannot be given together. An id the cursor holds no position for is refused, and the error names it.
+- `--datastream` limits a reset to one Datastream, `--multi-datastream` to one MultiDatastream, and `--thing` to the position of one Thing's HistoricalLocations, its id written as `show` prints it. A Datastream, a MultiDatastream and a Thing that share an id are reset apart, and no two of the options can be given together. An id the cursor holds no position for is refused, and the error names it.
 
 A running job holds its cursors, so a cursor command against one of them fails with `cursor 'rivm-air' is in use by a running job` and changes nothing: stop the job first. A cursor command that cannot use a cursor fails with `run-cursor-unusable`, as a run does.
 
@@ -543,11 +544,17 @@ In a `range` or `incremental` read, every Observation follows the data streams, 
 {"observation":{"@iot.id":501,"phenomenonTime":"2026-11-12T10:00:00Z","result":[4.2,270]},"multiDatastream":4}
 ~~~
 
+With `historicalLocations: true`, every HistoricalLocation follows the Observations, one per line, as the server served it with its Locations, with the id of its Thing, grouped by Thing:
+
+~~~json
+{"historicalLocation":{"@iot.id":88,"time":"2026-11-12T10:04:00Z","Locations":[{"@iot.id":36190,"encodingType":"application/geo+json","location":{"type":"Point","coordinates":[5.4797,51.4433]}}]},"thing":12512}
+~~~
+
 A read with `featuresOfInterest: true` keeps each FeatureOfInterest inside its Observation, as the server served it: in each observation line of a `range` or `incremental` read, and in each Datastream's `Observations` of a `latest` read. A snapshot recorded without features of interest still reads, and its readings have no `featureOfInterest`.
 
 Each data stream keeps its Sensor inside its line, as the server served it. A snapshot recorded without Sensors still reads, and its readings have no `sensor`.
 
-The source fails when its first line is no header, the header names another snapshot format or a version its service root does not end with, a line is no JSON object of these kinds, or a data stream line of either kind follows an observation line. A snapshot without MultiDatastream lines reads as one recorded before MultiDatastreams were read. The error names the line. A snapshot holds no request header or credential, so it can be shared or kept as a test fixture.
+The source fails when its first line is no header, the header names another snapshot format or a version its service root does not end with, a line is no JSON object of these kinds, a data stream line of either kind follows an observation line or a historicalLocation line, or an observation line follows a historicalLocation line. A snapshot without MultiDatastream lines reads as one recorded before MultiDatastreams were read, and one without historicalLocation lines as one recorded before HistoricalLocations were read. The error names the line. A snapshot holds no request header or credential, so it can be shared or kept as a test fixture.
 
 A snapshot is detected from its header line, which must end within the file's first 4 KiB, so it needs no declared format. The snapshot check runs before the JSON check, and a SensorThings response such as `{"value":[...]}` has no header, so it is still read as JSON. A file declared `format: "sensorthings"` whose first line is no header fails, with an error that quotes a header.
 
@@ -583,6 +590,7 @@ Every record has this shape. The ids, names, units and definitions are RIVM Same
 | `thing.id`, `.name`, `.description`, `.properties` | The Thing's members. |
 | `location` | The GeoJSON geometry of the Thing's GeoJSON Location with the lowest id. See [Locations](#locations). |
 | `locations` | Every Location of the Thing, in id order, with its members. See [Locations](#locations). |
+| `historicalLocation` | One place the Thing was known at, and when, in the record of a HistoricalLocation, which has no `readings`. See [Historical locations](#historical-locations). |
 | `readings.<key>` | One reading: an Observation of a Datastream, or one value of an Observation of a MultiDatastream, with the data stream it belongs to. See [Reading keys](#reading-keys) and [MultiDatastreams](#multidatastreams). |
 | `.id`, `.result`, `.phenomenonTime`, `.resultTime`, `.validTime`, `.resultQuality`, `.parameters` | The Observation's members, as served. |
 | `.time` | The instant `phenomenonTime` stands for, in UTC. See [Reading times](#reading-times). |
@@ -598,9 +606,9 @@ Ids keep the JSON type the server sent: an integer id stays a number and a text 
 ### Records per read
 
 - `latest`: one record per Thing, in the order the snapshot first names it. Its `readings` hold one entry for each of its data streams with an Observation. A Thing whose data streams have none is a record without `readings`.
-- `range` and `incremental`: one record per Observation. An Observation of a Datastream gives exactly one entry in `readings`, and an Observation of a MultiDatastream one entry per value, so values measured together stay in one record. A record whose Observation gives no reading is dropped.
+- `range` and `incremental`: one record per Observation. An Observation of a Datastream gives exactly one entry in `readings`, and an Observation of a MultiDatastream one entry per value, so values measured together stay in one record. A record whose Observation gives no reading is dropped. With `historicalLocations: true`, each HistoricalLocation then gives one record of its Thing (see [Historical locations](#historical-locations)).
 
-The snapshot is read as a stream: the data streams are indexed, and each Observation becomes a record without being held, so a snapshot of any length is read in bounded memory.
+The snapshot is read as a stream: the data streams are indexed, and each Observation and each HistoricalLocation becomes a record without being held, so a snapshot of any length is read in bounded memory.
 
 A record of a `range` or `incremental` read holds the readings of one Observation, so several records describe one Thing. Without a `temporal` setting, the output keeps one record per entity and mapping, so all but one reading of each Thing would be lost. Such a snapshot is therefore read only into output with `output.temporal.representation: "series"`, which keeps every reading of each Thing as one temporal entity (see [Temporal output](output.md#temporal-output)). Without it, the run fails with `run-misconfigured` before the snapshot's first record is read, and the error names the snapshot, its read, and the setting it needs. A range or incremental read of a server without it fails when the run is built, before any request, and the error names the service root. A `latest` snapshot is read into every output.
 
@@ -713,6 +721,70 @@ location: {
 ~~~
 
 A FeatureOfInterest need not be a place the Thing was at: it can be a river reach or a sample. A latest record holds one reading per data stream, each with a FeatureOfInterest of its own. The mapping therefore chooses the place: the Thing's `location`, or a reading's `featureOfInterest.feature`.
+
+### Historical locations
+
+A Thing that moves, such as a bus, a boat or a tracked container, changes its Location, and the server records each place with the time the Thing was known there as a HistoricalLocation (OGC 18-088 section 8.2.3). A record's `location` is the Thing's place when the read runs, and `featuresOfInterest: true` gives the place of each reading. Neither gives the Thing's track: where it went between two readings or while it reported none, where it was when its readings' FeatureOfInterest is no place, such as a river reach, or a history a client loaded into the server. Set `historicalLocations: true` to read it:
+
+~~~json5
+sensorthings: {
+    datastreams: "startswith(name,'bus-')",
+    read: { range: { last: "24h" } },
+    historicalLocations: true,
+},
+~~~
+
+A range or incremental read then reads the HistoricalLocations of every Thing a listed data stream belongs to. The default is `false`. A latest read reads none, because its record's `location` already is the Thing's last known place, so the setting with `read: "latest"`, or without `read`, is refused when the manifest loads, and the error names the setting.
+
+**The requests.** After the Observations, the read requests the HistoricalLocations of each Thing the listed data streams belong to, of either kind, by ascending Thing id, each with its Locations:
+
+~~~text
+{root}/Things({id})/HistoricalLocations?$filter=time%20ge%20{from}%20and%20time%20lt%20{to}&$expand=Locations&$orderby=time%20asc,id%20asc&$top={pageSize}
+~~~
+
+A Thing's id is written as a data stream's is: `(12512)`, or `('bus-12')` for a text id. A range read uses the range's bounds. An incremental read uses, for each Thing, the bounds it uses for a data stream: from a lookback behind the Thing's high-water mark, or from `initial` when the cursor holds no position for it, to the cycle start. Each request is followed page by page under the rules of [Reading a server](#reading-a-server): `limits.pages` stops one Thing's request and the read goes on with the next Thing, and `delay` spaces every request. `limits.observations` counts Observations only, so the HistoricalLocations are read after it stops the Observations. A HistoricalLocation that a page repeats, or that the Thing's position already holds, is dropped, as an Observation is.
+
+**Cursors.** An incremental read keeps one position per Thing for its HistoricalLocations, by their `time`, beside the positions of the data streams, and moves it with them once the cycle succeeds. `cassiopeia sensorthings cursor show` lists it with the kind `thing`, and `cassiopeia sensorthings cursor reset --thing <ID>` resets it alone (see [Reading new readings](#reading-new-readings)). A Thing that is no longer listed keeps its position and resumes from it when it is listed again; its data streams are reported by `collect-datastreams-missing`.
+
+**The records.** Each HistoricalLocation gives one record, after the records of the Observations, with the Thing's `server`, `thing`, `location` and `locations`, a `historicalLocation`, and no `readings`:
+
+~~~json
+{
+    "server": { "url": "https://h.example/v1.1", "host": "h.example", "version": "v1.1" },
+    "thing": { "id": 12512, "name": "bus-12" },
+    "location": { "type": "Point", "coordinates": [5.4801, 51.4410] },
+    "locations": [
+        { "id": 36191, "encodingType": "application/geo+json", "location": { "type": "Point", "coordinates": [5.4801, 51.4410] } }
+    ],
+    "historicalLocation": {
+        "id": 88,
+        "time": "2026-11-12T10:04:00Z",
+        "location": { "type": "Point", "coordinates": [5.4797, 51.4433] }
+    }
+}
+~~~
+
+| Member | Content |
+| --- | --- |
+| `historicalLocation.id` | The HistoricalLocation's id, as served. |
+| `historicalLocation.time` | Its `time`, in UTC, written as a reading's `time` is: at most six fractional digits, without a fraction of zero. |
+| `historicalLocation.location` | The geometry of its Locations, chosen and read as the record's `location` is: that of its GeoJSON Location with the lowest id (see [Locations](#locations)). |
+
+A HistoricalLocation whose `time` is not an instant with a date, a time and a UTC offset, or that has no Location, or none in GeoJSON, gives no record. One `ingest-historical-locations-unreadable` warning per source names the first such HistoricalLocation, its Thing and what could not be read: its `time`, or its Location with the lowest id and that Location's `encodingType`. It counts every one. A HistoricalLocation whose GeoJSON Location with the lowest id holds no geometry gives a `historicalLocation` without `location`, without a warning.
+
+**Mapping.** Into output with `output.temporal.representation: "series"`, a mapping writes the Thing's track as `location` instances:
+
+~~~json5
+location: {
+    type: "GeoProperty",
+    source: "{{ historicalLocation.location }}",
+    properties: {
+        observedAt: { source: "{{ historicalLocation.time }}", transformation: "datetime" },
+    },
+},
+~~~
+
+A record of an Observation has no `historicalLocation`, so this attribute is left out of it, and the attributes that read `readings` are left out of a HistoricalLocation's record. Each record's entity is validated on its own, so a schema that requires `location`, as `AirQualityObserved`'s does, finds it missing on the entity of every Observation's record.
 
 ### Sensors
 

@@ -5,7 +5,7 @@ use crate::end_to_end::{
 };
 use cassiopeia_common::store_kind::StoreKind;
 use cassiopeia_diagnostic::code::{collect_code::CollectCode, diagnostic_code::DiagnosticCode};
-use cassiopeia_sensorthings::{cursor_name::CursorName, entity_id::EntityId, service_root::ServiceRoot, stream_id::StreamId};
+use cassiopeia_sensorthings::{cursor_name::CursorName, entity_id::EntityId, read_stream::ReadStream, service_root::ServiceRoot, stream_id::StreamId};
 use cassiopeia_sensorthings_cursor::{
     cursor_store::CursorStore,
     position::Position,
@@ -290,7 +290,7 @@ fn a_reset_of_the_multi_datastream_leaves_the_datastream_of_its_id_where_it_was(
         .unwrap();
     let after = store.positions().unwrap();
 
-    let datastream = StreamId::Datastream(EntityId::Integer(4));
+    let datastream = ReadStream::Data(StreamId::Datastream(EntityId::Integer(4)));
     assert_eq!(high_waters(&after), [("Datastream 4".to_owned(), at("05:00"))]);
     assert_eq!(after.get(&datastream), before.get(&datastream));
 }

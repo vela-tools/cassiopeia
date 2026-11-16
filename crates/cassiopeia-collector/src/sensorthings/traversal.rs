@@ -5,7 +5,8 @@ use crate::{
         page_reader::PageReader,
     },
 };
-use cassiopeia_sensorthings::{paging::next_link::resolve_next_link, settings::collect_limits::PageLimit};
+use cassiopeia_sensorthings::{entity_id::EntityId, paging::next_link::resolve_next_link, settings::collect_limits::PageLimit};
+use cassiopeia_sensorthings_cursor::seen_entities::SeenEntities;
 use serde_json::{Map, Value};
 use std::{collections::HashSet, mem, ops::ControlFlow};
 use url::Url;
@@ -75,4 +76,37 @@ pub(crate) fn traverse<E: From<CollectorError>>(
         })?;
         visited.insert(mem::replace(&mut next, resolved));
     }
+}
+
+/// Follows the request `first` as [`traverse`] does, handing `item` each item none of `seen` holds
+/// and this traversal has not handed it before, with its id when it has one.
+///
+/// A `$skip`-built page repeats an item when the server gains rows between pages, so an item this
+/// traversal already handed is dropped, as is one a cursor position has seen. One without an id
+/// cannot be told apart and is handed every time.
+///
+/// # Errors
+///
+/// Returns every error [`traverse`] returns, and every error `item` returns.
+pub(crate) fn traverse_unseen(
+    reader: &mut PageReader,
+    first: Url,
+    pages: PageLimit,
+    seen: &SeenEntities,
+    mut item: impl FnMut(Option<&EntityId>, Map<String, Value>) -> Result<ControlFlow<CollectLimit>, CollectorError>,
+) -> Result<TraversalEnd, CollectorError> {
+    let mut handed: HashSet<EntityId> = HashSet::new();
+    traverse(reader, first, pages, |served| {
+        let id = EntityId::of(&served);
+        if let Some(id) = &id
+            && (seen.contains(id) || handed.contains(id))
+        {
+            return Ok(ControlFlow::Continue(()));
+        }
+        let flow = item(id.as_ref(), served)?;
+        if let Some(id) = id {
+            handed.insert(id);
+        }
+        Ok(flow)
+    })
 }

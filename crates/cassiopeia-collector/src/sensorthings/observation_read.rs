@@ -2,11 +2,12 @@ use crate::{
     collection_warnings::CollectionWarnings,
     error::CollectorError,
     sensorthings::{
+        historical_location_read::HistoricalLocationSink,
         limit_reached::CollectLimit,
         observation_budget::ObservationBudget,
         page_reader::PageReader,
         snapshot_failure::unwritable,
-        traversal::{TraversalEnd, traverse},
+        traversal::{TraversalEnd, traverse_unseen},
     },
 };
 use cassiopeia_sensorthings::{
@@ -15,9 +16,9 @@ use cassiopeia_sensorthings::{
     snapshot::{line::ObservationLine, writer::ObservationWriter},
     stream_id::StreamId,
 };
-use cassiopeia_sensorthings_cursor::seen_observations::SeenObservations;
+use cassiopeia_sensorthings_cursor::seen_entities::SeenEntities;
 use serde_json::{Map, Value};
-use std::{collections::HashSet, io::Write, ops::ControlFlow, path::Path};
+use std::{io::Write, ops::ControlFlow, path::Path};
 use url::Url;
 
 /// Where a read writes its Observations, and how many more it may write.
@@ -40,13 +41,9 @@ impl<'a, W: Write> ObservationSink<'a, W> {
         }
     }
 
-    /// Ends the snapshot.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`CollectorError::Io`] when the snapshot cannot be written.
-    pub(crate) fn finish(self) -> Result<(), CollectorError> {
-        self.lines.finish().map(drop).map_err(unwritable(self.path))
+    /// Ends the Observations, so the `HistoricalLocations` can follow them.
+    pub(crate) fn into_historical_locations(self) -> HistoricalLocationSink<'a, W> {
+        HistoricalLocationSink::new(self.lines.into_historical_locations(), self.path)
     }
 }
 
@@ -63,27 +60,16 @@ pub(crate) fn read_observations<W: Write>(
     request: Url,
     pages: PageLimit,
     datastream: &StreamId,
-    seen: &SeenObservations,
+    seen: &SeenEntities,
     sink: &mut ObservationSink<'_, W>,
     mut wrote: impl FnMut(&EntityId, &Map<String, Value>),
 ) -> Result<TraversalEnd, CollectorError> {
-    // A `$skip`-built page repeats an item when the server gains rows between pages, so an
-    // Observation this traversal already wrote is dropped. One without an id cannot be told apart
-    // and is written.
-    let mut written: HashSet<EntityId> = HashSet::new();
-    traverse(reader, request, pages, |observation| {
-        let id = EntityId::of(&observation);
-        if let Some(id) = &id
-            && (seen.contains(id) || written.contains(id))
-        {
-            return Ok(ControlFlow::Continue(()));
-        }
+    traverse_unseen(reader, request, pages, seen, |id, observation| {
         if let ControlFlow::Break(limit) = sink.budget.spend() {
             return Ok(ControlFlow::Break(limit));
         }
         if let Some(id) = id {
-            wrote(&id, &observation);
-            written.insert(id);
+            wrote(id, &observation);
         }
         // Each line owns the id of its data stream, while the read keeps it for the next one.
         sink.lines

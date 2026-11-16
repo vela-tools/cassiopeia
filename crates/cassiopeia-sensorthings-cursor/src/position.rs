@@ -1,38 +1,37 @@
-use crate::seen_observations::SeenObservations;
+use crate::seen_entities::SeenEntities;
 use cassiopeia_sensorthings::reach_back::reach_back;
 use chrono::{DateTime, Utc};
 use getset::{CopyGetters, Getters};
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
 
-/// How far one data stream has been read: the read position a cursor keeps for it.
+/// How far one stream has been read, a data stream's Observations or a Thing's `HistoricalLocations`:
+/// the read position a cursor keeps for it.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, CopyGetters, Getters)]
 pub struct Position {
-    /// The latest reading time written for the data stream.
+    /// The latest time written for the stream: a reading time, or a `HistoricalLocation`'s `time`.
     #[getset(get_copy = "pub")]
     high_water: DateTime<Utc>,
-    /// The Observations written for the data stream whose reading time is at or after the
-    /// high-water mark minus the lookback.
+    /// The entities written for the stream whose time is at or after the high-water mark minus the
+    /// lookback.
     #[getset(get = "pub")]
-    seen: SeenObservations,
-    /// The start of the last cycle whose discovery listed the data stream.
+    seen: SeenEntities,
+    /// The start of the last cycle that listed the stream.
     #[getset(get_copy = "pub")]
     last_listed: DateTime<Utc>,
-    /// The start of the first cycle whose discovery no longer listed the data stream, or `None`
-    /// while it is listed.
+    /// The start of the first cycle that no longer listed the stream, or `None` while it is listed.
     #[getset(get_copy = "pub")]
     missing_since: Option<DateTime<Utc>>,
 }
 
 impl Position {
-    /// The first position of a data stream that discovery listed in the cycle that started at
-    /// `cycle_start`, for which the cycle wrote `written`: its high-water mark is the latest of
-    /// them. `None` when the cycle wrote none, so the data stream starts at the initial point again
-    /// next cycle.
-    pub(crate) fn first(written: SeenObservations, cycle_start: DateTime<Utc>, lookback: Duration) -> Option<Position> {
+    /// The first position of a stream that the cycle that started at `cycle_start` listed, and for
+    /// which it wrote `written`: its high-water mark is the latest of them. `None` when the cycle
+    /// wrote none, so the stream starts at the initial point again next cycle.
+    pub(crate) fn first(written: SeenEntities, cycle_start: DateTime<Utc>, lookback: Duration) -> Option<Position> {
         let mut position = Position {
             high_water: written.latest()?,
-            seen: SeenObservations::default(),
+            seen: SeenEntities::default(),
             last_listed: cycle_start,
             missing_since: None,
         };
@@ -40,11 +39,11 @@ impl Position {
         Some(position)
     }
 
-    /// Moves the position past `written`, the Observations the cycle that started at `cycle_start`
-    /// wrote for the data stream, which its discovery listed.
+    /// Moves the position past `written`, the entities the cycle that started at `cycle_start` wrote
+    /// for the stream, which it listed.
     ///
     /// The high-water mark never moves back: a late upload is remembered as seen, behind it.
-    pub(crate) fn list(&mut self, written: SeenObservations, cycle_start: DateTime<Utc>, lookback: Duration) {
+    pub(crate) fn list(&mut self, written: SeenEntities, cycle_start: DateTime<Utc>, lookback: Duration) {
         if let Some(latest) = written.latest() {
             self.high_water = self.high_water.max(latest);
         }
@@ -54,23 +53,23 @@ impl Position {
         self.missing_since = None;
     }
 
-    /// Marks the data stream missing since the cycle that started at `cycle_start`, unless an
-    /// earlier cycle already found it missing.
+    /// Marks the stream missing since the cycle that started at `cycle_start`, unless an earlier
+    /// cycle already found it missing.
     pub(crate) fn miss(&mut self, cycle_start: DateTime<Utc>) {
         self.missing_since = self.missing_since.or(Some(cycle_start));
     }
 
-    /// Sets the high-water mark to `high_water` and forgets the Observations seen, so the data
-    /// stream is read again from there.
+    /// Sets the high-water mark to `high_water` and forgets the entities seen, so the stream is read
+    /// again from there.
     pub(crate) fn rewind(&mut self, high_water: DateTime<Utc>) {
         self.high_water = high_water;
-        self.seen = SeenObservations::default();
+        self.seen = SeenEntities::default();
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use crate::{position::Position, seen_observations::SeenObservations};
+    use crate::{position::Position, seen_entities::SeenEntities};
     use cassiopeia_sensorthings::entity_id::EntityId;
     use chrono::{DateTime, Utc};
     use pretty_assertions::assert_eq;
@@ -83,8 +82,8 @@ mod tests {
         DateTime::parse_from_rfc3339(&format!("2026-11-12T{time}:00Z")).unwrap().to_utc()
     }
 
-    fn seen(observations: &[(i64, &str)]) -> SeenObservations {
-        SeenObservations::from(
+    fn seen(observations: &[(i64, &str)]) -> SeenEntities {
+        SeenEntities::from(
             observations
                 .iter()
                 .map(|(id, time)| (EntityId::Integer(*id), at(time)))
@@ -92,7 +91,7 @@ mod tests {
         )
     }
 
-    fn position(high_water: &str, seen: SeenObservations, missing_since: Option<&str>) -> Position {
+    fn position(high_water: &str, seen: SeenEntities, missing_since: Option<&str>) -> Position {
         Position {
             high_water: at(high_water),
             seen,
@@ -113,7 +112,7 @@ mod tests {
 
     #[test]
     fn a_late_reading_keeps_the_high_water_mark() {
-        let mut held = position("09:00", SeenObservations::default(), None);
+        let mut held = position("09:00", SeenEntities::default(), None);
         held.list(seen(&[(11, "08:50")]), at("10:00"), LOOKBACK);
 
         assert_eq!(held.high_water(), at("09:00"));
@@ -123,7 +122,7 @@ mod tests {
     #[test]
     fn a_listed_stream_without_readings_keeps_its_position() {
         let mut held = position("09:00", seen(&[(7, "08:30")]), Some("08:00"));
-        held.list(SeenObservations::default(), at("10:00"), LOOKBACK);
+        held.list(SeenEntities::default(), at("10:00"), LOOKBACK);
 
         assert_eq!(
             held,
@@ -145,12 +144,12 @@ mod tests {
 
     #[test]
     fn a_stream_without_readings_gets_no_first_position() {
-        assert_eq!(Position::first(SeenObservations::default(), at("10:00"), LOOKBACK), None);
+        assert_eq!(Position::first(SeenEntities::default(), at("10:00"), LOOKBACK), None);
     }
 
     #[test]
     fn a_missing_stream_keeps_the_start_of_the_first_cycle_that_missed_it() {
-        let mut held = position("09:00", SeenObservations::default(), None);
+        let mut held = position("09:00", SeenEntities::default(), None);
         held.miss(at("10:00"));
         held.miss(at("11:00"));
 
@@ -166,7 +165,7 @@ mod tests {
             held,
             Position {
                 high_water: at("06:00"),
-                ..position("09:00", SeenObservations::default(), Some("08:00"))
+                ..position("09:00", SeenEntities::default(), Some("08:00"))
             }
         );
     }

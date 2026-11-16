@@ -2,6 +2,7 @@ use crate::{
     collection_warnings::CollectionWarnings,
     error::CollectorError,
     sensorthings::{
+        historical_location_read::read_historical_locations,
         observation_read::{ObservationSink, next_stream, read_observations},
         page_reader::PageReader,
         range_empty::RangeEmpty,
@@ -12,13 +13,14 @@ use crate::{
 };
 use cassiopeia_common::cycle_start::CycleStart;
 use cassiopeia_sensorthings::{
+    listed_things::ListedThings,
     range_datastreams::RangeDatastreams,
     request::{discovery_request::metadata_discovery_request, observations_request::observations_request},
     service::SensorThingsService,
-    settings::time_range::TimeRange,
+    settings::{historical_locations::HistoricalLocations, time_range::TimeRange},
     snapshot::{line::DatastreamLine, writer::SnapshotWriter},
 };
-use cassiopeia_sensorthings_cursor::seen_observations::SeenObservations;
+use cassiopeia_sensorthings_cursor::seen_entities::SeenEntities;
 use std::{io::Write, path::Path};
 
 /// Reads every reading of `range` in the cycle that started at `cycle_start` from the data streams
@@ -29,9 +31,13 @@ use std::{io::Write, path::Path};
 /// alone. Otherwise the metadata discoveries come first, of the Datastreams and then of the
 /// `MultiDatastreams` the settings select, and every data stream they serve is written as it was
 /// served. Then each data stream that may hold a reading of the window is read on its own,
-/// Datastreams first, each kind by ascending id, oldest reading first, and each Observation is written as it was served, with its
-/// `FeatureOfInterest` when the settings request features of interest. A page limit stops one data
-/// stream's read and the read goes on with the next; the observation limit stops the whole read.
+/// Datastreams first, each kind by ascending id, oldest reading first, and each Observation is
+/// written as it was served, with its `FeatureOfInterest` when the settings request features of
+/// interest. A page limit stops one data stream's read and the read goes on with the next; the
+/// observation limit stops the reads of Observations. When the settings request `HistoricalLocations`,
+/// those of the window of each Thing a listed data stream belongs to are read last, by ascending
+/// Thing id, oldest first, each with its Locations; a page limit stops one Thing's read, and the
+/// observation limit, which counts Observations only, stops none.
 ///
 /// # Errors
 ///
@@ -57,8 +63,12 @@ pub(crate) fn read_range<W: Write>(
     };
     let settings = service.settings();
     let mut datastreams = RangeDatastreams::default();
+    let mut things = ListedThings::default();
     let discoveries = discover_streams(reader, service, metadata_discovery_request, |kind, served| {
         datastreams.add(kind, &served, window);
+        if settings.historical_locations() == HistoricalLocations::Requested {
+            things.add(&served);
+        }
         snapshot.datastream(&DatastreamLine::new(kind, served)).map_err(unwritable(path))
     })?;
     for (_, end) in discoveries {
@@ -68,7 +78,7 @@ pub(crate) fn read_range<W: Write>(
     }
     let mut sink = ObservationSink::new(snapshot.into_observations(), settings.limits().observations(), path);
     // A range read keeps nothing between cycles, so no Observation is seen before it is read.
-    let unseen = SeenObservations::default();
+    let unseen = SeenEntities::default();
     for datastream in datastreams.into_ids() {
         let request = observations_request(service.root(), &datastream, window, settings.page_size(), settings.features_of_interest());
         let end = read_observations(reader, request, settings.limits().pages(), &datastream, &unseen, &mut sink, |_, _| {})?;
@@ -76,16 +86,23 @@ pub(crate) fn read_range<W: Write>(
             break;
         }
     }
+    let mut sink = sink.into_historical_locations();
+    for thing in things.into_ids() {
+        read_historical_locations(reader, service, &thing, window, &unseen, &mut sink, &mut warnings)?;
+    }
     sink.finish()?;
     Ok(warnings)
 }
 
 #[cfg(test)]
 mod tests {
-    use crate::sensorthings::{
-        limit_reached::{CollectLimit, LimitReached},
-        range_empty::RangeEmpty,
-        test_collection::{RUNNING, collect, collector, root, snapshot_lines},
+    use crate::{
+        collection_warnings::CollectionWarnings,
+        sensorthings::{
+            limit_reached::{CollectLimit, LimitReached},
+            range_empty::RangeEmpty,
+            test_collection::{RUNNING, collect, collector, root, snapshot_lines},
+        },
     };
     use cassiopeia_common::request_header::RequestHeaders;
     use cassiopeia_sensorthings::{
@@ -575,5 +592,213 @@ mod tests {
         );
         let written: Vec<Value> = named_streams(&snapshot_lines(payloads)).into_iter().map(|(id, _)| id).collect();
         assert_eq!(written, [json!(1), json!(2), json!(3)]);
+    }
+
+    /// The path and query of the `HistoricalLocations` request of the Thing addressed as `key`, such as
+    /// `(12512)` or `('bus-12')`, between `bounds`, `top` a page.
+    fn historical_locations_path(key: &str, bounds: (&str, &str), top: u16) -> String {
+        format!(
+            "/v1.1/Things{key}/HistoricalLocations?$filter=time%20ge%20{}%20and%20time%20lt%20{}&$expand=Locations&$orderby=time%20asc,id%20asc&$top={top}",
+            bounds.0, bounds.1
+        )
+    }
+
+    /// Served `HistoricalLocations` `ids`, each known at a minute past 09:00 on 2026-11-12 as late as
+    /// its id, at one `GeoJSON` Location.
+    fn historical_locations(ids: &[u64]) -> Vec<Value> {
+        ids.iter()
+            .map(|id| {
+                json!({
+                    "@iot.id": id,
+                    "time": format!("2026-11-12T09:{:02}:00Z", id % 60),
+                    "Locations": [{
+                        "@iot.id": 36190,
+                        "encodingType": "application/geo+json",
+                        "location": {"type": "Point", "coordinates": [5.4797, 51.4433]},
+                    }],
+                })
+            })
+            .collect()
+    }
+
+    /// Serves the metadata discovery at `path_and_query` with the Datastreams `streams`, each an id
+    /// and the id of its Thing.
+    fn discovery_of_things(server: &mut ServerGuard, path_and_query: &str, streams: &[(u64, Value)]) -> Mock {
+        let datastreams: Vec<Value> = streams
+            .iter()
+            .map(|(id, thing)| json!({"@iot.id": id, "name": format!("stream {id}"), "Thing": {"@iot.id": thing}}))
+            .collect();
+        serve(server, path_and_query, page(&datastreams, None))
+    }
+
+    /// Each `historicalLocation` line of a snapshot as the id of its `HistoricalLocation` and of its
+    /// Thing, in file order.
+    fn historical_location_lines(lines: &[Value]) -> Vec<(Value, Value)> {
+        lines
+            .iter()
+            .filter(|line| line.get("historicalLocation").is_some())
+            .map(|line| (line["historicalLocation"]["@iot.id"].clone(), line["thing"].clone()))
+            .collect()
+    }
+
+    /// The settings of a `last: "24h"` range read of `HistoricalLocations`, with the members `extra`.
+    fn history_read(extra: &str) -> String {
+        range_read(r#"{"last": "24h"}"#, &format!(r#", "historicalLocations": true{extra}"#))
+    }
+
+    #[test]
+    fn the_historical_locations_of_each_listed_thing_follow_the_observations_by_ascending_thing_id() {
+        let mut server = mockito::Server::new();
+        let mocks = [
+            discovery_of_things(&mut server, METADATA, &[(1, json!("bus-12")), (2, json!(12512)), (3, json!(12512))]),
+            serve(&mut server, &observations_path(1, LAST_DAY), page(&observations(&[11]), None)),
+            serve(&mut server, &observations_path(2, LAST_DAY), page(&observations(&[21]), None)),
+            serve(&mut server, &observations_path(3, LAST_DAY), page(&observations(&[31]), None)),
+            serve(
+                &mut server,
+                &historical_locations_path("(12512)", LAST_DAY, 1000),
+                page(&historical_locations(&[4, 34, 52]), None),
+            ),
+            serve(
+                &mut server,
+                &historical_locations_path("('bus-12')", LAST_DAY, 1000),
+                page(&historical_locations(&[7]), None),
+            ),
+        ];
+
+        let (result, payloads) = collect(collector(&server, &history_read(""), RequestHeaders::default(), &RUNNING));
+
+        assert_eq!(result.unwrap(), CollectionWarnings::default());
+        mocks.iter().for_each(Mock::assert);
+        let lines = snapshot_lines(payloads);
+        assert_eq!(observation_lines(&lines), [(json!(11), json!(1)), (json!(21), json!(2)), (json!(31), json!(3))]);
+        assert_eq!(
+            historical_location_lines(&lines),
+            [
+                (json!(4), json!(12512)),
+                (json!(34), json!(12512)),
+                (json!(52), json!(12512)),
+                (json!(7), json!("bus-12")),
+            ]
+        );
+        assert_eq!(lines[7], json!({"historicalLocation": historical_locations(&[4])[0], "thing": 12512}));
+        assert!(lines[7..].iter().all(|line| line.get("historicalLocation").is_some()), "{lines:?}");
+    }
+
+    #[test]
+    fn no_historical_location_is_requested_unless_the_settings_request_them() {
+        let mut server = mockito::Server::new();
+        let mocks = [
+            discovery_of_things(&mut server, METADATA, &[(1, json!(12512))]),
+            serve(&mut server, &observations_path(1, LAST_DAY), page(&observations(&[11]), None)),
+        ];
+        let untouched = server.mock("GET", Matcher::Regex(r"^/v1\.1/Things".to_owned())).expect(0).create();
+
+        let (result, payloads) = collect(collector(
+            &server,
+            &range_read(r#"{"last": "24h"}"#, r#", "historicalLocations": false"#),
+            RequestHeaders::default(),
+            &RUNNING,
+        ));
+
+        result.unwrap();
+        mocks.iter().for_each(Mock::assert);
+        untouched.assert();
+        assert_eq!(historical_location_lines(&snapshot_lines(payloads)), []);
+    }
+
+    #[test]
+    fn the_page_limit_ends_a_thing_s_read_and_names_the_next_link() {
+        let mut server = mockito::Server::new();
+        let next = format!("{}/v1.1/Things(12512)/HistoricalLocations?$skip=2", server.url());
+        let mocks = [
+            discovery_of_things(&mut server, &METADATA.replace("$top=1000", "$top=2"), &[(1, json!(12512))]),
+            serve(&mut server, &observations_path(1, LAST_DAY).replace("$top=1000", "$top=2"), page(&[], None)),
+            serve(
+                &mut server,
+                &historical_locations_path("(12512)", LAST_DAY, 2),
+                page(&historical_locations(&[4, 34]), Some(&next)),
+            ),
+        ];
+        let unfollowed = server.mock("GET", Matcher::Regex(r"\$skip=2$".to_owned())).expect(0).create();
+
+        let (result, payloads) = collect(collector(
+            &server,
+            &history_read(r#", "pageSize": 2, "limits": {"pages": 1}"#),
+            RequestHeaders::default(),
+            &RUNNING,
+        ));
+
+        mocks.iter().for_each(Mock::assert);
+        unfollowed.assert();
+        assert_eq!(
+            result.unwrap().limits_reached(),
+            [LimitReached::new(
+                root(&server),
+                CollectLimit::Pages(PageLimit::try_from(1).unwrap()),
+                Url::parse(&next).unwrap(),
+            )]
+        );
+        assert_eq!(
+            historical_location_lines(&snapshot_lines(payloads)),
+            [(json!(4), json!(12512)), (json!(34), json!(12512))]
+        );
+    }
+
+    #[test]
+    fn the_observation_limit_stops_no_historical_location() {
+        let mut server = mockito::Server::new();
+        let mocks = [
+            discovery_of_things(&mut server, METADATA, &[(1, json!(12512))]),
+            serve(&mut server, &observations_path(1, LAST_DAY), page(&observations(&[11, 12]), None)),
+            serve(
+                &mut server,
+                &historical_locations_path("(12512)", LAST_DAY, 1000),
+                page(&historical_locations(&[4, 34]), None),
+            ),
+        ];
+
+        let (result, payloads) = collect(collector(
+            &server,
+            &history_read(r#", "limits": {"observations": 1}"#),
+            RequestHeaders::default(),
+            &RUNNING,
+        ));
+
+        mocks.iter().for_each(Mock::assert);
+        let limits: Vec<CollectLimit> = result.unwrap().limits_reached().iter().map(LimitReached::limit).collect();
+        assert_eq!(limits, [CollectLimit::Observations(ObservationLimit::try_from(1).unwrap())]);
+        let lines = snapshot_lines(payloads);
+        assert_eq!(observation_lines(&lines), [(json!(11), json!(1))]);
+        assert_eq!(historical_location_lines(&lines), [(json!(4), json!(12512)), (json!(34), json!(12512))]);
+    }
+
+    #[test]
+    fn a_historical_location_repeated_across_pages_is_written_once() {
+        let mut server = mockito::Server::new();
+        let second = format!("{}/v1.1/Things(12512)/HistoricalLocations?$skip=2", server.url());
+        let mocks = [
+            discovery_of_things(&mut server, METADATA, &[(1, json!(12512))]),
+            serve(&mut server, &observations_path(1, LAST_DAY), page(&[], None)),
+            serve(
+                &mut server,
+                &historical_locations_path("(12512)", LAST_DAY, 1000),
+                page(&historical_locations(&[4, 34]), Some(&second)),
+            ),
+            serve(
+                &mut server,
+                "/v1.1/Things(12512)/HistoricalLocations?$skip=2",
+                page(&historical_locations(&[34, 52]), None),
+            ),
+        ];
+
+        let (result, payloads) = collect(collector(&server, &history_read(""), RequestHeaders::default(), &RUNNING));
+
+        result.unwrap();
+        mocks.iter().for_each(Mock::assert);
+        assert_eq!(
+            historical_location_lines(&snapshot_lines(payloads)),
+            [(json!(4), json!(12512)), (json!(34), json!(12512)), (json!(52), json!(12512))]
+        );
     }
 }
