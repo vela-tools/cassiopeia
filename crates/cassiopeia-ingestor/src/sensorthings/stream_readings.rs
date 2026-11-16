@@ -15,12 +15,24 @@ use cassiopeia_sensorthings::{
 };
 use serde_json::{Map, Value};
 
-/// The Datastream members a reading's `datastream` carries.
-const DATASTREAM_MEMBERS: [&str; 4] = ["name", "description", "observationType", "properties"];
+/// The Datastream members a reading's `datastream` carries: its own, then the `phenomenonTime`,
+/// `resultTime` and `observedArea` that sum up all of its Observations (OGC 18-088 section 8.2.4,
+/// Table 10), as the server served them when it listed the Datastream.
+const DATASTREAM_MEMBERS: [&str; 7] = [
+    "name",
+    "description",
+    "observationType",
+    "properties",
+    "phenomenonTime",
+    "resultTime",
+    "observedArea",
+];
 
 /// The `MultiDatastream` members a reading's `multiDatastream` carries, before its element's
-/// `observationType` and `position`.
-const MULTI_DATASTREAM_MEMBERS: [&str; 3] = ["name", "description", "properties"];
+/// `observationType` and `position`: its own, then the `phenomenonTime`, `resultTime` and
+/// `observedArea` that sum up all of its Observations (OGC 18-088 section 12, Table 26), as the
+/// server served them when it listed the `MultiDatastream`.
+const MULTI_DATASTREAM_MEMBERS: [&str; 6] = ["name", "description", "properties", "phenomenonTime", "resultTime", "observedArea"];
 
 /// The `ObservedProperty` members a reading's `observedProperty` carries.
 const OBSERVED_PROPERTY_MEMBERS: [&str; 4] = ["name", "definition", "description", "properties"];
@@ -257,6 +269,67 @@ mod tests {
                 .iter()
                 .all(|reading| reading.parts.kind == StreamKind::MultiDatastream && reading.parts.sensor.is_some())
         );
+    }
+
+    /// The `phenomenonTime`, `resultTime` and `observedArea` of a data stream whose Observations were
+    /// made from 1 to 12 November 2026 around Eindhoven.
+    fn extents() -> Value {
+        json!({
+            "phenomenonTime": "2026-11-01T00:00:00Z/2026-11-12T10:00:00Z",
+            "resultTime": "2026-11-01T00:00:05Z/2026-11-12T10:00:05Z",
+            "observedArea": {"type": "Polygon", "coordinates": [[[5.40, 51.40], [5.50, 51.40], [5.50, 51.47], [5.40, 51.47], [5.40, 51.40]]]},
+        })
+    }
+
+    /// `served` with the members of `extents`.
+    fn with_extents(served: Value) -> Value {
+        let mut served = object(served);
+        served.extend(object(extents()));
+        Value::Object(served)
+    }
+
+    #[test]
+    fn a_datastream_carries_its_times_and_observed_area_after_its_own_members() {
+        let served = with_extents(json!({"@iot.id": 5, "name": "pm10 stream", "properties": {"floor": 2}, "ObservedProperty": {"@iot.id": 1, "name": "pm10"}}));
+
+        let readings = read(&StreamId::Datastream(EntityId::Integer(5)), served).unwrap();
+
+        let mut expected = object(json!({"id": 5, "name": "pm10 stream", "properties": {"floor": 2}}));
+        expected.extend(object(extents()));
+        assert_eq!(Value::Object(readings[0].parts.members.clone()), Value::Object(expected));
+        assert_eq!(
+            readings[0].parts.members.keys().collect::<Vec<_>>(),
+            ["id", "name", "properties", "phenomenonTime", "resultTime", "observedArea"]
+        );
+    }
+
+    #[test]
+    fn every_element_of_a_multi_datastream_carries_its_times_and_observed_area_before_its_position() {
+        let readings = read(&StreamId::MultiDatastream(EntityId::Integer(4)), with_extents(wind())).unwrap();
+
+        assert_eq!(readings.len(), 2);
+        for reading in &readings {
+            let members = &reading.parts.members;
+            for (member, value) in object(extents()) {
+                assert_eq!(members.get(&member), Some(&value), "{member} of {}", reading.source);
+            }
+            assert_eq!(
+                members.keys().collect::<Vec<_>>(),
+                [
+                    "id",
+                    "name",
+                    "description",
+                    "properties",
+                    "phenomenonTime",
+                    "resultTime",
+                    "observedArea",
+                    "observationType",
+                    "position"
+                ],
+                "{}",
+                reading.source
+            );
+        }
     }
 
     #[test]

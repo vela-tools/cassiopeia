@@ -1,0 +1,14 @@
+{
+    version: "v4",
+    dataModel: "dataModel.Device/Device",
+    identity: {
+        entityName: "sta-{{ server.host }}-{{ thing.id }}",
+    },
+    attributes: {
+        name: { source: "{{ thing.name }}" },
+        dateLastValueReported: {
+            source: "{% if readings.pm10.datastream.phenomenonTime %}{{ readings.pm10.datastream.phenomenonTime | split(pat='/') | last }}{% endif %}",
+            transformation: "datetime",
+        },
+    },
+}
