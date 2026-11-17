@@ -8,7 +8,8 @@ use std::{error::Error, fmt::Display, path::Path};
 /// two runs from different folders compare equal.
 #[derive(Debug, PartialEq)]
 pub(crate) struct ViewRecord {
-    /// Every entity the run wrote, ordered by `id`.
+    /// Every entity the run wrote, file by file in the order of their names, each file's in the
+    /// order it lists them.
     pub(crate) entities: Vec<Value>,
     /// How the run ended and what it reported.
     pub(crate) report: RunReport,
@@ -22,28 +23,6 @@ pub(crate) struct RunReport {
     failure: Option<Vec<String>>,
     /// Every diagnostic it reported, ordered by code and message.
     diagnostics: Vec<ReportedDiagnostic>,
-}
-
-/// How a golden run ended and the code and count of every diagnostic it reported, leaving out the
-/// occurrence each message names as its example.
-#[derive(Debug, PartialEq)]
-pub(crate) struct ReportTally<'a> {
-    /// The error that ended the run and each of its sources, when it failed.
-    failure: Option<&'a [String]>,
-    /// The code and occurrence count of every diagnostic, in order.
-    counts: Vec<(DiagnosticCode, u64)>,
-}
-
-impl RunReport {
-    /// How the run ended and the code and count of every diagnostic it reported.
-    pub(crate) fn tally(&self) -> ReportTally<'_> {
-        let mut counts: Vec<(DiagnosticCode, u64)> = self.diagnostics.iter().map(|diagnostic| (diagnostic.code, diagnostic.occurrences)).collect();
-        counts.sort();
-        ReportTally {
-            failure: self.failure.as_deref(),
-            counts,
-        }
-    }
 }
 
 /// One diagnostic a golden run reported.
@@ -84,9 +63,6 @@ impl Placeholders<'_> {
 impl ViewRecord {
     /// Records what a golden run wrote and reported, given how it ended.
     pub(crate) fn new(result: Result<(), PipelineError>, outcome: RunOutcome, placeholders: &Placeholders<'_>) -> ViewRecord {
-        let mut entities = outcome.entities;
-        entities.sort_by(|left, right| left["id"].as_str().cmp(&right["id"].as_str()));
-
         let failure = result.err().map(|error| {
             let mut chain = Vec::new();
             let mut cause: Option<&dyn Error> = Some(&error);
@@ -108,7 +84,7 @@ impl ViewRecord {
         diagnostics.sort();
 
         ViewRecord {
-            entities,
+            entities: outcome.entities,
             report: RunReport { failure, diagnostics },
         }
     }

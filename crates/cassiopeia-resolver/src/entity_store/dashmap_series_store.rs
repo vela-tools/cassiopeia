@@ -12,6 +12,7 @@ use crate::{
 use ahash::RandomState;
 use cassiopeia_ir::source_position::SourcePosition;
 use dashmap::DashMap;
+use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
 use smallvec::smallvec;
 use std::{num::NonZeroU64, sync::Arc};
 use urn_rs::Urn;
@@ -118,7 +119,9 @@ impl EntityStore for DashMapSeriesEntityStore {
     }
 
     fn get_entity_ids(&self) -> Result<Vec<Urn>> {
-        Ok(in_source_order(self.data.iter().map(|entry| (entry.first, entry.key().clone())).collect()))
+        // Each shard is gathered on a thread of its own, so copying every id out costs a fraction of
+        // a pass over the map, and the sort is parallel too.
+        Ok(in_source_order(self.data.par_iter().map(|entry| (entry.first, entry.key().clone())).collect()))
     }
 
     fn assemble_entity(&self, base_id: &Urn, _mappings: &dyn MappingReads) -> Result<AssembledFragments> {
@@ -172,9 +175,9 @@ mod tests {
                 FragmentWrite,
                 tests::{
                     READS_EVERYTHING,
+                    assert_hands_ids_on_in_order_of_their_first_records,
                     assert_joins_expiries_across_mappings,
                     assert_merges_scopes_per_id,
-                    assert_series_hands_ids_on_in_order_of_their_first_records,
                     assert_series_hands_observations_on_in_source_order,
                     assert_series_keeps_the_furthest_expiry_per_mapping,
                 },
@@ -209,7 +212,7 @@ mod tests {
 
     #[test]
     fn ids_are_handed_on_in_the_order_of_their_first_records() {
-        assert_series_hands_ids_on_in_order_of_their_first_records(&DashMapSeriesEntityStore::new());
+        assert_hands_ids_on_in_order_of_their_first_records(&DashMapSeriesEntityStore::new());
     }
 
     #[test]

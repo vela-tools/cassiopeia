@@ -1,11 +1,10 @@
 use crate::{
     entity_store::{
-        entity_order::in_source_order,
         error::{EntityStoreError, Result},
         mapping_expiry::{MappingExpiry, join_observations},
         mapping_reads::MappingReads,
         redb_database::RedbDatabase,
-        redb_key::{base_id_bytes, distinct_id_count, make_prefix, prefix_end},
+        redb_key::{distinct_id_count, for_each_id_chunk_in_source_order, ids_in_source_order, make_prefix, prefix_end},
         redb_scope::{PendingScopes, SCOPES_TABLE, read_scope},
         store::{AssembledFragment, AssembledFragments, EntityStore, FragmentWrite, StoredUnit},
         stored_observation::StoredObservation,
@@ -15,7 +14,7 @@ use crate::{
     store_write_strategy::StoreWriteStrategy,
 };
 use cassiopeia_ir::source_position::{SOURCE_POSITION_BYTES, SourcePosition};
-use redb::{Durability, ReadableDatabase, ReadableTable, ReadableTableMetadata, TableDefinition};
+use redb::{Durability, ReadableDatabase, ReadableTableMetadata, TableDefinition};
 use smallvec::smallvec;
 use std::num::NonZeroU64;
 use urn_rs::Urn;
@@ -127,35 +126,14 @@ impl EntityStore for RedbSeriesEntityStore {
     }
 
     fn get_entity_ids(&self) -> Result<Vec<Urn>> {
-        // The keys of one id sort by position, so the first key of each id holds the position of its
-        // first record: one scan over the keys gathers every id with it, and a sort puts them in that
-        // order. Listing the ids takes this scan whatever their order, so ordering them costs the sort
-        // alone.
-        let read_txn = self
-            .db
-            .database()
-            .begin_read()
-            .map_err(|e| self.db.err(e.into(), StoreAction::BeginTransaction))?;
-        let table = read_txn.open_table(DATA_TABLE).map_err(|e| self.db.err(e.into(), StoreAction::OpenTable))?;
-        let mut firsts: Vec<(SourcePosition, Urn)> = Vec::new();
-        let mut previous: Option<Vec<u8>> = None;
-        for entry in table.iter().map_err(|e| self.db.err(e.into(), StoreAction::Iterate))? {
-            let (key, _value) = entry.map_err(|e| self.db.err(e.into(), StoreAction::Iterate))?;
-            let key = key.value();
-            let base = base_id_bytes(key);
-            if previous.as_deref() == Some(base) {
-                continue;
-            }
-            previous = Some(base.to_vec());
-            let position = key
-                .get(base.len() + 1..base.len() + 1 + SOURCE_POSITION_BYTES)
-                .and_then(|bytes| <[u8; SOURCE_POSITION_BYTES]>::try_from(bytes).ok())
-                .map(SourcePosition::from_be_bytes);
-            if let (Some(position), Ok(urn)) = (position, String::from_utf8_lossy(base).parse::<Urn>()) {
-                firsts.push((position, urn));
-            }
-        }
-        Ok(in_source_order(firsts))
+        ids_in_source_order(&self.db, DATA_TABLE, |key, _value| key_position(key))
+    }
+
+    fn for_each_entity_id_chunk(&self, chunk_size: usize, callback: &mut dyn FnMut(Vec<Urn>) -> Result<()>) -> Result<()> {
+        // The keys of one id hold the positions of its records, so one scan over the keys gathers every
+        // id with the position of its first record, and a sort puts them in that order. Listing the
+        // ids takes this scan whatever their order, so ordering them costs the sort alone.
+        for_each_id_chunk_in_source_order(&self.db, DATA_TABLE, |key, _value| key_position(key), chunk_size, callback)
     }
 
     fn assemble_entity(&self, base_id: &Urn, _mappings: &dyn MappingReads) -> Result<AssembledFragments> {
@@ -243,6 +221,13 @@ impl Drop for RedbSeriesEntityStore {
     }
 }
 
+/// The position a key ends in: the big-endian bytes after the base id and its separator.
+fn key_position(key: &[u8]) -> Result<SourcePosition> {
+    key.last_chunk::<SOURCE_POSITION_BYTES>()
+        .map(|bytes| SourcePosition::from_be_bytes(*bytes))
+        .ok_or(EntityStoreError::TruncatedPosition { length: key.len() })
+}
+
 #[cfg(test)]
 mod tests {
     use crate::{
@@ -255,9 +240,9 @@ mod tests {
                 FragmentWrite,
                 tests::{
                     READS_EVERYTHING,
+                    assert_hands_ids_on_in_order_of_their_first_records,
                     assert_joins_expiries_across_mappings,
                     assert_merges_scopes_per_id,
-                    assert_series_hands_ids_on_in_order_of_their_first_records,
                     assert_series_hands_observations_on_in_source_order,
                     assert_series_keeps_the_furthest_expiry_per_mapping,
                 },
@@ -292,7 +277,7 @@ mod tests {
 
     #[test]
     fn ids_are_handed_on_in_the_order_of_their_first_records() {
-        assert_series_hands_ids_on_in_order_of_their_first_records(&RedbSeriesEntityStore::new().unwrap());
+        assert_hands_ids_on_in_order_of_their_first_records(&RedbSeriesEntityStore::new().unwrap());
     }
 
     #[test]

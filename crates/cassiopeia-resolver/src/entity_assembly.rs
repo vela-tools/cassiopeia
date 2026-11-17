@@ -37,7 +37,6 @@ use std::{
     sync::Arc,
     time::{Duration, Instant},
 };
-use tracing::trace;
 use urn_rs::Urn;
 
 /// Every distinct mapping, with the run variables it reads records with, that one base id's stored
@@ -224,7 +223,6 @@ impl FragmentResolver {
             entities.push(AssembledEntity::new(base_id.clone(), unit_scope, expires_at, unit_relationships, fragments));
         }
 
-        trace!("Assembled entity {} into {} unit(s)", base_id, entities.len());
         Ok(IdAssembly {
             units: entities,
             merge,
@@ -887,6 +885,47 @@ mod tests {
                 let expected: Vec<serde_json::Value> = (offset..400).step_by(2).map(|record| json!(record)).collect();
                 assert_eq!(temperatures, expected, "{station}");
             }
+        }
+    }
+
+    #[test]
+    fn ids_written_from_many_threads_are_handed_on_in_the_order_of_their_first_records_in_every_current_state_store() {
+        /// One record of the input at `input` for each of `records`, the record at `record` naming the
+        /// station `record` steps through `stations` to.
+        fn batch(stations: &[Urn], mapping: &Arc<Mapping>, input: u32, records: impl Iterator<Item = usize>) -> Vec<Mapped<Fragment>> {
+            records
+                .map(|record| {
+                    Mapped::new(
+                        Fragment::builder()
+                            .source_data(json!({"temperature": record}))
+                            .target_urn(stations[record % stations.len()].clone())
+                            .position(SourcePosition::first_of(input).advanced(record))
+                            .build(),
+                        Arc::clone(mapping),
+                    )
+                })
+                .collect()
+        }
+
+        let current_state_stores: [Box<dyn EntityStore>; 2] = [Box::new(DashMapLatestEntityStore::new()), Box::new(RedbLatestEntityStore::new().unwrap())];
+        for store in current_state_stores {
+            let (resolver, mappings) = resolver_with(store, &[SIMPLE]);
+            // The stations' text runs opposite to the order of their first records, so only that order
+            // puts them in this one.
+            let stations: Vec<Urn> = (0..60_usize).rev().map(|station| urn(&format!("urn:ngsi-ld:Station:{station:02}"))).collect();
+
+            // The second input's records reach the store first, four for each station, and the first
+            // input's two for every other station after them.
+            assert!(resolver.resolve_batch(batch(&stations, &mappings[0], 1, 0..240)).iter().all(Result::is_ok));
+            assert!(
+                resolver
+                    .resolve_batch(batch(&stations, &mappings[0], 0, (1..120).step_by(2)))
+                    .iter()
+                    .all(Result::is_ok)
+            );
+
+            let expected: Vec<Urn> = stations.iter().skip(1).step_by(2).chain(stations.iter().step_by(2)).cloned().collect();
+            assert_eq!(resolver.get_entity_ids().unwrap(), expected);
         }
     }
 

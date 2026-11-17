@@ -5,16 +5,17 @@ use crate::{
         mapping_expiry::join,
         mapping_reads::MappingReads,
         redb_database::RedbDatabase,
-        redb_key::{collect_ids, distinct_id_count, for_each_id_chunk, make_prefix, prefix_end},
+        redb_key::{distinct_id_count, for_each_id_chunk_in_source_order, ids_in_source_order, make_prefix, prefix_end},
         redb_scope::{PendingScopes, SCOPES_TABLE, read_scope},
+        redb_slot_value::{decode_slot, encode_slot, slot_first},
         store::{AssembledFragments, EntityStore, FragmentWrite, StoredUnit},
-        stored_slot::StoredSlot,
     },
     mapping_id::MappingId,
     store_action::StoreAction,
     store_write_strategy::StoreWriteStrategy,
 };
 use ahash::AHashMap;
+use cassiopeia_ir::source_position::SourcePosition;
 use cassiopeia_mapping::source_reads::SourceReads;
 use redb::{Durability, ReadableDatabase, ReadableTable, TableDefinition};
 use smallvec::SmallVec;
@@ -26,13 +27,14 @@ const DATA_TABLE: TableDefinition<&[u8], &[u8]> = TableDefinition::new("data");
 /// Persistent disk-backed current-state entity store using [redb](https://docs.rs/redb).
 ///
 /// Each mapping's [`LatestSlot`] for a base id lives under the key `{base_id}\x1F{mapping_id_be}`,
-/// encoded with `rmp-serde`. A batch reads each key once, folds the batch's records into the slot by
-/// the current-state rule (a temporal mapping keeps the greatest-`observedAt` record, a static mapping
-/// merges in source order), and commits once. The whole batch is in hand, so every slot it touched is
-/// sealed before it is written back. Assembly prefix-scans a base id's keys into one joined emit-unit,
-/// joining the expiry each key carries into the entity's. Durability is `Durability::None`: the
-/// database lives in a temporary directory cleaned up at the end of the run, so fsync would be pure
-/// waste.
+/// encoded with `rmp-serde` behind the position of the first record the mapping resolved to the id.
+/// A batch reads each key once, folds the batch's records into the slot by the current-state rule (a
+/// temporal mapping keeps the greatest-`observedAt` record, a static mapping merges in source order),
+/// and commits once. The whole batch is in hand, so every slot it touched is sealed before it is
+/// written back. Assembly prefix-scans a base id's keys into one joined emit-unit, joining the expiry
+/// each key carries into the entity's. The ids are handed on in the order of their first records.
+/// Durability is `Durability::None`: the database lives in a temporary directory cleaned up at the
+/// end of the run, so fsync would be pure waste.
 #[derive(Debug, Clone)]
 pub struct RedbLatestEntityStore {
     db: RedbDatabase,
@@ -60,8 +62,9 @@ impl RedbLatestEntityStore {
 
 /// One `(base id, mapping)` key's slot within a batch, with the read set of the mapping it seals with.
 struct BatchSlot<'a> {
-    /// The key's slot, seeded from disk; `None` until a record has landed on it.
-    slot: Option<LatestSlot>,
+    /// The key's slot and the position of the first record it took, seeded from disk; `None` until a
+    /// record has landed on it.
+    slot: Option<(SourcePosition, LatestSlot)>,
     /// The read set of the mapping, from the batch's writes.
     reads: &'a SourceReads,
 }
@@ -118,7 +121,10 @@ impl EntityStore for RedbLatestEntityStore {
                         // Seed the accumulator from disk once per key.
                         let existing = data_table.get(vacant.key().as_slice()).map_err(|e| self.db.err(e.into(), StoreAction::Read))?;
                         let slot = match existing {
-                            Some(guard) => Some(LatestSlot::from_stored(rmp_serde::from_slice::<StoredSlot>(guard.value())?, batch)),
+                            Some(guard) => {
+                                let (first, stored) = decode_slot(guard.value())?;
+                                Some((first, LatestSlot::from_stored(stored, batch)))
+                            }
                             None => None,
                         };
                         vacant.insert(BatchSlot { slot, reads })
@@ -133,8 +139,11 @@ impl EntityStore for RedbLatestEntityStore {
                     expires_at,
                 };
                 match &mut entry.slot {
-                    Some(slot) => slot.absorb(incoming, reads),
-                    None => entry.slot = Some(LatestSlot::new(incoming, temporal)),
+                    Some((first, slot)) => {
+                        *first = (*first).min(position);
+                        slot.absorb(incoming, reads);
+                    }
+                    None => entry.slot = Some((position, LatestSlot::new(incoming, temporal))),
                 }
                 if let Some(scope) = scope {
                     pending_scopes.add(&base_id, scope);
@@ -142,9 +151,9 @@ impl EntityStore for RedbLatestEntityStore {
             }
 
             for (key, BatchSlot { slot, reads }) in grouped {
-                if let Some(slot) = slot {
+                if let Some((first, slot)) = slot {
                     // Every record of the batch is in, so the slot is written back with them merged.
-                    let bytes = rmp_serde::to_vec(&slot.into_stored(reads))?;
+                    let bytes = encode_slot(first, &slot.into_stored(reads))?;
                     data_table
                         .insert(key.as_slice(), bytes.as_slice())
                         .map_err(|e| self.db.err(e.into(), StoreAction::Insert))?;
@@ -159,11 +168,15 @@ impl EntityStore for RedbLatestEntityStore {
     }
 
     fn get_entity_ids(&self) -> Result<Vec<Urn>> {
-        collect_ids(&self.db, DATA_TABLE)
+        ids_in_source_order(&self.db, DATA_TABLE, |_key, value| slot_first(value))
     }
 
     fn for_each_entity_id_chunk(&self, chunk_size: usize, callback: &mut dyn FnMut(Vec<Urn>) -> Result<()>) -> Result<()> {
-        for_each_id_chunk(&self.db, DATA_TABLE, chunk_size, callback)
+        // Every slot leads with the position of its first record, so one scan over the slots gathers
+        // every id with the earliest of its slots' positions, and a sort puts them in that order.
+        // Listing the ids takes this scan whatever their order, so ordering them costs the sort alone,
+        // where an index kept in source order would cost a write for every entity.
+        for_each_id_chunk_in_source_order(&self.db, DATA_TABLE, |_key, value| slot_first(value), chunk_size, callback)
     }
 
     fn assemble_entity(&self, base_id: &Urn, _mappings: &dyn MappingReads) -> Result<AssembledFragments> {
@@ -187,7 +200,7 @@ impl EntityStore for RedbLatestEntityStore {
             let (key, value) = entry.map_err(|e| self.db.err(e.into(), StoreAction::Iterate))?;
             // Every batch writes the slots it touched back with their records merged, so a stored slot
             // needs no read set to finish.
-            let stored: StoredSlot = rmp_serde::from_slice(value.value())?;
+            let (_first, stored) = decode_slot(value.value())?;
             let (fragment, expiry) = stored.into_fragment(mapping_id_of(key.value()));
             expiries.push(expiry);
             unit.push(fragment);
@@ -270,7 +283,13 @@ mod tests {
             store::{
                 EntityStore,
                 FragmentWrite,
-                tests::{READS_EVERYTHING, assert_expiry_follows_the_retained_record, assert_joins_expiries_across_mappings, assert_merges_scopes_per_id},
+                tests::{
+                    READS_EVERYTHING,
+                    assert_expiry_follows_the_retained_record,
+                    assert_hands_ids_on_in_order_of_their_first_records,
+                    assert_joins_expiries_across_mappings,
+                    assert_merges_scopes_per_id,
+                },
             },
         },
         mapping_id::MappingId,
@@ -298,6 +317,11 @@ mod tests {
     #[test]
     fn a_mapping_s_expiry_follows_the_record_it_retains() {
         assert_expiry_follows_the_retained_record(&RedbLatestEntityStore::new().unwrap());
+    }
+
+    #[test]
+    fn ids_are_handed_on_in_the_order_of_their_first_records() {
+        assert_hands_ids_on_in_order_of_their_first_records(&RedbLatestEntityStore::new().unwrap());
     }
 
     fn write(base_id: &Urn, data: serde_json::Value, mapping: u32, temporal: bool, observed_at: Option<&str>) -> FragmentWrite<'static> {
