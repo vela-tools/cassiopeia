@@ -127,6 +127,10 @@ mod tests {
             DiagnosticCode::Collect(CollectCode::DatastreamsMissing).to_string(),
             "collect-datastreams-missing"
         );
+        assert_eq!(
+            DiagnosticCode::Collect(CollectCode::FeaturesOfInterestUnserved).to_string(),
+            "collect-features-of-interest-unserved"
+        );
     }
 
     #[test]

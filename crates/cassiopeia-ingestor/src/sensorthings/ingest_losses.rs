@@ -1,5 +1,5 @@
 use crate::sensorthings::reading_keys::RenamedReading;
-use cassiopeia_sensorthings::entity_id::EntityId;
+use cassiopeia_sensorthings::{entity_id::EntityId, observation_name::ObservationName};
 use derive_more::Display;
 
 /// How many renamed readings are kept to name; the rest are counted.
@@ -120,17 +120,6 @@ pub struct UnreadableMultiResult {
     pub observation: ObservationName,
     /// The `MultiDatastream`'s id.
     pub multi_datastream: EntityId,
-}
-
-/// How a loss names an Observation: by its id, or as one served without an id.
-#[derive(Debug, Clone, PartialEq, Eq, Display)]
-pub enum ObservationName {
-    /// The Observation's id.
-    #[display("Observation {_0}")]
-    Id(EntityId),
-    /// The Observation was served without an `@iot.id`.
-    #[display("an Observation without an id")]
-    WithoutId,
 }
 
 /// How a loss names a `FeatureOfInterest`: by its id, or as one served without an id, which a
@@ -288,14 +277,13 @@ mod tests {
         HistoricalLocationName,
         LossTally,
         LowestLocation,
-        ObservationName,
         SensorThingsLosses,
         UnreadableFeatureOfInterest,
         UnreadableHistoricalLocation,
         UnreadableLocation,
         UnreadableMultiResult,
     };
-    use cassiopeia_sensorthings::entity_id::EntityId;
+    use cassiopeia_sensorthings::{entity_id::EntityId, observation_name::ObservationName};
     use pretty_assertions::assert_eq;
 
     #[test]
@@ -374,7 +362,6 @@ mod tests {
             ["Observation 501 of MultiDatastream 4"]
         );
         assert_eq!(losses.unreadable_multi_results().total(), 2);
-        assert_eq!(ObservationName::WithoutId.to_string(), "an Observation without an id");
     }
 
     #[test]

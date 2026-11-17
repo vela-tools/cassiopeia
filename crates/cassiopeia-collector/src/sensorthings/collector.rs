@@ -5,6 +5,7 @@ use crate::{
     error::CollectorError,
     sensorthings::{
         cursor_cycle::CursorCycle,
+        feature_of_interest_check::FeatureOfInterestCheck,
         incremental_read::read_incremental,
         multi_datastreams_unread::MultiDatastreamsUnread,
         page_reader::PageReader,
@@ -160,14 +161,18 @@ fn write_snapshot(
 
 /// Reads the newest reading of every data stream `service` selects, its Datastreams and then its
 /// `MultiDatastreams`, into `snapshot`, after its header, then the Things it lists by themselves,
-/// and returns the collection limits that stopped a discovery, if any did.
+/// and returns what the read met that the cycle carries on past: the collection limits that stopped
+/// a discovery, and the newest Observations served without the `FeatureOfInterest` the read asked
+/// for.
 fn read_latest<W: Write>(
     reader: &mut PageReader,
     service: &SensorThingsService,
     mut snapshot: SnapshotWriter<W>,
     path: &Path,
 ) -> Result<CollectionWarnings, CollectorError> {
+    let mut features = FeatureOfInterestCheck::new(service);
     let ends = discover_streams(reader, service, latest_discovery_request, |kind, served| {
+        features.newest_observation(kind, &served);
         snapshot.datastream(&DatastreamLine::new(kind, served)).map_err(unwritable(path))
     })?;
     let mut warnings = CollectionWarnings::default();
@@ -176,6 +181,7 @@ fn read_latest<W: Write>(
             warnings.limit_reached(limit);
         }
     }
+    features.record(&mut warnings);
     let mut things = snapshot.into_things();
     read_things(reader, service, &mut things, path, &mut warnings)?;
     things.finish().map_err(unwritable(path))?;
@@ -216,6 +222,7 @@ mod tests {
         collection_warnings::CollectionWarnings,
         error::CollectorError,
         sensorthings::{
+            features_of_interest_unserved::{FeaturesOfInterestUnserved, UnservedObservation},
             limit_reached::{CollectLimit, LimitReached},
             multi_datastreams_unread::MultiDatastreamsUnread,
             test_collection::{RUNNING, checking_collector, collect, collector, cycle_start, root, snapshot_lines},
@@ -228,16 +235,20 @@ mod tests {
     };
     use cassiopeia_ir::payload::FilePayload;
     use cassiopeia_sensorthings::{
+        entity_id::EntityId,
+        observation_name::ObservationName,
         paging::next_link::NextLinkError,
         read_kind::ReadKind,
         settings::collect_limits::PageLimit,
         snapshot::header::SnapshotHeader,
+        stream_id::StreamId,
     };
     use mockito::{Matcher, Mock, ServerGuard};
     use pretty_assertions::assert_eq;
     use serde_json::{Value, json};
     use std::{
         fs,
+        num::NonZeroU64,
         sync::atomic::{AtomicBool, Ordering},
         time::{Duration, Instant},
     };
@@ -326,9 +337,42 @@ mod tests {
 
         let (result, payloads) = collect(collector(&server, r#"{"featuresOfInterest": true}"#, RequestHeaders::default(), &RUNNING));
 
-        result.unwrap();
+        assert_eq!(result.unwrap(), CollectionWarnings::default());
         discovery.assert();
         assert_eq!(snapshot_lines(payloads)[1], json!({ "datastream": datastream }));
+    }
+
+    #[test]
+    fn a_latest_read_of_a_server_that_ignores_the_nested_expansion_warns_once_naming_the_first_newest_observation() {
+        let mut server = mockito::Server::new();
+        let datastreams = [
+            json!({"@iot.id": 7, "name": "bus-12-pm10", "Observations": [{"@iot.id": 70, "phenomenonTime": "2026-11-12T09:59:00Z", "result": 18.2}]}),
+            json!({
+                "@iot.id": 8,
+                "name": "bus-12-no2",
+                "Observations": [{"@iot.id": 80, "phenomenonTime": "2026-11-12T09:59:00Z", "result": 29.5, "FeatureOfInterest": null}],
+            }),
+            json!({"@iot.id": 9, "name": "bus-12-o3", "Observations": []}),
+        ];
+        let discovery = serve(&mut server, LATEST_WITH_FEATURES, json!({ "value": datastreams }).to_string());
+
+        let (result, payloads) = collect(collector(&server, r#"{"featuresOfInterest": true}"#, RequestHeaders::default(), &RUNNING));
+
+        let warnings = result.unwrap();
+        discovery.assert();
+        assert_eq!(
+            warnings.unserved_features_of_interest(),
+            [FeaturesOfInterestUnserved::new(
+                root(&server),
+                UnservedObservation {
+                    observation: ObservationName::Id(EntityId::Integer(70)),
+                    datastream: StreamId::Datastream(EntityId::Integer(7)),
+                },
+                NonZeroU64::new(2).unwrap(),
+            )]
+        );
+        let lines = snapshot_lines(payloads);
+        assert_eq!(lines[1..], datastreams.map(|datastream| json!({ "datastream": datastream })));
     }
 
     #[test]
@@ -349,7 +393,9 @@ mod tests {
 
         let (result, payloads) = collect(collector(&server, "{}", RequestHeaders::default(), &RUNNING));
 
-        result.unwrap();
+        // The newest Observation has no FeatureOfInterest, which a read that did not ask for one
+        // does not report.
+        assert_eq!(result.unwrap(), CollectionWarnings::default());
         discovery.assert();
         assert_eq!(snapshot_lines(payloads)[1], json!({ "datastream": datastream }));
     }

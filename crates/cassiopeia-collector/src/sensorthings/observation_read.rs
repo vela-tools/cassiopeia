@@ -2,6 +2,7 @@ use crate::{
     collection_warnings::CollectionWarnings,
     error::CollectorError,
     sensorthings::{
+        feature_of_interest_check::FeatureOfInterestCheck,
         historical_location_read::HistoricalLocationSink,
         limit_reached::CollectLimit,
         observation_budget::ObservationBudget,
@@ -12,7 +13,8 @@ use crate::{
 };
 use cassiopeia_sensorthings::{
     entity_id::EntityId,
-    settings::collect_limits::{ObservationLimit, PageLimit},
+    service::SensorThingsService,
+    settings::collect_limits::PageLimit,
     snapshot::{line::ObservationLine, writer::ObservationWriter},
     stream_id::StreamId,
 };
@@ -21,35 +23,43 @@ use serde_json::{Map, Value};
 use std::{io::Write, ops::ControlFlow, path::Path};
 use url::Url;
 
-/// Where a read writes its Observations, and how many more it may write.
+/// Where a read writes its Observations, how many more it may write, and which it wrote without the
+/// `FeatureOfInterest` it asked for.
 pub(crate) struct ObservationSink<'a, W> {
     /// The snapshot, past its data stream lines.
     lines: ObservationWriter<W>,
     /// How many more Observations the cycle may write.
     budget: ObservationBudget,
+    /// The count of the Observations written without the `FeatureOfInterest` the read asked for.
+    features: FeatureOfInterestCheck<'a>,
     /// Where the snapshot is written, which a write failure names.
     path: &'a Path,
 }
 
 impl<'a, W: Write> ObservationSink<'a, W> {
-    /// The sink of `lines`, the snapshot at `path`, that takes at most `limit` Observations.
-    pub(crate) const fn new(lines: ObservationWriter<W>, limit: ObservationLimit, path: &'a Path) -> ObservationSink<'a, W> {
+    /// The sink of `lines`, the snapshot at `path`, of a read of `service`, that takes at most the
+    /// Observations its `limits.observations` allows.
+    pub(crate) fn new(lines: ObservationWriter<W>, service: &'a SensorThingsService, path: &'a Path) -> ObservationSink<'a, W> {
         ObservationSink {
             lines,
-            budget: ObservationBudget::new(limit),
+            budget: ObservationBudget::new(service.settings().limits().observations()),
+            features: FeatureOfInterestCheck::new(service),
             path,
         }
     }
 
-    /// Ends the Observations, so the `HistoricalLocations` can follow them.
-    pub(crate) fn into_historical_locations(self) -> HistoricalLocationSink<'a, W> {
+    /// Ends the Observations, so the `HistoricalLocations` can follow them, and records those written
+    /// without the `FeatureOfInterest` the read asked for in `warnings`.
+    pub(crate) fn into_historical_locations(self, warnings: &mut CollectionWarnings) -> HistoricalLocationSink<'a, W> {
+        self.features.record(warnings);
         HistoricalLocationSink::new(self.lines.into_historical_locations(), self.path)
     }
 }
 
 /// Writes the Observations `request` serves of the data stream `datastream` into `sink`, each once
-/// and none of `seen`, as long as its budget allows, following at most `pages` pages, and hands
-/// `wrote` each Observation it writes that has an id, before it is written.
+/// and none of `seen`, as long as its budget allows, following at most `pages` pages, counts each
+/// it writes without the `FeatureOfInterest` the read asked for, and hands `wrote` each Observation
+/// it writes that has an id, before it is written.
 ///
 /// # Errors
 ///
@@ -68,6 +78,7 @@ pub(crate) fn read_observations<W: Write>(
         if let ControlFlow::Break(limit) = sink.budget.spend() {
             return Ok(ControlFlow::Break(limit));
         }
+        sink.features.observation(datastream, &observation);
         if let Some(id) = id {
             wrote(id, &observation);
         }
