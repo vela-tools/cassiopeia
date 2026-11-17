@@ -13,6 +13,7 @@ pub(crate) mod redb_key;
 pub mod redb_latest_store;
 pub(crate) mod redb_scope;
 pub mod redb_series_store;
+pub(crate) mod redb_slot_value;
 pub mod store;
 pub(crate) mod stored_observation;
 pub(crate) mod stored_slot;

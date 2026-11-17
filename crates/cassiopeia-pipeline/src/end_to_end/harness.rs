@@ -12,6 +12,7 @@ use cassiopeia_manifest::manifest::Manifest;
 use cassiopeia_reporter::reporter::Reporter;
 use serde_json::Value;
 use std::{
+    collections::BTreeMap,
     fs,
     io::ErrorKind,
     path::{Path, PathBuf},
@@ -85,8 +86,11 @@ pub(crate) struct RunOutcome {
     pub(crate) diagnostics: Vec<RecordedDiagnostic>,
     /// The warning total of the run's one completed cycle.
     pub(crate) warnings: u64,
-    /// Every entity the run wrote, across all of its output files.
+    /// Every entity the run wrote, file by file in the order of their names, each file's in the
+    /// order it lists them.
     pub(crate) entities: Vec<Value>,
+    /// Every file the run wrote, by name, as it wrote it.
+    pub(crate) files: BTreeMap<PathBuf, String>,
 }
 
 impl RunOutcome {
@@ -307,30 +311,36 @@ pub(crate) fn run_manifest(
     let result = built.and_then(|mut pipeline| pipeline.run());
 
     let warnings = totals.0.lock().unwrap_or_else(PoisonError::into_inner).iter().sum();
+    let files = written_files(&output);
     let outcome = RunOutcome {
         diagnostics: reporter.diagnostics(),
         warnings,
-        entities: written_entities(&output),
+        entities: files.values().flat_map(|file| file_entities(file)).collect(),
+        files,
     };
     (result, outcome)
 }
 
-/// Every entity written into `output`, across all of its files, or none when the run never
-/// created the directory.
-fn written_entities(output: &Path) -> Vec<Value> {
+/// Every file written into `output`, by name, or none when the run never created the directory.
+fn written_files(output: &Path) -> BTreeMap<PathBuf, String> {
     let files = match fs::read_dir(output) {
         Ok(files) => files,
-        Err(error) if error.kind() == ErrorKind::NotFound => return Vec::new(),
+        Err(error) if error.kind() == ErrorKind::NotFound => return BTreeMap::new(),
         Err(error) => panic!("the output directory cannot be read: {error}"),
     };
-    let mut entities = Vec::new();
-    for file in files {
-        let written: Value = serde_json::from_str(&fs::read_to_string(file.unwrap().path()).unwrap()).unwrap();
-        let Value::Array(written) = written else {
-            panic!("an entity file must hold a JSON array");
-        };
-        entities.extend(written);
-    }
+    files
+        .map(|file| {
+            let path = file.unwrap().path();
+            (PathBuf::from(path.file_name().unwrap()), fs::read_to_string(&path).unwrap())
+        })
+        .collect()
+}
+
+/// The entities an entity file lists, in its order.
+fn file_entities(file: &str) -> Vec<Value> {
+    let Value::Array(entities) = serde_json::from_str(file).unwrap() else {
+        panic!("an entity file must hold a JSON array");
+    };
     entities
 }
 

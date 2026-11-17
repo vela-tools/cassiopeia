@@ -18,26 +18,24 @@ use temp_dir::TempDir;
 /// Runs `case` in `view` on both entity stores and returns what the Redb run wrote and reported.
 ///
 /// A diagnostic that stands for several occurrences names the first one it met. Records are
-/// extracted on one thread, a series run hands entities on in source order on either store, and a
-/// current-state run on Redb in key order, so that example is the same on every run. A current-state
-/// run on `DashMap` hands them on in hash order, which changes the example between runs, so the
-/// `DashMap` run is held to the same entities and to the same code and count for every diagnostic. A
-/// difference there is a defect of a store rather than a change to what the mapping writes, and
-/// fails the corpus outright.
+/// extracted on one thread, and either store hands entities on in the order of their first records,
+/// so a run writes its entities and names its examples the same on every run and store. The two runs
+/// are held to the same entities in the same order and to the same diagnostics. A difference there is
+/// a defect of a store rather than a change to what the mapping writes, and fails the corpus
+/// outright.
 pub(crate) fn run_view(case: &GoldenCase, view: View) -> ViewRecord {
-    let hashed = run_on_store(case, view, StoreKind::DashMap);
-    let ordered = run_on_store(case, view, StoreKind::Redb);
+    let in_memory = run_on_store(case, view, StoreKind::DashMap);
+    let on_disk = run_on_store(case, view, StoreKind::Redb);
     let directory = case.directory().display();
     assert_eq!(
-        hashed.entities, ordered.entities,
+        in_memory.entities, on_disk.entities,
         "{directory} in {view:?}: the stores wrote different entities"
     );
     assert_eq!(
-        hashed.report.tally(),
-        ordered.report.tally(),
+        in_memory.report, on_disk.report,
         "{directory} in {view:?}: the stores reported different diagnostics"
     );
-    ordered
+    on_disk
 }
 
 /// Runs `case` in `view` on `store`, in a temporary folder of its own, and records what it wrote and

@@ -1,6 +1,7 @@
 use crate::{
     entity_store::{
         concurrent_scopes::ConcurrentScopes,
+        entity_order::in_source_order,
         error::{EntityStoreError, Result},
         latest_slot::{IncomingRecord, LatestSlot},
         mapping_expiry::join,
@@ -11,8 +12,10 @@ use crate::{
     store_write_strategy::StoreWriteStrategy,
 };
 use ahash::RandomState;
+use cassiopeia_ir::source_position::SourcePosition;
 use cassiopeia_mapping::source_reads::SourceReads;
 use dashmap::DashMap;
+use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
 use smallvec::SmallVec;
 use std::sync::Arc;
 use urn_rs::Urn;
@@ -21,8 +24,18 @@ use urn_rs::Urn;
 ///
 /// An id is fed by one mapping in the common case and by a handful at most, so a linear scan finds a
 /// mapping's slot faster than a hash would, and the inline capacity of one keeps the slots inside the
-/// map's own entry rather than in a table of their own on the heap.
+/// id's entry rather than in a table of their own on the heap.
 type MappingSlots = SmallVec<[(MappingId, LatestSlot); 1]>;
+
+/// Every slot stored for one base id, and the position of the earliest record any of them took.
+#[derive(Debug)]
+struct EntitySlots {
+    /// The earliest position among the id's records, which places the id among the entities the
+    /// store hands on.
+    first: SourcePosition,
+    /// The id's slots, one per mapping that contributed to it.
+    slots: MappingSlots,
+}
 
 /// In-memory current-state entity store using [`DashMap`] for lock-free concurrent access.
 ///
@@ -30,13 +43,18 @@ type MappingSlots = SmallVec<[(MappingId, LatestSlot); 1]>;
 /// greatest-`observedAt` record, a static mapping merges its records in source order. This is
 /// O(mappings) per id, so a temporal id's many observations never grow the stored footprint. Each
 /// slot carries the expiry its records contribute, and the entity's own is joined from them at
-/// assembly. Keys compare by `Urn` equivalence, RFC 8141 section 3, the scheme-based rung of the
-/// RFC 3986 section 6 comparison NGSI-LD clause 5.5.1 adopts, so ids differing only in case of the
-/// scheme or NID, in percent-encoding hex case, or in r-, q- or f-components name one entity.
+/// assembly. The ids are handed on in the order of their first records. Keys compare by `Urn`
+/// equivalence, RFC 8141 section 3, the scheme-based rung of the RFC 3986 section 6 comparison
+/// NGSI-LD clause 5.5.1 adopts, so ids differing only in case of the scheme or NID, in
+/// percent-encoding hex case, or in r-, q- or f-components name one entity.
 #[derive(Clone, Debug, Default)]
 pub struct DashMapLatestEntityStore {
     scopes: ConcurrentScopes,
-    data: Arc<DashMap<Urn, MappingSlots, RandomState>>,
+    /// Each id's slots are boxed, so the map's own table holds an id and a pointer per entry. Assembly
+    /// visits the ids in the order of their first records, which is no order of the table, and a
+    /// table of small entries keeps those visits in cache, while the boxes were allocated as the ids'
+    /// first records arrived, close to the order assembly visits them in.
+    data: Arc<DashMap<Urn, Box<EntitySlots>, RandomState>>,
 }
 
 impl DashMapLatestEntityStore {
@@ -77,15 +95,20 @@ impl EntityStore for DashMapLatestEntityStore {
             expires_at,
         };
         let unplaced = match self.data.get_mut(&base_id) {
-            Some(mut per_mapping) => place(&mut per_mapping, mapping_id, incoming, reads),
+            Some(mut entity) => place(&mut entity, mapping_id, incoming, reads),
             None => Some(incoming),
         };
         if let Some(incoming) = unplaced {
-            let mut per_mapping = self.data.entry(base_id.clone()).or_default();
+            let mut entity = self.data.entry(base_id.clone()).or_insert_with(|| {
+                Box::new(EntitySlots {
+                    first: position,
+                    slots: MappingSlots::new(),
+                })
+            });
             // A concurrent writer may have created the id between the miss and this insert, so the
             // slot is looked up again rather than assumed vacant.
-            if let Some(incoming) = place(&mut per_mapping, mapping_id, incoming, reads) {
-                per_mapping.push((mapping_id, LatestSlot::new(incoming, temporal)));
+            if let Some(incoming) = place(&mut entity, mapping_id, incoming, reads) {
+                entity.slots.push((mapping_id, LatestSlot::new(incoming, temporal)));
             }
         }
 
@@ -96,14 +119,16 @@ impl EntityStore for DashMapLatestEntityStore {
     }
 
     fn get_entity_ids(&self) -> Result<Vec<Urn>> {
-        Ok(self.data.iter().map(|entry| entry.key().clone()).collect())
+        // Each shard is gathered on a thread of its own, so copying every id out costs a fraction of
+        // a pass over the map, and the sort is parallel too.
+        Ok(in_source_order(self.data.par_iter().map(|entry| (entry.first, entry.key().clone())).collect()))
     }
 
     fn assemble_entity(&self, base_id: &Urn, mappings: &dyn MappingReads) -> Result<AssembledFragments> {
         // Draining rather than reading: the scan visits each id once and the store is destroyed
         // straight after, so the retained records are moved into the emit-unit instead of copied.
-        let (expires_at, units) = match self.data.remove(base_id) {
-            Some((_id, per_mapping)) if !per_mapping.is_empty() => {
+        let (expires_at, units) = match self.data.remove(base_id).map(|(_id, entity)| entity.slots) {
+            Some(per_mapping) if !per_mapping.is_empty() => {
                 let mut unit = StoredUnit::new();
                 let mut expiries = Vec::with_capacity(per_mapping.len());
                 for (mapping_id, slot) in per_mapping {
@@ -150,13 +175,14 @@ impl EntityStore for DashMapLatestEntityStore {
 }
 
 /// Folds one record into an id's slot for its mapping, counting it among the records the mapping
-/// resolved to the id.
+/// resolved to the id, and moves the id's first position to the record's when it comes earlier.
 ///
 /// Returns `None` once the record has been absorbed. Returns the record back when the mapping has no
 /// slot yet, so the caller can insert it under a key it owns; handing it back rather than inserting
 /// here keeps the owned-key clone on the one path that needs it.
-fn place(per_mapping: &mut MappingSlots, mapping_id: MappingId, incoming: IncomingRecord, reads: &SourceReads) -> Option<IncomingRecord> {
-    let Some((_, slot)) = per_mapping.iter_mut().find(|(known, _)| *known == mapping_id) else {
+fn place(entity: &mut EntitySlots, mapping_id: MappingId, incoming: IncomingRecord, reads: &SourceReads) -> Option<IncomingRecord> {
+    entity.first = entity.first.min(incoming.position);
+    let Some((_, slot)) = entity.slots.iter_mut().find(|(known, _)| *known == mapping_id) else {
         return Some(incoming);
     };
     slot.absorb(incoming, reads);
@@ -172,7 +198,13 @@ mod tests {
             store::{
                 EntityStore,
                 FragmentWrite,
-                tests::{READS_EVERYTHING, assert_expiry_follows_the_retained_record, assert_joins_expiries_across_mappings, assert_merges_scopes_per_id},
+                tests::{
+                    READS_EVERYTHING,
+                    assert_expiry_follows_the_retained_record,
+                    assert_hands_ids_on_in_order_of_their_first_records,
+                    assert_joins_expiries_across_mappings,
+                    assert_merges_scopes_per_id,
+                },
             },
         },
         mapping_id::MappingId,
@@ -200,6 +232,11 @@ mod tests {
     #[test]
     fn a_mapping_s_expiry_follows_the_record_it_retains() {
         assert_expiry_follows_the_retained_record(&DashMapLatestEntityStore::new());
+    }
+
+    #[test]
+    fn ids_are_handed_on_in_the_order_of_their_first_records() {
+        assert_hands_ids_on_in_order_of_their_first_records(&DashMapLatestEntityStore::new());
     }
 
     fn write(base_id: &Urn, data: serde_json::Value, mapping: u32, temporal: bool, observed_at: Option<&str>) -> FragmentWrite<'static> {

@@ -4,13 +4,13 @@ input_file: crates/cassiopeia-pipeline/golden/identity/plain-reference/manifest.
 ---
 [
   {
-    "id": "urn:ngsi-ld:Station:MunchenHbf",
-    "type": "Station",
-    "name": "Munich central"
-  },
-  {
     "id": "urn:ngsi-ld:Station:S1",
     "type": "Station",
     "name": "First"
+  },
+  {
+    "id": "urn:ngsi-ld:Station:MunchenHbf",
+    "type": "Station",
+    "name": "Munich central"
   }
 ]

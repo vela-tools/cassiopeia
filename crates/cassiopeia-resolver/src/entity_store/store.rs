@@ -422,14 +422,15 @@ pub(crate) mod tests {
         assert_eq!(records, [json!(1), json!(2), json!(3), json!(4), json!(5), json!("second input")]);
     }
 
-    /// Contract every series [`EntityStore`] must honour: ids are handed on in the order of their
-    /// first records in the source, however their records reached the store. A record that comes
-    /// before every record of its id stored so far moves the id earlier, and ids whose first record
-    /// is one record follow the bytewise order of their text. Listing the ids and walking them chunk
-    /// by chunk agree, and the count is of distinct ids.
-    pub(crate) fn assert_series_hands_ids_on_in_order_of_their_first_records(store: &dyn EntityStore) {
-        let [late, early, moved, shared_b, shared_a] =
-            ["Late", "Early", "Moved", "Shared-B", "Shared-A"].map(|name| format!("urn:ngsi-ld:Camera:{name}").parse::<Urn>().unwrap());
+    /// Contract every [`EntityStore`] must honour: ids are handed on in the order of their first
+    /// records in the source, however their records reached the store. A record that comes before
+    /// every record of its id stored so far moves the id earlier, whichever of the id's mappings it
+    /// comes from, a later record never moves it, and ids whose first record is one record follow the
+    /// bytewise order of their text. Listing the ids and walking them chunk by chunk agree, and the
+    /// count is of distinct ids.
+    pub(crate) fn assert_hands_ids_on_in_order_of_their_first_records(store: &dyn EntityStore) {
+        let [late, early, moved, shared_b, shared_a, joined] =
+            ["Late", "Early", "Moved", "Shared-B", "Shared-A", "Joined"].map(|name| format!("urn:ngsi-ld:Camera:{name}").parse::<Urn>().unwrap());
 
         store.store_fragment(write_at(&late, at(9), json!(9))).unwrap();
         store
@@ -439,12 +440,22 @@ pub(crate) mod tests {
                 write_at(&shared_b, at(4), json!(4)),
                 write_at(&shared_a, at(4), json!(4)),
                 write_at(&early, at(1), json!(1)),
+                write_at(&joined, at(8), json!(8)),
             ])
             .unwrap();
         store.store_fragment(write_at(&moved, at(0), json!(0))).unwrap();
         store.store_fragment(write_at(&late, at(3), json!(3))).unwrap();
+        store
+            .store_fragment(FragmentWrite {
+                mapping_id: MappingId::new(2),
+                ..write_at(&joined, at(5), json!(5))
+            })
+            .unwrap();
+        store
+            .store_fragment_batch(vec![write_at(&early, at(6), json!(6)), write_at(&moved, at(10), json!(10))])
+            .unwrap();
 
-        let expected = [moved, early, late, shared_a, shared_b];
+        let expected = [moved, early, late, shared_a, shared_b, joined];
         assert_eq!(store.get_entity_ids().unwrap(), expected);
         let mut walked = Vec::new();
         store
@@ -454,7 +465,6 @@ pub(crate) mod tests {
             })
             .unwrap();
         assert_eq!(walked, expected);
-        assert_eq!(store.count(), 5);
-        assert_eq!(store.unit_count(), 8);
+        assert_eq!(store.count(), 6);
     }
 }
