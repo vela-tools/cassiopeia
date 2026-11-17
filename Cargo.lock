@@ -876,7 +876,7 @@ dependencies = [
  "kml",
  "mediatype",
  "ndarray",
- "netcdf-core 0.12.1",
+ "netcdf-core 0.13.0",
  "netcdf-reader",
  "netcdf-writer",
  "num-traits",
@@ -5240,7 +5240,7 @@ dependencies = [
  "oxilangtag",
  "oxiri",
  "rand 0.9.5",
- "thiserror 2.0.21",
+ "thiserror 1.0.69",
 ]
 
 [[package]]
@@ -5253,7 +5253,7 @@ dependencies = [
  "oxilangtag",
  "oxiri",
  "oxrdf",
- "thiserror 2.0.21",
+ "thiserror 1.0.69",
 ]
 
 [[package]]
