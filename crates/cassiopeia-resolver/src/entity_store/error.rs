@@ -1,7 +1,8 @@
-use crate::store_action::StoreAction;
+use crate::{mapping_id::MappingId, store_action::StoreAction};
 use rmp_serde::{decode, encode};
 use std::{io, path::PathBuf, result};
 use thiserror::Error;
+use urn_rs::Urn;
 
 /// Errors raised by entity store operations.
 #[derive(Debug, Error)]
@@ -38,6 +39,23 @@ pub enum EntityStoreError {
     /// `MessagePack` decoding of an on-disk fragment payload failed.
     #[error("Failed to decode fragment from MessagePack")]
     MsgPackDecode(#[from] decode::Error),
+
+    /// Two fragments of one entity were written at the same place in the source, which a position
+    /// stands for only one of.
+    #[error("Two fragments of {entity} were written at the same place in the source")]
+    RepeatedPosition {
+        /// The entity both fragments contribute to.
+        entity: Urn,
+    },
+
+    /// A merge of an entity's records names a mapping no read set was registered for.
+    #[error("The records of {entity} came from mapping {}, which no read set was registered for", mapping_id.as_u32())]
+    UnregisteredMapping {
+        /// The entity whose records were being merged.
+        entity: Urn,
+        /// The mapping the records came from.
+        mapping_id: MappingId,
+    },
 }
 
 /// The result type used throughout entity store operations.

@@ -1,0 +1,16 @@
+---
+source: crates/cassiopeia-pipeline/src/end_to_end/golden/mod.rs
+input_file: crates/cassiopeia-pipeline/golden/values/whole-record-context/manifest.json5
+---
+{
+  "diagnostics": [
+    {
+      "code": "extractor-null-dropped",
+      "occurrences": 1,
+      "message": [
+        "! Attribute `record` was written without its null object members, which NGSI-LD does not allow",
+        "  ╰─ attribute   record"
+      ]
+    }
+  ]
+}

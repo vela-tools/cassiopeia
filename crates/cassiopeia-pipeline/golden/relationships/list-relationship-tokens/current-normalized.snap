@@ -1,0 +1,45 @@
+---
+source: crates/cassiopeia-pipeline/src/end_to_end/golden/mod.rs
+input_file: crates/cassiopeia-pipeline/golden/relationships/list-relationship-tokens/manifest.json5
+---
+[
+  {
+    "id": "urn:ngsi-ld:Stop:S1",
+    "type": "Stop",
+    "servedBy": {
+      "type": "ListRelationship",
+      "objectList": [
+        {
+          "object": "urn:ngsi-ld:Line:U1"
+        },
+        {
+          "object": "urn:ngsi-ld:Line:U4"
+        },
+        {
+          "object": "urn:ngsi-ld:Line:U7"
+        }
+      ],
+      "objectType": "Line"
+    }
+  },
+  {
+    "id": "urn:ngsi-ld:Stop:S2",
+    "type": "Stop",
+    "servedBy": {
+      "type": "ListRelationship",
+      "objectList": [
+        {
+          "object": "urn:ngsi-ld:Line:U2"
+        },
+        {
+          "object": "urn:ngsi-ld:Line:U3"
+        }
+      ],
+      "objectType": "Line"
+    }
+  },
+  {
+    "id": "urn:ngsi-ld:Stop:S3",
+    "type": "Stop"
+  }
+]

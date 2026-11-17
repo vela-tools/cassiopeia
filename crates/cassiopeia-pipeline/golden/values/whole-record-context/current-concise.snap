@@ -1,0 +1,32 @@
+---
+source: crates/cassiopeia-pipeline/src/end_to_end/golden/mod.rs
+input_file: crates/cassiopeia-pipeline/golden/values/whole-record-context/manifest.json5
+---
+[
+  {
+    "id": "urn:ngsi-ld:Sample:S1",
+    "type": "Sample",
+    "record": {
+      "code": "S1",
+      "reading": 21.5,
+      "tags": [
+        "a",
+        "b"
+      ],
+      "nested": {}
+    },
+    "raw": {
+      "json": {
+        "code": "S1",
+        "reading": 21.5,
+        "tags": [
+          "a",
+          "b"
+        ],
+        "nested": {
+          "k": null
+        }
+      }
+    }
+  }
+]

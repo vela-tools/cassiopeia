@@ -1,12 +1,12 @@
 use crate::{error::ExpanderError, expansion_losses::ExpansionLosses};
-use cassiopeia_ir::{fragment::Fragment, mapped::Mapped, record::Record};
+use cassiopeia_ir::{fragment::Fragment, mapped::Mapped, record::Record, source_position::SourcePosition};
 
 /// Expands raw records into mapped NGSI-LD fragments.
 ///
 /// This is the contract for record expansion: given a single [`Record`], an implementation
 /// produces one or more [`Mapped<Fragment>`]s according to its mapping configuration.
 pub trait Expander: Send + Sync {
-    /// Expands a single record into one or more fragments.
+    /// Expands a single record into one or more fragments, each carrying the record's `position`.
     ///
     /// What the record loses while it is still expanded is recorded in `losses`, so the stage that
     /// owns the batch can name it; a record is never failed over one. An entity expiry that resolves
@@ -17,13 +17,17 @@ pub trait Expander: Send + Sync {
     ///
     /// Returns [`ExpanderError`] when the record's identity or scope fails to resolve into a valid
     /// URN or scope, or a relationship target cannot be minted for a reason other than its template.
-    fn expand(&self, record: Record, losses: &ExpansionLosses) -> Result<Vec<Mapped<Fragment>>, ExpanderError>;
+    fn expand(&self, record: Record, position: SourcePosition, losses: &ExpansionLosses) -> Result<Vec<Mapped<Fragment>>, ExpanderError>;
 
-    /// Expands a batch of records.
+    /// Expands a batch of consecutive records, the first of which stands at `first` in the source.
     ///
-    /// The default implementation processes records sequentially; implementations may override it
-    /// to provide an optimized execution strategy.
-    fn expand_batch(&self, records: Vec<Record>, losses: &ExpansionLosses) -> Vec<Result<Vec<Mapped<Fragment>>, ExpanderError>> {
-        records.into_iter().map(|record| self.expand(record, losses)).collect()
+    /// The results come back in the order of `records`. The default implementation processes records
+    /// sequentially; implementations may override it to provide an optimized execution strategy.
+    fn expand_batch(&self, records: Vec<Record>, first: SourcePosition, losses: &ExpansionLosses) -> Vec<Result<Vec<Mapped<Fragment>>, ExpanderError>> {
+        records
+            .into_iter()
+            .enumerate()
+            .map(|(offset, record)| self.expand(record, first.advanced(offset), losses))
+            .collect()
     }
 }

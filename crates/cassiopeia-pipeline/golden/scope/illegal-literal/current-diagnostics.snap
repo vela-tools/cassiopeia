@@ -1,0 +1,11 @@
+---
+source: crates/cassiopeia-pipeline/src/end_to_end/golden/mod.rs
+input_file: crates/cassiopeia-pipeline/golden/scope/illegal-literal/manifest.json5
+---
+{
+  "failure": [
+    "The scope template in the mapping document at '[case]/mapping.json5' can never be an entity's scope",
+    "'/Novo mesto' is not a legal NGSI-LD scope: a scope is one or more '/'-separated levels, each starting with a Unicode letter and continuing with Unicode letters, numbers or underscores (ETSI GS CIM 009 v1.9.1 clause 4.18)"
+  ],
+  "diagnostics": []
+}

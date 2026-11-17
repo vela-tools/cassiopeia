@@ -1,0 +1,42 @@
+---
+source: crates/cassiopeia-pipeline/src/end_to_end/golden/mod.rs
+input_file: crates/cassiopeia-pipeline/golden/values/property-times/manifest.json5
+---
+[
+  {
+    "id": "urn:ngsi-ld:Sample:S1",
+    "type": "Sample",
+    "stamp": {
+      "type": "Property",
+      "value": "2026-03-01T09:04:35Z",
+      "valueType": "DateTime"
+    },
+    "day": {
+      "type": "Property",
+      "value": "2026-03-01",
+      "valueType": "Date"
+    }
+  },
+  {
+    "id": "urn:ngsi-ld:Sample:S2",
+    "type": "Sample",
+    "stamp": {
+      "type": "Property",
+      "value": "2026-04-03T22:00:20Z",
+      "valueType": "DateTime"
+    },
+    "day": {
+      "type": "Property",
+      "value": "2026-03-01",
+      "valueType": "Date"
+    }
+  },
+  {
+    "id": "urn:ngsi-ld:Sample:S3",
+    "type": "Sample"
+  },
+  {
+    "id": "urn:ngsi-ld:Sample:S4",
+    "type": "Sample"
+  }
+]

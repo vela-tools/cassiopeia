@@ -24,4 +24,5 @@ jobs:
       - uses: taiki-e/install-action@v2
         with:
           tool: cargo-insta
-      - run: cargo insta test --check --unreferenced=reject -p cassiopeia-pipeline --all-features -- --locked end_to_end::golden::
+      - run: cargo fetch --locked
+      - run: cargo insta test --check --unreferenced=reject -p cassiopeia-pipeline --all-features -- end_to_end::golden::

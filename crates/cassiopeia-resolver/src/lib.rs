@@ -24,6 +24,7 @@
 
 pub mod assembly_losses;
 pub mod coalesced_batch;
+pub mod concurrent_batch;
 pub mod discarded_observations;
 pub mod entity_assembly;
 pub mod entity_source;
@@ -37,8 +38,12 @@ pub mod mapping_id;
 pub mod mapping_registry;
 pub mod merged_records;
 pub mod observed_at_failures;
+pub(crate) mod prepared_fragment;
 pub mod record_merge;
+pub mod registered_mappings;
 pub mod relationship_store;
 pub mod store_action;
 pub mod store_batch_failure;
 pub mod store_write_strategy;
+#[cfg(test)]
+pub(crate) mod test_order;

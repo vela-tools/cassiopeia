@@ -1,0 +1,16 @@
+---
+source: crates/cassiopeia-pipeline/src/end_to_end/golden/mod.rs
+input_file: crates/cassiopeia-pipeline/golden/relationships/synthetic-illegal-scope/manifest.json5
+---
+{
+  "diagnostics": [
+    {
+      "code": "expander-urn-ungeneratable",
+      "occurrences": 1,
+      "message": [
+        "! The resolved scope '/Novo mesto' cannot be the entity's scope",
+        "  ╰─ caused by   '/Novo mesto' is not a legal NGSI-LD scope: a scope is one or more '/'-separated levels, each starting with a Unicode letter and continuing with Unicode letters, numbers or underscores (ETSI GS CIM 009 v1.9.1 clause 4.18)"
+      ]
+    }
+  ]
+}

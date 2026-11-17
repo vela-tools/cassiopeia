@@ -1,0 +1,42 @@
+---
+source: crates/cassiopeia-pipeline/src/end_to_end/golden/mod.rs
+input_file: crates/cassiopeia-pipeline/golden/values/list-form-source/manifest.json5
+---
+[
+  {
+    "id": "urn:ngsi-ld:Sample:S1",
+    "type": "Sample",
+    "address": {
+      "type": "Property",
+      "value": "Main 12"
+    },
+    "page": {
+      "type": "Property",
+      "value": "https://example.org/Main/12"
+    },
+    "building": {
+      "type": "Property",
+      "value": "urn:ngsi-ld:Building:Main12"
+    }
+  },
+  {
+    "id": "urn:ngsi-ld:Sample:S2",
+    "type": "Sample",
+    "address": {
+      "type": "Property",
+      "value": " 12"
+    },
+    "page": {
+      "type": "Property",
+      "value": "https://example.org//12"
+    },
+    "building": {
+      "type": "Property",
+      "value": "urn:ngsi-ld:Building:12"
+    }
+  },
+  {
+    "id": "urn:ngsi-ld:Sample:S3",
+    "type": "Sample"
+  }
+]

@@ -120,7 +120,7 @@ output: {
 }
 ~~~
 
-The setting shapes what Cassiopeia produces, not where it sends the result, so it applies to file and broker destinations alike. The series fold touches only temporal attributes. An attribute without `observedAt`, such as a name, is kept once. Cassiopeia sorts each attribute's instances oldest first, so the arrays read as a series through time.
+The setting shapes what Cassiopeia produces, not where it sends the result, so it applies to file and broker destinations alike. The series fold touches only temporal attributes. An attribute without `observedAt`, such as a name, is kept once, from the entity's first record in the source: the first record that holds it in the order the input lists its records, and over several inputs, in the first of them in the manifest. Cassiopeia sorts each attribute's instances oldest first, so the arrays read as a series through time; instances with the same `observedAt` keep the order of their records in the source. A file lists the folded entities in the order their first records come in the source, so two runs over the same input write the same files.
 
 The difference is plainest in a file. Current-state writes one object per ID holding the latest reading; `series` writes one object per ID whose attributes are instance arrays. Against a broker the stored temporal history is the same either way when observations are posted to the temporal endpoint; the representation changes only whether Cassiopeia folds each ID before delivery.
 

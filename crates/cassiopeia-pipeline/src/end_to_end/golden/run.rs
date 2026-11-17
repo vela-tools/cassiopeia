@@ -18,9 +18,10 @@ use temp_dir::TempDir;
 /// Runs `case` in `view` on both entity stores and returns what the Redb run wrote and reported.
 ///
 /// A diagnostic that stands for several occurrences names the first one it met. Records are
-/// extracted on one thread and Redb hands entities on in key order, so that example is the same on
-/// every run. `DashMap` hands them on in hash order, which changes the example between runs, so its
-/// run is held to the same entities and to the same code and count for every diagnostic. A
+/// extracted on one thread, a series run hands entities on in source order on either store, and a
+/// current-state run on Redb in key order, so that example is the same on every run. A current-state
+/// run on `DashMap` hands them on in hash order, which changes the example between runs, so the
+/// `DashMap` run is held to the same entities and to the same code and count for every diagnostic. A
 /// difference there is a defect of a store rather than a change to what the mapping writes, and
 /// fails the corpus outright.
 pub(crate) fn run_view(case: &GoldenCase, view: View) -> ViewRecord {

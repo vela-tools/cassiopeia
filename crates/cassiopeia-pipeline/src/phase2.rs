@@ -107,7 +107,7 @@ mod tests {
         router::MappingRouter,
     };
     use cassiopeia_extractor::{dropped_attributes::DroppedAttributes, entity_extractor::EntityExtractor, extractor::Extractor};
-    use cassiopeia_ir::{fragment::Fragment, mapped::Mapped, record::Record};
+    use cassiopeia_ir::{fragment::Fragment, mapped::Mapped, record::Record, source_position::SourcePosition};
     use cassiopeia_mapping::{
         mapping::Mapping,
         template::{run_variables::RunVariables, runner::TemplateRunner},
@@ -149,6 +149,7 @@ mod tests {
             let fragment = Fragment::builder()
                 .source_data(json!({"temperature": 20}))
                 .target_urn(id.parse().unwrap())
+                .position(SourcePosition::first_of(0))
                 .build();
             sink.resolve(Mapped::new(fragment, Arc::clone(&mapping))).unwrap();
         }
@@ -202,7 +203,7 @@ mod tests {
         };
 
         let expander = GenericExpander::new(MappingRouter::Single(Arc::clone(&mapping)), resolver.clone(), RunVariables::none());
-        let fragments = Expander::expand(&expander, Record::new(None, data), &ExpansionLosses::new()).unwrap();
+        let fragments = Expander::expand(&expander, Record::new(None, data), SourcePosition::first_of(0), &ExpansionLosses::new()).unwrap();
         let fragment_resolver = FragmentResolver::new(
             Box::new(DashMapLatestEntityStore::new()),
             Box::new(DashMapRelationshipStore::new()),

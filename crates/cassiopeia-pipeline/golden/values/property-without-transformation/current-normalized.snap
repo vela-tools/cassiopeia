@@ -1,0 +1,34 @@
+---
+source: crates/cassiopeia-pipeline/src/end_to_end/golden/mod.rs
+input_file: crates/cassiopeia-pipeline/golden/values/property-without-transformation/manifest.json5
+---
+[
+  {
+    "id": "urn:ngsi-ld:Sample:S1",
+    "type": "Sample",
+    "text": {
+      "type": "Property",
+      "value": "plain"
+    },
+    "number": {
+      "type": "Property",
+      "value": "12.5"
+    },
+    "flag": {
+      "type": "Property",
+      "value": "true"
+    },
+    "list": {
+      "type": "Property",
+      "value": "[\"BS\",\"IN\"]"
+    },
+    "object": {
+      "type": "Property",
+      "value": "{\"k\":1}"
+    },
+    "empty": {
+      "type": "Property",
+      "value": ""
+    }
+  }
+]

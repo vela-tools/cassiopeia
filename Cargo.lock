@@ -810,6 +810,7 @@ dependencies = [
  "cassiopeia-unresolved-templates",
  "chrono",
  "deunicode",
+ "indexmap 2.14.2",
  "pretty_assertions",
  "rayon",
  "serde_json",

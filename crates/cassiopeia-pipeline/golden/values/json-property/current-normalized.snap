@@ -1,0 +1,39 @@
+---
+source: crates/cassiopeia-pipeline/src/end_to_end/golden/mod.rs
+input_file: crates/cassiopeia-pipeline/golden/values/json-property/manifest.json5
+---
+[
+  {
+    "id": "urn:ngsi-ld:Sample:S1",
+    "type": "Sample",
+    "asIs": {
+      "type": "JsonProperty",
+      "json": {
+        "no2": 3,
+        "pm10": null
+      }
+    },
+    "decoded": {
+      "type": "JsonProperty",
+      "json": {
+        "no2": 3,
+        "pm10": null
+      }
+    },
+    "emptyObject": {
+      "type": "JsonProperty",
+      "json": {}
+    },
+    "objects": {
+      "type": "JsonProperty",
+      "json": [
+        {
+          "a": 1
+        },
+        {
+          "b": null
+        }
+      ]
+    }
+  }
+]

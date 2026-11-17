@@ -1,4 +1,4 @@
-use crate::mapping_id::MappingId;
+use crate::{mapping_id::MappingId, registered_mappings::RegisteredMappings};
 use ahash::RandomState;
 use cassiopeia_mapping::{mapping::Mapping, template::run_variables::RunVariables};
 use dashmap::DashMap;
@@ -127,6 +127,13 @@ impl MappingRegistry {
         self.by_id.get(&raw).map(|entry| entry.value().clone())
     }
 
+    /// Every mapping and variables pair interned so far, by id, copied out so they can be read
+    /// without the registry's locks.
+    #[must_use]
+    pub fn snapshot(&self) -> RegisteredMappings {
+        RegisteredMappings::new(self.by_id.iter().map(|entry| (MappingId::new(*entry.key()), entry.value().clone())))
+    }
+
     /// Returns the number of distinct mapping and variables pairs interned so far.
     pub fn len(&self) -> usize {
         self.by_id.len()
@@ -140,7 +147,7 @@ impl MappingRegistry {
 
 #[cfg(test)]
 mod tests {
-    use crate::{mapping_id::MappingId, mapping_registry::MappingRegistry};
+    use crate::{entity_store::mapping_reads::MappingReads, mapping_id::MappingId, mapping_registry::MappingRegistry};
     use cassiopeia_mapping::{
         mapping::Mapping,
         template::{run_variables::RunVariables, runner::TemplateRunner},
@@ -165,6 +172,24 @@ mod tests {
         let mut variables = Map::new();
         variables.insert("network".to_string(), json!(value));
         RunVariables::new(variables)
+    }
+
+    #[test]
+    fn a_snapshot_holds_every_mapping_interned_before_it_and_its_read_set() {
+        let registry = MappingRegistry::new();
+        let station = mapping();
+        let bikes = registry.intern(&station, &network("bikes"));
+        let cars = registry.intern(&station, &network("cars"));
+
+        let snapshot = registry.snapshot();
+        registry.intern(&station, &network("buses"));
+
+        for id in [bikes, cars] {
+            assert!(Arc::ptr_eq(snapshot.get(id).unwrap().mapping(), &station));
+            assert_eq!(snapshot.reads(id), Some(station.source_reads()));
+        }
+        assert!(snapshot.get(MappingId::new(0)).is_none());
+        assert_eq!(snapshot.reads(MappingId::new(3)), None);
     }
 
     #[test]

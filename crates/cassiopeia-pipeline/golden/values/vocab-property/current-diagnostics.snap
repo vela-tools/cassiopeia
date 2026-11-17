@@ -1,0 +1,24 @@
+---
+source: crates/cassiopeia-pipeline/src/end_to_end/golden/mod.rs
+input_file: crates/cassiopeia-pipeline/golden/values/vocab-property/manifest.json5
+---
+{
+  "diagnostics": [
+    {
+      "code": "extractor-iri-unreadable",
+      "occurrences": 1,
+      "message": [
+        "! Attribute `category` dropped: `station` is not an IRI",
+        "  ╰─ attribute   category"
+      ]
+    },
+    {
+      "code": "extractor-urn-unreadable",
+      "occurrences": 1,
+      "message": [
+        "! Attribute `classification` dropped: `https://example.org/class` is not a URN",
+        "  ╰─ attribute   classification"
+      ]
+    }
+  ]
+}

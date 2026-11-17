@@ -7,37 +7,37 @@ input_file: crates/cassiopeia-pipeline/golden/merging/two-mappings-expiries/mani
     "id": "urn:ngsi-ld:Station:S1",
     "type": "Station",
     "expiresAt": "2026-03-02T12:00:00Z",
-    "status": {
-      "type": "Property",
-      "value": "open"
-    },
     "name": {
       "type": "Property",
       "value": "Main"
+    },
+    "status": {
+      "type": "Property",
+      "value": "open"
     }
   },
   {
     "id": "urn:ngsi-ld:Station:S2",
     "type": "Station",
-    "status": {
-      "type": "Property",
-      "value": "closed"
-    },
     "name": {
       "type": "Property",
       "value": "Branch"
+    },
+    "status": {
+      "type": "Property",
+      "value": "closed"
     }
   },
   {
     "id": "urn:ngsi-ld:Station:S3",
     "type": "Station",
-    "status": {
-      "type": "Property",
-      "value": "open"
-    },
     "name": {
       "type": "Property",
       "value": "Depot"
+    },
+    "status": {
+      "type": "Property",
+      "value": "open"
     }
   }
 ]

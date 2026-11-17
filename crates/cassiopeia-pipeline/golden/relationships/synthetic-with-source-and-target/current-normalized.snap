@@ -1,0 +1,27 @@
+---
+source: crates/cassiopeia-pipeline/src/end_to_end/golden/mod.rs
+input_file: crates/cassiopeia-pipeline/golden/relationships/synthetic-with-source-and-target/manifest.json5
+---
+[
+  {
+    "id": "urn:ngsi-ld:Asset:A1",
+    "type": "Asset",
+    "owner": {
+      "type": "Relationship",
+      "object": "urn:ngsi-ld:Organization:O1",
+      "objectType": "Organization"
+    }
+  },
+  {
+    "id": "urn:ngsi-ld:Asset:A2",
+    "type": "Asset"
+  },
+  {
+    "id": "urn:ngsi-ld:Organization:O1",
+    "type": "Organization",
+    "name": {
+      "type": "Property",
+      "value": "City council"
+    }
+  }
+]

@@ -24,6 +24,13 @@ const RIVM_THINGS: [&str; 2] = [
     "urn:ngsi-ld:AirQualityObserved:sta-api-samenmetenrivmnl-12512",
 ];
 
+/// The ids a local FROST-Server's Things are given, in the order their first records come in the
+/// FROST range fixture.
+const FROST_THINGS: [&str; 2] = [
+    "urn:ngsi-ld:AirQualityObserved:sta-localhost-eindhoven-centrum",
+    "urn:ngsi-ld:AirQualityObserved:sta-localhost-helmond-west",
+];
+
 /// The instant every reading of the RIVM latest fixture was made.
 const RIVM_LATEST_TIME: &str = "2026-11-13T07:00:00Z";
 
@@ -159,6 +166,28 @@ fn a_range_read_into_series_files_sorts_instances_oldest_first() {
             "{store:?}"
         );
     }
+}
+
+#[test]
+fn a_range_snapshot_replayed_into_series_files_writes_the_same_files_on_every_run_and_store() {
+    let mut runs: Vec<Vec<Value>> = Vec::new();
+    for store in STORES {
+        for _ in 0..10 {
+            let (result, outcome) = run_snapshot(store, &fixture("frost-v1.1-range.jsonl"), SERIES_OUTPUT);
+            result.unwrap();
+
+            // The file lists the Things in the order their first records come in the snapshot.
+            let ids: Vec<&str> = outcome.entities.iter().filter_map(|entity| entity["id"].as_str()).collect();
+            assert_eq!(ids, FROST_THINGS, "{store:?}");
+            for id in FROST_THINGS {
+                // `dateObserved` carries no `observedAt`, so it is kept from the Thing's first record in
+                // the snapshot, its `pm10` reading at 11:00, rather than from any of the later ones.
+                assert_eq!(entity(&outcome, id)["dateObserved"]["value"], "2026-11-16T11:00:00Z", "{store:?} {id}");
+            }
+            runs.push(outcome.entities);
+        }
+    }
+    assert!(runs.windows(2).all(|pair| pair[0] == pair[1]));
 }
 
 #[test]

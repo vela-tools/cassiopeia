@@ -1,0 +1,32 @@
+---
+source: crates/cassiopeia-pipeline/src/end_to_end/golden/mod.rs
+input_file: crates/cassiopeia-pipeline/golden/values/property-times/manifest.json5
+---
+{
+  "diagnostics": [
+    {
+      "code": "extractor-timestamp-unreadable",
+      "occurrences": 1,
+      "message": [
+        "! Attribute `day` dropped: `2026-03` is not a date-time in any spelling Cassiopeia reads",
+        "  ╰─ attribute   day"
+      ]
+    },
+    {
+      "code": "extractor-timestamp-unreadable",
+      "occurrences": 1,
+      "message": [
+        "! Attribute `stamp` dropped: `2026-03-01T11:04:35` is not a date-time in any spelling Cassiopeia reads",
+        "  ╰─ attribute   stamp"
+      ]
+    },
+    {
+      "code": "extractor-timestamp-unreadable",
+      "occurrences": 3,
+      "message": [
+        "! Attribute `clock` dropped: `11:04:35` is not a date-time in any spelling Cassiopeia reads",
+        "  ╰─ attribute   clock"
+      ]
+    }
+  ]
+}

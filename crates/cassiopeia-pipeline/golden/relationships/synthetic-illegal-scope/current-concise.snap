@@ -1,0 +1,17 @@
+---
+source: crates/cassiopeia-pipeline/src/end_to_end/golden/mod.rs
+input_file: crates/cassiopeia-pipeline/golden/relationships/synthetic-illegal-scope/manifest.json5
+---
+[
+  {
+    "id": "urn:ngsi-ld:Asset:A1",
+    "type": "Asset",
+    "owner": "urn:ngsi-ld:Organization:O1"
+  },
+  {
+    "id": "urn:ngsi-ld:Organization:O1",
+    "type": "Organization",
+    "scope": "/Ljubljana",
+    "name": "City council"
+  }
+]

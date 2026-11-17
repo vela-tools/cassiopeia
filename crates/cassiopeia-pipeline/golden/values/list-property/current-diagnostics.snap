@@ -1,0 +1,32 @@
+---
+source: crates/cassiopeia-pipeline/src/end_to_end/golden/mod.rs
+input_file: crates/cassiopeia-pipeline/golden/values/list-property/manifest.json5
+---
+{
+  "diagnostics": [
+    {
+      "code": "extractor-timestamp-unreadable",
+      "occurrences": 1,
+      "message": [
+        "! Attribute `asTime` dropped: `11:00:00` is not a date-time in any spelling Cassiopeia reads",
+        "  ╰─ attribute   asTime"
+      ]
+    },
+    {
+      "code": "extractor-null-dropped",
+      "occurrences": 1,
+      "message": [
+        "! Attribute `withNull` was written without its null array items, which NGSI-LD does not allow",
+        "  ╰─ attribute   withNull"
+      ]
+    },
+    {
+      "code": "extractor-number-unreadable",
+      "occurrences": 1,
+      "message": [
+        "! Attribute `unreadableItem` dropped: `x` is not an integer",
+        "  ╰─ attribute   unreadableItem"
+      ]
+    }
+  ]
+}

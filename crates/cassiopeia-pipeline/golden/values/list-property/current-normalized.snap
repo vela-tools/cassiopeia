@@ -1,0 +1,255 @@
+---
+source: crates/cassiopeia-pipeline/src/end_to_end/golden/mod.rs
+input_file: crates/cassiopeia-pipeline/golden/values/list-property/manifest.json5
+---
+[
+  {
+    "id": "urn:ngsi-ld:Sample:S1",
+    "type": "Sample",
+    "defaultFromText": {
+      "type": "ListProperty",
+      "valueList": [
+        1,
+        7,
+        15
+      ]
+    },
+    "defaultFromScalar": {
+      "type": "ListProperty",
+      "valueList": [
+        "BS IN"
+      ]
+    },
+    "withNull": {
+      "type": "ListProperty",
+      "valueList": [
+        1,
+        2
+      ]
+    },
+    "asArray": {
+      "type": "ListProperty",
+      "valueList": [
+        "a",
+        "b"
+      ]
+    },
+    "asBoolean": {
+      "type": "ListProperty",
+      "valueList": [
+        true,
+        false
+      ]
+    },
+    "asInteger": {
+      "type": "ListProperty",
+      "valueList": [
+        1,
+        2
+      ]
+    },
+    "asFloat": {
+      "type": "ListProperty",
+      "valueList": [
+        1.5,
+        2.5
+      ]
+    },
+    "asString": {
+      "type": "ListProperty",
+      "valueList": [
+        "1",
+        "b"
+      ]
+    },
+    "asIri": {
+      "type": "ListProperty",
+      "valueList": [
+        "http://example.org/a",
+        "https://example.org/b"
+      ]
+    },
+    "asUrn": {
+      "type": "ListProperty",
+      "valueList": [
+        "urn:example:A",
+        "urn:example:b"
+      ]
+    },
+    "asObject": {
+      "type": "ListProperty",
+      "valueList": [
+        {
+          "k": 1
+        },
+        {
+          "k": 2
+        }
+      ]
+    },
+    "asJson": {
+      "type": "ListProperty",
+      "valueList": [
+        12.5,
+        {
+          "k": 1
+        }
+      ]
+    },
+    "asDatetime": {
+      "type": "ListProperty",
+      "valueList": [
+        "2026-03-01T11:00:00Z",
+        "2026-03-01T12:00:00Z"
+      ]
+    },
+    "asDate": {
+      "type": "ListProperty",
+      "valueList": [
+        "2026-03-01",
+        "2026-03-02"
+      ]
+    },
+    "asGeometry": {
+      "type": "ListProperty",
+      "valueList": [
+        {
+          "type": "Point",
+          "coordinates": [
+            14.5,
+            46.05
+          ]
+        }
+      ]
+    },
+    "asPoint": {
+      "type": "ListProperty",
+      "valueList": [
+        {
+          "type": "Point",
+          "coordinates": [
+            14.5,
+            46.05
+          ]
+        },
+        {
+          "type": "Point",
+          "coordinates": [
+            14.51,
+            46.06
+          ]
+        }
+      ]
+    },
+    "asMultipoint": {
+      "type": "ListProperty",
+      "valueList": [
+        {
+          "type": "MultiPoint",
+          "coordinates": [
+            [
+              14.5,
+              46.05
+            ]
+          ]
+        }
+      ]
+    },
+    "asLinestring": {
+      "type": "ListProperty",
+      "valueList": [
+        {
+          "type": "LineString",
+          "coordinates": [
+            [
+              14.5,
+              46.05
+            ],
+            [
+              14.51,
+              46.06
+            ]
+          ]
+        }
+      ]
+    },
+    "asMultilinestring": {
+      "type": "ListProperty",
+      "valueList": [
+        {
+          "type": "MultiLineString",
+          "coordinates": [
+            [
+              [
+                14.5,
+                46.05
+              ],
+              [
+                14.51,
+                46.06
+              ]
+            ]
+          ]
+        }
+      ]
+    },
+    "asPolygon": {
+      "type": "ListProperty",
+      "valueList": [
+        {
+          "type": "Polygon",
+          "coordinates": [
+            [
+              [
+                14.5,
+                46.0
+              ],
+              [
+                14.6,
+                46.0
+              ],
+              [
+                14.6,
+                46.1
+              ],
+              [
+                14.5,
+                46.0
+              ]
+            ]
+          ]
+        }
+      ]
+    },
+    "asMultipolygon": {
+      "type": "ListProperty",
+      "valueList": [
+        {
+          "type": "MultiPolygon",
+          "coordinates": [
+            [
+              [
+                [
+                  14.5,
+                  46.0
+                ],
+                [
+                  14.6,
+                  46.0
+                ],
+                [
+                  14.6,
+                  46.1
+                ],
+                [
+                  14.5,
+                  46.0
+                ]
+              ]
+            ]
+          ]
+        }
+      ]
+    }
+  }
+]

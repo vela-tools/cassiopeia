@@ -1,37 +1,56 @@
 use crate::{
     entity_store::{
         concurrent_scopes::ConcurrentScopes,
+        entity_order::in_source_order,
         error::Result,
         mapping_expiry::{MappingExpiry, join_observations},
+        mapping_reads::MappingReads,
         store::{AssembledFragment, AssembledFragments, EntityStore, FragmentWrite, StoredUnit},
     },
     store_write_strategy::StoreWriteStrategy,
 };
 use ahash::RandomState;
+use cassiopeia_ir::source_position::SourcePosition;
 use dashmap::DashMap;
 use smallvec::smallvec;
 use std::{num::NonZeroU64, sync::Arc};
 use urn_rs::Urn;
 
-/// One stored observation and the entity `expiresAt` its record declares.
+/// One stored observation, where its record stands in the source, and the entity `expiresAt` the
+/// record declares.
 #[derive(Debug)]
 struct SeriesObservation {
+    /// Where the observation's record stands in the run's sources.
+    position: SourcePosition,
     /// The observation as assembly returns it.
     fragment: AssembledFragment,
     /// The expiry the observation's record declares.
     expires_at: MappingExpiry,
 }
 
+/// Every observation stored for one base id, and the position of the earliest of their records.
+#[derive(Debug)]
+struct SeriesEntry {
+    /// The earliest position among the observations' records, which places the id among the
+    /// entities the store hands on.
+    first: SourcePosition,
+    /// The observations, in the order they reached the store.
+    observations: Vec<SeriesObservation>,
+}
+
 /// In-memory series entity store using [`DashMap`] for lock-free concurrent access.
 ///
-/// Each base [`Urn`] maps to an append-only list of every fragment stored for it, in arrival order.
-/// Assembly returns one emit-unit per fragment, so a temporal id's observations each become a
-/// single-instance entity the fold stage later folds into one `EntityTemporal` (ETSI GS CIM 009
-/// v1.9.1 clause 5.2.20), and the expiries the observations carry are joined into the entity's.
+/// Each base [`Urn`] maps to an append-only list of every fragment stored for it. The resolver writes
+/// a batch from many threads, so the list fills in whatever order they finish; each observation keeps
+/// the position of its record, and assembly returns one emit-unit per observation in source order,
+/// so a temporal id's observations each become a single-instance entity the fold stage later folds
+/// into one `EntityTemporal` (ETSI GS CIM 009 v1.9.1 clause 5.2.20), keeping an attribute without
+/// `observedAt` from the first record in the source. The expiries the observations carry are joined
+/// into the entity's, and the ids are handed on in the order of their first records.
 #[derive(Clone, Debug, Default)]
 pub struct DashMapSeriesEntityStore {
     scopes: ConcurrentScopes,
-    data: Arc<DashMap<Urn, Vec<SeriesObservation>, RandomState>>,
+    data: Arc<DashMap<Urn, SeriesEntry, RandomState>>,
 }
 
 impl DashMapSeriesEntityStore {
@@ -51,6 +70,7 @@ impl EntityStore for DashMapSeriesEntityStore {
         let FragmentWrite {
             base_id,
             source_data,
+            position,
             mapping_id,
             scope,
             expires_at,
@@ -58,6 +78,7 @@ impl EntityStore for DashMapSeriesEntityStore {
         } = write;
         // Every observation is kept on its own, so each stored fragment stands for exactly one record.
         let observation = SeriesObservation {
+            position,
             fragment: AssembledFragment {
                 mapping_id,
                 data: source_data,
@@ -73,13 +94,21 @@ impl EntityStore for DashMapSeriesEntityStore {
         // discard, leaving the clone to the one insert per id that actually needs an owned key.
         let unplaced = match self.data.get_mut(&base_id) {
             Some(mut existing) => {
-                existing.push(observation);
+                existing.first = existing.first.min(position);
+                existing.observations.push(observation);
                 None
             }
             None => Some(observation),
         };
         if let Some(observation) = unplaced {
-            self.data.entry(base_id.clone()).or_default().push(observation);
+            // Another thread may have placed the id since the lookup above, so the entry is joined
+            // rather than assumed new.
+            let mut entry = self.data.entry(base_id.clone()).or_insert_with(|| SeriesEntry {
+                first: position,
+                observations: Vec::new(),
+            });
+            entry.first = entry.first.min(position);
+            entry.observations.push(observation);
         }
 
         if let Some(scope) = scope {
@@ -89,15 +118,20 @@ impl EntityStore for DashMapSeriesEntityStore {
     }
 
     fn get_entity_ids(&self) -> Result<Vec<Urn>> {
-        Ok(self.data.iter().map(|entry| entry.key().clone()).collect())
+        Ok(in_source_order(self.data.iter().map(|entry| (entry.first, entry.key().clone())).collect()))
     }
 
-    fn assemble_entity(&self, base_id: &Urn) -> Result<AssembledFragments> {
+    fn assemble_entity(&self, base_id: &Urn, _mappings: &dyn MappingReads) -> Result<AssembledFragments> {
         // Draining rather than reading: the scan visits each id once and the store is destroyed
         // straight after, so every stored record is moved into its emit-unit. Copying them here
         // instead would deep-clone the entire dataset a second time, on top of the copy the store
         // already holds.
-        let observations = self.data.remove(base_id).map(|(_id, observations)| observations).unwrap_or_default();
+        let mut observations = self.data.remove(base_id).map(|(_id, entry)| entry.observations).unwrap_or_default();
+        // Records of one input mostly reach the store in source order, so one scan usually rules the
+        // sort out. The sort is stable, so observations of one record keep the order they arrived in.
+        if !observations.is_sorted_by_key(|observation| observation.position) {
+            observations.sort_by_key(|observation| observation.position);
+        }
         let expires_at = join_observations(observations.iter().map(|observation| (observation.fragment.mapping_id, observation.expires_at)));
         let units: Vec<StoredUnit> = observations.into_iter().map(|observation| smallvec![observation.fragment]).collect();
         let scope = self.scopes.get(base_id);
@@ -109,7 +143,7 @@ impl EntityStore for DashMapSeriesEntityStore {
     }
 
     fn unit_count(&self) -> usize {
-        self.data.iter().map(|entry| entry.value().len()).sum()
+        self.data.iter().map(|entry| entry.value().observations.len()).sum()
     }
 
     fn clear(&self) -> Result<()> {
@@ -140,11 +174,14 @@ mod tests {
                     READS_EVERYTHING,
                     assert_joins_expiries_across_mappings,
                     assert_merges_scopes_per_id,
+                    assert_series_hands_ids_on_in_order_of_their_first_records,
+                    assert_series_hands_observations_on_in_source_order,
                     assert_series_keeps_the_furthest_expiry_per_mapping,
                 },
             },
         },
         mapping_id::MappingId,
+        test_order::{ReadsEverything, next_batch, next_position},
     };
     use cassiopeia_mapping::observed_at::ObservedAt;
     use pretty_assertions::assert_eq;
@@ -166,6 +203,16 @@ mod tests {
     }
 
     #[test]
+    fn an_id_s_observations_are_handed_on_in_source_order() {
+        assert_series_hands_observations_on_in_source_order(&DashMapSeriesEntityStore::new());
+    }
+
+    #[test]
+    fn ids_are_handed_on_in_the_order_of_their_first_records() {
+        assert_series_hands_ids_on_in_order_of_their_first_records(&DashMapSeriesEntityStore::new());
+    }
+
+    #[test]
     fn a_mapping_s_observations_keep_their_furthest_expiry() {
         assert_series_keeps_the_furthest_expiry_per_mapping(&DashMapSeriesEntityStore::new());
     }
@@ -174,6 +221,8 @@ mod tests {
         FragmentWrite {
             base_id: base_id.clone(),
             source_data: data,
+            position: next_position(),
+            batch: next_batch(),
             mapping_id: MappingId::new(1),
             temporal: true,
             timestamp: RecordTimestamp::Declared(ObservedAt::new(observed_at)),
@@ -184,7 +233,7 @@ mod tests {
     }
 
     #[test]
-    fn three_observations_become_three_units_in_arrival_order() {
+    fn three_observations_written_in_source_order_become_three_units_in_that_order() {
         let store = DashMapSeriesEntityStore::new();
         let id = urn("urn:ngsi-ld:Camera:1");
         let first = json!({"on": true, "ts": "2026-04-03T22:00:20Z"});
@@ -197,7 +246,7 @@ mod tests {
         assert_eq!(store.count(), 1);
         assert_eq!(store.unit_count(), 3);
 
-        let assembled = store.assemble_entity(&id).unwrap();
+        let assembled = store.assemble_entity(&id, &ReadsEverything).unwrap();
         assert_eq!(assembled.units.len(), 3);
         assert_eq!(assembled.units[0][0].data, first);
         assert_eq!(assembled.units[1][0].data, second);
@@ -212,7 +261,7 @@ mod tests {
         store.store_fragment(write(&id, json!({"on": true}), "2026-04-03T22:00:20Z")).unwrap();
         store.store_fragment(write(&id, json!({"on": false}), "2026-04-03T22:05:20Z")).unwrap();
 
-        let assembled = store.assemble_entity(&id).unwrap();
+        let assembled = store.assemble_entity(&id, &ReadsEverything).unwrap();
         assert!(
             assembled
                 .units
@@ -229,12 +278,12 @@ mod tests {
         store.store_fragment(write(&id, json!({"on": true}), "2026-04-03T22:00:20Z")).unwrap();
         store.store_fragment(write(&id, json!({"on": false}), "2026-04-03T22:05:20Z")).unwrap();
 
-        assert_eq!(store.assemble_entity(&id).unwrap().units.len(), 2);
+        assert_eq!(store.assemble_entity(&id, &ReadsEverything).unwrap().units.len(), 2);
 
         // The records moved into the emit-units, so nothing is left holding a second copy.
         assert_eq!(store.count(), 0);
         assert_eq!(store.unit_count(), 0);
-        assert!(store.assemble_entity(&id).unwrap().units.is_empty());
+        assert!(store.assemble_entity(&id, &ReadsEverything).unwrap().units.is_empty());
     }
 
     #[test]
@@ -248,7 +297,7 @@ mod tests {
         store.store_fragment(write(&id, json!({"seq": 3}), "2026-04-03T22:10:20Z")).unwrap();
 
         assert_eq!(store.count(), 1);
-        let assembled = store.assemble_entity(&id).unwrap();
+        let assembled = store.assemble_entity(&id, &ReadsEverything).unwrap();
         let sequence: Vec<i64> = assembled
             .units
             .iter()

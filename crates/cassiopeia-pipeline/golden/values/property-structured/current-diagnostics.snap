@@ -1,0 +1,48 @@
+---
+source: crates/cassiopeia-pipeline/src/end_to_end/golden/mod.rs
+input_file: crates/cassiopeia-pipeline/golden/values/property-structured/manifest.json5
+---
+{
+  "diagnostics": [
+    {
+      "code": "extractor-null-dropped",
+      "occurrences": 1,
+      "message": [
+        "! Attribute `object` was written without its null object members, which NGSI-LD does not allow",
+        "  ╰─ attribute   object"
+      ]
+    },
+    {
+      "code": "extractor-json-text-unreadable",
+      "occurrences": 1,
+      "message": [
+        "! Attribute `decoded` dropped: `not json` is not JSON",
+        "  ╰─ attribute   decoded"
+      ]
+    },
+    {
+      "code": "extractor-object-misshapen",
+      "occurrences": 1,
+      "message": [
+        "! Attribute `object` dropped: `[1]` is not a JSON object",
+        "  ╰─ attribute   object"
+      ]
+    },
+    {
+      "code": "extractor-value-only-null",
+      "occurrences": 1,
+      "message": [
+        "! Attribute `list` dropped: `[null,null]` is not a value holding something other than null",
+        "  ╰─ attribute   list"
+      ]
+    },
+    {
+      "code": "extractor-value-only-null",
+      "occurrences": 1,
+      "message": [
+        "! Attribute `object` dropped: `{\"maybe\":null}` is not a value holding something other than null",
+        "  ╰─ attribute   object"
+      ]
+    }
+  ]
+}
