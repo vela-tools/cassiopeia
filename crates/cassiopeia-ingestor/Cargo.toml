@@ -64,7 +64,7 @@ geopackage-core = "0.14.4"
 grib-core = "0.8.0"
 grib-writer = "0.8.0"
 mediatype = "0.23.0"
-netcdf-writer = "0.12.1"
+netcdf-writer = "0.13.0"
 pretty_assertions = "1.4.1"
 temp-dir = "0.2.0"
 zip = { version = "9.5.1", default-features = false, features = ["deflate"] }
