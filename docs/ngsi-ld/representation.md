@@ -180,7 +180,7 @@ The receiving system must already know that this number is in degrees Celsius an
 
 Relationship arrays can mean different things, so the representation matters. A normalized Relationship instance uses an `object` member. ETSI allows that member to contain one URI or an array of URIs. If the same relationship name has several separate instances, the entity-level attribute is an array of Relationship objects, and `datasetId` distinguishes the instances when needed.
 
-That is different from a `ListRelationship`. A normalized ListRelationship uses `objectList` for one ordered collection of target URIs. Its simplified form is a bare ordered array of URIs. A ListRelationship can also have multiple dataset-specific instances under the multi-attribute rules in clause 4.5.5.
+That is different from a `ListRelationship`. A normalized ListRelationship uses `objectList` for one ordered collection of targets, each an object whose single `object` member holds the target URI (clause 4.5.22.2). Its concise form may write each target as a bare URI string (clause 4.5.22.3), and its simplified form is a bare ordered array of URIs. A ListRelationship can also have multiple dataset-specific instances under the multi-attribute rules in clause 4.5.5.
 
 A bare array of normalized Relationship objects is not a substitute for a single Relationship object. It represents multiple instances of the same attribute, so each instance needs its own identity through `datasetId`, except that one instance may be the default and omit it. Do not copy a simplified relationship array directly into normalized output.
 

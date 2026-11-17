@@ -75,15 +75,15 @@ Produce it with Cassiopeia: `type: "Relationship"` with a `target.entity`; see t
 
 A `ListRelationship` links one entity to many others through one attribute (ETSI GS CIM 009 v1.9.1 clause 4.5.22). It carries an ordered `objectList` of URIs and may include one shared `objectType`. It represents one ordered collection of links, rather than several separate relationship instances. Like the other Property and Relationship types, it can be used as a dataset-specific instance with `datasetId`. It may also carry nested sub-attributes that qualify the list as a whole (clause 4.5.2.2), as [example 30](https://github.com/vela-tools/cassiopeia-examples/blob/main/examples/30-csv-nested-relationship/example.md) shows with a `castSize` property on a movie's `hasCast` list relationship.
 
-Its value member is `objectList`. From the `Flight` of [example 12](https://github.com/vela-tools/cassiopeia-examples/blob/main/examples/12-csv-list-relationship/example.md), a route's link to every aircraft model that flies it:
+Its value member is `objectList`. In the normalized representation, each element is an object whose single `object` member holds one target URI (clause 4.5.22.2). The concise representation may write each element as the bare URI string instead (clause 4.5.22.3), and Cassiopeia does so. From the `Flight` of [example 12](https://github.com/vela-tools/cassiopeia-examples/blob/main/examples/12-csv-list-relationship/example.md), a route's link to every aircraft model that flies it, in the normalized representation:
 
 ```json
 "hasAircraftModel": {
     "type": "ListRelationship",
     "objectList": [
-        "urn:ngsi-ld:AircraftModel:773",
-        "urn:ngsi-ld:AircraftModel:320",
-        "urn:ngsi-ld:AircraftModel:330"
+        { "object": "urn:ngsi-ld:AircraftModel:773" },
+        { "object": "urn:ngsi-ld:AircraftModel:320" },
+        { "object": "urn:ngsi-ld:AircraftModel:330" }
     ],
     "objectType": "AircraftModel"
 }

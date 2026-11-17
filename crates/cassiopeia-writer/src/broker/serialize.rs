@@ -80,7 +80,16 @@ mod tests {
         sender::test_support::{context, thing},
         serialize::serialize_batch,
     };
+    use cassiopeia_common::representation::NgsiLdRepresentation;
+    use cassiopeia_ngsi_ld::entity::{
+        NgsiLdEntity,
+        attribute::{NgsiLdAttribute, NgsiLdAttributeWrapper, list_relationship::NgsiLdListRelationship},
+        name::NameBuf,
+        representation::NgsiLdSerializable,
+    };
     use pretty_assertions::assert_eq;
+    use serde_json::json;
+    use urn_rs::Urn;
 
     #[test]
     fn an_array_shape_serializes_a_json_array() {
@@ -103,5 +112,31 @@ mod tests {
 
         assert!(parsed.is_object());
         assert_eq!(parsed["id"], "urn:ngsi-ld:Thing:1");
+    }
+
+    #[test]
+    fn a_normalized_list_relationship_reaches_the_broker_as_the_object_list_a_file_holds() {
+        let ctx = context(RequestShape::PerEntity);
+        let targets = ["urn:ngsi-ld:Line:U1", "urn:ngsi-ld:Line:U4"].map(|target| target.parse::<Urn>().unwrap());
+        let entities = [
+            NgsiLdEntity::builder("urn:ngsi-ld:Stop:S1".parse::<Urn>().unwrap(), NameBuf::new("Stop").unwrap())
+                .attribute(
+                    NameBuf::new("servedBy").unwrap(),
+                    NgsiLdAttributeWrapper::single(NgsiLdAttribute::ListRelationship(NgsiLdListRelationship::new(targets.into()))),
+                )
+                .build(),
+        ];
+        let mut scratch = Vec::new();
+
+        let payload = serialize_batch(&ctx, &entities, &mut scratch).unwrap();
+        let sent: serde_json::Value = serde_json::from_slice(&payload).unwrap();
+
+        // ETSI GS CIM 009 v1.9.1 clause 4.5.22.2: every normalized `objectList` element is an object
+        // holding the single member `object`.
+        assert_eq!(
+            sent["servedBy"]["objectList"],
+            json!([{ "object": "urn:ngsi-ld:Line:U1" }, { "object": "urn:ngsi-ld:Line:U4" }])
+        );
+        assert_eq!(sent, entities[0].to_json(NgsiLdRepresentation::Normalized).unwrap());
     }
 }
