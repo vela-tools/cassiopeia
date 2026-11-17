@@ -10,7 +10,6 @@ use crate::entity::{
         vocab_property::NgsiLdVocabProperty,
     },
     representation::{
-        DisplaySeq,
         DisplayStr,
         qualifiers::{
             serialize_dataset_id,
@@ -25,10 +24,33 @@ use crate::entity::{
     },
 };
 use cassiopeia_common::representation::NgsiLdRepresentation;
-use serde::{Serializer, ser::SerializeMap};
+use serde::{Serialize, Serializer, ser::SerializeMap};
+use urn_rs::Urn;
 
 /// The representation these serializers emit; every nested attribute is emitted the same way.
 const MODE: NgsiLdRepresentation = NgsiLdRepresentation::Normalized;
+
+/// One element of a normalized `objectList`: a JSON object whose single member `object` holds one
+/// target URI (ETSI GS CIM 009 v1.9.1 clause 4.5.22.2, table 5.2.37-1).
+#[derive(Serialize)]
+struct ListedObject<'a> {
+    object: DisplayStr<&'a Urn>,
+}
+
+/// A normalized `objectList`: every target wrapped in a [`ListedObject`].
+///
+/// Clause 4.5.22.2 of ETSI GS CIM 009 v1.9.1 requires the object form here. A bare URI string is the
+/// concise shape (clause 4.5.22.3). The NGSI-LD core `@context` declares `"@type": "@id"` on the
+/// `object` term but not on `objectList`, so a bare string would expand to text rather than to a link.
+struct ObjectList<'a>(&'a [Urn]);
+
+// No derive maps each element into a `ListedObject`; streaming them through `collect_seq` avoids
+// collecting an intermediate `Vec`.
+impl Serialize for ObjectList<'_> {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.collect_seq(self.0.iter().map(|object| ListedObject { object: DisplayStr(object) }))
+    }
+}
 
 /// Serializes a Property in the normalized representation.
 ///
@@ -81,14 +103,15 @@ pub fn serialize_geo_property<S: Serializer>(geo: &NgsiLdGeoProperty, serializer
     map.end()
 }
 
-/// Serializes a `ListRelationship` in the normalized representation.
+/// Serializes a `ListRelationship` in the normalized representation, each `objectList` element as a
+/// `{ "object": URI }` object (ETSI GS CIM 009 v1.9.1 clause 4.5.22.2).
 ///
 /// # Errors
 /// Returns the serializer's error if serialization fails.
 pub fn serialize_list_relationship<S: Serializer>(rel: &NgsiLdListRelationship, serializer: S) -> Result<S::Ok, S::Error> {
     let mut map = serializer.serialize_map(None)?;
     map.serialize_entry("type", "ListRelationship")?;
-    map.serialize_entry("objectList", &DisplaySeq(&rel.object_list))?;
+    map.serialize_entry("objectList", &ObjectList(&rel.object_list))?;
     serialize_object_type(&mut map, rel.object_type.as_ref())?;
     serialize_observed_at(&mut map, rel.observed_at.as_ref())?;
     serialize_expires_at(&mut map, rel.expires_at.as_ref())?;

@@ -618,9 +618,14 @@ mod list_relationship_tests {
 
         let normalized = serialize_entity(&entity, NgsiLdRepresentation::Normalized);
         assert_eq!(normalized["members"]["type"], "ListRelationship");
-        assert_eq!(normalized["members"]["objectList"][0], "urn:ngsi-ld:Person:John");
-        assert_eq!(normalized["members"]["objectList"][1], "urn:ngsi-ld:Person:Paul");
-        assert_eq!(normalized["members"]["objectList"][2], "urn:ngsi-ld:Person:George");
+        assert_eq!(
+            normalized["members"]["objectList"],
+            json!([
+                { "object": "urn:ngsi-ld:Person:John" },
+                { "object": "urn:ngsi-ld:Person:Paul" },
+                { "object": "urn:ngsi-ld:Person:George" },
+            ])
+        );
 
         let concise = serialize_entity(&entity, NgsiLdRepresentation::Concise);
         assert_eq!(concise["members"]["objectList"][0], "urn:ngsi-ld:Person:John");
@@ -647,7 +652,10 @@ mod list_relationship_tests {
 
         let normalized = serialize_entity(&entity, NgsiLdRepresentation::Normalized);
         assert_eq!(normalized["owner"]["type"], "ListRelationship");
-        assert_eq!(normalized["owner"]["objectList"][0], "urn:ngsi-ld:Organization:ComuneDiMilano");
+        assert_eq!(
+            normalized["owner"]["objectList"],
+            json!([{ "object": "urn:ngsi-ld:Organization:ComuneDiMilano" }])
+        );
 
         let simplified = serialize_entity(&entity, NgsiLdRepresentation::Simplified);
         assert!(simplified["owner"].is_array());
@@ -673,6 +681,8 @@ mod list_relationship_tests {
 
         let normalized = serialize_entity(&entity, NgsiLdRepresentation::Normalized);
         assert_eq!(normalized["hasCast"]["type"], "ListRelationship");
+        assert_eq!(normalized["hasCast"]["objectList"], json!([{ "object": "urn:ngsi-ld:Person:1" }]));
+        assert_eq!(normalized["hasCast"]["objectType"], "Person");
         assert_eq!(normalized["hasCast"]["castSize"]["type"], "Property");
         assert_eq!(normalized["hasCast"]["castSize"]["value"], 2);
 
@@ -757,6 +767,130 @@ mod list_relationship_tests {
         assert!(simplified["members"].is_array());
         assert_eq!(simplified["members"][0], "urn:ngsi-ld:Person:John");
         assert_eq!(simplified["members"][1], "urn:ngsi-ld:Person:Paul");
+    }
+
+    /// A list relationship's targets, one and three of them.
+    const TARGET_LISTS: [&[&str]; 2] = [&["urn:ngsi-ld:Line:U1"], &["urn:ngsi-ld:Line:U1", "urn:ngsi-ld:Line:U4", "urn:ngsi-ld:Line:U7"]];
+
+    /// One qualifier a list relationship can carry.
+    struct Qualifier {
+        /// The member it is written as.
+        member: &'static str,
+        /// Sets it on a list relationship.
+        set: fn(&mut NgsiLdListRelationship),
+        /// The value it is written with.
+        written: &'static str,
+    }
+
+    /// Every qualifier a list relationship can carry besides its sub-attributes.
+    const QUALIFIERS: [Qualifier; 3] = [
+        Qualifier {
+            member: "objectType",
+            set: |list| list.object_type = Some(NameBuf::new("Line").unwrap()),
+            written: "Line",
+        },
+        Qualifier {
+            member: "datasetId",
+            set: |list| list.dataset_id = Some("urn:ngsi-ld:dataset:timetable".parse().unwrap()),
+            written: "urn:ngsi-ld:dataset:timetable",
+        },
+        Qualifier {
+            member: "observedAt",
+            set: |list| list.observed_at = Some(Utc.with_ymd_and_hms(2026, 11, 17, 8, 0, 0).unwrap()),
+            written: "2026-11-17T08:00:00Z",
+        },
+    ];
+
+    /// The `servedBy` member a `Stop` holding `list` writes in `representation`.
+    fn served_by(list: NgsiLdListRelationship, representation: NgsiLdRepresentation) -> JsonValue {
+        let entity = create_test_entity("S1", "Stop", "servedBy", NgsiLdAttribute::ListRelationship(list));
+        let mut written = serialize_entity(&entity, representation);
+        written["servedBy"].take()
+    }
+
+    /// A list relationship over `targets` with no qualifier.
+    fn bare_list(targets: &[&str]) -> NgsiLdListRelationship {
+        NgsiLdListRelationship::new(targets.iter().map(|target| target.parse::<Urn>().unwrap()).collect())
+    }
+
+    /// A list relationship over `targets` carrying every qualifier of [`QUALIFIERS`].
+    fn qualified_list(targets: &[&str]) -> NgsiLdListRelationship {
+        let mut list = bare_list(targets);
+        for qualifier in QUALIFIERS {
+            (qualifier.set)(&mut list);
+        }
+        list
+    }
+
+    /// The normalized members of a list relationship over `targets` with no qualifier.
+    fn normalized_members(targets: &[&str]) -> JsonValue {
+        json!({
+            "type": "ListRelationship",
+            "objectList": targets.iter().map(|target| json!({ "object": target })).collect::<Vec<JsonValue>>(),
+        })
+    }
+
+    /// `members` with every qualifier of [`QUALIFIERS`] added.
+    fn with_every_qualifier(mut members: JsonValue) -> JsonValue {
+        for qualifier in QUALIFIERS {
+            members[qualifier.member] = json!(qualifier.written);
+        }
+        members
+    }
+
+    #[test]
+    fn a_normalized_list_relationship_wraps_every_target_in_an_object_member_with_or_without_qualifiers() {
+        // ETSI GS CIM 009 v1.9.1 clause 4.5.22.2 and table 5.2.37-1: each `objectList` element of
+        // the normalized form is a JSON object holding the single member `object`.
+        for targets in TARGET_LISTS {
+            assert_eq!(
+                served_by(bare_list(targets), NgsiLdRepresentation::Normalized),
+                normalized_members(targets),
+                "{targets:?}"
+            );
+            for Qualifier { member, set, written } in QUALIFIERS {
+                let mut list = bare_list(targets);
+                set(&mut list);
+                let mut expected = normalized_members(targets);
+                expected[member] = json!(written);
+                assert_eq!(served_by(list, NgsiLdRepresentation::Normalized), expected, "{targets:?} with {member}");
+            }
+            assert_eq!(
+                served_by(qualified_list(targets), NgsiLdRepresentation::Normalized),
+                with_every_qualifier(normalized_members(targets)),
+                "{targets:?} with every qualifier"
+            );
+        }
+    }
+
+    #[test]
+    fn a_concise_list_relationship_keeps_its_targets_as_uri_strings() {
+        // ETSI GS CIM 009 v1.9.1 clause 4.5.22.3 allows an `objectList` of bare URI strings in the
+        // concise form, and `type` may be left out there.
+        for targets in TARGET_LISTS {
+            assert_eq!(
+                served_by(bare_list(targets), NgsiLdRepresentation::Concise),
+                json!({ "objectList": targets }),
+                "{targets:?}"
+            );
+            assert_eq!(
+                served_by(qualified_list(targets), NgsiLdRepresentation::Concise),
+                with_every_qualifier(json!({ "objectList": targets })),
+                "{targets:?} with every qualifier"
+            );
+        }
+    }
+
+    #[test]
+    fn a_simplified_list_relationship_is_its_bare_array_of_uri_strings() {
+        for targets in TARGET_LISTS {
+            assert_eq!(served_by(bare_list(targets), NgsiLdRepresentation::Simplified), json!(targets), "{targets:?}");
+            assert_eq!(
+                served_by(qualified_list(targets), NgsiLdRepresentation::Simplified),
+                json!(targets),
+                "{targets:?} with every qualifier"
+            );
+        }
     }
 }
 
@@ -951,16 +1085,22 @@ mod multi_attribute_tests {
         let normalized = serialize_entity(&entity, NgsiLdRepresentation::Normalized);
         assert!(normalized["servesAirports"].is_array());
         assert_eq!(normalized["servesAirports"][0]["type"], "ListRelationship");
-        assert_eq!(normalized["servesAirports"][0]["objectList"][0], "urn:ngsi-ld:Airport:1");
-        assert_eq!(normalized["servesAirports"][0]["objectList"][1], "urn:ngsi-ld:Airport:2");
+        assert_eq!(
+            normalized["servesAirports"][0]["objectList"],
+            json!([{ "object": "urn:ngsi-ld:Airport:1" }, { "object": "urn:ngsi-ld:Airport:2" }])
+        );
         assert_eq!(normalized["servesAirports"][0]["objectType"], "Airport");
         assert_eq!(normalized["servesAirports"][0]["datasetId"], "urn:ngsi-ld:dataset:role:departure");
-        assert_eq!(normalized["servesAirports"][1]["objectList"][0], "urn:ngsi-ld:Airport:3");
+        assert_eq!(normalized["servesAirports"][1]["objectList"], json!([{ "object": "urn:ngsi-ld:Airport:3" }]));
         assert_eq!(normalized["servesAirports"][1]["datasetId"], "urn:ngsi-ld:dataset:role:arrival");
 
         let concise = serialize_entity(&entity, NgsiLdRepresentation::Concise);
         assert!(concise["servesAirports"].is_array());
-        assert_eq!(concise["servesAirports"][0]["objectList"][0], "urn:ngsi-ld:Airport:1");
+        assert_eq!(
+            concise["servesAirports"][0]["objectList"],
+            json!(["urn:ngsi-ld:Airport:1", "urn:ngsi-ld:Airport:2"])
+        );
+        assert_eq!(concise["servesAirports"][1]["objectList"], json!(["urn:ngsi-ld:Airport:3"]));
         assert_eq!(concise["servesAirports"][0]["datasetId"], "urn:ngsi-ld:dataset:role:departure");
         assert_eq!(concise["servesAirports"][1]["datasetId"], "urn:ngsi-ld:dataset:role:arrival");
     }
