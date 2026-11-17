@@ -1,0 +1,18 @@
+{
+    version: "v1",
+    inputs: [
+        {
+            source: "network.json",
+            mappings: [
+                {
+                    collection: "network.stations",
+                    mapping: "stations.json5",
+                },
+                {
+                    collection: "network.lines",
+                    mapping: "lines.json5",
+                },
+            ],
+        },
+    ],
+}

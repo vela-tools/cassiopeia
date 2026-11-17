@@ -1,0 +1,17 @@
+// Two records of one entity that disagree on an attribute, and one that lacks another.
+{
+    version: "v4",
+    dataModel: "Station",
+    identity: {
+        entityName: "{{ code }}",
+    },
+    attributes: {
+        name: {
+            source: "{{ name }}",
+        },
+        capacity: {
+            source: "{{ capacity }}",
+            transformation: "integer",
+        },
+    },
+}

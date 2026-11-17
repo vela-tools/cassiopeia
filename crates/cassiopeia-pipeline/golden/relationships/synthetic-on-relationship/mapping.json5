@@ -1,0 +1,26 @@
+// A `syntheticEntity` on a Relationship writes a related entity from the same record and links to
+// it. A record whose synthetic identity resolves to nothing gets neither the entity nor the link.
+{
+    version: "v4",
+    dataModel: "Asset",
+    identity: {
+        entityName: "{{ code }}",
+    },
+    attributes: {
+        owner: {
+            type: "Relationship",
+            syntheticEntity: {
+                dataModel: "Organization",
+                identity: {
+                    entityName: "{{ owner_id }}",
+                },
+                scope: "/{{ region }}",
+                attributes: {
+                    name: {
+                        source: "{{ owner_name }}",
+                    },
+                },
+            },
+        },
+    },
+}

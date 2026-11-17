@@ -1,0 +1,25 @@
+// A Relationship builds its target's id from `source` and `target.entity`. A source that names no
+// target gives no link quietly, while a source template that fails to render warns.
+{
+    version: "v4",
+    dataModel: "Sensor",
+    identity: {
+        entityName: "{{ code }}",
+    },
+    attributes: {
+        building: {
+            type: "Relationship",
+            source: "{{ building }}",
+            target: {
+                entity: "Building",
+            },
+        },
+        room: {
+            type: "Relationship",
+            source: "{{ room | lower }}",
+            target: {
+                entity: "Room",
+            },
+        },
+    },
+}

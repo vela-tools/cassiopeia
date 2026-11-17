@@ -1,0 +1,14 @@
+// An entity name of literal text and plain references resolves to nothing when any field it reads
+// is missing or empty, so those records are skipped rather than named `Ljubljana-` or `-S3`.
+{
+    version: "v4",
+    dataModel: "Station",
+    identity: {
+        entityName: "{{ city }}-{{ code }}",
+    },
+    attributes: {
+        name: {
+            source: "{{ name }}",
+        },
+    },
+}

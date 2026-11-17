@@ -1,0 +1,123 @@
+// Every `convert` strategy of the `geometry` block, each toward a type it can reach, named after
+// the attribute that applies it.
+{
+    version: "v4",
+    dataModel: "Site",
+    identity: {
+        entityName: "{{ code }}",
+    },
+    attributes: {
+        first: {
+            type: "GeoProperty",
+            source: "{{ twoPolygons }}",
+            transformation: "polygon",
+            geometry: {
+                convert: "first",
+            },
+        },
+        largest: {
+            type: "GeoProperty",
+            source: "{{ twoPolygons }}",
+            transformation: "polygon",
+            geometry: {
+                convert: "largest",
+            },
+        },
+        centroid: {
+            type: "GeoProperty",
+            source: "{{ polygonWithHole }}",
+            transformation: "point",
+            geometry: {
+                convert: "centroid",
+            },
+        },
+        pointOnSurface: {
+            type: "GeoProperty",
+            source: "{{ polygonWithHole }}",
+            transformation: "point",
+            geometry: {
+                convert: "point-on-surface",
+            },
+        },
+        firstVertex: {
+            type: "GeoProperty",
+            source: "{{ line }}",
+            transformation: "point",
+            geometry: {
+                convert: "first-vertex",
+            },
+        },
+        bboxCenter: {
+            type: "GeoProperty",
+            source: "{{ line }}",
+            transformation: "point",
+            geometry: {
+                convert: "bbox-center",
+            },
+        },
+        exteriorRing: {
+            type: "GeoProperty",
+            source: "{{ polygonWithHole }}",
+            transformation: "linestring",
+            geometry: {
+                convert: "exterior-ring",
+            },
+        },
+        boundary: {
+            type: "GeoProperty",
+            source: "{{ polygonWithHole }}",
+            transformation: "multilinestring",
+            geometry: {
+                convert: "boundary",
+            },
+        },
+        connect: {
+            type: "GeoProperty",
+            source: "{{ points }}",
+            transformation: "linestring",
+            geometry: {
+                convert: "connect",
+            },
+        },
+        ring: {
+            type: "GeoProperty",
+            source: "{{ closedLine }}",
+            transformation: "polygon",
+            geometry: {
+                convert: "ring",
+            },
+        },
+        convexHull: {
+            type: "GeoProperty",
+            source: "{{ points }}",
+            transformation: "polygon",
+            geometry: {
+                convert: "convex-hull",
+            },
+        },
+        envelope: {
+            type: "GeoProperty",
+            source: "{{ line }}",
+            transformation: "polygon",
+            geometry: {
+                convert: "envelope",
+            },
+        },
+        vertices: {
+            type: "GeoProperty",
+            source: "{{ polygonWithHole }}",
+            transformation: "multipoint",
+            geometry: {
+                convert: "vertices",
+            },
+        },
+        flatten: {
+            type: "GeoProperty",
+            source: "{{ pointCollection }}",
+            transformation: "multipoint",
+            geometry: {
+                convert: "flatten",
+            },
+        },
+    },
+}

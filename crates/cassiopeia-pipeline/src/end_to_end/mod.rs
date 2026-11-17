@@ -2,6 +2,7 @@ mod data_stream_extents;
 mod features_of_interest;
 mod geo_properties;
 mod geojson_collections;
+mod golden;
 mod harness;
 mod historical_locations;
 mod incremental_reads;

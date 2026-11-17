@@ -11,7 +11,7 @@
 //! the [`reporter::TerminalReporter`] that ties them together.
 
 pub mod column;
-pub(crate) mod diagnostic_lines;
+pub mod diagnostic_lines;
 pub(crate) mod entry_handle;
 pub(crate) mod registry;
 pub mod reporter;

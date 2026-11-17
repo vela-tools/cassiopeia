@@ -1,0 +1,23 @@
+// `integer`, `float` and `boolean` read text without the whitespace around it. A value they cannot
+// read costs the attribute with a warning, and a blank one gives no attribute without one.
+{
+    version: "v4",
+    dataModel: "Sample",
+    identity: {
+        entityName: "{{ code }}",
+    },
+    attributes: {
+        count: {
+            source: "{{ count }}",
+            transformation: "integer",
+        },
+        level: {
+            source: "{{ level }}",
+            transformation: "float",
+        },
+        active: {
+            source: "{{ active }}",
+            transformation: "boolean",
+        },
+    },
+}

@@ -1,0 +1,24 @@
+// A `syntheticEntity` declared on a Property, an attribute that links nothing.
+{
+    version: "v4",
+    dataModel: "Asset",
+    identity: {
+        entityName: "{{ code }}",
+    },
+    attributes: {
+        ownerName: {
+            source: "{{ owner_name }}",
+            syntheticEntity: {
+                dataModel: "Organization",
+                identity: {
+                    entityName: "{{ owner_id }}",
+                },
+                attributes: {
+                    name: {
+                        source: "{{ owner_name }}",
+                    },
+                },
+            },
+        },
+    },
+}

@@ -1,0 +1,12 @@
+---
+source: crates/cassiopeia-pipeline/src/end_to_end/golden/mod.rs
+input_file: crates/cassiopeia-pipeline/golden/merging/records-agree/manifest.json5
+---
+[
+  {
+    "id": "urn:ngsi-ld:Station:S1",
+    "type": "Station",
+    "name": "Main",
+    "capacity": 40
+  }
+]

@@ -1,0 +1,26 @@
+// A `syntheticEntity` on a ListRelationship writes one entity per token, which its mapping reads as
+// `{{ this[0] }}`. A token whose identity resolves to nothing contributes neither entity nor link.
+{
+    version: "v4",
+    dataModel: "Mountain",
+    identity: {
+        entityName: "{{ name }}",
+    },
+    attributes: {
+        hasCountry: {
+            type: "ListRelationship",
+            source: "{{ countries }}",
+            syntheticEntity: {
+                dataModel: "Country",
+                identity: {
+                    entityName: "{{ this[0] }}",
+                },
+                attributes: {
+                    label: {
+                        source: "{{ this[0] }}",
+                    },
+                },
+            },
+        },
+    },
+}

@@ -1,0 +1,18 @@
+// `{{ context }}` as a whole source is the record itself, without the run variables.
+{
+    version: "v4",
+    dataModel: "Sample",
+    identity: {
+        entityName: "{{ code }}",
+    },
+    attributes: {
+        record: {
+            source: "{{ context }}",
+            transformation: "object",
+        },
+        raw: {
+            type: "JsonProperty",
+            source: "{{context}}",
+        },
+    },
+}

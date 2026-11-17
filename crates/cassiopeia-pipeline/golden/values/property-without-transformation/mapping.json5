@@ -1,0 +1,32 @@
+// A Property without a transformation reads as `string`: a number becomes its text, and an array
+// or object its compact JSON text. A null source gives no attribute, an empty string is a value.
+{
+    version: "v4",
+    dataModel: "Sample",
+    identity: {
+        entityName: "{{ code }}",
+    },
+    attributes: {
+        text: {
+            source: "{{ text }}",
+        },
+        number: {
+            source: "{{ number }}",
+        },
+        flag: {
+            source: "{{ flag }}",
+        },
+        list: {
+            source: "{{ list }}",
+        },
+        object: {
+            source: "{{ object }}",
+        },
+        empty: {
+            source: "{{ empty }}",
+        },
+        absent: {
+            source: "{{ absent }}",
+        },
+    },
+}

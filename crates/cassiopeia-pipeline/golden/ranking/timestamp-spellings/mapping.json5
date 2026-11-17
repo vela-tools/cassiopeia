@@ -1,0 +1,33 @@
+// Two records whose timestamps name instants in different spellings: `12:00+02:00` is 10:00 UTC,
+// an hour before `11:00Z`, though its text sorts after it.
+{
+    version: "v4",
+    dataModel: "Sensor",
+    identity: {
+        entityName: "{{ code }}",
+    },
+    attributes: {
+        reading: {
+            source: "{{ reading }}",
+            transformation: "float",
+            properties: {
+                observedAt: {
+                    source: "{{ time }}",
+                    transformation: "datetime",
+                },
+            },
+        },
+        status: {
+            source: "{{ status }}",
+            properties: {
+                observedAt: {
+                    source: "{{ time }}",
+                    transformation: "datetime",
+                },
+            },
+        },
+        name: {
+            source: "{{ name }}",
+        },
+    },
+}

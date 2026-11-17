@@ -1,0 +1,17 @@
+{
+    version: "v1",
+    vars: {
+        network: "Global",
+        districts: ["Center", "North"],
+        capacity: 40,
+    },
+    inputs: [
+        {
+            source: "records.csv",
+            mapping: "mapping.json5",
+            vars: {
+                network: "LPP",
+            },
+        },
+    ],
+}

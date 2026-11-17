@@ -1,0 +1,14 @@
+// The first of two mappings that write the same entities, each with an entity `expiresAt`.
+{
+    version: "v4",
+    dataModel: "Station",
+    identity: {
+        entityName: "{{ code }}",
+    },
+    expiresAt: "{{ until }}",
+    attributes: {
+        name: {
+            source: "{{ name }}",
+        },
+    },
+}

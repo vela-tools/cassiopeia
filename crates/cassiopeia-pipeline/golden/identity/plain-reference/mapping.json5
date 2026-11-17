@@ -1,0 +1,14 @@
+// The entity name is a plain reference to one field. A non-ASCII value keeps a usable ID, while a
+// value that cleans to nothing (`-`) and a missing value each skip their record.
+{
+    version: "v4",
+    dataModel: "Station",
+    identity: {
+        entityName: "{{ code }}",
+    },
+    attributes: {
+        name: {
+            source: "{{ name }}",
+        },
+    },
+}

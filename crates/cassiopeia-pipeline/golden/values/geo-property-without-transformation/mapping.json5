@@ -1,0 +1,15 @@
+// A GeoProperty without a transformation reads `geometry`: a GeoJSON object or its JSON text, of
+// whichever admissible type. A value that spells no geometry is dropped with a warning.
+{
+    version: "v4",
+    dataModel: "Sample",
+    identity: {
+        entityName: "{{ code }}",
+    },
+    attributes: {
+        location: {
+            type: "GeoProperty",
+            source: "{{ location }}",
+        },
+    },
+}

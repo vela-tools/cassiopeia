@@ -1,0 +1,18 @@
+// GeoJSON positions are WGS 84 longitude and latitude (RFC 7946 section 4), so a position outside
+// them drops the attribute with a warning naming where it sits, and the entity is still written.
+{
+    version: "v4",
+    dataModel: "Site",
+    identity: {
+        entityName: "{{ code }}",
+    },
+    attributes: {
+        location: {
+            type: "GeoProperty",
+            source: "{{ location }}",
+        },
+        name: {
+            source: "{{ name }}",
+        },
+    },
+}

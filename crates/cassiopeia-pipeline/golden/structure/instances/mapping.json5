@@ -1,0 +1,44 @@
+// `instances` writes one attribute name as several instances told apart by `datasetId` (ETSI GS CIM
+// 009 v1.9.1 clause 4.5.5). The attribute-level `properties` are shared, and the second instance
+// overrides the shared `provider`.
+{
+    version: "v4",
+    dataModel: "Forecast",
+    identity: {
+        entityName: "{{ code }}",
+    },
+    attributes: {
+        temperature: {
+            transformation: "float",
+            properties: {
+                unitCode: {
+                    source: "CEL",
+                },
+                provider: {
+                    source: "Shared",
+                },
+            },
+            instances: [
+                {
+                    source: "{{ ecmwf }}",
+                    properties: {
+                        datasetId: {
+                            source: "urn:ngsi-ld:dataset:model:ecmwf",
+                        },
+                    },
+                },
+                {
+                    source: "{{ gfs }}",
+                    properties: {
+                        datasetId: {
+                            source: "urn:ngsi-ld:dataset:model:gfs",
+                        },
+                        provider: {
+                            source: "Own",
+                        },
+                    },
+                },
+            ],
+        },
+    },
+}

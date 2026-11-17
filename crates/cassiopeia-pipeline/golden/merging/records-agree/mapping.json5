@@ -1,0 +1,17 @@
+// Two records of one entity that agree on every attribute.
+{
+    version: "v4",
+    dataModel: "Station",
+    identity: {
+        entityName: "{{ code }}",
+    },
+    attributes: {
+        name: {
+            source: "{{ name }}",
+        },
+        capacity: {
+            source: "{{ capacity }}",
+            transformation: "integer",
+        },
+    },
+}

@@ -1,0 +1,34 @@
+// A GeometryCollection is no NGSI-LD geometry (ETSI GS CIM 009 v1.9.1 clause 4.7). A GeoProperty
+// drops it with a warning unless `flatten` folds it, which refuses a collection mixing dimensions;
+// a Property with `geometry` keeps it as its GeoJSON object.
+{
+    version: "v4",
+    dataModel: "Site",
+    identity: {
+        entityName: "{{ code }}",
+    },
+    attributes: {
+        unfolded: {
+            type: "GeoProperty",
+            source: "{{ points }}",
+        },
+        flattened: {
+            type: "GeoProperty",
+            source: "{{ points }}",
+            geometry: {
+                convert: "flatten",
+            },
+        },
+        mixedFlattened: {
+            type: "GeoProperty",
+            source: "{{ mixed }}",
+            geometry: {
+                convert: "flatten",
+            },
+        },
+        collection: {
+            source: "{{ mixed }}",
+            transformation: "geometry",
+        },
+    },
+}

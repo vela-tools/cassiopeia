@@ -1,0 +1,23 @@
+// `datetime`, `date` and `time` read the spellings sources write, convert to UTC and add the
+// matching `valueType`. Text they cannot read costs the attribute with a warning.
+{
+    version: "v4",
+    dataModel: "Sample",
+    identity: {
+        entityName: "{{ code }}",
+    },
+    attributes: {
+        stamp: {
+            source: "{{ stamp }}",
+            transformation: "datetime",
+        },
+        day: {
+            source: "{{ day }}",
+            transformation: "date",
+        },
+        clock: {
+            source: "{{ clock }}",
+            transformation: "time",
+        },
+    },
+}

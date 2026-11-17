@@ -1,0 +1,25 @@
+---
+source: crates/cassiopeia-pipeline/src/end_to_end/golden/mod.rs
+input_file: crates/cassiopeia-pipeline/golden/merging/two-mappings-expiries/manifest.json5
+---
+[
+  {
+    "id": "urn:ngsi-ld:Station:S1",
+    "type": "Station",
+    "expiresAt": "2026-03-02T12:00:00Z",
+    "name": "Main",
+    "status": "open"
+  },
+  {
+    "id": "urn:ngsi-ld:Station:S2",
+    "type": "Station",
+    "name": "Branch",
+    "status": "closed"
+  },
+  {
+    "id": "urn:ngsi-ld:Station:S3",
+    "type": "Station",
+    "name": "Depot",
+    "status": "open"
+  }
+]

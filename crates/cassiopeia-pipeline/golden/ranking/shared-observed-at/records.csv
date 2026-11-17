@@ -1,0 +1,4 @@
+code,reading,status,time,name
+S1,21.5,ok,2026-03-01T10:00:00Z,First
+S1,23.5,warm,2026-03-01T12:00:00Z,Third
+S1,22.5,ok,2026-03-01T11:00:00Z,Second

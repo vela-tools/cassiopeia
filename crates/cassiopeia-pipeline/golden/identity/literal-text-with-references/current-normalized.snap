@@ -1,0 +1,14 @@
+---
+source: crates/cassiopeia-pipeline/src/end_to_end/golden/mod.rs
+input_file: crates/cassiopeia-pipeline/golden/identity/literal-text-with-references/manifest.json5
+---
+[
+  {
+    "id": "urn:ngsi-ld:Station:Ljubljana-S1",
+    "type": "Station",
+    "name": {
+      "type": "Property",
+      "value": "Complete"
+    }
+  }
+]

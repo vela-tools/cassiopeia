@@ -1,0 +1,23 @@
+// `array`, `object` and `json` read JSON text. A null inside the value is left out with a warning,
+// a value of nothing but nulls drops the attribute, and text of the wrong shape is refused.
+{
+    version: "v4",
+    dataModel: "Sample",
+    identity: {
+        entityName: "{{ code }}",
+    },
+    attributes: {
+        list: {
+            source: "{{ list }}",
+            transformation: "array",
+        },
+        object: {
+            source: "{{ object }}",
+            transformation: "object",
+        },
+        decoded: {
+            source: "{{ decoded }}",
+            transformation: "json",
+        },
+    },
+}

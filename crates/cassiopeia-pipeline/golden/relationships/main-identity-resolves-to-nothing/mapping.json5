@@ -1,0 +1,24 @@
+// A record whose main identity resolves to nothing while it declares a synthetic entity.
+{
+    version: "v4",
+    dataModel: "Asset",
+    identity: {
+        entityName: "{{ code }}",
+    },
+    attributes: {
+        owner: {
+            type: "Relationship",
+            syntheticEntity: {
+                dataModel: "Organization",
+                identity: {
+                    entityName: "{{ owner_id }}",
+                },
+                attributes: {
+                    name: {
+                        source: "{{ owner_name }}",
+                    },
+                },
+            },
+        },
+    },
+}

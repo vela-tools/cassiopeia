@@ -1,0 +1,34 @@
+// `properties` declares attributes of an attribute, recursively: here a Property under a Property
+// under the top-level attribute, and a Relationship beside them (ETSI GS CIM 009 v1.9.1 clause
+// 4.5.2.2).
+{
+    version: "v4",
+    dataModel: "Sensor",
+    identity: {
+        entityName: "{{ code }}",
+    },
+    attributes: {
+        temperature: {
+            source: "{{ temperature }}",
+            transformation: "float",
+            properties: {
+                accuracy: {
+                    source: "{{ accuracy }}",
+                    transformation: "float",
+                    properties: {
+                        method: {
+                            source: "{{ method }}",
+                        },
+                    },
+                },
+                calibratedBy: {
+                    type: "Relationship",
+                    source: "{{ lab }}",
+                    target: {
+                        entity: "Laboratory",
+                    },
+                },
+            },
+        },
+    },
+}

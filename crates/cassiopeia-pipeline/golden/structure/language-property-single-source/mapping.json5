@@ -1,0 +1,16 @@
+// A LanguageProperty declared with a single `source` reads the whole map: an object keyed by
+// language tag, or its JSON text. Entries with an invalid tag or no text are dropped, and a value
+// that is no such object is refused with a warning.
+{
+    version: "v4",
+    dataModel: "Place",
+    identity: {
+        entityName: "{{ code }}",
+    },
+    attributes: {
+        name: {
+            type: "LanguageProperty",
+            source: "{{ names }}",
+        },
+    },
+}

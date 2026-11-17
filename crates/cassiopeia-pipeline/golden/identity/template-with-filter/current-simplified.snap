@@ -1,0 +1,11 @@
+---
+source: crates/cassiopeia-pipeline/src/end_to_end/golden/mod.rs
+input_file: crates/cassiopeia-pipeline/golden/identity/template-with-filter/manifest.json5
+---
+[
+  {
+    "id": "urn:ngsi-ld:Station:ab-1",
+    "type": "Station",
+    "name": "Has a code"
+  }
+]

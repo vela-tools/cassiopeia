@@ -1,0 +1,13 @@
+{
+    version: "v1",
+    inputs: [
+        {
+            source: "names.csv",
+            mapping: "names.json5",
+        },
+        {
+            source: "capacities.csv",
+            mapping: "capacities.json5",
+        },
+    ],
+}

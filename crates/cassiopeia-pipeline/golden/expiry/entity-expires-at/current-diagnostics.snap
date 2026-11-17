@@ -1,0 +1,17 @@
+---
+source: crates/cassiopeia-pipeline/src/end_to_end/golden/mod.rs
+input_file: crates/cassiopeia-pipeline/golden/expiry/entity-expires-at/manifest.json5
+---
+{
+  "diagnostics": [
+    {
+      "code": "expander-expires-at-unreadable",
+      "occurrences": 1,
+      "message": [
+        "! 1 `Ticket` records publish without `expiresAt` (first: `urn:ngsi-ld:Ticket:T2`): `soon` is not a date-time in any spelling Cassiopeia reads",
+        "  ├─ entity type Ticket",
+        "  ╰─ entities    urn:ngsi-ld:Ticket:T2"
+      ]
+    }
+  ]
+}

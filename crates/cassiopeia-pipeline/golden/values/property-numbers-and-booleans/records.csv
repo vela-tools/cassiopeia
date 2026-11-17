@@ -1,0 +1,6 @@
+code,count,level,active
+S1,12,21.5,yes
+S2, 12 ,"1,5",0
+S3,7.9,NaN,maybe
+S4,abc,x,OFF
+S5,,,

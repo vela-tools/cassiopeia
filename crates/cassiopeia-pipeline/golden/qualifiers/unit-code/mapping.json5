@@ -1,0 +1,29 @@
+// A `unitCode` must be a UN/CEFACT Recommendation No. 20 code (ETSI GS CIM 009 v1.9.1 clause
+// 4.5.2); any other text is left out with a warning and the attribute is kept.
+{
+    version: "v4",
+    dataModel: "Sensor",
+    identity: {
+        entityName: "{{ code }}",
+    },
+    attributes: {
+        temperature: {
+            source: "{{ temperature }}",
+            transformation: "float",
+            properties: {
+                unitCode: {
+                    source: "CEL",
+                },
+            },
+        },
+        concentration: {
+            source: "{{ concentration }}",
+            transformation: "float",
+            properties: {
+                unitCode: {
+                    source: "{{ unit }}",
+                },
+            },
+        },
+    },
+}

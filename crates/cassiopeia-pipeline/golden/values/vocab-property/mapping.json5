@@ -1,0 +1,20 @@
+// A VocabProperty reads `iri` by default and admits `urn`; each writes its value in normal form
+// and drops a value it cannot read with a warning.
+{
+    version: "v4",
+    dataModel: "Sample",
+    identity: {
+        entityName: "{{ code }}",
+    },
+    attributes: {
+        category: {
+            type: "VocabProperty",
+            source: "{{ category }}",
+        },
+        classification: {
+            type: "VocabProperty",
+            source: "{{ classification }}",
+            transformation: "urn",
+        },
+    },
+}

@@ -1,0 +1,36 @@
+// A list-form source concatenates its parts under `string`, `iri` and `urn`. A part that resolves to
+// nothing is left out, and a source whose fields are all missing gives no attribute at all.
+{
+    version: "v4",
+    dataModel: "Sample",
+    identity: {
+        entityName: "{{ code }}",
+    },
+    attributes: {
+        address: {
+            source: [
+                "{{ street }}",
+                " ",
+                "{{ number }}",
+            ],
+            transformation: "string",
+        },
+        page: {
+            source: [
+                "https://example.org/",
+                "{{ street }}",
+                "/",
+                "{{ number }}",
+            ],
+            transformation: "iri",
+        },
+        building: {
+            source: [
+                "urn:ngsi-ld:Building:",
+                "{{ street }}",
+                "{{ number }}",
+            ],
+            transformation: "urn",
+        },
+    },
+}

@@ -1,0 +1,15 @@
+[
+    {
+        "code": "S1",
+        "building": "B-12",
+        "room": "R1"
+    },
+    {
+        "code": "S2",
+        "building": "-",
+        "room": "R2"
+    },
+    {
+        "code": "S3"
+    }
+]

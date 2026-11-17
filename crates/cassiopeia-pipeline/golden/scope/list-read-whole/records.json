@@ -1,0 +1,30 @@
+[
+    {
+        "code": "S1",
+        "name": "Two areas",
+        "areas": [
+            "/Ljubljana",
+            "/Ljubljana/Center"
+        ]
+    },
+    {
+        "code": "S2",
+        "name": "Empty list",
+        "areas": []
+    },
+    {
+        "code": "S3",
+        "name": "Null item",
+        "areas": [
+            null,
+            "/Maribor"
+        ]
+    },
+    {
+        "code": "S4",
+        "name": "Number item",
+        "areas": [
+            1
+        ]
+    }
+]

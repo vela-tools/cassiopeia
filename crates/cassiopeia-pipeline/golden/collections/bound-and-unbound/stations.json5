@@ -1,0 +1,13 @@
+// The mapping bound to the `network.stations` collection.
+{
+    version: "v4",
+    dataModel: "Station",
+    identity: {
+        entityName: "{{ id }}",
+    },
+    attributes: {
+        name: {
+            source: "{{ name }}",
+        },
+    },
+}

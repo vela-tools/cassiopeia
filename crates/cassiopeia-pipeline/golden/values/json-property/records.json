@@ -1,0 +1,23 @@
+[
+    {
+        "code": "S1",
+        "payload": {
+            "no2": 3,
+            "pm10": null
+        },
+        "text": "{\"no2\":3,\"pm10\":null}",
+        "empty": {},
+        "first": {
+            "a": 1
+        },
+        "second": {
+            "b": null
+        },
+        "mixed": [
+            {
+                "a": 1
+            },
+            2
+        ]
+    }
+]

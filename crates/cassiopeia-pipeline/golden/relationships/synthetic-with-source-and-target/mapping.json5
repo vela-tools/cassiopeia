@@ -1,0 +1,29 @@
+// A `syntheticEntity` beside a `source` and `target` links through that source, which gates the
+// synthetic entity: a record whose source names no target writes neither.
+{
+    version: "v4",
+    dataModel: "Asset",
+    identity: {
+        entityName: "{{ code }}",
+    },
+    attributes: {
+        owner: {
+            type: "Relationship",
+            source: "{{ owner_id }}",
+            target: {
+                entity: "Organization",
+            },
+            syntheticEntity: {
+                dataModel: "Organization",
+                identity: {
+                    entityName: "{{ owner_id }}",
+                },
+                attributes: {
+                    name: {
+                        source: "{{ owner_name }}",
+                    },
+                },
+            },
+        },
+    },
+}

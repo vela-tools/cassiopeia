@@ -1,0 +1,48 @@
+---
+source: crates/cassiopeia-pipeline/src/end_to_end/golden/mod.rs
+input_file: crates/cassiopeia-pipeline/golden/ranking/shared-observed-at/manifest.json5
+---
+[
+  {
+    "id": "urn:ngsi-ld:Sensor:S1",
+    "type": "Sensor",
+    "reading": [
+      {
+        "type": "Property",
+        "value": 21.5,
+        "observedAt": "2026-03-01T10:00:00Z"
+      },
+      {
+        "type": "Property",
+        "value": 22.5,
+        "observedAt": "2026-03-01T11:00:00Z"
+      },
+      {
+        "type": "Property",
+        "value": 23.5,
+        "observedAt": "2026-03-01T12:00:00Z"
+      }
+    ],
+    "status": [
+      {
+        "type": "Property",
+        "value": "ok",
+        "observedAt": "2026-03-01T10:00:00Z"
+      },
+      {
+        "type": "Property",
+        "value": "ok",
+        "observedAt": "2026-03-01T11:00:00Z"
+      },
+      {
+        "type": "Property",
+        "value": "warm",
+        "observedAt": "2026-03-01T12:00:00Z"
+      }
+    ],
+    "name": {
+      "type": "Property",
+      "value": "First"
+    }
+  }
+]

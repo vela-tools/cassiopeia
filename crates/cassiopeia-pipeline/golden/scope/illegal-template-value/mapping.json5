@@ -1,0 +1,15 @@
+// A scope level is letters, numbers and underscores (ETSI GS CIM 009 v1.9.1 clause 4.18), so a
+// resolved scope with a space skips its record, while a Unicode letter is kept.
+{
+    version: "v4",
+    dataModel: "Station",
+    identity: {
+        entityName: "{{ code }}",
+    },
+    scope: "/{{ city }}",
+    attributes: {
+        name: {
+            source: "{{ name }}",
+        },
+    },
+}

@@ -1,0 +1,44 @@
+---
+source: crates/cassiopeia-pipeline/src/end_to_end/golden/mod.rs
+input_file: crates/cassiopeia-pipeline/golden/geometry/altitude/manifest.json5
+---
+[
+  {
+    "id": "urn:ngsi-ld:Site:G1",
+    "type": "Site",
+    "kept": {
+      "type": "GeoProperty",
+      "value": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            14.5,
+            46.05,
+            295.0
+          ],
+          [
+            14.51,
+            46.06,
+            310.5
+          ]
+        ]
+      }
+    },
+    "dropped": {
+      "type": "GeoProperty",
+      "value": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            14.5,
+            46.05
+          ],
+          [
+            14.51,
+            46.06
+          ]
+        ]
+      }
+    }
+  }
+]

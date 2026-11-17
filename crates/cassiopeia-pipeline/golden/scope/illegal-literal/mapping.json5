@@ -1,0 +1,15 @@
+// A literal scope that breaks the scope rules resolves the same for every record, so the mapping
+// is refused when it loads and the run writes nothing.
+{
+    version: "v4",
+    dataModel: "Station",
+    identity: {
+        entityName: "{{ code }}",
+    },
+    scope: "/Novo mesto",
+    attributes: {
+        name: {
+            source: "{{ name }}",
+        },
+    },
+}

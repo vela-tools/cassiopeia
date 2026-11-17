@@ -47,9 +47,14 @@ url = "2.5.8"
 urn-rs = "1.0.0"
 
 [dev-dependencies]
+cassiopeia-terminal-style.workspace = true
+insta = { version = "1.49.0", features = ["glob", "json"] }
 jsonschema = "0.61.2"
 mockito = { version = "1.7.2", default-features = false }
 pretty_assertions = "1.4.1"
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json5 = "0.2.1"
+strum = { version = "0.28.0", features = ["derive"] }
 tempfile = "3.27.0"
 
 [features]

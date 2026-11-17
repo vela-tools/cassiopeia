@@ -1,0 +1,13 @@
+// The first of two mappings that write the same entity: it maps the name.
+{
+    version: "v4",
+    dataModel: "Station",
+    identity: {
+        entityName: "{{ code }}",
+    },
+    attributes: {
+        name: {
+            source: "{{ name }}",
+        },
+    },
+}

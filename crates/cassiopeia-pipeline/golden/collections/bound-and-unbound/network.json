@@ -1,0 +1,26 @@
+{
+    "network": {
+        "stations": [
+            {
+                "id": "S1",
+                "name": "Main"
+            },
+            {
+                "id": "S2",
+                "name": "Branch"
+            }
+        ],
+        "lines": [
+            {
+                "id": "U1",
+                "colour": "red"
+            }
+        ],
+        "vehicles": [
+            {
+                "id": "V1",
+                "model": "Tram"
+            }
+        ]
+    }
+}

@@ -1,0 +1,26 @@
+// A synthetic entity's scope is checked like the main entity's, and an illegal one skips the whole
+// record, the main entity included.
+{
+    version: "v4",
+    dataModel: "Asset",
+    identity: {
+        entityName: "{{ code }}",
+    },
+    attributes: {
+        owner: {
+            type: "Relationship",
+            syntheticEntity: {
+                dataModel: "Organization",
+                identity: {
+                    entityName: "{{ owner_id }}",
+                },
+                scope: "/{{ region }}",
+                attributes: {
+                    name: {
+                        source: "{{ owner_name }}",
+                    },
+                },
+            },
+        },
+    },
+}

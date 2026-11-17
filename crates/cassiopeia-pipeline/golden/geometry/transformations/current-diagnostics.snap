@@ -1,0 +1,16 @@
+---
+source: crates/cassiopeia-pipeline/src/end_to_end/golden/mod.rs
+input_file: crates/cassiopeia-pipeline/golden/geometry/transformations/manifest.json5
+---
+{
+  "diagnostics": [
+    {
+      "code": "geometry-ambiguous-multi-geometry",
+      "occurrences": 1,
+      "message": [
+        "! Attribute `refused` dropped: a MultiPolygon carrying 2 members cannot become a single geometry without a declared `geometry: { convert: ... }` conversion",
+        "  ╰─ attribute   refused"
+      ]
+    }
+  ]
+}

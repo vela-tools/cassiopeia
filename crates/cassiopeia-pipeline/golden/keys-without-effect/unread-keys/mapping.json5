@@ -1,0 +1,44 @@
+// Keys that the attribute, sub-attribute, instance or target they sit on does not read: a
+// misspelled `transformation`, and a target's `sourceField` and `idPattern`.
+{
+    version: "v4",
+    dataModel: "Sensor",
+    identity: {
+        entityName: "{{ code }}",
+    },
+    attributes: {
+        count: {
+            source: "{{ count }}",
+            transformaton: "integer",
+            properties: {
+                accuracy: {
+                    source: "{{ accuracy }}",
+                    transfromation: "float",
+                },
+            },
+        },
+        forecast: {
+            transformation: "float",
+            instances: [
+                {
+                    source: "{{ forecast }}",
+                    unitCode: "CEL",
+                    properties: {
+                        datasetId: {
+                            source: "urn:ngsi-ld:dataset:model:gfs",
+                        },
+                    },
+                },
+            ],
+        },
+        building: {
+            type: "Relationship",
+            source: "{{ building }}",
+            target: {
+                entity: "Building",
+                sourceField: "building",
+                idPattern: "Building-{{ building }}",
+            },
+        },
+    },
+}

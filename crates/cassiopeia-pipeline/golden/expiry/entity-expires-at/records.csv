@@ -1,0 +1,4 @@
+code,valid_until,name
+T1,2026-03-01T11:00:00Z,Readable
+T2,soon,Unreadable
+T3,,Missing
