@@ -3168,15 +3168,6 @@ dependencies = [
 
 [[package]]
 name = "hdf5-core"
-version = "0.12.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2c3d4ad873a5db535c052705e1b34070391157f4acc0ca50fcdc9c5923780112"
-dependencies = [
- "thiserror 2.0.21",
-]
-
-[[package]]
-name = "hdf5-core"
 version = "0.13.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8677f7e6cdd34853d824de6d4394395aff5f4d00e388e75b7366e08fefe91236"
@@ -3191,7 +3182,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a34ef20fa8f104da38fbc79438b31d18c790e5f65d7200021987f974d69e7462"
 dependencies = [
  "flate2",
- "hdf5-core 0.13.0",
+ "hdf5-core",
  "libc",
  "lru 0.19.0",
  "lz4_flex",
@@ -3205,12 +3196,12 @@ dependencies = [
 
 [[package]]
 name = "hdf5-writer"
-version = "0.12.1"
+version = "0.13.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4a30694330c92d37b3d8183037d699012011976f14f45784b829e8be61d58bc3"
+checksum = "7545adf9836e914f56a9f619e6ac32eeaf145811a9dbcd5a4b47c4448852721c"
 dependencies = [
  "flate2",
- "hdf5-core 0.12.1",
+ "hdf5-core",
  "thiserror 2.0.21",
 ]
 
@@ -4918,12 +4909,12 @@ dependencies = [
 
 [[package]]
 name = "netcdf-writer"
-version = "0.12.1"
+version = "0.13.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d5917acdf004e1bf7c90b90ac0a20d965ead91b1fec111221ae1ac0db7806e20"
+checksum = "5c31a66fc5423c82a6469752a14b3292ecac26362a31751d27557346b5785b62"
 dependencies = [
  "hdf5-writer",
- "netcdf-core 0.12.1",
+ "netcdf-core 0.13.0",
  "thiserror 2.0.21",
 ]
 
