@@ -33,7 +33,7 @@ use std::{io::Write, path::Path};
 /// served. Then each data stream that may hold a reading of the window is read on its own,
 /// Datastreams first, each kind by ascending id, oldest reading first, and each Observation is
 /// written as it was served, with its `FeatureOfInterest` when the settings request features of
-/// interest. A page limit stops one data stream's read and the read goes on with the next; the
+/// interest; those served without it are counted for one warning. A page limit stops one data stream's read and the read goes on with the next; the
 /// observation limit stops the reads of Observations. When the settings request `HistoricalLocations`,
 /// those of the window of each Thing a listed data stream belongs to are read last, by ascending
 /// Thing id, oldest first, each with its Locations; a page limit stops one Thing's read, and the
@@ -76,7 +76,7 @@ pub(crate) fn read_range<W: Write>(
             warnings.limit_reached(limit);
         }
     }
-    let mut sink = ObservationSink::new(snapshot.into_observations(), settings.limits().observations(), path);
+    let mut sink = ObservationSink::new(snapshot.into_observations(), service, path);
     // A range read keeps nothing between cycles, so no Observation is seen before it is read.
     let unseen = SeenEntities::default();
     for datastream in datastreams.into_ids() {
@@ -86,7 +86,7 @@ pub(crate) fn read_range<W: Write>(
             break;
         }
     }
-    let mut sink = sink.into_historical_locations();
+    let mut sink = sink.into_historical_locations(&mut warnings);
     for thing in things.into_ids() {
         read_historical_locations(reader, service, &thing, window, &unseen, &mut sink, &mut warnings)?;
     }
@@ -99,6 +99,7 @@ mod tests {
     use crate::{
         collection_warnings::CollectionWarnings,
         sensorthings::{
+            features_of_interest_unserved::{FeaturesOfInterestUnserved, UnservedObservation},
             limit_reached::{CollectLimit, LimitReached},
             range_empty::RangeEmpty,
             test_collection::{RUNNING, collect, collector, root, snapshot_lines},
@@ -106,16 +107,19 @@ mod tests {
     };
     use cassiopeia_common::request_header::RequestHeaders;
     use cassiopeia_sensorthings::{
+        entity_id::EntityId,
+        observation_name::ObservationName,
         read_kind::ReadKind,
         read_window::ReadWindow,
         settings::collect_limits::{ObservationLimit, PageLimit},
         snapshot::header::SnapshotHeader,
+        stream_id::StreamId,
     };
     use chrono::{DateTime, Utc};
     use mockito::{Matcher, Mock, ServerGuard};
     use pretty_assertions::assert_eq;
     use serde_json::{Value, json};
-    use std::slice;
+    use std::{num::NonZeroU64, slice};
     use url::Url;
 
     /// The path and query of the metadata discovery request with the default settings.
@@ -262,10 +266,85 @@ mod tests {
             &RUNNING,
         ));
 
-        result.unwrap();
+        assert_eq!(result.unwrap(), CollectionWarnings::default());
         mocks.iter().for_each(Mock::assert);
         let lines = snapshot_lines(payloads);
         assert_eq!(lines[2], json!({"observation": observation, "datastream": 1}));
+    }
+
+    /// Served Observations `ids`, as [`observations`] serves them, each with the `FeatureOfInterest`
+    /// member `feature`.
+    fn observations_with(ids: &[u64], feature: &Value) -> Vec<Value> {
+        observations(ids)
+            .into_iter()
+            .map(|mut observation| {
+                observation["FeatureOfInterest"] = feature.clone();
+                observation
+            })
+            .collect()
+    }
+
+    #[test]
+    fn a_range_read_of_a_server_that_serves_no_feature_of_interest_warns_once_naming_the_first_observation() {
+        let mut server = mockito::Server::new();
+        let mut first = observations(&[11]);
+        first.extend(observations_with(&[12], &Value::Null));
+        let mocks = [
+            discovery(&mut server, &[1, 2]),
+            serve(&mut server, &observations_with_features_path(1, LAST_DAY), page(&first, None)),
+            serve(&mut server, &observations_with_features_path(2, LAST_DAY), page(&observations(&[21]), None)),
+        ];
+
+        let (result, payloads) = collect(collector(
+            &server,
+            &range_read(r#"{"last": "24h"}"#, r#", "featuresOfInterest": true"#),
+            RequestHeaders::default(),
+            &RUNNING,
+        ));
+
+        let warnings = result.unwrap();
+        mocks.iter().for_each(Mock::assert);
+        assert_eq!(
+            warnings.unserved_features_of_interest(),
+            [FeaturesOfInterestUnserved::new(
+                root(&server),
+                UnservedObservation {
+                    observation: ObservationName::Id(EntityId::Integer(11)),
+                    datastream: StreamId::Datastream(EntityId::Integer(1)),
+                },
+                NonZeroU64::new(3).unwrap(),
+            )]
+        );
+        let lines = snapshot_lines(payloads);
+        assert_eq!(observation_lines(&lines), [(json!(11), json!(1)), (json!(12), json!(1)), (json!(21), json!(2))]);
+        assert_eq!(lines[4], json!({"observation": first[1], "datastream": 1}));
+    }
+
+    #[test]
+    fn a_range_read_counts_only_the_observations_it_writes_without_their_feature_of_interest() {
+        let mut server = mockito::Server::new();
+        let feature = json!({"@iot.id": 4711, "encodingType": "application/geo+json", "feature": {"type": "Point", "coordinates": [5.4797, 51.4433]}});
+        let mut items = observations_with(&[11], &feature);
+        items.extend(observations(&[12, 13]));
+        let mocks = [
+            discovery(&mut server, &[1]),
+            serve(&mut server, &observations_with_features_path(1, LAST_DAY), page(&items, None)),
+        ];
+
+        let (result, _) = collect(collector(
+            &server,
+            &range_read(r#"{"last": "24h"}"#, r#", "featuresOfInterest": true, "limits": {"observations": 2}"#),
+            RequestHeaders::default(),
+            &RUNNING,
+        ));
+
+        let warnings = result.unwrap();
+        mocks.iter().for_each(Mock::assert);
+        let [unserved] = warnings.unserved_features_of_interest() else {
+            panic!("expected one warning: {warnings:?}");
+        };
+        assert_eq!(unserved.first().to_string(), "Observation 12 of Datastream 1");
+        assert_eq!(unserved.count().get(), 1);
     }
 
     #[test]
@@ -283,7 +362,7 @@ mod tests {
             &RUNNING,
         ));
 
-        result.unwrap();
+        assert_eq!(result.unwrap(), CollectionWarnings::default());
         mocks.iter().for_each(Mock::assert);
     }
 

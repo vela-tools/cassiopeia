@@ -1,5 +1,6 @@
 use crate::sensorthings::{
     datastreams_missing::DatastreamsMissing,
+    features_of_interest_unserved::FeaturesOfInterestUnserved,
     limit_reached::LimitReached,
     multi_datastreams_unread::MultiDatastreamsUnread,
     range_empty::RangeEmpty,
@@ -18,6 +19,9 @@ pub struct CollectionWarnings {
     missing_datastreams: Vec<DatastreamsMissing>,
     /// The servers that hold `MultiDatastreams` their input reads none of.
     unread_multi_datastreams: Vec<MultiDatastreamsUnread>,
+    /// The reads that asked for features of interest and wrote Observations their server served
+    /// without one.
+    unserved_features_of_interest: Vec<FeaturesOfInterestUnserved>,
 }
 
 impl CollectionWarnings {
@@ -44,6 +48,13 @@ impl CollectionWarnings {
     #[must_use]
     pub fn unread_multi_datastreams(&self) -> &[MultiDatastreamsUnread] {
         &self.unread_multi_datastreams
+    }
+
+    /// The reads that asked for features of interest and wrote Observations their server served
+    /// without one.
+    #[must_use]
+    pub fn unserved_features_of_interest(&self) -> &[FeaturesOfInterestUnserved] {
+        &self.unserved_features_of_interest
     }
 
     /// Records that a collection limit stopped a read, unless the same limit already stopped a read
@@ -73,6 +84,12 @@ impl CollectionWarnings {
     /// Records that a server holds `MultiDatastreams` its input reads none of.
     pub fn multi_datastreams_unread(&mut self, unread: MultiDatastreamsUnread) {
         self.unread_multi_datastreams.push(unread);
+    }
+
+    /// Records that a read that asked for features of interest wrote Observations its server served
+    /// without one.
+    pub fn features_of_interest_unserved(&mut self, unserved: FeaturesOfInterestUnserved) {
+        self.unserved_features_of_interest.push(unserved);
     }
 }
 

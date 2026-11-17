@@ -41,8 +41,8 @@ mod tests {
         code::{diagnostic_code::DiagnosticCode, ingest_code::IngestCode},
         context_field::ContextField,
     };
-    use cassiopeia_ingestor::sensorthings::ingest_losses::{ObservationName, SensorThingsLosses, UnreadableMultiResult};
-    use cassiopeia_sensorthings::entity_id::EntityId;
+    use cassiopeia_ingestor::sensorthings::ingest_losses::{SensorThingsLosses, UnreadableMultiResult};
+    use cassiopeia_sensorthings::{entity_id::EntityId, observation_name::ObservationName};
     use pretty_assertions::assert_eq;
     use std::path::PathBuf;
 

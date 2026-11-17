@@ -63,12 +63,14 @@ pub(super) fn observation_readings(
 
 #[cfg(test)]
 mod tests {
-    use crate::sensorthings::{
-        ingest_losses::{ObservationName, SensorThingsLosses},
-        observation_readings::observation_readings,
-        record_builder::DatastreamParts,
+    use crate::sensorthings::{ingest_losses::SensorThingsLosses, observation_readings::observation_readings, record_builder::DatastreamParts};
+    use cassiopeia_sensorthings::{
+        entity_id::EntityId,
+        observation_name::ObservationName,
+        snapshot::line_number::LineNumber,
+        stream_id::StreamId,
+        stream_kind::StreamKind,
     };
-    use cassiopeia_sensorthings::{entity_id::EntityId, snapshot::line_number::LineNumber, stream_id::StreamId, stream_kind::StreamKind};
     use pretty_assertions::assert_eq;
     use serde_json::{Map, Value, json};
 

@@ -15,6 +15,9 @@ pub enum CollectCode {
     /// A server holds `MultiDatastreams` an input reads none of, because its `multiDatastreams`
     /// setting selects none.
     MultiDatastreamsUnread,
+    /// A server served Observations without the `FeatureOfInterest` a read that asked for features
+    /// of interest expanded, so their readings have no `featureOfInterest`.
+    FeaturesOfInterestUnserved,
 }
 
 #[cfg(test)]
@@ -28,5 +31,6 @@ mod tests {
         assert_eq!(CollectCode::RangeEmpty.to_string(), "range-empty");
         assert_eq!(CollectCode::DatastreamsMissing.to_string(), "datastreams-missing");
         assert_eq!(CollectCode::MultiDatastreamsUnread.to_string(), "multi-datastreams-unread");
+        assert_eq!(CollectCode::FeaturesOfInterestUnserved.to_string(), "features-of-interest-unserved");
     }
 }

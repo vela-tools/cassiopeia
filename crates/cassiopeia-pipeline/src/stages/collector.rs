@@ -5,6 +5,7 @@ use crate::{
         limits_reached_report::report_limits_reached,
         missing_datastreams_report::report_missing_datastreams,
         unread_multi_datastreams_report::report_unread_multi_datastreams,
+        unserved_features_of_interest_report::report_unserved_features_of_interest,
     },
 };
 use cassiopeia_collector::{
@@ -91,7 +92,8 @@ pub(crate) fn spawn_collector_thread(
                 report_limits_reached(sink, &warnings)
                     + report_empty_ranges(sink, &warnings)
                     + report_missing_datastreams(sink, &warnings)
-                    + report_unread_multi_datastreams(sink, &warnings),
+                    + report_unread_multi_datastreams(sink, &warnings)
+                    + report_unserved_features_of_interest(sink, &warnings),
             ),
             Err(error) => {
                 stage.failed(1);

@@ -39,7 +39,8 @@ use std::{io::Write, path::Path};
 /// stamped at or after the cycle start waits for a later cycle. The data streams furthest behind are
 /// read first, whatever their kind. An Observation the position has seen, or this read already
 /// wrote, is dropped; every other one is written as it was served, with its `FeatureOfInterest` when
-/// the settings request features of interest. A page limit stops one data stream's read and the read
+/// the settings request features of interest, and those served without it are counted for one
+/// warning. A page limit stops one data stream's read and the read
 /// goes on with the next; the observation limit stops the reads of Observations, and what each data
 /// stream wrote up to there moves its position, so the next cycle goes on from there.
 ///
@@ -98,7 +99,7 @@ pub(crate) fn read_incremental<W: Write>(
     if let Some(missing) = DatastreamsMissing::of(service.root(), incremental.cursor(), &positions, &update, start) {
         warnings.datastreams_missing(missing);
     }
-    let mut sink = ObservationSink::new(snapshot.into_observations(), settings.limits().observations(), path);
+    let mut sink = ObservationSink::new(snapshot.into_observations(), service, path);
     let unseen = SeenEntities::default();
     for (datastream, window) in datastreams.into_reads() {
         let request = observations_request(service.root(), &datastream, window, settings.page_size(), settings.features_of_interest());
@@ -118,7 +119,7 @@ pub(crate) fn read_incremental<W: Write>(
             break;
         }
     }
-    let mut sink = sink.into_historical_locations();
+    let mut sink = sink.into_historical_locations(&mut warnings);
     for thing in things.into_ids() {
         let stream = ReadStream::Thing(thing);
         let position = positions.get(&stream);
@@ -146,10 +147,12 @@ pub(crate) fn read_incremental<W: Write>(
 #[cfg(test)]
 mod tests {
     use crate::{
+        collection_warnings::CollectionWarnings,
         error::CollectorError,
         sensorthings::{
             cursor_cycle::CursorCycle,
             cursor_update_slot::CursorUpdateSlot,
+            features_of_interest_unserved::{FeaturesOfInterestUnserved, UnservedObservation},
             limit_reached::{CollectLimit, LimitReached},
             test_collection::{RUNNING, collect, collector, cycle_start, resuming_collector, root, snapshot_lines},
         },
@@ -157,6 +160,7 @@ mod tests {
     use cassiopeia_common::request_header::RequestHeaders;
     use cassiopeia_sensorthings::{
         entity_id::EntityId,
+        observation_name::ObservationName,
         read_kind::ReadKind,
         read_stream::ReadStream,
         settings::collect_limits::ObservationLimit,
@@ -170,6 +174,7 @@ mod tests {
     use serde_json::{Value, json};
     use std::{
         collections::BTreeMap,
+        num::NonZeroU64,
         sync::{Arc, Mutex},
         time::Duration,
     };
@@ -388,6 +393,70 @@ mod tests {
                 .all(|request| request.ends_with("&$orderby=phenomenonTime%20asc,id%20asc&$expand=FeatureOfInterest($select=id,name,description,properties,encodingType,feature)&$select=id,phenomenonTime,result,resultTime,validTime,resultQuality,parameters&$top=1000")),
             "{requests:?}"
         );
+    }
+
+    /// Reads the mock server incrementally with `settings` from no position, its Datastream 1
+    /// answering every observations request with `observations`, and returns what the read met that
+    /// the cycle carries on past.
+    fn warnings_of(server: &mut ServerGuard, settings: &str, observations: &Value) -> CollectionWarnings {
+        discovery(server, &[1]);
+        let answer = server
+            .mock("GET", Matcher::Regex(r"^/v1\.1/Datastreams\(1\)/Observations\?".to_owned()))
+            .with_body(json!({ "value": observations }).to_string())
+            .expect(1)
+            .create();
+        let (result, payloads) = collect(resuming_collector(
+            server,
+            settings,
+            CursorCycle::new(Positions::default(), CursorUpdateSlot::default()),
+        ));
+        answer.assert();
+        snapshot_lines(payloads);
+        result.unwrap()
+    }
+
+    #[test]
+    fn an_incremental_read_of_features_of_interest_warns_once_for_the_observations_served_without_them() {
+        let mut server = mockito::Server::new();
+        let observations = json!([
+            {"@iot.id": 11, "phenomenonTime": "2026-11-12T09:00:00Z", "result": 11},
+            {"@iot.id": 12, "phenomenonTime": "2026-11-12T09:10:00Z", "result": 12, "FeatureOfInterest": null},
+            {"@iot.id": 13, "phenomenonTime": "2026-11-12T09:20:00Z", "result": 13, "FeatureOfInterest": {"@iot.id": 4711}},
+        ]);
+
+        let warnings = warnings_of(&mut server, &incremental(r#", "featuresOfInterest": true"#), &observations);
+
+        assert_eq!(
+            warnings.unserved_features_of_interest(),
+            [FeaturesOfInterestUnserved::new(
+                root(&server),
+                UnservedObservation {
+                    observation: ObservationName::Id(EntityId::Integer(11)),
+                    datastream: StreamId::Datastream(EntityId::Integer(1)),
+                },
+                NonZeroU64::new(2).unwrap(),
+            )]
+        );
+    }
+
+    #[test]
+    fn an_incremental_read_whose_observations_carry_their_features_of_interest_reports_nothing() {
+        let mut server = mockito::Server::new();
+        let observations = json!([{"@iot.id": 11, "phenomenonTime": "2026-11-12T09:00:00Z", "result": 11, "FeatureOfInterest": {"@iot.id": 4711}}]);
+
+        let warnings = warnings_of(&mut server, &incremental(r#", "featuresOfInterest": true"#), &observations);
+
+        assert_eq!(warnings, CollectionWarnings::default());
+    }
+
+    #[test]
+    fn an_incremental_read_without_features_of_interest_reports_none_unserved() {
+        let mut server = mockito::Server::new();
+        let observations = json!([{"@iot.id": 11, "phenomenonTime": "2026-11-12T09:00:00Z", "result": 11}]);
+
+        let warnings = warnings_of(&mut server, &incremental(""), &observations);
+
+        assert_eq!(warnings, CollectionWarnings::default());
     }
 
     #[test]

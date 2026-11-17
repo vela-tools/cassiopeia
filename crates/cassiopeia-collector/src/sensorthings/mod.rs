@@ -5,13 +5,16 @@
 //! latest read lists by themselves, are read through the same traversal, paging, limits and pacing.
 //! An incremental read resumes from the positions its cursor committed and leaves the update of the
 //! cycle for the pipeline to commit, and a run checks once whether its server holds
-//! `MultiDatastreams` an input reads none of.
+//! `MultiDatastreams` an input reads none of. A read that asks for features of interest counts the
+//! Observations it writes that its server served without one.
 
 pub mod collection_listing;
 pub mod collector;
 pub mod cursor_cycle;
 pub mod cursor_update_slot;
 pub mod datastreams_missing;
+mod feature_of_interest_check;
+pub mod features_of_interest_unserved;
 mod historical_location_read;
 mod incremental_read;
 pub mod limit_reached;

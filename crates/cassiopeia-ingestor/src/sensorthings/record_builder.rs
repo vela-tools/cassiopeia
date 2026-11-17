@@ -1,7 +1,7 @@
 use crate::sensorthings::{
     error::{SensorThingsIngestError, StaEntity},
     feature_of_interest::feature_of_interest,
-    ingest_losses::{ObservationName, SensorThingsLosses},
+    ingest_losses::SensorThingsLosses,
     location::ThingLocations,
     null_members::{move_member, present},
     served_id::optional_served_id,
@@ -10,6 +10,7 @@ use cassiopeia_ir::record::Record;
 use cassiopeia_sensorthings::{
     entity_id::{EntityId, ID_MEMBER},
     observation_members::{CARRIED_OBSERVATION_MEMBERS, RESULT_MEMBER},
+    observation_name::ObservationName,
     phenomenon_time::{PHENOMENON_TIME_MEMBER, PhenomenonTime},
     service_root::ServiceRoot,
     snapshot::line_number::LineNumber,
@@ -209,10 +210,16 @@ const fn stream_member(kind: StreamKind) -> &'static str {
 #[cfg(test)]
 mod tests {
     use crate::sensorthings::{
-        ingest_losses::{ObservationName, SensorThingsLosses},
+        ingest_losses::SensorThingsLosses,
         record_builder::{DatastreamParts, ObservationParts, server_member},
     };
-    use cassiopeia_sensorthings::{entity_id::EntityId, service_root::ServiceRoot, snapshot::line_number::LineNumber, stream_kind::StreamKind};
+    use cassiopeia_sensorthings::{
+        entity_id::EntityId,
+        observation_name::ObservationName,
+        service_root::ServiceRoot,
+        snapshot::line_number::LineNumber,
+        stream_kind::StreamKind,
+    };
     use pretty_assertions::assert_eq;
     use serde_json::{Map, Value, json};
 

@@ -3,6 +3,7 @@ use crate::end_to_end::{
     sensorthings::{SERIES_OUTPUT, entity, fixture, instant_times},
 };
 use cassiopeia_common::store_kind::StoreKind;
+use cassiopeia_diagnostic::code::{collect_code::CollectCode, diagnostic_code::DiagnosticCode};
 use mockito::{Matcher, Mock, ServerGuard};
 use pretty_assertions::assert_eq;
 use serde_json::{Value, json};
@@ -162,7 +163,7 @@ fn a_latest_read_places_the_newest_reading_where_it_was_taken() {
 }
 
 #[test]
-fn a_latest_read_of_a_server_that_ignores_the_nested_expansion_succeeds_without_the_place() {
+fn a_latest_read_of_a_server_that_ignores_the_nested_expansion_succeeds_without_the_place_and_warns_once() {
     let (mut datastream, observations) = moving_thing();
     let mut newest = observations.last().unwrap().clone();
     newest.as_object_mut().unwrap().remove("FeatureOfInterest");
@@ -173,4 +174,13 @@ fn a_latest_read_of_a_server_that_ignores_the_nested_expansion_succeeds_without_
     let bus = entity(&outcome, MOCK_BUS);
     assert!(bus.get("location").is_none(), "{bus}");
     assert_eq!(bus["pm10"]["observedAt"], READING_TIMES[2]);
+    let unserved = outcome.coded(DiagnosticCode::Collect(CollectCode::FeaturesOfInterestUnserved));
+    assert_eq!(unserved.len(), 1, "{:?}", outcome.diagnostics);
+    assert!(
+        unserved[0].headline.ends_with(
+            "/v1.1` served 1 Observation without the FeatureOfInterest that `featuresOfInterest` asks for, so its readings have no `featureOfInterest`: Observation bus-12-pm10-3 of Datastream bus-12-pm10"
+        ),
+        "{}",
+        unserved[0].headline
+    );
 }
