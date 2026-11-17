@@ -6,8 +6,9 @@ use thiserror::Error;
 /// Why the `valueType` of an attribute could not be expanded to a datatype IRI.
 #[derive(Debug, Error)]
 pub enum ExpansionError {
-    /// The bundled core `@context` is not JSON.
-    #[error("The bundled NGSI-LD core @context cannot be read")]
+    /// A bundled `@context` document, the core `@context` or the Data Integrity `@context` it imports,
+    /// is not JSON.
+    #[error("The bundled NGSI-LD core @context or a @context it imports cannot be read")]
     CoreContext(#[source] serde_json::Error),
 
     /// The HTTP client remote `@context` documents are fetched through could not be built.

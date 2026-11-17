@@ -1,4 +1,4 @@
-use crate::{context_load_error::ContextLoadError, core_context::CORE_CONTEXT};
+use crate::context_load_error::ContextLoadError;
 use cassiopeia_common::user_agent::UserAgent;
 use dashmap::DashMap;
 use iri_rs::{Iri, IriBuf};
@@ -16,7 +16,7 @@ const LOAD_TIMEOUT: Duration = Duration::from_secs(30);
 /// The media types a `@context` is asked for in, JSON-LD first (JSON-LD 1.1 clause 9.1).
 const ACCEPTED: HeaderValue = HeaderValue::from_static("application/ld+json, application/json;q=0.9, */*;q=0.1");
 
-/// Loads the `@context` documents an expansion needs: the bundled core `@context`, and every other one
+/// Loads the `@context` documents an expansion needs: the bundled ones from memory, and every other one
 /// over HTTP, once per run.
 ///
 /// A fetched document is read as JSON whatever media type it is served as. JSON-LD 1.1 expects
@@ -24,7 +24,7 @@ const ACCEPTED: HeaderValue = HeaderValue::from_static("application/ld+json, app
 /// `@context` from `raw.githubusercontent.com`, which serves it as `text/plain`, and those are the
 /// contexts a run attaches by default.
 pub struct ContextLoader {
-    /// Every document loaded so far, keyed by the IRI it was asked for under, the core `@context`
+    /// Every document loaded so far, keyed by the IRI it was asked for under, the bundled documents
     /// among them from the start, so a `@context` several mappings share is fetched once.
     ///
     /// A `@context` IRI compares as a string, as every IRI does in JSON-LD and RDF (RDF 1.1 Concepts
@@ -36,19 +36,18 @@ pub struct ContextLoader {
 }
 
 impl ContextLoader {
-    /// Builds a loader holding the bundled core `@context`, fetching every other one under
-    /// `user_agent`.
+    /// Builds a loader serving each `bundled` document under the URL beside it, fetching every other
+    /// `@context` under `user_agent`.
     ///
     /// # Errors
     /// Returns [`ContextLoadError::Client`] when the HTTP client cannot be built.
-    pub fn new(user_agent: &UserAgent, core: RemoteDocument) -> Result<ContextLoader, ContextLoadError> {
+    pub fn new(user_agent: &UserAgent, bundled: impl IntoIterator<Item = (Iri<&'static str>, RemoteDocument)>) -> Result<ContextLoader, ContextLoadError> {
         let client = Client::builder()
             .user_agent(user_agent.as_str())
             .timeout(LOAD_TIMEOUT)
             .build()
             .map_err(ContextLoadError::Client)?;
-        let documents = DashMap::new();
-        documents.insert(CORE_CONTEXT.into(), core);
+        let documents = bundled.into_iter().map(|(url, document)| (IriBuf::from(url), document)).collect();
 
         Ok(ContextLoader { documents, client })
     }
@@ -102,7 +101,7 @@ mod tests {
     use crate::{
         context_load_error::ContextLoadError,
         context_loader::ContextLoader,
-        core_context::{CORE_CONTEXT, core_context_document},
+        core_context::{CORE_CONTEXT, DATA_INTEGRITY_CONTEXT, core_context_documents},
     };
     use cassiopeia_common::user_agent::UserAgent;
     use futures_executor::block_on;
@@ -116,7 +115,7 @@ mod tests {
     };
 
     fn loader() -> ContextLoader {
-        ContextLoader::new(&UserAgent::from("test".to_owned()), core_context_document().unwrap()).unwrap()
+        ContextLoader::new(&UserAgent::from("test".to_owned()), core_context_documents().unwrap()).unwrap()
     }
 
     /// Serves one response, then stops listening, and returns the URL it is served at.
@@ -138,10 +137,16 @@ mod tests {
     }
 
     #[test]
-    fn the_core_context_is_served_without_a_request() {
-        let document = block_on(loader().load(CORE_CONTEXT)).unwrap();
+    fn the_bundled_contexts_are_served_without_a_request() {
+        let loader = loader();
 
-        assert_eq!(document.url().map(IriBuf::as_str), Some(CORE_CONTEXT.as_str()));
+        for url in [CORE_CONTEXT, DATA_INTEGRITY_CONTEXT] {
+            // Held from the start, so the load below is answered from memory and never reaches the
+            // network.
+            assert!(loader.documents.contains_key(url.as_str()));
+            let document = block_on(loader.load(url)).unwrap();
+            assert_eq!(document.url().map(IriBuf::as_str), Some(url.as_str()));
+        }
     }
 
     #[test]

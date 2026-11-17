@@ -1,6 +1,6 @@
 use crate::{
     context_loader::ContextLoader,
-    core_context::{CORE_CONTEXT, HAS_VALUE_TYPE, core_context_document},
+    core_context::{CORE_CONTEXT, HAS_VALUE_TYPE, core_context_documents},
     error::ExpansionError,
     expanded_value_types::ExpandedValueTypes,
 };
@@ -33,11 +33,11 @@ impl ValueTypeExpander {
     /// Builds an expander that fetches remote `@context` documents under `user_agent`.
     ///
     /// # Errors
-    /// Returns [`ExpansionError::CoreContext`] when the bundled core `@context` cannot be read, and
+    /// Returns [`ExpansionError::CoreContext`] when a bundled `@context` document cannot be read, and
     /// [`ExpansionError::Client`] when the HTTP client cannot be built.
     pub fn new(user_agent: &UserAgent) -> Result<ValueTypeExpander, ExpansionError> {
-        let core = core_context_document().map_err(ExpansionError::CoreContext)?;
-        let loader = ContextLoader::new(user_agent, core).map_err(ExpansionError::Client)?;
+        let bundled = core_context_documents().map_err(ExpansionError::CoreContext)?;
+        let loader = ContextLoader::new(user_agent, bundled).map_err(ExpansionError::Client)?;
 
         Ok(ValueTypeExpander { loader })
     }
