@@ -51,9 +51,10 @@ struct IncomingRecord {
 /// Each base [`Urn`] maps to one retained fragment per mapping: a temporal mapping keeps the
 /// greatest-`observedAt` record, a static mapping deep-merges its records. This is O(mappings) per id,
 /// so a temporal id's many observations never grow the stored footprint. Each slot carries the
-/// expiry its records contribute, and the entity's own is joined from them at assembly. The
-/// `exact-eq` feature of `urn-rs` makes `Urn`'s `Hash`/`Eq` cover the full normalized URN, so keys
-/// hash without a `to_string()` round-trip.
+/// expiry its records contribute, and the entity's own is joined from them at assembly. Keys
+/// compare by `Urn` equivalence, RFC 8141 section 3, the scheme-based rung of the RFC 3986 section 6
+/// comparison NGSI-LD clause 5.5.1 adopts, so ids differing only in case of the scheme or NID, in
+/// percent-encoding hex case, or in r-, q- or f-components name one entity.
 #[derive(Clone, Debug, Default)]
 pub struct DashMapLatestEntityStore {
     scopes: ConcurrentScopes,

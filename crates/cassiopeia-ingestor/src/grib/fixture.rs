@@ -5,9 +5,12 @@ use cassiopeia_common::{channel::ChannelSender, signal::Signal};
 use cassiopeia_ir::record::Record;
 use grib::{
     WriteToBuffer,
-    def::grib2::template::{
-        Template3_0,
-        param_set::{EarthShape, LatLonGrid as PsLatLon, ScaledValue},
+    def::grib2::{
+        table::EarthShapeType,
+        template::{
+            Template3_0,
+            param_set::{EarthShape, LatLonGrid as PsLatLon, ScaledValue},
+        },
     },
     encoder::{EncodingMethod, GpvEncoder, LatLonGrid, SimplePackingStrategy, SingleGrib2Message, WriteGrib2Message},
 };
@@ -50,7 +53,7 @@ fn section3_body(ni: usize, nj: usize) -> Vec<u8> {
         .into();
     let template = Template3_0 {
         earth: EarthShape {
-            shape: 6,
+            shape: EarthShapeType(6),
             spherical_earth_radius: ScaledValue {
                 scale_factor: 0,
                 scaled_value: 6_371_229,

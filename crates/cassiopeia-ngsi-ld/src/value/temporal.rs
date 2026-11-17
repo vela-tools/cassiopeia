@@ -3,7 +3,7 @@ use crate::value::{
     types::{Number, TemporalValue, TemporalValueType},
 };
 use chrono::{DateTime, NaiveDate, NaiveDateTime, TimeZone, Utc};
-use jiff::{Timestamp, Zoned};
+use jiff::{Timestamp, ZonedDateTime};
 use num_traits::ToPrimitive;
 
 /// The unit a Unix epoch number is counted in, read off its magnitude.
@@ -121,7 +121,7 @@ impl TemporalValue {
         // offset resolves its local time through the zone's rules, DST included.
         if bytes.contains(&b'[') {
             return s
-                .parse::<Zoned>()
+                .parse::<ZonedDateTime>()
                 .ok()
                 .and_then(|zoned| Self::from_epoch_nanoseconds(zoned.timestamp().as_nanosecond()));
         }

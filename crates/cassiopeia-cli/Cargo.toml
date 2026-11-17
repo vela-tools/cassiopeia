@@ -24,7 +24,7 @@ cassiopeia-smart-data-models.workspace = true
 cassiopeia-terminal-style.workspace = true
 cassiopeia-tui.workspace = true
 chrono = "0.4.45"
-clap = { version = "4.6.7", features = ["derive"] }
+clap = { version = "4.6.8", features = ["derive"] }
 clap-markdown = "0.1.5"
 getset = "0.1.7"
 json5format = "0.2.6"
@@ -42,7 +42,7 @@ cefact-units = "1.0.0"
 encoding_rs = "0.8.44"
 mockito = { version = "1.7.2", default-features = false }
 pretty_assertions = "1.4.1"
-redb = "4.5.0"
+redb = "4.6.0"
 tempfile = "3.27.0"
 url = "2.5.8"
 

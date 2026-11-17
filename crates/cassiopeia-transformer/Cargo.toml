@@ -22,7 +22,7 @@ indexmap = { version = "2.14.2", features = ["serde"] }
 iri-rs = "4.1.1"
 rayon = "1.12.0"
 thiserror = "2.0.21"
-urn-rs = "0.9.2"
+urn-rs = "1.0.0"
 
 [dev-dependencies]
 langtag = "1.1.0"
