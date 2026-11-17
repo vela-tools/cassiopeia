@@ -1,0 +1,5 @@
+code,list,object,decoded
+S1,"[1,2]","{""k"":1,""n"":null}","{""no2"":3}"
+S2,BS IN,[1],12.5
+S3,"[null,null]","{""maybe"":null}",not json
+S4,,,

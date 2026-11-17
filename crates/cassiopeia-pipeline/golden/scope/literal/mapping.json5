@@ -1,0 +1,14 @@
+// A literal scope applies to every entity the mapping writes.
+{
+    version: "v4",
+    dataModel: "Station",
+    identity: {
+        entityName: "{{ code }}",
+    },
+    scope: "/Ljubljana/Center",
+    attributes: {
+        name: {
+            source: "{{ name }}",
+        },
+    },
+}

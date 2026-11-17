@@ -1,0 +1,125 @@
+// A ListProperty gathers its source into a list, `array` by default, and any other transformation
+// reads each item. A null item is left out with a warning, and an item the transformation cannot
+// read drops the whole attribute, since a list's order carries meaning.
+{
+    version: "v4",
+    dataModel: "Sample",
+    identity: {
+        entityName: "{{ code }}",
+    },
+    attributes: {
+        defaultFromText: {
+            type: "ListProperty",
+            source: "{{ fromText }}",
+        },
+        defaultFromScalar: {
+            type: "ListProperty",
+            source: "{{ scalar }}",
+        },
+        withNull: {
+            type: "ListProperty",
+            source: "{{ withNull }}",
+            transformation: "integer",
+        },
+        unreadableItem: {
+            type: "ListProperty",
+            source: "{{ unreadable }}",
+            transformation: "integer",
+        },
+        asArray: {
+            type: "ListProperty",
+            source: "{{ asArray }}",
+            transformation: "array",
+        },
+        asBoolean: {
+            type: "ListProperty",
+            source: "{{ asBoolean }}",
+            transformation: "boolean",
+        },
+        asInteger: {
+            type: "ListProperty",
+            source: "{{ asInteger }}",
+            transformation: "integer",
+        },
+        asFloat: {
+            type: "ListProperty",
+            source: "{{ asFloat }}",
+            transformation: "float",
+        },
+        asString: {
+            type: "ListProperty",
+            source: "{{ asString }}",
+            transformation: "string",
+        },
+        asIri: {
+            type: "ListProperty",
+            source: "{{ asIri }}",
+            transformation: "iri",
+        },
+        asUrn: {
+            type: "ListProperty",
+            source: "{{ asUrn }}",
+            transformation: "urn",
+        },
+        asObject: {
+            type: "ListProperty",
+            source: "{{ asObject }}",
+            transformation: "object",
+        },
+        asJson: {
+            type: "ListProperty",
+            source: "{{ asJson }}",
+            transformation: "json",
+        },
+        asDatetime: {
+            type: "ListProperty",
+            source: "{{ asDatetime }}",
+            transformation: "datetime",
+        },
+        asDate: {
+            type: "ListProperty",
+            source: "{{ asDate }}",
+            transformation: "date",
+        },
+        asTime: {
+            type: "ListProperty",
+            source: "{{ asTime }}",
+            transformation: "time",
+        },
+        asGeometry: {
+            type: "ListProperty",
+            source: "{{ asGeometry }}",
+            transformation: "geometry",
+        },
+        asPoint: {
+            type: "ListProperty",
+            source: "{{ asPoint }}",
+            transformation: "point",
+        },
+        asMultipoint: {
+            type: "ListProperty",
+            source: "{{ asMultipoint }}",
+            transformation: "multipoint",
+        },
+        asLinestring: {
+            type: "ListProperty",
+            source: "{{ asLinestring }}",
+            transformation: "linestring",
+        },
+        asMultilinestring: {
+            type: "ListProperty",
+            source: "{{ asMultilinestring }}",
+            transformation: "multilinestring",
+        },
+        asPolygon: {
+            type: "ListProperty",
+            source: "{{ asPolygon }}",
+            transformation: "polygon",
+        },
+        asMultipolygon: {
+            type: "ListProperty",
+            source: "{{ asMultipolygon }}",
+            transformation: "multipolygon",
+        },
+    },
+}

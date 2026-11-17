@@ -1,0 +1,13 @@
+[
+    {
+        "code": "S1",
+        "reading": 21.5,
+        "tags": [
+            "a",
+            "b"
+        ],
+        "nested": {
+            "k": null
+        }
+    }
+]

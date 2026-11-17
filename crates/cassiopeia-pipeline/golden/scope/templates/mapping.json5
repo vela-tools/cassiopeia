@@ -1,0 +1,18 @@
+// Each scope template resolves on its own: one whose field is missing is left out, and a record
+// for which no template resolves gets no scope.
+{
+    version: "v4",
+    dataModel: "Station",
+    identity: {
+        entityName: "{{ code }}",
+    },
+    scope: [
+        "/{{ country }}",
+        "/{{ country }}/{{ city }}",
+    ],
+    attributes: {
+        name: {
+            source: "{{ name }}",
+        },
+    },
+}

@@ -1,0 +1,50 @@
+// A geometry transformation names the type the GeoProperty holds. Identity, promotion (a Point to
+// a MultiPoint) and unwrapping (a one-member multi-geometry to its member) are lossless and
+// automatic; a conversion that would discard coordinates is refused without a `convert`.
+{
+    version: "v4",
+    dataModel: "Site",
+    identity: {
+        entityName: "{{ code }}",
+    },
+    attributes: {
+        position: {
+            type: "GeoProperty",
+            source: [
+                "{{ lon }}",
+                "{{ lat }}",
+            ],
+            transformation: "point",
+        },
+        promoted: {
+            type: "GeoProperty",
+            source: "{{ point }}",
+            transformation: "multipoint",
+        },
+        route: {
+            type: "GeoProperty",
+            source: "{{ line }}",
+            transformation: "linestring",
+        },
+        routes: {
+            type: "GeoProperty",
+            source: "{{ line }}",
+            transformation: "multilinestring",
+        },
+        unwrapped: {
+            type: "GeoProperty",
+            source: "{{ onePolygon }}",
+            transformation: "polygon",
+        },
+        areas: {
+            type: "GeoProperty",
+            source: "{{ twoPolygons }}",
+            transformation: "multipolygon",
+        },
+        refused: {
+            type: "GeoProperty",
+            source: "{{ twoPolygons }}",
+            transformation: "polygon",
+        },
+    },
+}

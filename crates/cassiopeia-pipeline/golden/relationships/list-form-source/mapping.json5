@@ -1,0 +1,21 @@
+// A list-form `source` joins its parts into the target's name; a part that reads a missing field
+// gives no link.
+{
+    version: "v4",
+    dataModel: "Sensor",
+    identity: {
+        entityName: "{{ code }}",
+    },
+    attributes: {
+        building: {
+            type: "Relationship",
+            source: [
+                "B-",
+                "{{ building }}",
+            ],
+            target: {
+                entity: "Building",
+            },
+        },
+    },
+}

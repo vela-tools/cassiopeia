@@ -1,0 +1,20 @@
+// An attribute `expiresAt` (ETSI GS CIM 009 v1.9.1 clause 4.22) follows the `datetime` rules:
+// readable, unreadable with a warning, and missing.
+{
+    version: "v4",
+    dataModel: "Sensor",
+    identity: {
+        entityName: "{{ code }}",
+    },
+    attributes: {
+        alert: {
+            source: "{{ alert }}",
+            properties: {
+                expiresAt: {
+                    source: "{{ until }}",
+                    transformation: "datetime",
+                },
+            },
+        },
+    },
+}

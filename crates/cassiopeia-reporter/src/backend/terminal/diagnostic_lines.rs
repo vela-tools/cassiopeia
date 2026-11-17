@@ -27,7 +27,8 @@ const CONCISE_DETAIL_LINES: usize = 2;
 /// The concise form is a headline plus at most two unlabelled detail lines: what a reader needs to
 /// know without being told everything. The verbose form drops the headline's qualifier (it becomes
 /// a row of its own) and lists the cause chain ahead of every context field.
-pub(crate) fn diagnostic_lines(diagnostic: &Diagnostic, verbosity: Verbosity, rendering: Rendering) -> Vec<String> {
+#[must_use]
+pub fn diagnostic_lines(diagnostic: &Diagnostic, verbosity: Verbosity, rendering: Rendering) -> Vec<String> {
     let (headline, details) = match verbosity {
         Verbosity::Concise => (concise_headline(diagnostic, rendering), concise_details(diagnostic)),
         Verbosity::Full => (plain_headline(diagnostic, rendering), full_details(diagnostic)),

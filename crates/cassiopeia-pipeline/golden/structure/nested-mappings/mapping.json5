@@ -1,0 +1,45 @@
+// `mappings` builds an object member by member, nested two levels, and the attribute's
+// transformation converts the object it builds: kept under `object`, written as text under
+// `string`.
+{
+    version: "v4",
+    dataModel: "Building",
+    identity: {
+        entityName: "{{ code }}",
+    },
+    attributes: {
+        address: {
+            transformation: "object",
+            mappings: {
+                streetAddress: {
+                    source: "{{ street }}",
+                },
+                addressLocality: {
+                    source: "{{ city }}",
+                },
+                postal: {
+                    mappings: {
+                        code: {
+                            source: "{{ postcode }}",
+                            transformation: "integer",
+                        },
+                        country: {
+                            source: "SI",
+                        },
+                    },
+                },
+            },
+        },
+        addressText: {
+            transformation: "string",
+            mappings: {
+                streetAddress: {
+                    source: "{{ street }}",
+                },
+                addressLocality: {
+                    source: "{{ city }}",
+                },
+            },
+        },
+    },
+}

@@ -1,0 +1,23 @@
+// `iri` and `urn` write their value in its normal form, and drop text that is no absolute IRI or
+// no URN with a warning.
+{
+    version: "v4",
+    dataModel: "Sample",
+    identity: {
+        entityName: "{{ code }}",
+    },
+    attributes: {
+        homepage: {
+            source: "{{ homepage }}",
+            transformation: "iri",
+        },
+        building: {
+            source: "{{ building }}",
+            transformation: "urn",
+        },
+        label: {
+            source: "{{ label }}",
+            transformation: "string",
+        },
+    },
+}

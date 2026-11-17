@@ -1,0 +1,18 @@
+// A ListRelationship reads its source as identifiers separated by whitespace or commas. A token
+// with no letter or digit is skipped, and a source with no tokens left gives no attribute.
+{
+    version: "v4",
+    dataModel: "Stop",
+    identity: {
+        entityName: "{{ code }}",
+    },
+    attributes: {
+        servedBy: {
+            type: "ListRelationship",
+            source: "{{ lines }}",
+            target: {
+                entity: "Line",
+            },
+        },
+    },
+}

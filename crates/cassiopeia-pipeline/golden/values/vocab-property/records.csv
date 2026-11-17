@@ -1,0 +1,4 @@
+code,category,classification
+S1,HTTPS://Example.org/Vocab#Station,URN:Example:Class:A
+S2,station,https://example.org/class
+S3,,

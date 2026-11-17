@@ -1,0 +1,33 @@
+// Attributes that share one `observedAt` template rank the records of an entity by it: the
+// current state keeps the latest record, and a series keeps every observation.
+{
+    version: "v4",
+    dataModel: "Sensor",
+    identity: {
+        entityName: "{{ code }}",
+    },
+    attributes: {
+        reading: {
+            source: "{{ reading }}",
+            transformation: "float",
+            properties: {
+                observedAt: {
+                    source: "{{ time }}",
+                    transformation: "datetime",
+                },
+            },
+        },
+        status: {
+            source: "{{ status }}",
+            properties: {
+                observedAt: {
+                    source: "{{ time }}",
+                    transformation: "datetime",
+                },
+            },
+        },
+        name: {
+            source: "{{ name }}",
+        },
+    },
+}

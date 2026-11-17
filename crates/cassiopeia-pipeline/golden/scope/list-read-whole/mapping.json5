@@ -1,0 +1,15 @@
+// A scope template that reads a list whole gives one scope per item. An empty list and a null
+// item give none, and an item that is no text skips its record.
+{
+    version: "v4",
+    dataModel: "Station",
+    identity: {
+        entityName: "{{ code }}",
+    },
+    scope: "{{ areas }}",
+    attributes: {
+        name: {
+            source: "{{ name }}",
+        },
+    },
+}

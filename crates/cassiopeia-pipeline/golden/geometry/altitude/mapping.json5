@@ -1,0 +1,22 @@
+// A position's altitude is carried through by default; `altitude: "drop"` truncates every position
+// to a longitude and a latitude.
+{
+    version: "v4",
+    dataModel: "Site",
+    identity: {
+        entityName: "{{ code }}",
+    },
+    attributes: {
+        kept: {
+            type: "GeoProperty",
+            source: "{{ path }}",
+        },
+        dropped: {
+            type: "GeoProperty",
+            source: "{{ path }}",
+            geometry: {
+                altitude: "drop",
+            },
+        },
+    },
+}

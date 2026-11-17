@@ -1,0 +1,21 @@
+// A mapping reads run variables as `{{ vars.NAME }}`, beside the record. A per-input variable wins
+// over a global one of the same name, and a variable keeps its JSON type.
+{
+    version: "v4",
+    dataModel: "Station",
+    identity: {
+        entityName: "{{ vars.network }}-{{ code }}",
+    },
+    attributes: {
+        network: {
+            source: "{{ vars.network }}",
+        },
+        district: {
+            source: "{{ vars.districts[0] }}",
+        },
+        capacity: {
+            source: "{{ vars.capacity }}",
+            transformation: "integer",
+        },
+    },
+}

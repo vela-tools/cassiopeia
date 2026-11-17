@@ -1,0 +1,24 @@
+---
+source: crates/cassiopeia-pipeline/src/end_to_end/golden/mod.rs
+input_file: crates/cassiopeia-pipeline/golden/keys-without-effect/unread-keys/manifest.json5
+---
+[
+  {
+    "id": "urn:ngsi-ld:Sensor:S1",
+    "type": "Sensor",
+    "count": {
+      "value": "12",
+      "accuracy": "0.5"
+    },
+    "forecast": [
+      {
+        "value": 21.5,
+        "datasetId": "urn:ngsi-ld:dataset:model:gfs"
+      }
+    ],
+    "building": {
+      "object": "urn:ngsi-ld:Building:B1",
+      "objectType": "Building"
+    }
+  }
+]

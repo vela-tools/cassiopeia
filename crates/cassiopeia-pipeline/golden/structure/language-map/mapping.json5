@@ -1,0 +1,22 @@
+// A LanguageProperty declared with a `languageMap` reads one entry per language tag. An entry that
+// resolves to nothing is left out, and a map with no entry left gives no attribute.
+{
+    version: "v4",
+    dataModel: "Place",
+    identity: {
+        entityName: "{{ code }}",
+    },
+    attributes: {
+        description: {
+            type: "LanguageProperty",
+            languageMap: {
+                en: {
+                    source: "{{ en }}",
+                },
+                sl: {
+                    source: "{{ sl }}",
+                },
+            },
+        },
+    },
+}

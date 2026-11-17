@@ -1,0 +1,17 @@
+---
+source: crates/cassiopeia-pipeline/src/end_to_end/golden/mod.rs
+input_file: crates/cassiopeia-pipeline/golden/identity/literal-entity-name/manifest.json5
+---
+{
+  "diagnostics": [
+    {
+      "code": "resolver-records-merged",
+      "occurrences": 1,
+      "message": [
+        "! 2 records resolved to `urn:ngsi-ld:Headquarters:Main` and disagreed on `name`; one value of each disagreeing field was kept and the others were discarded",
+        "  ├─ entity type Headquarters",
+        "  ╰─ entities    urn:ngsi-ld:Headquarters:Main"
+      ]
+    }
+  ]
+}

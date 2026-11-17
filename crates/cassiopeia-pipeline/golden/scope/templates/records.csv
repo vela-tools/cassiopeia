@@ -1,0 +1,4 @@
+code,country,city,name
+S1,Slovenia,Ljubljana,Both
+S2,Slovenia,,Country only
+S3,,Maribor,City only

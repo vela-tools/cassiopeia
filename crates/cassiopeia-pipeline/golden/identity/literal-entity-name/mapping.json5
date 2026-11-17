@@ -1,0 +1,14 @@
+// A literal entity name reads no field, so every record names the same entity and the records
+// merge into one.
+{
+    version: "v4",
+    dataModel: "Headquarters",
+    identity: {
+        entityName: "Main",
+    },
+    attributes: {
+        name: {
+            source: "{{ name }}",
+        },
+    },
+}

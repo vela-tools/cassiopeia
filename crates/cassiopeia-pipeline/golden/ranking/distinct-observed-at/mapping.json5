@@ -1,0 +1,29 @@
+// Two attributes with two distinct `observedAt` templates: each record carries both times.
+{
+    version: "v4",
+    dataModel: "Sensor",
+    identity: {
+        entityName: "{{ code }}",
+    },
+    attributes: {
+        reading: {
+            source: "{{ reading }}",
+            transformation: "float",
+            properties: {
+                observedAt: {
+                    source: "{{ read_time }}",
+                    transformation: "datetime",
+                },
+            },
+        },
+        status: {
+            source: "{{ status }}",
+            properties: {
+                observedAt: {
+                    source: "{{ status_time }}",
+                    transformation: "datetime",
+                },
+            },
+        },
+    },
+}

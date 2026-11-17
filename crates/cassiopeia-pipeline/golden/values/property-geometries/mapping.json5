@@ -1,0 +1,41 @@
+// A Property accepts every geometry transformation and writes the GeoJSON geometry as its value.
+{
+    version: "v4",
+    dataModel: "Sample",
+    identity: {
+        entityName: "{{ code }}",
+    },
+    attributes: {
+        anyGeometry: {
+            source: "{{ point }}",
+            transformation: "geometry",
+        },
+        position: {
+            source: [
+                "{{ lon }}",
+                "{{ lat }}",
+            ],
+            transformation: "point",
+        },
+        stops: {
+            source: "{{ multipoint }}",
+            transformation: "multipoint",
+        },
+        route: {
+            source: "{{ linestring }}",
+            transformation: "linestring",
+        },
+        routes: {
+            source: "{{ multilinestring }}",
+            transformation: "multilinestring",
+        },
+        area: {
+            source: "{{ polygon }}",
+            transformation: "polygon",
+        },
+        areas: {
+            source: "{{ multipolygon }}",
+            transformation: "multipolygon",
+        },
+    },
+}

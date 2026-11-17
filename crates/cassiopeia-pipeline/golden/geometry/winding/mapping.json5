@@ -1,0 +1,26 @@
+// Rings are rewound to the right-hand rule by default (RFC 7946 clause 3.1.6), and an unclosed
+// ring is closed; `winding: "keep"` writes them as the source wound them.
+{
+    version: "v4",
+    dataModel: "Site",
+    identity: {
+        entityName: "{{ code }}",
+    },
+    attributes: {
+        rewound: {
+            type: "GeoProperty",
+            source: "{{ clockwise }}",
+        },
+        kept: {
+            type: "GeoProperty",
+            source: "{{ clockwise }}",
+            geometry: {
+                winding: "keep",
+            },
+        },
+        closed: {
+            type: "GeoProperty",
+            source: "{{ open }}",
+        },
+    },
+}

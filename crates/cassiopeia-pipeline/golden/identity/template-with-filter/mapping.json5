@@ -1,0 +1,14 @@
+// An entity name that filters its field goes through Tera. The filter renders for a record that
+// holds the field and fails for a record that lacks it, which skips that record.
+{
+    version: "v4",
+    dataModel: "Station",
+    identity: {
+        entityName: "{{ code | lower }}",
+    },
+    attributes: {
+        name: {
+            source: "{{ name }}",
+        },
+    },
+}

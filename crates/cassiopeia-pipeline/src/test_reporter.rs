@@ -1,9 +1,11 @@
 use cassiopeia_common::telemetry::run::TelemetrySnapshot;
-use cassiopeia_diagnostic::{code::diagnostic_code::DiagnosticCode, context_field::ContextField, diagnostic::Diagnostic, reason::Reason};
+use cassiopeia_diagnostic::{code::diagnostic_code::DiagnosticCode, context_field::ContextField, diagnostic::Diagnostic, reason::Reason, verbosity::Verbosity};
 use cassiopeia_reporter::{
+    backend::terminal::diagnostic_lines::diagnostic_lines,
     guard::StageGuard,
     reporter::{DiagnosticSink, MessageLog, ProgressReporter, ProgressStage, RunSummary, StageReporter},
 };
+use cassiopeia_terminal_style::rendering::Rendering;
 use execution_time::ExecutionTime;
 use std::sync::{Mutex, PoisonError};
 
@@ -22,6 +24,9 @@ pub(crate) struct RecordedDiagnostic {
     pub(crate) defining: Vec<ContextField>,
     /// The context that describes one occurrence of it.
     pub(crate) incidental: Vec<ContextField>,
+    /// The lines a terminal prints for it in full verbosity, without colour: the headline, the cause
+    /// chain and every context field.
+    pub(crate) rendered: Vec<String>,
 }
 
 /// A reporter that records the diagnostics sent to it and discards everything else.
@@ -64,6 +69,7 @@ impl DiagnosticSink for RecordingReporter {
             // The diagnostic is only borrowed for the call, so its context is copied to outlive it.
             defining: diagnostic.defining().to_vec(),
             incidental: diagnostic.incidental().clone(),
+            rendered: diagnostic_lines(diagnostic, Verbosity::Full, Rendering::Plain),
         });
     }
 }

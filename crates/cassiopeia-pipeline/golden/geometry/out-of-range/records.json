@@ -1,0 +1,30 @@
+[
+    {
+        "code": "G1",
+        "name": "Projected",
+        "location": {
+            "type": "Point",
+            "coordinates": [
+                2600.5,
+                341870.2
+            ]
+        }
+    },
+    {
+        "code": "G2",
+        "name": "Beyond the pole",
+        "location": {
+            "type": "LineString",
+            "coordinates": [
+                [
+                    16.37,
+                    48.2
+                ],
+                [
+                    16.37,
+                    91
+                ]
+            ]
+        }
+    }
+]

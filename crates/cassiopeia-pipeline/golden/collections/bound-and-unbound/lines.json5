@@ -1,0 +1,13 @@
+// The mapping bound to the `network.lines` collection.
+{
+    version: "v4",
+    dataModel: "Line",
+    identity: {
+        entityName: "{{ id }}",
+    },
+    attributes: {
+        colour: {
+            source: "{{ colour }}",
+        },
+    },
+}

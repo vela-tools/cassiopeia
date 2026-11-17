@@ -1,0 +1,9 @@
+{
+    version: "v1",
+    inputs: [
+        {
+            source: "stations.csv",
+            mapping: "mapping.json5",
+        },
+    ],
+}

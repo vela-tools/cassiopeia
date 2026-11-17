@@ -1,0 +1,27 @@
+name: snapshots
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: snapshots-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  snapshots:
+    name: cargo insta test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/native-dependencies
+      - run: rustup toolchain install
+      - uses: Swatinem/rust-cache@v2
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-insta
+      - run: cargo insta test --check --unreferenced=reject -p cassiopeia-pipeline --all-features -- --locked end_to_end::golden::

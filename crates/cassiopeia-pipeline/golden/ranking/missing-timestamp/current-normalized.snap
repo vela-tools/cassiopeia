@@ -1,0 +1,24 @@
+---
+source: crates/cassiopeia-pipeline/src/end_to_end/golden/mod.rs
+input_file: crates/cassiopeia-pipeline/golden/ranking/missing-timestamp/manifest.json5
+---
+[
+  {
+    "id": "urn:ngsi-ld:Sensor:S1",
+    "type": "Sensor",
+    "reading": {
+      "type": "Property",
+      "value": 21.5,
+      "observedAt": "2026-03-01T11:00:00Z"
+    },
+    "status": {
+      "type": "Property",
+      "value": "ok",
+      "observedAt": "2026-03-01T11:00:00Z"
+    },
+    "name": {
+      "type": "Property",
+      "value": "Timed"
+    }
+  }
+]

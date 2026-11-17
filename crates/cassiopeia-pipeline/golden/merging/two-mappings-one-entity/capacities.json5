@@ -1,0 +1,14 @@
+// The second of two mappings that write the same entity: it maps the capacity.
+{
+    version: "v4",
+    dataModel: "Station",
+    identity: {
+        entityName: "{{ code }}",
+    },
+    attributes: {
+        capacity: {
+            source: "{{ capacity }}",
+            transformation: "integer",
+        },
+    },
+}

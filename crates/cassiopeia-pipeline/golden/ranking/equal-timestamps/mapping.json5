@@ -1,0 +1,32 @@
+// Two records of one entity observed at the same instant.
+{
+    version: "v4",
+    dataModel: "Sensor",
+    identity: {
+        entityName: "{{ code }}",
+    },
+    attributes: {
+        reading: {
+            source: "{{ reading }}",
+            transformation: "float",
+            properties: {
+                observedAt: {
+                    source: "{{ time }}",
+                    transformation: "datetime",
+                },
+            },
+        },
+        status: {
+            source: "{{ status }}",
+            properties: {
+                observedAt: {
+                    source: "{{ time }}",
+                    transformation: "datetime",
+                },
+            },
+        },
+        name: {
+            source: "{{ name }}",
+        },
+    },
+}

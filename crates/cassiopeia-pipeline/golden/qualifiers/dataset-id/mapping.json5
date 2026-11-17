@@ -1,0 +1,20 @@
+// A `datasetId` is a URI (ETSI GS CIM 009 v1.9.1 clause 4.5.5). The case shows a URN, an absolute
+// URI that is no URN, `@none`, text that is no URI, and a missing value.
+{
+    version: "v4",
+    dataModel: "Sensor",
+    identity: {
+        entityName: "{{ code }}",
+    },
+    attributes: {
+        forecast: {
+            source: "{{ forecast }}",
+            transformation: "float",
+            properties: {
+                datasetId: {
+                    source: "{{ dataset }}",
+                },
+            },
+        },
+    },
+}

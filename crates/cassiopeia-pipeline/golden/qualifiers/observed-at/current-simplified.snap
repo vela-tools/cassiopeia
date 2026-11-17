@@ -1,0 +1,24 @@
+---
+source: crates/cassiopeia-pipeline/src/end_to_end/golden/mod.rs
+input_file: crates/cassiopeia-pipeline/golden/qualifiers/observed-at/manifest.json5
+---
+[
+  {
+    "id": "urn:ngsi-ld:Sensor:S1",
+    "type": "Sensor",
+    "reading": 21.5,
+    "status": "ok"
+  },
+  {
+    "id": "urn:ngsi-ld:Sensor:S2",
+    "type": "Sensor",
+    "reading": 22.5,
+    "status": "ok"
+  },
+  {
+    "id": "urn:ngsi-ld:Sensor:S3",
+    "type": "Sensor",
+    "reading": 23.5,
+    "status": "ok"
+  }
+]

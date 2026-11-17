@@ -1,0 +1,6 @@
+code,forecast,dataset
+S1,21.5,urn:ngsi-ld:dataset:model:gfs
+S2,22.5,https://example.org/datasets/gfs
+S3,23.5,@none
+S4,24.5,gfs model
+S5,25.5,

@@ -1,0 +1,30 @@
+// `observedAt` makes an attribute an observation. Read with or without `transformation: "datetime"`,
+// a readable time is written as the qualifier; an unreadable one leaves the attribute without it
+// and warns, and a missing one leaves it without the qualifier quietly.
+{
+    version: "v4",
+    dataModel: "Sensor",
+    identity: {
+        entityName: "{{ code }}",
+    },
+    attributes: {
+        reading: {
+            source: "{{ reading }}",
+            transformation: "float",
+            properties: {
+                observedAt: {
+                    source: "{{ time }}",
+                    transformation: "datetime",
+                },
+            },
+        },
+        status: {
+            source: "{{ status }}",
+            properties: {
+                observedAt: {
+                    source: "{{ time }}",
+                },
+            },
+        },
+    },
+}

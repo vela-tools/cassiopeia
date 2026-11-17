@@ -1,0 +1,21 @@
+---
+source: crates/cassiopeia-pipeline/src/end_to_end/golden/mod.rs
+input_file: crates/cassiopeia-pipeline/golden/expiry/entity-expires-at/manifest.json5
+---
+[
+  {
+    "id": "urn:ngsi-ld:Ticket:T1",
+    "type": "Ticket",
+    "name": "Readable"
+  },
+  {
+    "id": "urn:ngsi-ld:Ticket:T2",
+    "type": "Ticket",
+    "name": "Unreadable"
+  },
+  {
+    "id": "urn:ngsi-ld:Ticket:T3",
+    "type": "Ticket",
+    "name": "Missing"
+  }
+]

@@ -1,0 +1,17 @@
+[
+    {
+        "code": "S1",
+        "text": "plain",
+        "number": 12.5,
+        "flag": true,
+        "list": [
+            "BS",
+            "IN"
+        ],
+        "object": {
+            "k": 1
+        },
+        "empty": "",
+        "absent": null
+    }
+]

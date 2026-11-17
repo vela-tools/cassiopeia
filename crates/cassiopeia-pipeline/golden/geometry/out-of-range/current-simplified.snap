@@ -1,0 +1,16 @@
+---
+source: crates/cassiopeia-pipeline/src/end_to_end/golden/mod.rs
+input_file: crates/cassiopeia-pipeline/golden/geometry/out-of-range/manifest.json5
+---
+[
+  {
+    "id": "urn:ngsi-ld:Site:G1",
+    "type": "Site",
+    "name": "Projected"
+  },
+  {
+    "id": "urn:ngsi-ld:Site:G2",
+    "type": "Site",
+    "name": "Beyond the pole"
+  }
+]

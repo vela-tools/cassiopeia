@@ -1,0 +1,100 @@
+---
+source: crates/cassiopeia-pipeline/src/end_to_end/golden/mod.rs
+input_file: crates/cassiopeia-pipeline/golden/geometry/winding/manifest.json5
+---
+[
+  {
+    "id": "urn:ngsi-ld:Site:G1",
+    "type": "Site",
+    "rewound": {
+      "type": "GeoProperty",
+      "value": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [
+              14.5,
+              46.0
+            ],
+            [
+              14.6,
+              46.0
+            ],
+            [
+              14.6,
+              46.1
+            ],
+            [
+              14.5,
+              46.1
+            ],
+            [
+              14.5,
+              46.0
+            ]
+          ]
+        ]
+      }
+    },
+    "kept": {
+      "type": "GeoProperty",
+      "value": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [
+              14.5,
+              46.0
+            ],
+            [
+              14.5,
+              46.1
+            ],
+            [
+              14.6,
+              46.1
+            ],
+            [
+              14.6,
+              46.0
+            ],
+            [
+              14.5,
+              46.0
+            ]
+          ]
+        ]
+      }
+    },
+    "closed": {
+      "type": "GeoProperty",
+      "value": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [
+              14.5,
+              46.0
+            ],
+            [
+              14.6,
+              46.0
+            ],
+            [
+              14.6,
+              46.1
+            ],
+            [
+              14.5,
+              46.1
+            ],
+            [
+              14.5,
+              46.0
+            ]
+          ]
+        ]
+      }
+    }
+  }
+]

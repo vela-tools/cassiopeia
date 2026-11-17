@@ -1,0 +1,15 @@
+// An entity `expiresAt` is written when it reads as an instant. Text that reads as none costs the
+// entity its expiry with a warning, and a missing field gives no expiry without one.
+{
+    version: "v4",
+    dataModel: "Ticket",
+    identity: {
+        entityName: "{{ code }}",
+    },
+    expiresAt: "{{ valid_until }}",
+    attributes: {
+        name: {
+            source: "{{ name }}",
+        },
+    },
+}

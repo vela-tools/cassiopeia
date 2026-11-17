@@ -2,6 +2,7 @@ use crate::{
     error::PipelineError,
     observer::{PipelineResult, RunObserver},
     pipeline::{Pipeline, ValidationOverrides},
+    pipeline_config::ExtractionParallelism,
     test_engine::{SHUTDOWN, engine_config},
     test_reporter::{RecordedDiagnostic, RecordingReporter},
 };
@@ -238,17 +239,46 @@ fn attempt_end_to_end(store: StoreKind, inputs: &[RunInput], entity_types: &[&st
 /// Runs a pipeline over the `declared` manifest inputs, with its own files under `root`, as `setup`
 /// says, and returns how the run ended, or failed to be built, with what it reported and wrote.
 fn run_declared(store: StoreKind, root: &Path, declared: &[String], setup: &RunSetup<'_>) -> (Result<(), PipelineError>, RunOutcome) {
-    let schemas_folder = schemas_folder(root, setup.schemas);
-    let output = root.join("out");
+    let folders = RunFolders {
+        schemas: schemas_folder(root, setup.schemas),
+        cursors: setup.cursors.map_or_else(|| root.join("cursors"), Path::to_path_buf),
+        output: root.join("out"),
+    };
 
     let schedule = setup.schedule.map(|schedule| format!(", schedule: {schedule}")).unwrap_or_default();
     let output_object = match setup.output {
-        RunOutput::Files(output_extra) => format!(r#"{{ target: "file", directory: "{}"{output_extra} }}"#, output.display()),
+        RunOutput::Files(output_extra) => format!(r#"{{ target: "file", directory: "{}"{output_extra} }}"#, folders.output.display()),
         RunOutput::Declared(object) => object.to_owned(),
     };
     let document = format!(r#"{{ version: "v1", inputs: [{}], output: {output_object}{schedule} }}"#, declared.join(", "));
     let manifest = Manifest::from_json5(&document, Path::new("manifest.json5")).unwrap();
 
+    run_manifest(store, &manifest, folders, ExtractionParallelism::Parallel, setup.shutdown)
+}
+
+/// The folders a run keeps its own files in.
+pub(crate) struct RunFolders {
+    /// The schemas its entities are validated against.
+    pub(crate) schemas: PathBuf,
+    /// The folder it keeps its cursors in.
+    pub(crate) cursors: PathBuf,
+    /// The folder its manifest's output writes entities into, read back once the run ends.
+    pub(crate) output: PathBuf,
+}
+
+/// Runs a pipeline over `manifest` on `store`, with its own files in `folders`, extracting records
+/// as `extraction` says, stopped by `shutdown`, and returns how the run ended, or failed to be
+/// built, with what it reported and wrote.
+///
+/// The run attaches no `@context` unless the manifest's output declares one.
+pub(crate) fn run_manifest(
+    store: StoreKind,
+    manifest: &Manifest,
+    folders: RunFolders,
+    extraction: ExtractionParallelism,
+    shutdown: &'static AtomicBool,
+) -> (Result<(), PipelineError>, RunOutcome) {
+    let RunFolders { schemas, cursors, output } = folders;
     let reporter: &'static RecordingReporter = Box::leak(Box::new(RecordingReporter::new()));
     let totals = Arc::new(WarningTotals::default());
     let observer: Arc<dyn RunObserver> = Arc::clone(&totals) as Arc<dyn RunObserver>;
@@ -256,10 +286,11 @@ fn run_declared(store: StoreKind, root: &Path, declared: &[String], setup: &RunS
     engine.entity_store = store;
     engine.relationship_store = store;
     engine.context_mode = AtContextMode::None;
-    engine.schemas_folder = schemas_folder;
-    engine.cursors_folder = setup.cursors.map_or_else(|| root.join("cursors"), Path::to_path_buf);
+    engine.extraction = extraction;
+    engine.schemas_folder = schemas;
+    engine.cursors_folder = cursors;
     let built = Pipeline::from_manifest(
-        &manifest,
+        manifest,
         ValidationOverrides {
             report_path: None,
             mode: None,
@@ -269,7 +300,7 @@ fn run_declared(store: StoreKind, root: &Path, declared: &[String], setup: &RunS
         serde_json::Map::new(),
         engine,
         reporter as &'static dyn Reporter,
-        setup.shutdown,
+        shutdown,
         observer,
     );
     // The pipeline holds the run's cursor stores until it is dropped, at the end of this block.

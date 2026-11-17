@@ -1,0 +1,17 @@
+---
+source: crates/cassiopeia-pipeline/src/end_to_end/golden/mod.rs
+input_file: crates/cassiopeia-pipeline/golden/identity/template-with-filter/manifest.json5
+---
+{
+  "diagnostics": [
+    {
+      "code": "expander-urn-ungeneratable",
+      "occurrences": 1,
+      "message": [
+        "! The identity.entityName template in the mapping document at '[case]/mapping.json5' could not be resolved",
+        "  ├─ caused by   `{{ code | lower }}` reads `code`, which this record does not have: guard it with `{% if code %}…{% endif %}` or default it with `code | default(value=…)`",
+        "  ╰─ caused by   Tera: Invalid type for the value, expected `string` but got `undefined`"
+      ]
+    }
+  ]
+}

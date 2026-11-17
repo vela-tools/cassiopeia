@@ -1,0 +1,4 @@
+code,homepage,building,label
+S1,HTTP://Example.org:80,URN:NGSI-LD:Building:B-12,12
+S2,/a/b,not a urn,text
+S3,,,
