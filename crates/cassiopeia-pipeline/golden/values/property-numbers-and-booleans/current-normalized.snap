@@ -1,0 +1,58 @@
+---
+source: crates/cassiopeia-pipeline/src/end_to_end/golden/mod.rs
+input_file: crates/cassiopeia-pipeline/golden/values/property-numbers-and-booleans/manifest.json5
+---
+[
+  {
+    "id": "urn:ngsi-ld:Sample:S1",
+    "type": "Sample",
+    "count": {
+      "type": "Property",
+      "value": 12
+    },
+    "level": {
+      "type": "Property",
+      "value": 21.5
+    },
+    "active": {
+      "type": "Property",
+      "value": true
+    }
+  },
+  {
+    "id": "urn:ngsi-ld:Sample:S2",
+    "type": "Sample",
+    "count": {
+      "type": "Property",
+      "value": 12
+    },
+    "level": {
+      "type": "Property",
+      "value": 1.5
+    },
+    "active": {
+      "type": "Property",
+      "value": false
+    }
+  },
+  {
+    "id": "urn:ngsi-ld:Sample:S3",
+    "type": "Sample",
+    "count": {
+      "type": "Property",
+      "value": 7
+    }
+  },
+  {
+    "id": "urn:ngsi-ld:Sample:S4",
+    "type": "Sample",
+    "active": {
+      "type": "Property",
+      "value": false
+    }
+  },
+  {
+    "id": "urn:ngsi-ld:Sample:S5",
+    "type": "Sample"
+  }
+]

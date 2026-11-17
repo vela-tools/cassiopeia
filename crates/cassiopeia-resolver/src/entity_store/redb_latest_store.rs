@@ -1,40 +1,38 @@
 use crate::{
     entity_store::{
         error::Result,
-        mapping_expiry::{MappingExpiry, join},
-        merge::deep_merge,
-        record_timestamp::RecordTimestamp,
+        latest_slot::{IncomingRecord, LatestSlot},
+        mapping_expiry::join,
+        mapping_reads::MappingReads,
         redb_database::RedbDatabase,
         redb_key::{collect_ids, distinct_id_count, for_each_id_chunk, make_prefix, prefix_end},
         redb_scope::{PendingScopes, SCOPES_TABLE, read_scope},
-        store::{AssembledFragment, AssembledFragments, EntityStore, FragmentWrite, StoredUnit},
-        stored_fragment::StoredFragment,
-        supersession::{SlotRanking, Supersession},
+        store::{AssembledFragments, EntityStore, FragmentWrite, StoredUnit},
+        stored_slot::StoredSlot,
     },
-    field_path::FieldPath,
     mapping_id::MappingId,
     store_action::StoreAction,
     store_write_strategy::StoreWriteStrategy,
 };
 use ahash::AHashMap;
 use cassiopeia_mapping::source_reads::SourceReads;
-use chrono::{DateTime, Utc};
 use redb::{Durability, ReadableDatabase, ReadableTable, TableDefinition};
-use serde_json::Value;
 use smallvec::SmallVec;
-use std::{collections::hash_map::Entry, num::NonZeroU64};
+use std::collections::hash_map::Entry;
 use urn_rs::Urn;
 
 const DATA_TABLE: TableDefinition<&[u8], &[u8]> = TableDefinition::new("data");
 
 /// Persistent disk-backed current-state entity store using [redb](https://docs.rs/redb).
 ///
-/// Each mapping's retained fragment for a base id lives under the key `{base_id}\x1F{mapping_id_be}`.
-/// A batch reads each key once, applies the current-state rule (a temporal mapping keeps the
-/// greatest-`observedAt` record, a static mapping deep-merges), and commits once. Assembly prefix-scans
-/// a base id's keys into one joined emit-unit, joining the expiry each key carries into the entity's.
-/// Durability is `Durability::None`: the database lives in
-/// a temporary directory cleaned up at the end of the run, so fsync would be pure waste.
+/// Each mapping's [`LatestSlot`] for a base id lives under the key `{base_id}\x1F{mapping_id_be}`,
+/// encoded with `rmp-serde`. A batch reads each key once, folds the batch's records into the slot by
+/// the current-state rule (a temporal mapping keeps the greatest-`observedAt` record, a static mapping
+/// merges in source order), and commits once. The whole batch is in hand, so every slot it touched is
+/// sealed before it is written back. Assembly prefix-scans a base id's keys into one joined emit-unit,
+/// joining the expiry each key carries into the entity's. Durability is `Durability::None`: the
+/// database lives in a temporary directory cleaned up at the end of the run, so fsync would be pure
+/// waste.
 #[derive(Debug, Clone)]
 pub struct RedbLatestEntityStore {
     db: RedbDatabase,
@@ -60,25 +58,12 @@ impl RedbLatestEntityStore {
     }
 }
 
-/// Coalesced in-memory state for one `(base id, mapping)` key within a batch.
-struct LatestEntry {
-    mapping_id: MappingId,
-    /// What the key holds so far, seeded from disk; `None` until a record has landed on it.
-    retained: Option<RetainedRecord>,
-}
-
-/// The record a current-state key retains, and how many records it has absorbed.
-struct RetainedRecord {
-    data: Value,
-    /// How the key ranks a temporal mapping's records, across every batch.
-    ranking: SlotRanking,
-    /// How many of the mapping's records resolved to the id, across every batch.
-    records: NonZeroU64,
-    /// The earliest field on which a merged record disagreed with the retained one, across every
-    /// batch.
-    conflict: Option<FieldPath>,
-    /// The entity `expiresAt` the mapping's records contribute, across every batch.
-    expires_at: MappingExpiry,
+/// One `(base id, mapping)` key's slot within a batch, with the read set of the mapping it seals with.
+struct BatchSlot<'a> {
+    /// The key's slot, seeded from disk; `None` until a record has landed on it.
+    slot: Option<LatestSlot>,
+    /// The read set of the mapping, from the batch's writes.
+    reads: &'a SourceReads,
 }
 
 impl EntityStore for RedbLatestEntityStore {
@@ -95,7 +80,9 @@ impl EntityStore for RedbLatestEntityStore {
             return Ok(());
         }
 
-        let mut grouped: AHashMap<Vec<u8>, LatestEntry> = AHashMap::new();
+        // A batch touches at most one key per write, so sizing the map for every write up front spares
+        // it the rehashes that would move each slot several times as it grows.
+        let mut grouped: AHashMap<Vec<u8>, BatchSlot<'_>> = AHashMap::with_capacity(fragments.len());
         let mut pending_scopes = PendingScopes::default();
 
         let mut write_txn = self
@@ -115,6 +102,8 @@ impl EntityStore for RedbLatestEntityStore {
                 let FragmentWrite {
                     base_id,
                     source_data,
+                    position,
+                    batch,
                     mapping_id,
                     temporal,
                     timestamp,
@@ -128,40 +117,34 @@ impl EntityStore for RedbLatestEntityStore {
                     Entry::Vacant(vacant) => {
                         // Seed the accumulator from disk once per key.
                         let existing = data_table.get(vacant.key().as_slice()).map_err(|e| self.db.err(e.into(), StoreAction::Read))?;
-                        let retained = match existing {
-                            Some(guard) => {
-                                let stored: StoredFragment = rmp_serde::from_slice(guard.value())?;
-                                Some(RetainedRecord {
-                                    data: stored.data,
-                                    ranking: stored.ranking,
-                                    records: stored.records,
-                                    conflict: stored.conflict,
-                                    expires_at: stored.expires_at,
-                                })
-                            }
+                        let slot = match existing {
+                            Some(guard) => Some(LatestSlot::from_stored(rmp_serde::from_slice::<StoredSlot>(guard.value())?, batch)),
                             None => None,
                         };
-                        vacant.insert(LatestEntry { mapping_id, retained })
+                        vacant.insert(BatchSlot { slot, reads })
                     }
                 };
 
-                apply_write(entry, source_data, temporal, timestamp, expires_at, reads);
+                let incoming = IncomingRecord {
+                    data: source_data,
+                    position,
+                    batch,
+                    timestamp,
+                    expires_at,
+                };
+                match &mut entry.slot {
+                    Some(slot) => slot.absorb(incoming, reads),
+                    None => entry.slot = Some(LatestSlot::new(incoming, temporal)),
+                }
                 if let Some(scope) = scope {
                     pending_scopes.add(&base_id, scope);
                 }
             }
 
-            for (key, entry) in grouped {
-                if let Some(retained) = entry.retained {
-                    let stored = StoredFragment {
-                        mapping_id: entry.mapping_id,
-                        data: retained.data,
-                        ranking: retained.ranking,
-                        records: retained.records,
-                        conflict: retained.conflict,
-                        expires_at: retained.expires_at,
-                    };
-                    let bytes = rmp_serde::to_vec(&stored)?;
+            for (key, BatchSlot { slot, reads }) in grouped {
+                if let Some(slot) = slot {
+                    // Every record of the batch is in, so the slot is written back with them merged.
+                    let bytes = rmp_serde::to_vec(&slot.into_stored(reads))?;
                     data_table
                         .insert(key.as_slice(), bytes.as_slice())
                         .map_err(|e| self.db.err(e.into(), StoreAction::Insert))?;
@@ -183,7 +166,7 @@ impl EntityStore for RedbLatestEntityStore {
         for_each_id_chunk(&self.db, DATA_TABLE, chunk_size, callback)
     }
 
-    fn assemble_entity(&self, base_id: &Urn) -> Result<AssembledFragments> {
+    fn assemble_entity(&self, base_id: &Urn, _mappings: &dyn MappingReads) -> Result<AssembledFragments> {
         let prefix = make_prefix(base_id);
         let end = prefix_end(&prefix);
 
@@ -196,21 +179,18 @@ impl EntityStore for RedbLatestEntityStore {
         let scope_table = read_txn.open_table(SCOPES_TABLE).map_err(|e| self.db.err(e.into(), StoreAction::OpenTable))?;
 
         let mut unit: StoredUnit = SmallVec::new();
-        let mut expiries: SmallVec<[MappingExpiry; 1]> = SmallVec::new();
+        let mut expiries = SmallVec::<[_; 1]>::new();
         for entry in data_table
             .range(prefix.as_slice()..end.as_slice())
             .map_err(|e| self.db.err(e.into(), StoreAction::Iterate))?
         {
-            let (_key, value) = entry.map_err(|e| self.db.err(e.into(), StoreAction::Iterate))?;
-            let stored: StoredFragment = rmp_serde::from_slice(value.value())?;
-            expiries.push(stored.expires_at);
-            unit.push(AssembledFragment {
-                mapping_id: stored.mapping_id,
-                data: stored.data,
-                records: stored.records,
-                conflict: stored.conflict,
-                unresolvable_discards: stored.ranking.unresolvable_discards(),
-            });
+            let (key, value) = entry.map_err(|e| self.db.err(e.into(), StoreAction::Iterate))?;
+            // Every batch writes the slots it touched back with their records merged, so a stored slot
+            // needs no read set to finish.
+            let stored: StoredSlot = rmp_serde::from_slice(value.value())?;
+            let (fragment, expiry) = stored.into_fragment(mapping_id_of(key.value()));
+            expiries.push(expiry);
+            unit.push(fragment);
         }
 
         // The prefix scan already returns each mapping in big-endian id order, so the joined unit is
@@ -272,43 +252,13 @@ impl Drop for RedbLatestEntityStore {
     }
 }
 
-/// Applies one write to its coalesced accumulator under the current-state rule, counting it among the
-/// records the mapping resolved to the id.
-fn apply_write(
-    entry: &mut LatestEntry,
-    source_data: Value,
-    temporal: bool,
-    timestamp: RecordTimestamp,
-    expires_at: Option<DateTime<Utc>>,
-    reads: &SourceReads,
-) {
-    let Some(retained) = &mut entry.retained else {
-        entry.retained = Some(RetainedRecord {
-            data: source_data,
-            ranking: SlotRanking::first(timestamp),
-            records: NonZeroU64::MIN,
-            conflict: None,
-            expires_at: MappingExpiry::first(expires_at),
-        });
-        return;
-    };
-
-    retained.records = retained.records.saturating_add(1);
-    if temporal {
-        // A temporal mapping's records are observations of one id: keep the latest, expiry and all.
-        match retained.ranking.rank(timestamp) {
-            Supersession::Supersedes => {
-                retained.data = source_data;
-                retained.expires_at.supersede(expires_at);
-            }
-            Supersession::Stale => {}
-        }
-    } else {
-        // A static mapping's records refine one entity: merge them, remembering where they disagreed.
-        let conflict = deep_merge(&mut retained.data, &source_data, reads);
-        retained.conflict = FieldPath::earliest(retained.conflict.take(), conflict);
-        retained.expires_at.refine(expires_at);
-    }
+/// The mapping id a key ends in: the four big-endian bytes after the base id and its separator.
+fn mapping_id_of(key: &[u8]) -> MappingId {
+    let id = key
+        .get(key.len().saturating_sub(4)..)
+        .and_then(|bytes| <[u8; 4]>::try_from(bytes).ok())
+        .map_or(0, u32::from_be_bytes);
+    MappingId::new(id)
 }
 
 #[cfg(test)]
@@ -324,6 +274,7 @@ mod tests {
             },
         },
         mapping_id::MappingId,
+        test_order::{ReadsEverything, next_batch, next_position},
     };
     use cassiopeia_mapping::observed_at::ObservedAt;
     use pretty_assertions::assert_eq;
@@ -353,6 +304,8 @@ mod tests {
         FragmentWrite {
             base_id: base_id.clone(),
             source_data: data,
+            position: next_position(),
+            batch: next_batch(),
             mapping_id: MappingId::new(mapping),
             temporal,
             timestamp: RecordTimestamp::from(observed_at.map(ObservedAt::new)),
@@ -373,7 +326,7 @@ mod tests {
             .store_fragment_batch(vec![write(&id, geometry, 1, false, None), write(&id, state, 2, false, None)])
             .unwrap();
 
-        let assembled = store.assemble_entity(&id).unwrap();
+        let assembled = store.assemble_entity(&id, &ReadsEverything).unwrap();
         assert_eq!(assembled.units.len(), 1);
         assert_eq!(assembled.units[0].len(), 2);
         assert_eq!(store.count(), 1);
@@ -394,7 +347,7 @@ mod tests {
         store.store_fragment(write(&id, late.clone(), 1, true, Some("2026-04-03T22:10:20Z"))).unwrap();
         store.store_fragment(write(&id, middle, 1, true, Some("2026-04-03T22:05:20Z"))).unwrap();
 
-        let assembled = store.assemble_entity(&id).unwrap();
+        let assembled = store.assemble_entity(&id, &ReadsEverything).unwrap();
         assert_eq!(assembled.units[0].len(), 1);
         assert_eq!(assembled.units[0][0].data, late);
     }
@@ -416,7 +369,7 @@ mod tests {
             .store_fragment(write(&id, json!({"on": false}), 2, true, Some("2026-04-03T21:00:20Z")))
             .unwrap();
 
-        let unit = &store.assemble_entity(&id).unwrap().units[0];
+        let unit = &store.assemble_entity(&id, &ReadsEverything).unwrap().units[0];
         let counts: Vec<u64> = unit.iter().map(|fragment| fragment.records.get()).collect();
         assert_eq!(counts, [3, 2]);
         assert_eq!(unit[0].data, json!({"a": 1, "b": 2, "c": 3}));
@@ -436,7 +389,7 @@ mod tests {
         store.store_fragment(write(&id, json!({"c": 1}), 2, false, None)).unwrap();
         store.store_fragment(write(&id, json!({"c": 1}), 2, false, None)).unwrap();
 
-        let unit = &store.assemble_entity(&id).unwrap().units[0];
+        let unit = &store.assemble_entity(&id, &ReadsEverything).unwrap().units[0];
         let conflicts: Vec<Option<String>> = unit.iter().map(|fragment| fragment.conflict.as_ref().map(ToString::to_string)).collect();
         assert_eq!(conflicts, [Some("a".to_string()), None]);
         assert_eq!(unit[0].data, json!({"a": 1, "z": 1, "b": 2}));
@@ -450,7 +403,7 @@ mod tests {
         store.store_fragment(write(&id, json!({"a": 1}), 1, false, None)).unwrap();
         store.store_fragment(write(&id, json!({"b": 2}), 1, false, None)).unwrap();
 
-        let assembled = store.assemble_entity(&id).unwrap();
+        let assembled = store.assemble_entity(&id, &ReadsEverything).unwrap();
         assert_eq!(assembled.units[0][0].data, json!({"a": 1, "b": 2}));
     }
 }

@@ -1,9 +1,10 @@
 use crate::{
-    entity_store::{error::Result, record_timestamp::RecordTimestamp},
+    entity_store::{error::Result, mapping_reads::MappingReads, record_timestamp::RecordTimestamp, write_batch::WriteBatch},
     field_path::FieldPath,
     mapping_id::MappingId,
     store_write_strategy::StoreWriteStrategy,
 };
+use cassiopeia_ir::source_position::SourcePosition;
 use cassiopeia_mapping::source_reads::SourceReads;
 use cassiopeia_ngsi_ld::entity::scope::NgsiLdScope;
 use chrono::{DateTime, Utc};
@@ -28,6 +29,11 @@ pub struct FragmentWrite<'a> {
     pub base_id: Urn,
     /// The source record the fragment was expanded from.
     pub source_data: Value,
+    /// Where that record stands in the run's sources. Writes reach a store in whatever order the
+    /// resolver's threads finish them, so a store that keeps records in order keeps them in this one.
+    pub position: SourcePosition,
+    /// The batch the write belongs to: every write of an earlier batch reached the store before it.
+    pub batch: WriteBatch,
     /// The interned id of the mapping that produced the fragment.
     pub mapping_id: MappingId,
     /// Whether the producing mapping is temporal (declares an `observedAt`).
@@ -139,22 +145,28 @@ pub trait EntityStore: Debug + Send + Sync + 'static {
 
     /// Iterates over all stored base URNs, calling `callback` with each chunk of ids.
     ///
-    /// The default implementation materializes every id first. Disk-backed stores override it to
-    /// stream chunks directly off a read transaction.
+    /// The default implementation materializes every id first, in the order
+    /// [`get_entity_ids`](Self::get_entity_ids) lists them, and moves them into the chunks. A store
+    /// that can list its ids without holding them all overrides it to stream chunks directly off a
+    /// read transaction.
     ///
     /// # Errors
     ///
     /// Returns [`EntityStoreError`](crate::entity_store::error::EntityStoreError) when the store
     /// cannot be read, or propagates any error the callback returns.
     fn for_each_entity_id_chunk(&self, chunk_size: usize, callback: &mut dyn FnMut(Vec<Urn>) -> Result<()>) -> Result<()> {
-        let ids = self.get_entity_ids()?;
-        for chunk in ids.chunks(chunk_size) {
-            callback(chunk.to_vec())?;
+        let mut ids = self.get_entity_ids()?.into_iter();
+        loop {
+            let chunk: Vec<Urn> = ids.by_ref().take(chunk_size).collect();
+            if chunk.is_empty() {
+                return Ok(());
+            }
+            callback(chunk)?;
         }
-        Ok(())
     }
 
-    /// Assembles the stored fragments for one base id into their emit-units and scope.
+    /// Assembles the stored fragments for one base id into their emit-units and scope, finishing any
+    /// merge of its records with the read sets `mappings` holds.
     ///
     /// **Assembly consumes the id's fragments.** An in-memory store drains them, so calling this
     /// twice for one id yields the fragments once and an empty `units` vec after. That is what the
@@ -168,8 +180,9 @@ pub trait EntityStore: Debug + Send + Sync + 'static {
     /// # Errors
     ///
     /// Returns [`EntityStoreError`](crate::entity_store::error::EntityStoreError) when the store
-    /// cannot be read or a stored fragment cannot be decoded.
-    fn assemble_entity(&self, base_id: &Urn) -> Result<AssembledFragments>;
+    /// cannot be read, a stored fragment cannot be decoded, or a merge to finish names a mapping
+    /// `mappings` has no read set for.
+    fn assemble_entity(&self, base_id: &Urn, mappings: &dyn MappingReads) -> Result<AssembledFragments>;
 
     /// Returns the number of distinct base entity ids currently stored.
     fn count(&self) -> usize;
@@ -214,12 +227,14 @@ pub(crate) mod tests {
             store::{EntityStore, FragmentWrite},
         },
         mapping_id::MappingId,
+        test_order::{ReadsEverything, next_batch, next_position},
     };
+    use cassiopeia_ir::source_position::SourcePosition;
     use cassiopeia_mapping::{observed_at::ObservedAt, source_reads::SourceReads};
     use cassiopeia_ngsi_ld::entity::scope::{NgsiLdScope, ScopeBuf};
     use chrono::{DateTime, TimeZone, Utc};
     use pretty_assertions::assert_eq;
-    use serde_json::json;
+    use serde_json::{Value, json};
     use urn_rs::Urn;
 
     /// The read set of a mapping that reads every key, so every disagreement a store test merges
@@ -230,6 +245,8 @@ pub(crate) mod tests {
         FragmentWrite {
             base_id: base_id.clone(),
             source_data: json!({ "mapping": mapping }),
+            position: next_position(),
+            batch: next_batch(),
             mapping_id: MappingId::new(mapping),
             temporal: false,
             timestamp: RecordTimestamp::Absent,
@@ -257,6 +274,20 @@ pub(crate) mod tests {
         }
     }
 
+    /// A write like [`write_observed`] of the record at `position`, carrying `record`.
+    fn write_at(base_id: &Urn, position: SourcePosition, record: Value) -> FragmentWrite<'static> {
+        FragmentWrite {
+            source_data: record,
+            position,
+            ..write_observed(base_id, 1, "2026-04-03T22:00:00Z", None)
+        }
+    }
+
+    /// The position of record `record` of the first input.
+    fn at(record: usize) -> SourcePosition {
+        SourcePosition::first_of(0).advanced(record)
+    }
+
     fn instant(seconds: i64) -> DateTime<Utc> {
         Utc.timestamp_opt(seconds, 0).single().unwrap()
     }
@@ -282,9 +313,9 @@ pub(crate) mod tests {
             .unwrap();
         store.store_fragment(write(&scoped, 2, &["/a"])).unwrap();
 
-        let scope = store.assemble_entity(&scoped).unwrap().scope;
+        let scope = store.assemble_entity(&scoped, &ReadsEverything).unwrap().scope;
         assert_eq!(serde_json::to_value(scope).unwrap(), json!(["/a", "/b", "/c", "/d"]));
-        assert_eq!(store.assemble_entity(&unscoped).unwrap().scope, None);
+        assert_eq!(store.assemble_entity(&unscoped, &ReadsEverything).unwrap().scope, None);
     }
 
     /// Cross-backend contract every [`EntityStore`] must honour: the expiries the mappings of one id
@@ -310,9 +341,9 @@ pub(crate) mod tests {
             .unwrap();
         store.store_fragment(write_expiring(&every_mapping, 3, Some(200))).unwrap();
 
-        assert_eq!(store.assemble_entity(&every_mapping).unwrap().expires_at, Some(instant(300)));
-        assert_eq!(store.assemble_entity(&one_mapping).unwrap().expires_at, None);
-        assert_eq!(store.assemble_entity(&no_mapping).unwrap().expires_at, None);
+        assert_eq!(store.assemble_entity(&every_mapping, &ReadsEverything).unwrap().expires_at, Some(instant(300)));
+        assert_eq!(store.assemble_entity(&one_mapping, &ReadsEverything).unwrap().expires_at, None);
+        assert_eq!(store.assemble_entity(&no_mapping, &ReadsEverything).unwrap().expires_at, None);
     }
 
     /// Contract every current-state [`EntityStore`] must honour: a mapping's expiry follows the
@@ -339,9 +370,9 @@ pub(crate) mod tests {
             .unwrap();
         store.store_fragment(write_expiring(&refined, 1, None)).unwrap();
 
-        assert_eq!(store.assemble_entity(&shortened).unwrap().expires_at, Some(instant(100)));
-        assert_eq!(store.assemble_entity(&cleared).unwrap().expires_at, None);
-        assert_eq!(store.assemble_entity(&refined).unwrap().expires_at, Some(instant(100)));
+        assert_eq!(store.assemble_entity(&shortened, &ReadsEverything).unwrap().expires_at, Some(instant(100)));
+        assert_eq!(store.assemble_entity(&cleared, &ReadsEverything).unwrap().expires_at, None);
+        assert_eq!(store.assemble_entity(&refined, &ReadsEverything).unwrap().expires_at, Some(instant(100)));
     }
 
     /// Contract every series [`EntityStore`] must honour: a mapping's observations contribute the
@@ -360,6 +391,70 @@ pub(crate) mod tests {
             .unwrap();
         store.store_fragment(write_observed(&id, 1, "2026-04-03T22:15:00Z", Some(200))).unwrap();
 
-        assert_eq!(store.assemble_entity(&id).unwrap().expires_at, Some(instant(300)));
+        assert_eq!(store.assemble_entity(&id, &ReadsEverything).unwrap().expires_at, Some(instant(300)));
+    }
+
+    /// Contract every series [`EntityStore`] must honour: an id's observations are handed on in the
+    /// order of their records in the source, whatever order they reached the store in, across
+    /// separate writes as well as within one batch, and the records of a later input after every
+    /// record of an earlier one.
+    pub(crate) fn assert_series_hands_observations_on_in_source_order(store: &dyn EntityStore) {
+        let id: Urn = "urn:ngsi-ld:Camera:1".parse().unwrap();
+
+        store.store_fragment(write_at(&id, at(3), json!(3))).unwrap();
+        store.store_fragment(write_at(&id, SourcePosition::first_of(1), json!("second input"))).unwrap();
+        store
+            .store_fragment_batch(vec![
+                write_at(&id, at(5), json!(5)),
+                write_at(&id, at(1), json!(1)),
+                write_at(&id, at(4), json!(4)),
+            ])
+            .unwrap();
+        store.store_fragment(write_at(&id, at(2), json!(2))).unwrap();
+
+        let records: Vec<Value> = store
+            .assemble_entity(&id, &ReadsEverything)
+            .unwrap()
+            .units
+            .into_iter()
+            .map(|unit| unit[0].data.clone())
+            .collect();
+        assert_eq!(records, [json!(1), json!(2), json!(3), json!(4), json!(5), json!("second input")]);
+    }
+
+    /// Contract every series [`EntityStore`] must honour: ids are handed on in the order of their
+    /// first records in the source, however their records reached the store. A record that comes
+    /// before every record of its id stored so far moves the id earlier, and ids whose first record
+    /// is one record follow the bytewise order of their text. Listing the ids and walking them chunk
+    /// by chunk agree, and the count is of distinct ids.
+    pub(crate) fn assert_series_hands_ids_on_in_order_of_their_first_records(store: &dyn EntityStore) {
+        let [late, early, moved, shared_b, shared_a] =
+            ["Late", "Early", "Moved", "Shared-B", "Shared-A"].map(|name| format!("urn:ngsi-ld:Camera:{name}").parse::<Urn>().unwrap());
+
+        store.store_fragment(write_at(&late, at(9), json!(9))).unwrap();
+        store
+            .store_fragment_batch(vec![
+                write_at(&early, at(2), json!(2)),
+                write_at(&moved, at(7), json!(7)),
+                write_at(&shared_b, at(4), json!(4)),
+                write_at(&shared_a, at(4), json!(4)),
+                write_at(&early, at(1), json!(1)),
+            ])
+            .unwrap();
+        store.store_fragment(write_at(&moved, at(0), json!(0))).unwrap();
+        store.store_fragment(write_at(&late, at(3), json!(3))).unwrap();
+
+        let expected = [moved, early, late, shared_a, shared_b];
+        assert_eq!(store.get_entity_ids().unwrap(), expected);
+        let mut walked = Vec::new();
+        store
+            .for_each_entity_id_chunk(2, &mut |chunk| {
+                walked.extend(chunk);
+                Ok(())
+            })
+            .unwrap();
+        assert_eq!(walked, expected);
+        assert_eq!(store.count(), 5);
+        assert_eq!(store.unit_count(), 8);
     }
 }

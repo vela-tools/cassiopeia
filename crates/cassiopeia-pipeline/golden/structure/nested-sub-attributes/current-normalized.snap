@@ -1,0 +1,35 @@
+---
+source: crates/cassiopeia-pipeline/src/end_to_end/golden/mod.rs
+input_file: crates/cassiopeia-pipeline/golden/structure/nested-sub-attributes/manifest.json5
+---
+[
+  {
+    "id": "urn:ngsi-ld:Sensor:S1",
+    "type": "Sensor",
+    "temperature": {
+      "type": "Property",
+      "value": 21.5,
+      "accuracy": {
+        "type": "Property",
+        "value": 0.2,
+        "method": {
+          "type": "Property",
+          "value": "reference"
+        }
+      },
+      "calibratedBy": {
+        "type": "Relationship",
+        "object": "urn:ngsi-ld:Laboratory:L1",
+        "objectType": "Laboratory"
+      }
+    }
+  },
+  {
+    "id": "urn:ngsi-ld:Sensor:S2",
+    "type": "Sensor",
+    "temperature": {
+      "type": "Property",
+      "value": 22.5
+    }
+  }
+]

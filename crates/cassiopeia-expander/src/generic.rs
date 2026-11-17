@@ -15,6 +15,7 @@ use cassiopeia_ir::{
     record::Record,
     relationship_key::RelationshipKey,
     relationship_path::RelationshipPath,
+    source_position::SourcePosition,
 };
 use cassiopeia_mapping::{
     attribute::Attribute,
@@ -48,15 +49,18 @@ pub struct GenericExpander {
 }
 
 /// The record one expansion is working through: its entity, its data with the run variables it is
-/// read with, and where its losses go.
+/// read with, its place in the source, and where its losses go.
 ///
-/// Every relationship the record declares is minted against the same three, so they travel
-/// together rather than as three parameters threaded through each minting step.
+/// Every relationship the record declares is minted against the same four, so they travel
+/// together rather than as four parameters threaded through each minting step.
 struct Expansion<'a> {
     /// The entity the record expands into, which every link it loses is recorded against.
     entity: &'a Urn,
     /// The record's data and run variables, read by every relationship source and synthetic identity.
     input: TemplateInput<'a>,
+    /// The record's place in the source; each fragment it expands into takes the place of the
+    /// record's next fragment.
+    position: SourcePosition,
     /// Where the record's losses are recorded.
     losses: &'a ExpansionLosses,
 }
@@ -107,11 +111,13 @@ impl GenericExpander {
         }
     }
 
-    /// Builds a fragment of this lane, carrying the lane's run variables beside its source data.
+    /// Builds a fragment of this lane, carrying the lane's run variables beside its source data and
+    /// the place of its record in the source.
     fn fragment(
         &self,
         source_data: Value,
         target_urn: Urn,
+        position: SourcePosition,
         scope: Option<NgsiLdScope>,
         expires_at: Option<DateTime<Utc>>,
         parent_context: Option<Vec<ParentContext>>,
@@ -119,6 +125,7 @@ impl GenericExpander {
         Fragment::builder()
             .source_data(source_data)
             .target_urn(target_urn)
+            .position(position)
             .scope(scope)
             .expires_at(expires_at)
             .parent_context(parent_context)
@@ -140,7 +147,13 @@ impl GenericExpander {
     /// Only the entity's own identity, scope, and `expiresAt` fail the record: there is no entity
     /// without them. A relationship that names no target, because its source resolves to nothing or
     /// fails to render, is left out, and the entity is still produced without it.
-    fn expand_value(&self, mapping: &Arc<Mapping>, data: Value, losses: &ExpansionLosses) -> Result<Vec<Mapped<Fragment>>, ExpanderError> {
+    fn expand_value(
+        &self,
+        mapping: &Arc<Mapping>,
+        data: Value,
+        position: SourcePosition,
+        losses: &ExpansionLosses,
+    ) -> Result<Vec<Mapped<Fragment>>, ExpanderError> {
         let mut fragments = Vec::new();
         let mut child_contexts = Vec::new();
 
@@ -151,6 +164,7 @@ impl GenericExpander {
         let expansion = Expansion {
             entity: &main_urn,
             input,
+            position,
             losses,
         };
 
@@ -159,7 +173,7 @@ impl GenericExpander {
             if let Some(synthetic) = attribute.synthetic_entity() {
                 if attribute.target().is_some() && matches!(attribute.kind(), NgsiLdAttributeKind::ListRelationship) {
                     child_contexts.extend(self.expand_synthetic_targets(attribute_name, attribute, synthetic, &expansion, &mut fragments)?);
-                } else if let Some(fragment) = self.expand_synthetic_entity(attribute_name, attribute, synthetic, &expansion)? {
+                } else if let Some(fragment) = self.expand_synthetic_entity(attribute_name, attribute, synthetic, &expansion, fragments.len())? {
                     fragments.push(fragment);
                 }
             } else if matches!(attribute.kind(), NgsiLdAttributeKind::ListRelationship) && attribute.target().is_some() && attribute.instances().is_some() {
@@ -214,7 +228,14 @@ impl GenericExpander {
         }
 
         let parent_context = if child_contexts.is_empty() { None } else { Some(child_contexts) };
-        let main_fragment = self.fragment(data, main_urn, main_scope, main_expires_at, parent_context);
+        let main_fragment = self.fragment(
+            data,
+            main_urn,
+            position.nth_fragment(fragments.len()),
+            main_scope,
+            main_expires_at,
+            parent_context,
+        );
         fragments.push(Mapped::new(main_fragment, Arc::clone(mapping)));
 
         Ok(fragments)
@@ -257,7 +278,8 @@ impl GenericExpander {
                 ParentContextType::Child(synthetic_urn.clone()),
                 Self::top_level_key(attribute_name),
             ));
-            let fragment = self.fragment(token_data, synthetic_urn, synthetic_scope, synthetic_expires_at, None);
+            let position = expansion.position.nth_fragment(fragments.len());
+            let fragment = self.fragment(token_data, synthetic_urn, position, synthetic_scope, synthetic_expires_at, None);
             // The fragment owns its mapping behind an `Arc`, and the synthetic mapping is only
             // borrowed from the parent attribute here.
             fragments.push(Mapped::new(fragment, Arc::new(synthetic.clone())));
@@ -267,7 +289,8 @@ impl GenericExpander {
     }
 
     /// Expands the one synthetic entity a non-list attribute materialises, linked back to the main
-    /// entity through a parent context, or nothing when this record names no target.
+    /// entity through a parent context, or nothing when this record names no target. The fragment
+    /// takes the place of the record's fragment at `ordinal`.
     ///
     /// The link the main entity carries is minted from the synthetic identity, so it always points at
     /// the entity emitted here. A record whose synthetic identity, or whose relationship source,
@@ -280,6 +303,7 @@ impl GenericExpander {
         attribute: &Attribute,
         synthetic: &Mapping,
         expansion: &Expansion<'_>,
+        ordinal: usize,
     ) -> Result<Option<Mapped<Fragment>>, ExpanderError> {
         let path = || RelationshipPath::flat(attribute_name.clone());
         // The minted object is discarded: this only asks whether the relationship source names a
@@ -308,6 +332,7 @@ impl GenericExpander {
         let fragment = self.fragment(
             expansion.input.record().clone(),
             synthetic_urn,
+            expansion.position.nth_fragment(ordinal),
             synthetic_scope,
             synthetic_expires_at,
             Some(vec![parent]),
@@ -390,15 +415,16 @@ impl GenericExpander {
 }
 
 impl Expander for GenericExpander {
-    fn expand(&self, record: Record, losses: &ExpansionLosses) -> Result<Vec<Mapped<Fragment>>, ExpanderError> {
+    fn expand(&self, record: Record, position: SourcePosition, losses: &ExpansionLosses) -> Result<Vec<Mapped<Fragment>>, ExpanderError> {
         let mapping = self.router.select(record.collection().as_ref())?;
-        self.expand_value(mapping, Value::Object(record.into_data()), losses)
+        self.expand_value(mapping, Value::Object(record.into_data()), position, losses)
     }
 
-    fn expand_batch(&self, records: Vec<Record>, losses: &ExpansionLosses) -> Vec<Result<Vec<Mapped<Fragment>>, ExpanderError>> {
+    fn expand_batch(&self, records: Vec<Record>, first: SourcePosition, losses: &ExpansionLosses) -> Vec<Result<Vec<Mapped<Fragment>>, ExpanderError>> {
+        let expand = |(offset, record)| self.expand(record, first.advanced(offset), losses);
         match self.parallelism {
-            Parallelism::Parallel => records.into_par_iter().map(|record| self.expand(record, losses)).collect(),
-            Parallelism::Sequential => records.into_iter().map(|record| self.expand(record, losses)).collect(),
+            Parallelism::Parallel => records.into_par_iter().enumerate().map(expand).collect(),
+            Parallelism::Sequential => records.into_iter().enumerate().map(expand).collect(),
         }
     }
 }
@@ -416,7 +442,7 @@ mod tests {
     };
     use cassiopeia_batch_sink::batch_sink::BatchSink;
     use cassiopeia_common::collection::CollectionName;
-    use cassiopeia_ir::{fragment::Fragment, mapped::Mapped, parent_context::ParentContextType, record::Record};
+    use cassiopeia_ir::{fragment::Fragment, mapped::Mapped, parent_context::ParentContextType, record::Record, source_position::SourcePosition};
     use cassiopeia_mapping::{
         mapping::Mapping,
         template::{run_variables::RunVariables, runner::TemplateRunner},
@@ -441,7 +467,7 @@ mod tests {
 
     impl ExpanderUnderTest {
         fn expand(&self, record: Record) -> Result<Vec<Mapped<Fragment>>, ExpanderError> {
-            Expander::expand(&self.expander, record, &self.losses)
+            Expander::expand(&self.expander, record, SourcePosition::first_of(0), &self.losses)
         }
 
         /// Every relationship whose template failed, as its dotted path, the first entity that lost
@@ -1039,6 +1065,42 @@ mod tests {
             ParentContextType::Parent(main) => assert_eq!(main.to_string(), "urn:ngsi-ld:AirQualityObserved:Station-1"),
             ParentContextType::Child(_) => panic!("synthetic entity must link back to its parent"),
         }
+    }
+
+    #[test]
+    fn a_batch_places_every_fragment_after_its_record_s_earlier_fragments_and_records() {
+        let expander = expander(
+            r#"{
+                version: "v4",
+                dataModel: "AirQualityObserved",
+                identity: { entityName: "Station-{{ id }}" },
+                attributes: {
+                    device: {
+                        syntheticEntity: {
+                            version: "v4",
+                            dataModel: "Device",
+                            identity: { entityName: "Dev-{{ id }}" },
+                            attributes: { name: { source: "{{ name }}" } },
+                        },
+                    },
+                },
+            }"#,
+        );
+        let first = SourcePosition::first_of(2).advanced(10);
+        let records = (1..=3).map(|id| record(json!({"id": id, "name": "sensor"}))).collect();
+
+        let positions: Vec<Vec<SourcePosition>> = expander
+            .expander
+            .expand_batch(records, first, &expander.losses)
+            .into_iter()
+            .map(|fragments| fragments.unwrap().iter().map(|fragment| *fragment.inner().position()).collect())
+            .collect();
+
+        let fragments_of = |record: SourcePosition| [record.nth_fragment(0), record.nth_fragment(1)];
+        assert_eq!(
+            positions,
+            [fragments_of(first), fragments_of(first.advanced(1)), fragments_of(first.advanced(2))]
+        );
     }
 
     #[test]

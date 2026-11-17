@@ -1,64 +1,42 @@
 use crate::{
     entity_store::{
         concurrent_scopes::ConcurrentScopes,
-        error::Result,
-        mapping_expiry::{MappingExpiry, join},
-        merge::deep_merge,
-        record_timestamp::RecordTimestamp,
-        store::{AssembledFragment, AssembledFragments, EntityStore, FragmentWrite, StoredUnit},
-        supersession::{SlotRanking, Supersession},
+        error::{EntityStoreError, Result},
+        latest_slot::{IncomingRecord, LatestSlot},
+        mapping_expiry::join,
+        mapping_reads::MappingReads,
+        store::{AssembledFragments, EntityStore, FragmentWrite, StoredUnit},
     },
-    field_path::FieldPath,
     mapping_id::MappingId,
     store_write_strategy::StoreWriteStrategy,
 };
-use ahash::{AHashMap, RandomState};
+use ahash::RandomState;
 use cassiopeia_mapping::source_reads::SourceReads;
-use chrono::{DateTime, Utc};
 use dashmap::DashMap;
-use serde_json::Value;
-use std::{num::NonZeroU64, sync::Arc};
+use smallvec::SmallVec;
+use std::sync::Arc;
 use urn_rs::Urn;
 
-/// One mapping's retained fragment for a base id under the current-state model.
-#[derive(Debug)]
-struct LatestFragment {
-    /// The retained source record.
-    data: Value,
-    /// How the slot ranks a temporal mapping's records by their record-level `observedAt`.
-    ranking: SlotRanking,
-    /// How many of the mapping's records resolved to the id, whether merged in, superseding, or
-    /// discarded as stale.
-    records: NonZeroU64,
-    /// The earliest field on which a merged record disagreed with the retained one.
-    conflict: Option<FieldPath>,
-    /// The entity `expiresAt` the mapping's records contribute.
-    expires_at: MappingExpiry,
-}
-
-/// One record on its way into a mapping's slot: what the slot retains of it if it lands there.
-struct IncomingRecord {
-    /// The source record.
-    data: Value,
-    /// What the record-level `observedAt` template yielded, for ranking it against the retained record.
-    timestamp: RecordTimestamp,
-    /// The entity `expiresAt` the record declares.
-    expires_at: Option<DateTime<Utc>>,
-}
+/// One base id's slots, one per mapping that contributed to it.
+///
+/// An id is fed by one mapping in the common case and by a handful at most, so a linear scan finds a
+/// mapping's slot faster than a hash would, and the inline capacity of one keeps the slots inside the
+/// map's own entry rather than in a table of their own on the heap.
+type MappingSlots = SmallVec<[(MappingId, LatestSlot); 1]>;
 
 /// In-memory current-state entity store using [`DashMap`] for lock-free concurrent access.
 ///
-/// Each base [`Urn`] maps to one retained fragment per mapping: a temporal mapping keeps the
-/// greatest-`observedAt` record, a static mapping deep-merges its records. This is O(mappings) per id,
-/// so a temporal id's many observations never grow the stored footprint. Each slot carries the
-/// expiry its records contribute, and the entity's own is joined from them at assembly. Keys
-/// compare by `Urn` equivalence, RFC 8141 section 3, the scheme-based rung of the RFC 3986 section 6
-/// comparison NGSI-LD clause 5.5.1 adopts, so ids differing only in case of the scheme or NID, in
-/// percent-encoding hex case, or in r-, q- or f-components name one entity.
+/// Each base [`Urn`] maps to one [`LatestSlot`] per mapping: a temporal mapping keeps the
+/// greatest-`observedAt` record, a static mapping merges its records in source order. This is
+/// O(mappings) per id, so a temporal id's many observations never grow the stored footprint. Each
+/// slot carries the expiry its records contribute, and the entity's own is joined from them at
+/// assembly. Keys compare by `Urn` equivalence, RFC 8141 section 3, the scheme-based rung of the
+/// RFC 3986 section 6 comparison NGSI-LD clause 5.5.1 adopts, so ids differing only in case of the
+/// scheme or NID, in percent-encoding hex case, or in r-, q- or f-components name one entity.
 #[derive(Clone, Debug, Default)]
 pub struct DashMapLatestEntityStore {
     scopes: ConcurrentScopes,
-    data: Arc<DashMap<Urn, AHashMap<MappingId, LatestFragment>, RandomState>>,
+    data: Arc<DashMap<Urn, MappingSlots, RandomState>>,
 }
 
 impl DashMapLatestEntityStore {
@@ -78,6 +56,8 @@ impl EntityStore for DashMapLatestEntityStore {
         let FragmentWrite {
             base_id,
             source_data,
+            position,
+            batch,
             mapping_id,
             temporal,
             timestamp,
@@ -91,28 +71,21 @@ impl EntityStore for DashMapLatestEntityStore {
         // only the first record of an id pays for an owned key.
         let incoming = IncomingRecord {
             data: source_data,
+            position,
+            batch,
             timestamp,
             expires_at,
         };
         let unplaced = match self.data.get_mut(&base_id) {
-            Some(mut per_mapping) => merge_fragment(&mut per_mapping, mapping_id, incoming, temporal, reads),
+            Some(mut per_mapping) => place(&mut per_mapping, mapping_id, incoming, reads),
             None => Some(incoming),
         };
         if let Some(incoming) = unplaced {
             let mut per_mapping = self.data.entry(base_id.clone()).or_default();
             // A concurrent writer may have created the id between the miss and this insert, so the
-            // merge rule is re-applied rather than assuming the mapping slot is still vacant.
-            if let Some(incoming) = merge_fragment(&mut per_mapping, mapping_id, incoming, temporal, reads) {
-                per_mapping.insert(
-                    mapping_id,
-                    LatestFragment {
-                        data: incoming.data,
-                        ranking: SlotRanking::first(incoming.timestamp),
-                        records: NonZeroU64::MIN,
-                        conflict: None,
-                        expires_at: MappingExpiry::first(incoming.expires_at),
-                    },
-                );
+            // slot is looked up again rather than assumed vacant.
+            if let Some(incoming) = place(&mut per_mapping, mapping_id, incoming, reads) {
+                per_mapping.push((mapping_id, LatestSlot::new(incoming, temporal)));
             }
         }
 
@@ -126,25 +99,25 @@ impl EntityStore for DashMapLatestEntityStore {
         Ok(self.data.iter().map(|entry| entry.key().clone()).collect())
     }
 
-    fn assemble_entity(&self, base_id: &Urn) -> Result<AssembledFragments> {
+    fn assemble_entity(&self, base_id: &Urn, mappings: &dyn MappingReads) -> Result<AssembledFragments> {
         // Draining rather than reading: the scan visits each id once and the store is destroyed
         // straight after, so the retained records are moved into the emit-unit instead of copied.
         let (expires_at, units) = match self.data.remove(base_id) {
             Some((_id, per_mapping)) if !per_mapping.is_empty() => {
-                let expires_at = join(per_mapping.values().map(|fragment| fragment.expires_at));
-                let mut unit: StoredUnit = per_mapping
-                    .into_iter()
-                    .map(|(mapping_id, fragment)| AssembledFragment {
+                let mut unit = StoredUnit::new();
+                let mut expiries = Vec::with_capacity(per_mapping.len());
+                for (mapping_id, slot) in per_mapping {
+                    let reads = mappings.reads(mapping_id).ok_or_else(|| EntityStoreError::UnregisteredMapping {
+                        entity: base_id.clone(),
                         mapping_id,
-                        data: fragment.data,
-                        records: fragment.records,
-                        conflict: fragment.conflict,
-                        unresolvable_discards: fragment.ranking.unresolvable_discards(),
-                    })
-                    .collect();
+                    })?;
+                    let (fragment, expiry) = slot.into_stored(reads).into_fragment(mapping_id);
+                    unit.push(fragment);
+                    expiries.push(expiry);
+                }
                 // A stable join order keeps the assembled entity deterministic across runs.
                 unit.sort_by_key(|fragment| fragment.mapping_id);
-                (expires_at, vec![unit])
+                (join(expiries), vec![unit])
             }
             _ => (None, Vec::new()),
         };
@@ -176,40 +149,17 @@ impl EntityStore for DashMapLatestEntityStore {
     }
 }
 
-/// Folds one record into an id's retained fragment for its mapping under the current-state rule,
-/// counting it among the records the mapping resolved to the id.
+/// Folds one record into an id's slot for its mapping, counting it among the records the mapping
+/// resolved to the id.
 ///
-/// Returns `None` once the record has been absorbed: merged, superseding, or deliberately discarded
-/// as stale. Returns the record back when the mapping has no slot yet, so the caller can insert it
-/// under a key it owns; handing it back rather than inserting here keeps the owned-key clone on the
-/// one path that needs it.
-fn merge_fragment(
-    per_mapping: &mut AHashMap<MappingId, LatestFragment>,
-    mapping_id: MappingId,
-    incoming: IncomingRecord,
-    temporal: bool,
-    reads: &SourceReads,
-) -> Option<IncomingRecord> {
-    let Some(existing) = per_mapping.get_mut(&mapping_id) else {
+/// Returns `None` once the record has been absorbed. Returns the record back when the mapping has no
+/// slot yet, so the caller can insert it under a key it owns; handing it back rather than inserting
+/// here keeps the owned-key clone on the one path that needs it.
+fn place(per_mapping: &mut MappingSlots, mapping_id: MappingId, incoming: IncomingRecord, reads: &SourceReads) -> Option<IncomingRecord> {
+    let Some((_, slot)) = per_mapping.iter_mut().find(|(known, _)| *known == mapping_id) else {
         return Some(incoming);
     };
-
-    existing.records = existing.records.saturating_add(1);
-    if temporal {
-        // A temporal mapping's records are observations of one id: keep the latest, expiry and all.
-        match existing.ranking.rank(incoming.timestamp) {
-            Supersession::Supersedes => {
-                existing.data = incoming.data;
-                existing.expires_at.supersede(incoming.expires_at);
-            }
-            Supersession::Stale => {}
-        }
-    } else {
-        // A static mapping's records refine one entity: merge them, remembering where they disagreed.
-        let conflict = deep_merge(&mut existing.data, &incoming.data, reads);
-        existing.conflict = FieldPath::earliest(existing.conflict.take(), conflict);
-        existing.expires_at.refine(incoming.expires_at);
-    }
+    slot.absorb(incoming, reads);
     None
 }
 
@@ -226,6 +176,7 @@ mod tests {
             },
         },
         mapping_id::MappingId,
+        test_order::{ReadsEverything, next_batch, next_position},
     };
     use cassiopeia_mapping::observed_at::ObservedAt;
     use pretty_assertions::assert_eq;
@@ -255,6 +206,8 @@ mod tests {
         FragmentWrite {
             base_id: base_id.clone(),
             source_data: data,
+            position: next_position(),
+            batch: next_batch(),
             mapping_id: MappingId::new(mapping),
             temporal,
             timestamp: RecordTimestamp::from(observed_at.map(ObservedAt::new)),
@@ -274,7 +227,7 @@ mod tests {
         store.store_fragment(write(&id, geometry, 1, false, None)).unwrap();
         store.store_fragment(write(&id, state, 2, false, None)).unwrap();
 
-        let assembled = store.assemble_entity(&id).unwrap();
+        let assembled = store.assemble_entity(&id, &ReadsEverything).unwrap();
         assert_eq!(assembled.units.len(), 1);
         assert_eq!(assembled.units[0].len(), 2);
     }
@@ -290,7 +243,7 @@ mod tests {
         store.store_fragment(write(&id, json!({"first": 1}), 1, false, None)).unwrap();
         store.store_fragment(write(&id, json!({"second": 2}), 2, false, None)).unwrap();
 
-        let assembled = store.assemble_entity(&id).unwrap();
+        let assembled = store.assemble_entity(&id, &ReadsEverything).unwrap();
         assert_eq!(assembled.units.len(), 1);
         let unit = &assembled.units[0];
         assert_eq!(unit.len(), 3);
@@ -316,7 +269,7 @@ mod tests {
         store.store_fragment(write(&id, middle.clone(), 1, true, Some("2026-04-03T22:10:20Z"))).unwrap();
         store.store_fragment(write(&id, last, 1, true, Some("2026-04-03T22:05:20Z"))).unwrap();
 
-        let assembled = store.assemble_entity(&id).unwrap();
+        let assembled = store.assemble_entity(&id, &ReadsEverything).unwrap();
         assert_eq!(assembled.units.len(), 1);
         assert_eq!(assembled.units[0].len(), 1);
         assert_eq!(assembled.units[0][0].data, middle);
@@ -330,7 +283,7 @@ mod tests {
         store.store_fragment(write(&id, json!({"a": 1}), 1, false, None)).unwrap();
         store.store_fragment(write(&id, json!({"b": 2}), 1, false, None)).unwrap();
 
-        let assembled = store.assemble_entity(&id).unwrap();
+        let assembled = store.assemble_entity(&id, &ReadsEverything).unwrap();
         assert_eq!(assembled.units[0][0].data, json!({"a": 1, "b": 2}));
     }
 
@@ -349,7 +302,7 @@ mod tests {
             .unwrap();
         store.store_fragment(write(&id, json!({"c": 3}), 3, false, None)).unwrap();
 
-        let unit = &store.assemble_entity(&id).unwrap().units[0];
+        let unit = &store.assemble_entity(&id, &ReadsEverything).unwrap().units[0];
         let counts: Vec<u64> = unit.iter().map(|fragment| fragment.records.get()).collect();
         // A stale observation is discarded yet still counted: it resolved to the id all the same.
         assert_eq!(counts, [2, 2, 1]);
@@ -366,7 +319,7 @@ mod tests {
         store.store_fragment(write(&id, json!({"c": 1}), 2, false, None)).unwrap();
         store.store_fragment(write(&id, json!({"c": 1, "d": 4}), 2, false, None)).unwrap();
 
-        let unit = &store.assemble_entity(&id).unwrap().units[0];
+        let unit = &store.assemble_entity(&id, &ReadsEverything).unwrap().units[0];
         let conflicts: Vec<Option<String>> = unit.iter().map(|fragment| fragment.conflict.as_ref().map(ToString::to_string)).collect();
         assert_eq!(conflicts, [Some("a".to_string()), None]);
         assert_eq!(unit[0].data, json!({"a": 1, "z": 1, "b": 2}));
@@ -380,7 +333,13 @@ mod tests {
 
         assert_eq!(store.count(), 1);
         assert_eq!(store.unit_count(), 1);
-        assert!(store.assemble_entity(&urn("urn:ngsi-ld:Camera:absent")).unwrap().units.is_empty());
+        assert!(
+            store
+                .assemble_entity(&urn("urn:ngsi-ld:Camera:absent"), &ReadsEverything)
+                .unwrap()
+                .units
+                .is_empty()
+        );
     }
 
     #[test]
@@ -390,10 +349,10 @@ mod tests {
         store.store_fragment(write(&id, json!({"a": 1}), 1, false, None)).unwrap();
         store.store_fragment(write(&id, json!({"b": 2}), 2, false, None)).unwrap();
 
-        assert_eq!(store.assemble_entity(&id).unwrap().units[0].len(), 2);
+        assert_eq!(store.assemble_entity(&id, &ReadsEverything).unwrap().units[0].len(), 2);
 
         // The retained records moved into the emit-unit, so the store holds no second copy.
         assert_eq!(store.count(), 0);
-        assert!(store.assemble_entity(&id).unwrap().units.is_empty());
+        assert!(store.assemble_entity(&id, &ReadsEverything).unwrap().units.is_empty());
     }
 }

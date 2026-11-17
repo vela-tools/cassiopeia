@@ -24,6 +24,7 @@ use cassiopeia_common::{
     telemetry::{channel_boundary::ChannelBoundary, run::RunTelemetry},
 };
 use cassiopeia_expander::{expander::Expander, generic::GenericExpander, router::MappingRouter};
+use cassiopeia_ir::source_position::SourcePosition;
 use cassiopeia_mapping::template::resolver::TemplateResolver;
 use cassiopeia_resolver::{entity_source::EntitySource, fragment_resolver::FragmentResolver};
 use std::sync::Arc;
@@ -76,12 +77,26 @@ impl Pipeline {
         let (shared_tx, shared_rx) = env.channel(Some(ChannelBoundary::between(Stage::Expander, Stage::Resolver)));
         let _ = shared_tx.send(Signal::Meta(run.meta.clone()));
 
-        for CycleLane {
-            input,
-            router,
-            cursor,
-            unread_check,
-        } in lanes
+        // Every lane's mappings are registered in the order of the manifest before any lane starts, so
+        // they take their ids, and the mappings joined onto one entity their order, in that order
+        // whichever lane's records reach the resolver first.
+        for lane in &lanes {
+            for mapping in lane.router.mappings() {
+                fragment_resolver.register(mapping, &lane.input.variables);
+            }
+        }
+
+        // A lane's place in the manifest heads the position of every record it reads, so the records
+        // of an earlier input come first wherever their order decides an outcome.
+        for (
+            lane_index,
+            CycleLane {
+                input,
+                router,
+                cursor,
+                unread_check,
+            },
+        ) in (0_u32..).zip(lanes)
         {
             let ingestor_bank = spawn_ingestor_bank(
                 &input.mapping_binding,
@@ -126,7 +141,14 @@ impl Pipeline {
             let expander: Box<dyn Expander> = Box::new(GenericExpander::new(router, template_resolver.clone(), input.variables.clone()));
             // Each lane's expander writes its fragments straight onto the shared resolver intake, so
             // no per-lane channel or bridge thread sits between the expander and the resolver.
-            spawn_expander_thread(expander, ingestor_bank.output_rx, shared_tx.clone(), batch_size, &env);
+            spawn_expander_thread(
+                expander,
+                ingestor_bank.output_rx,
+                shared_tx.clone(),
+                batch_size,
+                SourcePosition::first_of(lane_index),
+                &env,
+            );
         }
 
         // Drop the original sender so the shared channel closes once every lane bridge finishes.

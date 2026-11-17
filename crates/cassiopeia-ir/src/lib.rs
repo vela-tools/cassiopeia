@@ -23,4 +23,5 @@ pub mod relationship_key_error;
 pub mod relationship_path;
 pub mod relationships;
 pub mod resolved_attribute;
+pub mod source_position;
 pub mod sub_attribute;

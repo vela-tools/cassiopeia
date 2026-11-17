@@ -1,0 +1,19 @@
+---
+source: crates/cassiopeia-pipeline/src/end_to_end/golden/mod.rs
+input_file: crates/cassiopeia-pipeline/golden/relationships/relationship/manifest.json5
+---
+{
+  "diagnostics": [
+    {
+      "code": "expander-relationship-unresolvable",
+      "occurrences": 1,
+      "message": [
+        "! The attribute `room` template in the mapping document at '[case]/mapping.json5' could not be resolved for `urn:ngsi-ld:Sensor:S3`, so relationship `room` was left out; the entity itself was kept",
+        "  ├─ caused by   `{{ room | lower }}` reads `room`, which this record does not have: guard it with `{% if room %}…{% endif %}` or default it with `room | default(value=…)`",
+        "  ├─ caused by   Tera: Invalid type for the value, expected `string` but got `undefined`",
+        "  ├─ attribute   room",
+        "  ╰─ entities    urn:ngsi-ld:Sensor:S3"
+      ]
+    }
+  ]
+}

@@ -1,0 +1,24 @@
+---
+source: crates/cassiopeia-pipeline/src/end_to_end/golden/mod.rs
+input_file: crates/cassiopeia-pipeline/golden/values/vocab-property/manifest.json5
+---
+[
+  {
+    "id": "urn:ngsi-ld:Sample:S1",
+    "type": "Sample",
+    "category": {
+      "vocab": "https://example.org/Vocab#Station"
+    },
+    "classification": {
+      "vocab": "urn:example:Class:A"
+    }
+  },
+  {
+    "id": "urn:ngsi-ld:Sample:S2",
+    "type": "Sample"
+  },
+  {
+    "id": "urn:ngsi-ld:Sample:S3",
+    "type": "Sample"
+  }
+]

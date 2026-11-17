@@ -151,7 +151,7 @@ mod tests {
         stages::{assembler::spawn_assembler_thread, stage_env::StageEnv},
     };
     use cassiopeia_common::{batch::Batch, channel::ChannelPolicy, signal::Signal, telemetry::run::RunTelemetry};
-    use cassiopeia_ir::{assembled_entity::AssembledEntity, fragment::Fragment, mapped::Mapped};
+    use cassiopeia_ir::{assembled_entity::AssembledEntity, fragment::Fragment, mapped::Mapped, source_position::SourcePosition};
     use cassiopeia_mapping::{mapping::Mapping, template::runner::TemplateRunner};
     use cassiopeia_reporter::{backend::noop::NoopReporter, reporter::Reporter};
     use cassiopeia_resolver::{
@@ -197,6 +197,7 @@ mod tests {
             let fragment = Fragment::builder()
                 .source_data(json!({ "temperature": 20 }))
                 .target_urn(id.parse().unwrap())
+                .position(SourcePosition::first_of(0))
                 .build();
             sink.resolve(Mapped::new(fragment, Arc::clone(&mapping))).unwrap();
         }

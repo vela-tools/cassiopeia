@@ -3,21 +3,15 @@
 //! disk-backed store needs to stay at one round-trip per batch.
 
 use crate::{
-    entity_store::{error::EntityStoreError, record_timestamp::RecordTimestamp, store::FragmentWrite},
+    entity_store::{error::EntityStoreError, record_timestamp::RecordTimestamp, store::FragmentWrite, write_batch::WriteBatch},
     fragment_resolver::FragmentResolver,
     mapping_id::MappingId,
+    prepared_fragment::PreparedFragment,
     relationship_store::error::RelationshipStoreError,
 };
 use cassiopeia_common::parallelism::Parallelism;
-use cassiopeia_ir::{
-    fragment::{Fragment, FragmentParts},
-    mapped::Mapped,
-};
-use cassiopeia_mapping::{
-    mapping::Mapping,
-    observed_at::ObservedAt,
-    template::{error::TemplateError, run_variables::RunVariables, template_input::TemplateInput},
-};
+use cassiopeia_ir::{fragment::Fragment, mapped::Mapped, source_position::SourcePosition};
+use cassiopeia_mapping::mapping::Mapping;
 use cassiopeia_ngsi_ld::entity::scope::NgsiLdScope;
 use chrono::{DateTime, Utc};
 use rayon::prelude::*;
@@ -28,30 +22,12 @@ use std::{
 };
 use urn_rs::Urn;
 
-/// The per-fragment side-effects prepared before a coalesced store flush.
-///
-/// Every field is owned: the resolver is the fragment's last holder, so preparation takes the record
-/// and the scope apart rather than borrowing them, and the store write below moves them into place.
-pub(crate) struct PreparedFragment {
-    base_id: Urn,
-    source_data: Value,
-    scope: Option<NgsiLdScope>,
-    expires_at: Option<DateTime<Utc>>,
-    mapping: Arc<Mapping>,
-    /// The run variables the record is read with, interned with the mapping into its id.
-    variables: RunVariables,
-    /// What the record-level `observedAt` template yielded; read as a ranking timestamp only once the
-    /// mapping is interned, since a failure is kept against the mapping's id.
-    observed_at: Result<Option<ObservedAt>, TemplateError>,
-    temporal: bool,
-    edges: Vec<(Urn, String, Urn)>,
-}
-
 /// The owned half of one entity-store write, set apart from the mapping whose read set the write
 /// borrows.
 struct OwnedWrite {
     base_id: Urn,
     source_data: Value,
+    position: SourcePosition,
     mapping_id: MappingId,
     temporal: bool,
     timestamp: RecordTimestamp,
@@ -59,66 +35,30 @@ struct OwnedWrite {
     expires_at: Option<DateTime<Utc>>,
 }
 
-/// A prepared fragment paired with its interned mapping id, carried from preparation through both
-/// store writes.
-pub(crate) type PreparedSuccess = (PreparedFragment, MappingId);
-
 impl FragmentResolver {
     /// Prepares each fragment's side-effects, interning its mapping, and returns the prepared
-    /// fragments with their mapping ids and the preparation time.
-    pub(crate) fn prepare_fragments(&self, fragments: Vec<Mapped<Fragment>>) -> (Vec<PreparedSuccess>, Duration) {
+    /// fragments in the order of the batch with the time preparing them took.
+    pub(crate) fn prepare_fragments(&self, fragments: Vec<Mapped<Fragment>>) -> (Vec<PreparedFragment>, Duration) {
         let prepare_started = Instant::now();
-        let prepare = |fragment: Mapped<Fragment>| -> PreparedFragment {
-            let (fragment, mapping) = fragment.into_parts();
-            let observed_at = mapping.extract_observed_at(&self.resolver, TemplateInput::new(fragment.source_data(), fragment.variables()));
-            let temporal = mapping.is_temporal();
-            let FragmentParts {
-                source_data,
-                target_urn: base_id,
-                scope,
-                expires_at,
-                parent_context,
-                variables,
-            } = fragment.into_parts();
-            let edges = self.build_edges(&base_id, parent_context.as_ref(), temporal);
-
-            PreparedFragment {
-                base_id,
-                source_data,
-                scope,
-                expires_at,
-                mapping,
-                variables,
-                observed_at,
-                temporal,
-                edges,
-            }
+        let interned = self.intern_distinct(fragments.iter().map(|fragment| (fragment.mapping(), fragment.inner().variables())));
+        let prepare = |fragment: Mapped<Fragment>| {
+            let mapping_id = self.interned_id(&interned, fragment.mapping(), fragment.inner().variables());
+            self.prepare(fragment, mapping_id)
         };
 
         let prepared: Vec<PreparedFragment> = match self.parallelism {
             Parallelism::Parallel => fragments.into_par_iter().map(prepare).collect(),
             Parallelism::Sequential => fragments.into_iter().map(prepare).collect(),
         };
-        let preparation = prepare_started.elapsed();
-
-        let interned = self.intern_distinct(prepared.iter().map(|prepared| (&prepared.mapping, &prepared.variables)));
-        let successes = prepared
-            .into_iter()
-            .map(|prepared| {
-                let mapping_id = self.interned_id(&interned, &prepared.mapping, &prepared.variables);
-                (prepared, mapping_id)
-            })
-            .collect();
-
-        (successes, preparation)
+        (prepared, prepare_started.elapsed())
     }
 
     /// Writes every prepared relationship edge in one batch, returning any failure message and the
     /// time the write took.
-    pub(crate) fn write_relationship_edges(&self, successes: &[PreparedSuccess]) -> (Option<RelationshipStoreError>, Duration) {
-        let edge_refs: Vec<(Urn, &str, Urn)> = successes
+    pub(crate) fn write_relationship_edges(&self, prepared: &[PreparedFragment]) -> (Option<RelationshipStoreError>, Duration) {
+        let edge_refs: Vec<(Urn, &str, Urn)> = prepared
             .iter()
-            .flat_map(|(prepared, _)| {
+            .flat_map(|prepared| {
                 prepared
                     .edges
                     .iter()
@@ -134,22 +74,25 @@ impl FragmentResolver {
         (failure, relationship_started.elapsed())
     }
 
-    /// Writes every prepared fragment to the entity store in one batch, carrying each interned
-    /// mapping id, and returns any failure message and the time the write took.
+    /// Writes every prepared fragment to the entity store as one batch, `batch`, in the order of the
+    /// batch, and returns any failure message and the time the write took.
     ///
     /// Consuming the prepared fragments is what lets each record move into the store instead of being
     /// copied there. Each write borrows its mapping's read set, so the mappings are set aside first
-    /// and kept alive for the whole store call.
-    pub(crate) fn write_entity_fragments(&self, successes: Vec<PreparedSuccess>) -> (Option<EntityStoreError>, Duration) {
-        let (owned, mappings): (Vec<OwnedWrite>, Vec<Arc<Mapping>>) = successes
+    /// and kept alive for the whole store call. The `observedAt` failures are kept in the order of
+    /// the batch, so the failure reported for a mapping is the first one in the source.
+    pub(crate) fn write_entity_fragments(&self, prepared: Vec<PreparedFragment>, batch: WriteBatch) -> (Option<EntityStoreError>, Duration) {
+        let (owned, mappings): (Vec<OwnedWrite>, Vec<Arc<Mapping>>) = prepared
             .into_iter()
-            .map(|(prepared, mapping_id)| {
+            .map(|prepared| {
                 let PreparedFragment {
                     base_id,
                     source_data,
+                    position,
                     scope,
                     expires_at,
                     mapping,
+                    mapping_id,
                     observed_at,
                     temporal,
                     ..
@@ -158,6 +101,7 @@ impl FragmentResolver {
                     OwnedWrite {
                         base_id,
                         source_data,
+                        position,
                         mapping_id,
                         temporal,
                         timestamp: self.record_timestamp(mapping_id, observed_at),
@@ -174,6 +118,8 @@ impl FragmentResolver {
             .map(|(write, mapping)| FragmentWrite {
                 base_id: write.base_id,
                 source_data: write.source_data,
+                position: write.position,
+                batch,
                 mapping_id: write.mapping_id,
                 temporal: write.temporal,
                 timestamp: write.timestamp,
@@ -199,6 +145,7 @@ mod tests {
         entity_store::redb_latest_store::RedbLatestEntityStore,
         fragment_resolver::FragmentResolver,
         relationship_store::redb_store::RedbRelationshipStore,
+        test_order::next_position,
     };
     use cassiopeia_ir::{fragment::Fragment, mapped::Mapped};
     use cassiopeia_mapping::{
@@ -238,7 +185,12 @@ mod tests {
             (&loud, json!({"level": 2, "temperature": 21})),
         ]
         .into_iter()
-        .map(|(id, record)| Mapped::new(Fragment::builder().source_data(record).target_urn(id.clone()).build(), Arc::clone(&reading)))
+        .map(|(id, record)| {
+            Mapped::new(
+                Fragment::builder().source_data(record).target_urn(id.clone()).position(next_position()).build(),
+                Arc::clone(&reading),
+            )
+        })
         .collect();
 
         let (results, _timing) = resolver.resolve_batch_timed(batch);

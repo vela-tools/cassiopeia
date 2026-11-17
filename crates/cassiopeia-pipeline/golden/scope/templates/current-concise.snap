@@ -1,0 +1,26 @@
+---
+source: crates/cassiopeia-pipeline/src/end_to_end/golden/mod.rs
+input_file: crates/cassiopeia-pipeline/golden/scope/templates/manifest.json5
+---
+[
+  {
+    "id": "urn:ngsi-ld:Station:S1",
+    "type": "Station",
+    "scope": [
+      "/Slovenia",
+      "/Slovenia/Ljubljana"
+    ],
+    "name": "Both"
+  },
+  {
+    "id": "urn:ngsi-ld:Station:S2",
+    "type": "Station",
+    "scope": "/Slovenia",
+    "name": "Country only"
+  },
+  {
+    "id": "urn:ngsi-ld:Station:S3",
+    "type": "Station",
+    "name": "City only"
+  }
+]

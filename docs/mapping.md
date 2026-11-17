@@ -41,6 +41,8 @@ The mapping creates a `Sensor` entity with an ID based on the record's `id` fiel
 
 Cassiopeia applies the mapping once to each record. If the source contains several records, it resolves the resulting fragments into entities.
 
+When several records of one mapping resolve to the same entity, Cassiopeia keeps one record for the mapping, by a rule that depends on whether the mapping is temporal. A mapping without `observedAt` merges its records field by field: a field that only some of the records hold is taken from them, and a field the records disagree on keeps the value of the first record in the source that holds it, the others are discarded, and the run reports `resolver-records-merged`. A temporal mapping keeps the record with the latest `observedAt`, and of two records that name the same time, the one later in the source. Both rules follow the order in which the input lists its records, so every run over the same input keeps the same values, whichever entity store it uses. A run that keeps the whole series merges nothing (see [Temporal output](output.md#temporal-output)).
+
 ## The document shape
 
 JSON5 is the recommended format for mapping files. It keeps configuration documents readable. Comments can explain an unusual source field or modeling decision, trailing commas make edits and diffs less error-prone, and unquoted keys reduce visual noise. Cassiopeia also accepts strict JSON because JSON is a valid subset of JSON5. Use the `.json5` extension for mappings that use JSON5 features. A strict JSON file can use `.json` when another tool requires it.

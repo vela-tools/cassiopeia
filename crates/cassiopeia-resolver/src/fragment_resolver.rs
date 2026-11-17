@@ -1,8 +1,5 @@
 use crate::{
-    entity_store::{
-        record_timestamp::RecordTimestamp,
-        store::{EntityStore, FragmentWrite},
-    },
+    entity_store::{record_timestamp::RecordTimestamp, store::EntityStore, write_batch::WriteBatches},
     error::{ResolverError, Result},
     fragment_sink::FragmentSink,
     mapping_id::MappingId,
@@ -15,22 +12,17 @@ use crate::{
 use ahash::RandomState;
 use cassiopeia_common::parallelism::Parallelism;
 use cassiopeia_ir::{
-    fragment::{Fragment, FragmentParts},
+    fragment::Fragment,
     mapped::Mapped,
     parent_context::{ParentContext, ParentContextType},
 };
 use cassiopeia_mapping::{
     mapping::Mapping,
     observed_at::ObservedAt,
-    template::{error::TemplateError, resolver::TemplateResolver, run_variables::RunVariables, template_input::TemplateInput},
+    template::{error::TemplateError, resolver::TemplateResolver, run_variables::RunVariables},
 };
 use dashmap::DashMap;
-use rayon::prelude::*;
-use std::{
-    result,
-    sync::Arc,
-    time::{Duration, Instant},
-};
+use std::{result, sync::Arc, time::Duration};
 use urn_rs::Urn;
 
 /// Standard implementation of the [`FragmentSink`] and
@@ -68,6 +60,8 @@ pub struct FragmentResolver {
     /// The first failure of each mapping's `observedAt` template, for reporting the records a
     /// current-state store discards because of it.
     pub(crate) observed_at_failures: Arc<ObservedAtFailures>,
+    /// Numbers the batches the resolver writes, in the order it writes them.
+    pub(crate) write_batches: Arc<WriteBatches>,
 }
 
 impl FragmentResolver {
@@ -88,6 +82,7 @@ impl FragmentResolver {
             write_strategy,
             temporal_edge_dedup: Arc::new(DashMap::with_hasher(RandomState::new())),
             observed_at_failures: Arc::new(ObservedAtFailures::new()),
+            write_batches: Arc::new(WriteBatches::new()),
         }
     }
 
@@ -104,6 +99,16 @@ impl FragmentResolver {
                 RecordTimestamp::Unresolvable
             }
         }
+    }
+
+    /// Registers `mapping` read with `variables` before any of its fragments arrive.
+    ///
+    /// A mapping's id is handed out when it is first met, and the mappings joined onto one entity
+    /// are ordered by id. The inputs of a run stream their fragments in concurrently, so the run
+    /// registers every input's mappings up front, in the order of the manifest, to give them ids, and
+    /// the joined entities their order, in that order on every run.
+    pub fn register(&self, mapping: &Arc<Mapping>, variables: &RunVariables) {
+        self.mapping_registry.intern(mapping, variables);
     }
 
     /// Sets whether batch preparation runs across threads.
@@ -178,17 +183,21 @@ impl FragmentResolver {
     /// The coalesced path splits each fragment into the side-effects to commit
     /// (the private `prepare_fragments`, in [`coalesced_batch`](crate::coalesced_batch)), then flushes the relationship and
     /// entity stores once each. This turns an O(N) disk-backed run into O(batches) round-trips without
-    /// changing single-fragment semantics.
+    /// changing single-fragment semantics. Stores that take concurrent writes take the concurrent
+    /// path instead ([`concurrent_batch`](crate::concurrent_batch)), which writes the fragments of
+    /// different entities in parallel and each entity's in the order of the batch.
+    ///
+    /// The results hold one entry per fragment.
     #[must_use]
     pub fn resolve_batch_timed(&self, fragments: Vec<Mapped<Fragment>>) -> (Vec<Result<()>>, ResolveBatchTiming) {
         if self.write_strategy == StoreWriteStrategy::Concurrent {
             return self.resolve_batch_concurrent(fragments);
         }
 
-        let (successes, preparation) = self.prepare_fragments(fragments);
-        let count = successes.len();
-        let (rel_failure, relationship_write) = self.write_relationship_edges(&successes);
-        let (ent_failure, entity_write) = self.write_entity_fragments(successes);
+        let (prepared, preparation) = self.prepare_fragments(fragments);
+        let count = prepared.len();
+        let (rel_failure, relationship_write) = self.write_relationship_edges(&prepared);
+        let (ent_failure, entity_write) = self.write_entity_fragments(prepared, self.write_batches.next());
 
         // A store batch is all-or-nothing, so fan the failure across every fragment that contributed.
         // Sharing it keeps every fragment's result pointing at the same typed failure rather than at
@@ -207,35 +216,6 @@ impl FragmentResolver {
                 preparation,
                 relationship_write,
                 entity_write,
-            },
-        )
-    }
-
-    /// Resolves a batch against stores that accept concurrent per-fragment writes.
-    ///
-    /// The phases are the same as the coalesced path: prepare, write relationships, write the
-    /// fragment. Each fragment carries its own here, though, so the timing spans the whole fan-out
-    /// rather than one shared flush; that is what lets a concurrent store's write time be measured
-    /// at all, since no single flush exists to time.
-    fn resolve_batch_concurrent(&self, fragments: Vec<Mapped<Fragment>>) -> (Vec<Result<()>>, ResolveBatchTiming) {
-        let started = Instant::now();
-        let interned = self.intern_distinct(fragments.iter().map(|fragment| (fragment.mapping(), fragment.inner().variables())));
-        let resolve = |fragment: Mapped<Fragment>| {
-            let mapping_id = self.interned_id(&interned, fragment.mapping(), fragment.inner().variables());
-            self.resolve_with_mapping_id(fragment, mapping_id)
-        };
-        let results = match self.parallelism {
-            Parallelism::Parallel => fragments.into_par_iter().map(resolve).collect(),
-            Parallelism::Sequential => fragments.into_iter().map(resolve).collect(),
-        };
-        // The per-fragment phases interleave on this path, so the elapsed span is attributed to the
-        // store write as a whole rather than split between preparation and the two stores.
-        (
-            results,
-            ResolveBatchTiming {
-                preparation: Duration::ZERO,
-                relationship_write: Duration::ZERO,
-                entity_write: started.elapsed(),
             },
         )
     }
@@ -274,48 +254,12 @@ impl FragmentResolver {
     fn reading_key(mapping: &Arc<Mapping>, variables: &RunVariables) -> (usize, usize) {
         (Arc::as_ptr(mapping) as usize, variables.address())
     }
-
-    /// Resolves one fragment whose mapping has already been interned.
-    ///
-    /// Taking the id as an argument is what lets a batch intern once per distinct mapping instead
-    /// of once per fragment; the stored result is identical either way.
-    fn resolve_with_mapping_id(&self, fragment: Mapped<Fragment>, mapping_id: MappingId) -> Result<()> {
-        let (fragment, mapping) = fragment.into_parts();
-        let observed_at = mapping.extract_observed_at(&self.resolver, TemplateInput::new(fragment.source_data(), fragment.variables()));
-        let timestamp = self.record_timestamp(mapping_id, observed_at);
-        let temporal = mapping.is_temporal();
-        // The variables were interned into the mapping id, which is what the store keeps.
-        let FragmentParts {
-            source_data,
-            target_urn: base_id,
-            scope,
-            expires_at,
-            parent_context,
-            variables: _,
-        } = fragment.into_parts();
-
-        for (parent, property, child) in self.build_edges(&base_id, parent_context.as_ref(), temporal) {
-            self.relationship_store.add_child(&parent, &property, &child)?;
-        }
-
-        self.entity_store.store_fragment(FragmentWrite {
-            base_id,
-            source_data,
-            mapping_id,
-            temporal,
-            timestamp,
-            scope,
-            expires_at,
-            reads: mapping.source_reads(),
-        })?;
-        Ok(())
-    }
 }
 
 impl FragmentSink for FragmentResolver {
     fn resolve(&self, fragment: Mapped<Fragment>) -> Result<()> {
         let mapping_id = self.mapping_registry.intern(fragment.mapping(), fragment.inner().variables());
-        self.resolve_with_mapping_id(fragment, mapping_id)
+        self.write_prepared(self.prepare(fragment, mapping_id), self.write_batches.next())
     }
 
     fn resolve_batch(&self, fragments: Vec<Mapped<Fragment>>) -> Vec<Result<()>> {
@@ -331,6 +275,7 @@ mod tests {
         fragment_resolver::FragmentResolver,
         fragment_sink::FragmentSink,
         relationship_store::dashmap_store::DashMapRelationshipStore,
+        test_order::next_position,
     };
     use cassiopeia_ir::{
         fragment::Fragment,
@@ -414,6 +359,7 @@ mod tests {
                     Fragment::builder()
                         .source_data(json!({"temperature": 20, "timestamp": timestamp}))
                         .target_urn(station.clone())
+                        .position(next_position())
                         .parent_context(Some(vec![context]))
                         .build(),
                     Arc::clone(&mappings[0]),
@@ -437,6 +383,7 @@ mod tests {
                 Fragment::builder()
                     .source_data(json!({"t": 1}))
                     .target_urn(urn("urn:ngsi-ld:Station:1"))
+                    .position(next_position())
                     .build(),
                 Arc::clone(&mappings[0]),
             ),
@@ -444,6 +391,7 @@ mod tests {
                 Fragment::builder()
                     .source_data(json!({"t": 2}))
                     .target_urn(urn("urn:ngsi-ld:Station:2"))
+                    .position(next_position())
                     .build(),
                 Arc::clone(&mappings[0]),
             ),
@@ -463,6 +411,7 @@ mod tests {
                     Fragment::builder()
                         .source_data(json!({"t": index}))
                         .target_urn(urn(&format!("urn:ngsi-ld:Station:{index}")))
+                        .position(next_position())
                         .build(),
                     Arc::clone(&mappings[0]),
                 )
@@ -486,15 +435,27 @@ mod tests {
         let weather = urn("urn:ngsi-ld:WeatherObserved:1");
         let batch = vec![
             Mapped::new(
-                Fragment::builder().source_data(json!({"t": 1})).target_urn(air.clone()).build(),
+                Fragment::builder()
+                    .source_data(json!({"t": 1}))
+                    .target_urn(air.clone())
+                    .position(next_position())
+                    .build(),
                 Arc::clone(&mappings[0]),
             ),
             Mapped::new(
-                Fragment::builder().source_data(json!({"h": 2})).target_urn(weather.clone()).build(),
+                Fragment::builder()
+                    .source_data(json!({"h": 2}))
+                    .target_urn(weather.clone())
+                    .position(next_position())
+                    .build(),
                 Arc::clone(&mappings[1]),
             ),
             Mapped::new(
-                Fragment::builder().source_data(json!({"t": 3})).target_urn(air.clone()).build(),
+                Fragment::builder()
+                    .source_data(json!({"t": 3}))
+                    .target_urn(air.clone())
+                    .position(next_position())
+                    .build(),
                 Arc::clone(&mappings[0]),
             ),
         ];
@@ -527,6 +488,7 @@ mod tests {
             .source_data(record)
             // Every fragment owns its target id, while the test keeps it to assemble the entity.
             .target_urn(id.clone())
+            .position(next_position())
             .variables(variables)
             .build();
         Mapped::new(fragment, Arc::clone(mapping))
@@ -585,6 +547,7 @@ mod tests {
                         Fragment::builder()
                             .source_data(json!({"t": index}))
                             .target_urn(urn(&format!("urn:ngsi-ld:Station:{index}")))
+                            .position(next_position())
                             .build(),
                         Arc::clone(&mappings[0]),
                     )
@@ -612,6 +575,7 @@ mod tests {
                     Fragment::builder()
                         .source_data(json!({"t": index}))
                         .target_urn(urn(&format!("urn:ngsi-ld:Station:{index}")))
+                        .position(next_position())
                         .build(),
                     Arc::clone(&mappings[0]),
                 )

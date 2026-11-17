@@ -1,0 +1,22 @@
+---
+source: crates/cassiopeia-pipeline/src/end_to_end/golden/mod.rs
+input_file: crates/cassiopeia-pipeline/golden/values/run-variable/manifest.json5
+---
+[
+  {
+    "id": "urn:ngsi-ld:Station:LPP-S1",
+    "type": "Station",
+    "network": {
+      "type": "Property",
+      "value": "LPP"
+    },
+    "district": {
+      "type": "Property",
+      "value": "Center"
+    },
+    "capacity": {
+      "type": "Property",
+      "value": 40
+    }
+  }
+]

@@ -2,14 +2,17 @@ use crate::error::ExpanderError;
 use ahash::RandomState;
 use cassiopeia_common::collection::CollectionName;
 use cassiopeia_mapping::mapping::Mapping;
-use std::{collections::HashMap, sync::Arc};
+use indexmap::IndexMap;
+use std::sync::Arc;
 
-/// The mappings a collections router selects from, keyed by the verbatim source collection label.
+/// The mappings a collections router selects from, keyed by the verbatim source collection label, in
+/// the order the manifest binds them.
 ///
 /// The labels come straight out of the ingested source, so the map hashes with `ahash` rather than
 /// the standard library's `SipHash`: it resists a hostile key distribution at a fraction of the cost,
-/// and every record probes it.
-pub type CollectionRoutes = HashMap<CollectionName, Arc<Mapping>, RandomState>;
+/// and every record probes it. It keeps the manifest's order, so the router lists its mappings in the
+/// same order on every run.
+pub type CollectionRoutes = IndexMap<CollectionName, Arc<Mapping>, RandomState>;
 
 /// Selects the compiled mapping that governs a record, given its source collection label.
 ///
@@ -41,8 +44,8 @@ impl MappingRouter {
         }
     }
 
-    /// The distinct mappings this router can select, for stages that inspect every mapping a lane
-    /// carries (such as `@context` resolution).
+    /// The distinct mappings this router can select, in the order the manifest binds them, for stages
+    /// that inspect every mapping a lane carries (such as `@context` resolution).
     #[must_use]
     pub fn mappings(&self) -> Vec<&Arc<Mapping>> {
         match self {

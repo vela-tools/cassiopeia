@@ -18,7 +18,7 @@ use cassiopeia_common::{
 };
 use cassiopeia_diagnostic::severity::Severity;
 use cassiopeia_expander::{error::ExpanderError, expander::Expander, expansion_losses::ExpansionLosses};
-use cassiopeia_ir::{fragment::Fragment, mapped::Mapped, record::Record};
+use cassiopeia_ir::{fragment::Fragment, mapped::Mapped, record::Record, source_position::SourcePosition};
 use cassiopeia_reporter::guard::StageGuard;
 use execution_time::ExecutionTime;
 use std::{mem, ops::ControlFlow, thread::spawn};
@@ -77,6 +77,11 @@ impl<'a> FragmentEmitter<'a> {
 /// Spawns the expander for one lane. It owns the boxed expander outright (a single thread drives it,
 /// so no lock is needed) and counts both ingested records and emitted fragments as it runs.
 ///
+/// The lane's records arrive here in the order the input read them, so this one thread is where each
+/// record is given its place in the source: the lane's first record stands at `first` and every
+/// later one at the next position. Every fragment carries its record's position on to the stages
+/// that run in parallel.
+///
 /// Fragments are written straight onto the shared resolver intake channel (`tx`, one clone per lane),
 /// so every lane merges into the resolver with no intermediate per-lane channel or bridge thread.
 ///
@@ -92,6 +97,7 @@ pub(crate) fn spawn_expander_thread(
     receiver: ChannelReceiver<Signal<Batch<Record>, PipelineError>>,
     tx: FragmentSender,
     batch_size: usize,
+    first: SourcePosition,
     env: &StageEnv,
 ) {
     let reporter = env.reporter;
@@ -113,6 +119,7 @@ pub(crate) fn spawn_expander_thread(
         }
 
         let mut emitter = FragmentEmitter::new(&tx, batch_size);
+        let mut next = first;
 
         // The wait belongs to the expander: it is the consumer of the ingestor's records. The
         // ingestor stage's own input wait is measured where it waits for a payload to ingest.
@@ -131,7 +138,10 @@ pub(crate) fn spawn_expander_thread(
                     // is output wait, measured inside the emitter.
                     let service = expander_stage.service_span();
                     let losses = ExpansionLosses::new();
-                    let results = expander.expand_batch(Vec::from(records), &losses);
+                    let records = Vec::from(records);
+                    let batch_first = next;
+                    next = batch_first.advanced(records.len());
+                    let results = expander.expand_batch(records, batch_first, &losses);
                     drop(service);
 
                     let mut skipped = SkippedRecords::<_, ExpanderError>::new();

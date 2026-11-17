@@ -1,0 +1,42 @@
+---
+source: crates/cassiopeia-pipeline/src/end_to_end/golden/mod.rs
+input_file: crates/cassiopeia-pipeline/golden/structure/nested-mappings/manifest.json5
+---
+[
+  {
+    "id": "urn:ngsi-ld:Building:B1",
+    "type": "Building",
+    "address": {
+      "type": "Property",
+      "value": {
+        "streetAddress": "Main 12",
+        "addressLocality": "Ljubljana",
+        "postal": {
+          "code": 1000,
+          "country": "SI"
+        }
+      }
+    },
+    "addressText": {
+      "type": "Property",
+      "value": "{\"streetAddress\":\"Main 12\",\"addressLocality\":\"Ljubljana\"}"
+    }
+  },
+  {
+    "id": "urn:ngsi-ld:Building:B2",
+    "type": "Building",
+    "address": {
+      "type": "Property",
+      "value": {
+        "addressLocality": "Maribor",
+        "postal": {
+          "country": "SI"
+        }
+      }
+    },
+    "addressText": {
+      "type": "Property",
+      "value": "{\"addressLocality\":\"Maribor\"}"
+    }
+  }
+]

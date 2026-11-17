@@ -1,4 +1,4 @@
-use crate::parent_context::ParentContext;
+use crate::{parent_context::ParentContext, source_position::SourcePosition};
 use cassiopeia_mapping::template::run_variables::RunVariables;
 use cassiopeia_ngsi_ld::entity::scope::NgsiLdScope;
 use chrono::{DateTime, Utc};
@@ -15,6 +15,9 @@ pub struct Fragment {
     source_data: Value,
     /// The pre-calculated target URN.
     target_urn: Urn,
+    /// Where the record the fragment was expanded from stands in the run's sources; every fragment
+    /// of one record shares it.
+    position: SourcePosition,
     /// The resolved scope of the entity.
     #[builder(default = None)]
     scope: Option<NgsiLdScope>,
@@ -39,6 +42,8 @@ pub struct FragmentParts {
     pub source_data: Value,
     /// The pre-calculated target URN.
     pub target_urn: Urn,
+    /// Where the fragment's record stands in the run's sources.
+    pub position: SourcePosition,
     /// The resolved scope of the entity.
     pub scope: Option<NgsiLdScope>,
     /// The resolved entity `expiresAt` (ETSI GS CIM 009 v1.9.1 clause 4.5.1).
@@ -60,6 +65,7 @@ impl Fragment {
         FragmentParts {
             source_data: self.source_data,
             target_urn: self.target_urn,
+            position: self.position,
             scope: self.scope,
             expires_at: self.expires_at,
             parent_context: self.parent_context,
@@ -75,6 +81,7 @@ mod tests {
         parent_context::{ParentContext, ParentContextType},
         relationship_key::RelationshipKey,
         relationship_path::RelationshipPath,
+        source_position::SourcePosition,
     };
     use cassiopeia_mapping::template::run_variables::RunVariables;
     use cassiopeia_ngsi_ld::entity::name::NameBuf;
@@ -97,11 +104,13 @@ mod tests {
         let fragment = Fragment::builder()
             .source_data(json!({"t": 1}))
             .target_urn(urn("urn:ngsi-ld:Station:1"))
+            .position(SourcePosition::first_of(1).advanced(7))
             .expires_at(Some(expires_at))
             .parent_context(Some(vec![context.clone()]))
             .build();
         assert_eq!(fragment.source_data(), &json!({"t": 1}));
         assert_eq!(fragment.target_urn(), &urn("urn:ngsi-ld:Station:1"));
+        assert_eq!(fragment.position(), &SourcePosition::first_of(1).advanced(7));
         assert_eq!(fragment.scope(), &None);
         assert_eq!(fragment.expires_at(), &Some(expires_at));
         assert_eq!(fragment.parent_context().as_ref(), Some(&vec![context]));
@@ -109,7 +118,7 @@ mod tests {
     }
 
     #[test]
-    fn a_fragment_carries_the_run_variables_of_its_input_into_its_parts() {
+    fn a_fragment_carries_its_position_and_the_run_variables_of_its_input_into_its_parts() {
         let mut variables = Map::new();
         variables.insert("network".to_string(), json!("bikes"));
         let variables = RunVariables::new(variables);
@@ -117,12 +126,14 @@ mod tests {
         let parts = Fragment::builder()
             .source_data(json!({"id": 1}))
             .target_urn(urn("urn:ngsi-ld:Station:bikes-1"))
+            .position(SourcePosition::first_of(0).advanced(4))
             // The fragment takes its own handle on the shared map, while the test keeps one to compare.
             .variables(variables.clone())
             .build()
             .into_parts();
 
         assert_eq!(parts.source_data, json!({"id": 1}));
+        assert_eq!(parts.position, SourcePosition::first_of(0).advanced(4));
         assert_eq!(parts.variables.address(), variables.address());
     }
 }
