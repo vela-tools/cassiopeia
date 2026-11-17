@@ -51,9 +51,9 @@ pub fn metadata_discovery_request(root: &ServiceRoot, settings: &SensorThingsSet
 /// Query parameters are written in the order `$filter`, `$top`, `$expand`, `$orderby`, and `$filter`
 /// only when the settings select data streams of `kind` by an expression. A server evaluates query
 /// options in one order whatever order they are written in (OGC 18-088 section 9.3.1, Req 22), but
-/// `$top` comes before the `$top=1` of the newest Observation's expansion: istSOS4 1.3 builds its next link from the first `$top=` of the
-/// request, so a later `$top` gives it a page of one data stream, and every page then repeats all but
-/// one of the data streams of the page before it.
+/// `$top` comes before the `$top=1` of the newest Observation's expansion: istSOS4 1.3 builds its
+/// next link from the first `$top=` of the request, so a later `$top` gives it a page of one data
+/// stream, and every page then repeats all but one of the data streams of the page before it.
 #[must_use]
 pub fn latest_discovery_request(root: &ServiceRoot, settings: &SensorThingsSettings, kind: StreamKind) -> Url {
     let newest = match settings.features_of_interest() {
@@ -129,6 +129,12 @@ mod tests {
         serde_json::from_str(json).unwrap()
     }
 
+    /// The value of the first `$top` written in the query of `request`, which istSOS4 1.3 takes for
+    /// the page size of the next link it writes.
+    fn first_top(request: &Url) -> Option<&str> {
+        request.query()?.split_once("$top=")?.1.split('&').next()
+    }
+
     #[test]
     fn latest_discovery_request_is_built_exactly() {
         let request = latest_discovery_request(&root("https://h.example/v1.1"), &settings("{}"), StreamKind::Datastream);
@@ -140,15 +146,21 @@ mod tests {
     }
 
     #[test]
-    fn the_page_size_comes_before_the_top_of_the_newest_observation() {
+    fn the_page_size_is_the_first_top_of_a_latest_request() {
+        let request = latest_discovery_request(&root("https://h.example/v1.1"), &settings(r#"{"pageSize": 25}"#), StreamKind::Datastream);
+
+        assert_eq!(first_top(&request), Some("25"));
+    }
+
+    #[test]
+    fn the_page_size_is_the_first_top_of_a_filtered_latest_request_with_features_of_interest() {
         let request = latest_discovery_request(
             &root("https://h.example/v1.1"),
             &settings(r#"{"datastreams": "endswith(name,'-pm10')", "pageSize": 25, "featuresOfInterest": true}"#),
             StreamKind::Datastream,
         );
-        let query = request.query().unwrap_or_default();
 
-        assert_eq!(query.find("$top=").and_then(|start| query.get(start..start + 7)), Some("$top=25"));
+        assert_eq!(first_top(&request), Some("25"));
     }
 
     #[test]
