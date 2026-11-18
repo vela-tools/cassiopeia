@@ -6,6 +6,7 @@
 //! snapshot file) and emits one [`CollectedPayload`](cassiopeia_ir::payload::CollectedPayload) per
 //! source for the profiler to read.
 
+pub mod collection_end;
 pub mod collection_warnings;
 pub mod collector;
 pub mod downloaded_file;

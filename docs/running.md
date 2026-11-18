@@ -127,7 +127,13 @@ Warnings never fail a run. `--validation-mode warn` and the missing-schema warni
 
 ### Exit status
 
-Cassiopeia reports a run's outcome to the OS, so it can act as a CI gate. Exit `0` means success, with warnings allowed. A non-zero exit means a fatal abort under `abort` or `continue`. `ignore` always exits `0`. The run summary's `errors` and `warnings` counts reflect the failures used to determine the exit status.
+Cassiopeia reports a run's outcome to the OS, so it can act as a CI gate. Exit `0` means success, with warnings allowed. A non-zero exit means a fatal abort under `abort` or `continue`. `ignore` always exits `0`. The run summary's `errors` and `warnings` counts reflect the failures used to determine the exit status. A run you stop also exits `0`, as described under [Stop a run](#stop-a-run).
+
+### Stop a run
+
+Ctrl+C stops a run. SIGTERM stops it the same way; `kill`, `docker stop`, Kubernetes and systemd send it. SIGHUP, which a closed terminal or SSH session sends, does so too. The current cycle ends at its next stopping point: a SensorThings read ends before its next request, and every other stage ends before its next batch. A request already sent is answered first, so a slow server can delay the stop. What the cycle already wrote to files or to a broker with `atomicity: "streaming"` stays written. A broker output with `atomicity: "atomic"` sends nothing, and no cursor moves, so the next run reads the cycle's readings again.
+
+A scheduled cycle that a stop cut short is reported as stopped, such as `• [14:18:14] #00001 stopped (2.12s)`, and a one-shot run that a stop cut short reports `• Run stopped (2.12s)`. A stop between two cycles reports no cycle at all. A scheduled run then ends with `• Schedule finished`. A stop is not a failure: the run summary counts no error for it, a stopped cycle is not retried, `--on-failure` does not apply to it, and the process exits with status `0`.
 
 ### Read the run summary
 

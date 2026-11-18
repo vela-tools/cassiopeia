@@ -1,4 +1,5 @@
 use crate::{
+    collection_end::CollectionEnd,
     collection_warnings::CollectionWarnings,
     collector::Collector,
     downloader::Downloader,
@@ -86,7 +87,7 @@ impl SensorThingsCollector {
 }
 
 impl Collector for SensorThingsCollector {
-    fn collect(self: Box<Self>, sender: ChannelSender<Signal<CollectedPayload, CollectorError>>) -> Result<CollectionWarnings, CollectorError> {
+    fn collect(self: Box<Self>, sender: ChannelSender<Signal<CollectedPayload, CollectorError>>) -> Result<CollectionEnd, CollectorError> {
         let SensorThingsCollector {
             service,
             cursor,
@@ -108,7 +109,21 @@ impl Collector for SensorThingsCollector {
                 if let Err(cleanup) = fs::remove_dir_all(directory.path()) {
                     debug!("The partial snapshot in {} could not be removed: {cleanup}", directory.path().display());
                 }
-                return Err(error);
+                return match error {
+                    // A read unwinds through its error path once the run is being stopped, and a
+                    // stop is no failure of the read.
+                    CollectorError::Interrupted { .. } => Ok(CollectionEnd::Stopped),
+                    failure @ (CollectorError::ClientInit { .. }
+                    | CollectorError::Http { .. }
+                    | CollectorError::HttpStatus { .. }
+                    | CollectorError::Io { .. }
+                    | CollectorError::ChannelClosed
+                    | CollectorError::CursorWithheld { .. }
+                    | CollectorError::LinkLoop { .. }
+                    | CollectorError::NextLink { .. }
+                    | CollectorError::PageUnreadable { .. }
+                    | CollectorError::InvalidFileExtension { .. }) => Err(failure),
+                };
             }
         };
 
@@ -117,7 +132,7 @@ impl Collector for SensorThingsCollector {
         sender
             .send(Signal::Data(CollectedPayload::File(payload)))
             .map_err(|_| CollectorError::ChannelClosed)?;
-        Ok(warnings)
+        Ok(CollectionEnd::Collected(warnings))
     }
 }
 
@@ -219,13 +234,14 @@ fn read_things<W: Write>(
 #[cfg(test)]
 mod tests {
     use crate::{
+        collection_end::CollectionEnd,
         collection_warnings::CollectionWarnings,
         error::CollectorError,
         sensorthings::{
             features_of_interest_unserved::{FeaturesOfInterestUnserved, UnservedObservation},
             limit_reached::{CollectLimit, LimitReached},
             multi_datastreams_unread::MultiDatastreamsUnread,
-            test_collection::{RUNNING, checking_collector, collect, collector, cycle_start, root, snapshot_lines},
+            test_collection::{RUNNING, checking_collector, collect, collect_to_end, collector, cycle_start, root, snapshot_lines},
         },
     };
     use cassiopeia_common::{
@@ -587,7 +603,7 @@ mod tests {
     }
 
     #[test]
-    fn a_stop_between_pages_interrupts_collection() {
+    fn a_stop_between_pages_ends_collection_as_stopped_and_hands_nothing_on() {
         let mut server = mockito::Server::new();
         let body = page(&[1], Some(&format!("{}/v1.1/Datastreams?$skip=1", server.url())));
         server
@@ -600,10 +616,10 @@ mod tests {
             .create();
         let second = server.mock("GET", "/v1.1/Datastreams?$skip=1").expect(0).create();
 
-        let (result, payloads) = collect(collector(&server, "{}", RequestHeaders::default(), &STOPPED_AFTER_PAGE_ONE));
+        let (result, payloads) = collect_to_end(collector(&server, "{}", RequestHeaders::default(), &STOPPED_AFTER_PAGE_ONE));
 
         second.assert();
-        assert!(matches!(result, Err(CollectorError::Interrupted { .. })), "{result:?}");
+        assert_eq!(result.unwrap(), CollectionEnd::Stopped);
         assert_eq!(payloads.len(), 0);
     }
 

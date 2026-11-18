@@ -4,7 +4,7 @@ A schedule makes a run repeat instead of exiting after one pass. It turns a one-
 
 Every scheduling setting has two equivalent forms: a field inside a manifest's `schedule` block and a command-line flag on `cassiopeia map`. This page gives both forms. The manifest field table is in the [manifest guide](manifest.md#schedule).
 
-Whichever form you use, the first run fires immediately. Every later run waits for the trigger. With no bound, the command stays alive and keeps firing until you interrupt it (Ctrl-C).
+Whichever form you use, the first run fires immediately. Every later run waits for the trigger. With no bound, the command stays alive and keeps firing until you stop it with Ctrl+C, SIGTERM or SIGHUP. The cycle in progress then ends at its next stopping point and is reported as stopped, and the schedule ends. See [Stop a run](running.md#stop-a-run).
 
 ## The three triggers
 

@@ -5,10 +5,9 @@ use crate::{
             record::{Placeholders, ViewRecord},
             view::View,
         },
-        harness::{RunFolders, run_manifest},
+        harness::{RunFolders, RunStop, run_manifest},
     },
     pipeline_config::ExtractionParallelism,
-    test_engine::SHUTDOWN,
 };
 use cassiopeia_common::store_kind::StoreKind;
 use pretty_assertions::assert_eq;
@@ -50,7 +49,7 @@ fn run_on_store(case: &GoldenCase, view: View, store: StoreKind) -> ViewRecord {
     };
     fs::create_dir_all(&folders.schemas).unwrap();
     let manifest = case.manifest(view, &folders.output);
-    let (result, outcome) = run_manifest(store, &manifest, folders, ExtractionParallelism::Sequential, &SHUTDOWN);
+    let (result, outcome) = run_manifest(store, &manifest, folders, ExtractionParallelism::Sequential, RunStop::never());
     let placeholders = Placeholders {
         case: case.directory(),
         run: root,

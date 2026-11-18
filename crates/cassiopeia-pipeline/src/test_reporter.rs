@@ -29,12 +29,14 @@ pub(crate) struct RecordedDiagnostic {
     pub(crate) rendered: Vec<String>,
 }
 
-/// A reporter that records the diagnostics sent to it and discards everything else.
+/// A reporter that records the diagnostics and the info and success lines sent to it, and discards
+/// everything else.
 ///
 /// `const`-constructible so a test can back a `static` with it, which is what the stage spawners'
 /// `&'static dyn Reporter` requires.
 pub(crate) struct RecordingReporter {
     diagnostics: Mutex<Vec<RecordedDiagnostic>>,
+    messages: Mutex<Vec<String>>,
 }
 
 impl RecordingReporter {
@@ -42,6 +44,7 @@ impl RecordingReporter {
     pub(crate) const fn new() -> RecordingReporter {
         RecordingReporter {
             diagnostics: Mutex::new(Vec::new()),
+            messages: Mutex::new(Vec::new()),
         }
     }
 
@@ -49,11 +52,26 @@ impl RecordingReporter {
     pub(crate) fn diagnostics(&self) -> Vec<RecordedDiagnostic> {
         self.diagnostics.lock().unwrap_or_else(PoisonError::into_inner).clone()
     }
+
+    /// The info and success lines recorded so far, such as the line that reports a cycle, in the
+    /// order they were sent.
+    pub(crate) fn messages(&self) -> Vec<String> {
+        self.messages.lock().unwrap_or_else(PoisonError::into_inner).clone()
+    }
+
+    /// Records one info or success line.
+    fn record(&self, message: &str) {
+        self.messages.lock().unwrap_or_else(PoisonError::into_inner).push(message.to_owned());
+    }
 }
 
 impl MessageLog for RecordingReporter {
-    fn info(&self, _message: &str) {}
-    fn success(&self, _message: &str) {}
+    fn info(&self, message: &str) {
+        self.record(message);
+    }
+    fn success(&self, message: &str) {
+        self.record(message);
+    }
     fn debug(&self, _message: &str) {}
     fn step(&self, _current: usize, _total: usize, _message: &str) {}
     fn raw_log(&self, _message: &str) {}

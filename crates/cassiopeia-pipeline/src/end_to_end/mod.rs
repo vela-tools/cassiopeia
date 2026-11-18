@@ -21,6 +21,7 @@ mod sensors;
 mod sensorthings;
 mod series_validation;
 mod station_mappings;
+mod stopped_cycles;
 mod things;
 mod unit_codes;
 mod unreadable_geometries;
