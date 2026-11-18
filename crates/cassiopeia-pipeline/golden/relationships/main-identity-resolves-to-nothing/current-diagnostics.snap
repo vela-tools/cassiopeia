@@ -5,7 +5,7 @@ input_file: crates/cassiopeia-pipeline/golden/relationships/main-identity-resolv
 {
   "diagnostics": [
     {
-      "code": "expander-urn-ungeneratable",
+      "code": "expander-id-absent",
       "occurrences": 1,
       "message": [
         "! The identifier resolved for a 'Asset' entity is empty, so no URN can be minted"

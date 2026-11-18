@@ -1,7 +1,7 @@
 use crate::{attribute::instance_selection::InstanceSelection, dropped_attributes::DroppedAttributes};
 use cassiopeia_ir::{entity_relationships::EntityRelationships, metadata::EntityMetadata};
 use cassiopeia_mapping::{
-    attribute::declaration_trail::DeclarationTrail,
+    attribute::declaration_trail::{DeclarationTrail, Nesting},
     template::{resolver::TemplateResolver, template_input::TemplateInput},
 };
 use cassiopeia_ngsi_ld::entity::{attribute_path::AttributePath, name::NameBuf};
@@ -106,8 +106,94 @@ impl<'a> ResolutionContext<'a> {
         DeclarationTrail::path_of(self.owners, name)
     }
 
+    /// The top-level attribute a loss of the declaration `name` is filed under when `name` is an
+    /// `observedAt` qualifier: a sub-attribute named `observedAt`, declared on that attribute, on
+    /// one of its instances, or on any sub-attribute nested beneath it.
+    ///
+    /// An `observedAt` qualifies the Property or Relationship it is a sub-attribute of (ETSI GS CIM
+    /// 009 v1.9.1 clause 4.5.2.2), so one declared as a member of a structured value, or as a
+    /// top-level attribute, qualifies nothing and has no owner.
+    pub(crate) fn observed_at_owner(&self, name: &NameBuf) -> Option<&'a NameBuf> {
+        let owner = self.owners?;
+        match owner.nesting() {
+            Nesting::SubAttribute if name.as_str() == "observedAt" => Some(owner.root()),
+            Nesting::SubAttribute | Nesting::Member => None,
+        }
+    }
+
     /// Whether resolution has recursed past the guard depth.
     pub(crate) const fn recursion_limit_exceeded(&self) -> bool {
         self.depth > RECURSION_LIMIT
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::{attribute::resolution_context::ResolutionContext, dropped_attributes::DroppedAttributes};
+    use cassiopeia_ir::entity_relationships::EntityRelationships;
+    use cassiopeia_mapping::{
+        attribute::declaration_trail::{DeclarationTrail, Nesting},
+        template::{run_variables::RunVariables, runner::TemplateRunner, template_input::TemplateInput},
+    };
+    use cassiopeia_ngsi_ld::entity::name::NameBuf;
+    use pretty_assertions::assert_eq;
+    use serde_json::json;
+
+    fn name(value: &str) -> NameBuf {
+        NameBuf::new(value).unwrap()
+    }
+
+    /// The top-level attribute a loss of the declaration `leaf` is filed under as an `observedAt`,
+    /// when `leaf` is resolved beneath the declarations `owners` frames.
+    fn observed_at_owner(owners: Option<&DeclarationTrail<'_>>, leaf: &str) -> Option<String> {
+        let record = json!({});
+        let variables = RunVariables::none();
+        let resolver = TemplateRunner::new().resolver();
+        let relationships = EntityRelationships::default();
+        let dropped = DroppedAttributes::new();
+        let context = ResolutionContext {
+            owners,
+            ..ResolutionContext::new(TemplateInput::new(&record, &variables), &resolver, &relationships, &dropped, None)
+        };
+
+        context.observed_at_owner(&name(leaf)).map(ToString::to_string)
+    }
+
+    #[test]
+    fn a_top_level_attribute_named_observed_at_has_no_owner() {
+        assert_eq!(observed_at_owner(None, "observedAt"), None);
+    }
+
+    #[test]
+    fn an_observed_at_sub_attribute_is_owned_by_the_attribute_it_qualifies() {
+        let temperature = name("temperature");
+        let frame = DeclarationTrail::below(&temperature, Nesting::SubAttribute, None);
+
+        assert_eq!(observed_at_owner(Some(&frame), "observedAt"), Some("temperature".to_owned()));
+    }
+
+    #[test]
+    fn another_sub_attribute_has_no_owner() {
+        let temperature = name("temperature");
+        let frame = DeclarationTrail::below(&temperature, Nesting::SubAttribute, None);
+
+        assert_eq!(observed_at_owner(Some(&frame), "unitCode"), None);
+    }
+
+    #[test]
+    fn a_member_named_observed_at_has_no_owner() {
+        let reading = name("reading");
+        let frame = DeclarationTrail::below(&reading, Nesting::Member, None);
+
+        assert_eq!(observed_at_owner(Some(&frame), "observedAt"), None);
+    }
+
+    #[test]
+    fn an_observed_at_two_levels_down_is_owned_by_the_top_level_attribute() {
+        let (temperature, accuracy) = (name("temperature"), name("accuracy"));
+        let outer = DeclarationTrail::below(&temperature, Nesting::SubAttribute, None);
+        let inner = DeclarationTrail::below(&accuracy, Nesting::SubAttribute, Some(&outer));
+
+        assert_eq!(observed_at_owner(Some(&inner), "observedAt"), Some("temperature".to_owned()));
     }
 }

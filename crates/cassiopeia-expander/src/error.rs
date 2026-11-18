@@ -1,4 +1,4 @@
-use crate::urn::error::UrnError;
+use crate::urn::{error::UrnError, scope_error::ScopeError};
 use cassiopeia_common::collection::CollectionName;
 use cassiopeia_mapping::template::error::TemplateError;
 use thiserror::Error;
@@ -6,9 +6,13 @@ use thiserror::Error;
 /// Errors raised while expanding a record into fragments.
 #[derive(Debug, Error)]
 pub enum ExpanderError {
-    /// URN or scope generation failed for an entity or one of its relationships.
+    /// Identifier generation failed for the entity or one of its relationships.
     #[error(transparent)]
     Urn(#[from] UrnError),
+
+    /// The entity's scope could not be generated.
+    #[error(transparent)]
+    Scope(#[from] ScopeError),
 
     /// The entity `expiresAt` template failed to resolve against the record. The template's own
     /// error names its declaration and mapping document, so it is the whole message.

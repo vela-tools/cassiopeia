@@ -118,13 +118,13 @@ mod tests {
         let sink = UnreadableTimestamps::new();
         sink.record_occurrences(TimestampLoss::ObservedAt, &name("temperature"), "soon", NonZeroU64::new(3).unwrap());
         sink.record(TimestampLoss::ObservedAt, &name("temperature"), "later");
-        sink.record_occurrences(TimestampLoss::AttributeValue, &name("observedAt"), "never", NonZeroU64::new(2).unwrap());
+        sink.record_occurrences(TimestampLoss::AttributeValue, &name("dateObserved"), "never", NonZeroU64::new(2).unwrap());
 
         let entries = entries(sink);
         assert_eq!(entries.len(), 2);
         assert_eq!(entries[0].0, loss(TimestampLoss::ObservedAt, "temperature"));
         assert_eq!((entries[0].1.example.as_ref(), entries[0].1.occurrences().get()), ("soon", 4));
-        assert_eq!(entries[1].0, loss(TimestampLoss::AttributeValue, "observedAt"));
+        assert_eq!(entries[1].0, loss(TimestampLoss::AttributeValue, "dateObserved"));
         assert_eq!((entries[1].1.example.as_ref(), entries[1].1.occurrences().get()), ("never", 2));
     }
 

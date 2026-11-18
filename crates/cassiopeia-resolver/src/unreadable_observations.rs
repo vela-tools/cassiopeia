@@ -3,9 +3,9 @@ use ahash::AHashMap;
 use cassiopeia_mapping::{
     mapping::Mapping,
     observed_at::ObservedAt,
-    observed_declaration::ObservedDeclaration,
     observed_template::{ObservedTemplate, ObservedTemplateIndex},
 };
+use cassiopeia_ngsi_ld::entity::name::NameBuf;
 use std::{num::NonZeroU64, sync::Arc};
 
 /// What unreadable text under one `observedAt` template of one mapping cost across a scan: the
@@ -16,7 +16,8 @@ use std::{num::NonZeroU64, sync::Arc};
 /// problem, the text is one example of it, and the count says how far it spread.
 #[derive(Debug)]
 pub struct UnreadableObservation {
-    /// The mapping whose records were released, which names the declarations reading the text.
+    /// The mapping whose records were released, which names the attributes whose `observedAt` reads
+    /// the text.
     mapping: Arc<Mapping>,
     /// The template that rendered the text.
     template: ObservedTemplateIndex,
@@ -27,14 +28,15 @@ pub struct UnreadableObservation {
 }
 
 impl UnreadableObservation {
-    /// Every `observedAt` sub-attribute that read the text, each of which the discarded records
-    /// would have cost had they been kept.
+    /// The top-level attribute each `observedAt` sub-attribute that read the text qualifies, one
+    /// entry per sub-attribute, each of which the discarded records would have cost its `observedAt`
+    /// had they been kept.
     #[must_use]
-    pub fn declarations(&self) -> &[ObservedDeclaration] {
+    pub fn attributes(&self) -> &[NameBuf] {
         self.mapping
             .observation_plan()
             .template(self.template)
-            .map_or(&[], ObservedTemplate::declarations)
+            .map_or(&[], ObservedTemplate::attributes)
     }
 }
 
@@ -93,6 +95,7 @@ impl UnreadableObservations {
 mod tests {
     use crate::{entity_store::discarded_timestamps::UnreadableDiscards, mapping_id::MappingId, unreadable_observations::UnreadableObservations};
     use cassiopeia_mapping::{mapping::Mapping, observed_at::ObservedAt, observed_template::ObservedTemplateIndex, template::runner::TemplateRunner};
+    use cassiopeia_ngsi_ld::entity::name::NameBuf;
     use pretty_assertions::assert_eq;
     use std::{num::NonZeroU64, path::Path, sync::Arc};
 
@@ -133,7 +136,7 @@ mod tests {
         let entries = tally.into_entries();
         assert_eq!(entries.len(), 1);
         assert_eq!((entries[0].example.as_str(), entries[0].records.get()), ("soon", 5));
-        assert_eq!(entries[0].declarations().len(), 1);
+        assert_eq!(entries[0].attributes(), [NameBuf::new("reading").unwrap()]);
     }
 
     #[test]

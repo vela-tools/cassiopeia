@@ -1,10 +1,11 @@
 use crate::{
     error::ExpanderError,
     expander::Expander,
+    expansion::Expansion,
     expansion_losses::ExpansionLosses,
     expiry_resolver::ExpiryResolver,
     router::MappingRouter,
-    urn::{error::UrnError, generator::UrnGenerator},
+    urn::generator::UrnGenerator,
 };
 use cassiopeia_common::parallelism::Parallelism;
 use cassiopeia_ir::{
@@ -46,52 +47,6 @@ pub struct GenericExpander {
     /// `{{ vars.<name> }}`. They travel beside each record on its fragments rather than inside it, so
     /// the record stays what the source gave.
     variables: RunVariables,
-}
-
-/// The record one expansion is working through: its entity, its data with the run variables it is
-/// read with, its place in the source, and where its losses go.
-///
-/// Every relationship the record declares is minted against the same four, so they travel
-/// together rather than as four parameters threaded through each minting step.
-struct Expansion<'a> {
-    /// The entity the record expands into, which every link it loses is recorded against.
-    entity: &'a Urn,
-    /// The record's data and run variables, read by every relationship source and synthetic identity.
-    input: TemplateInput<'a>,
-    /// The record's place in the source; each fragment it expands into takes the place of the
-    /// record's next fragment.
-    position: SourcePosition,
-    /// Where the record's losses are recorded.
-    losses: &'a ExpansionLosses,
-}
-
-impl Expansion<'_> {
-    /// Keeps what minting one link yielded, or nothing when the link names no target.
-    ///
-    /// A source that resolves to no identifier names no target, exactly as an absent foreign key
-    /// does. A template that fails to render is the same gap in the data, so it too costs only the
-    /// link, not the record: the failure is recorded under the relationship's `path`, built only
-    /// then, so the run can still name it. Every other failure is a fault in the mapping and fails
-    /// the record.
-    fn keep<T>(&self, minted: Result<T, UrnError>, path: impl FnOnce() -> RelationshipPath) -> Result<Option<T>, ExpanderError> {
-        match minted {
-            Ok(minted) => Ok(Some(minted)),
-            Err(UrnError::GeneratedIdEmpty { .. }) => Ok(None),
-            Err(UrnError::Template(error)) => {
-                self.losses.links.record(&path(), self.entity, error);
-                Ok(None)
-            }
-            Err(
-                other @ (UrnError::BuildUrn { .. }
-                | UrnError::InvalidScope { .. }
-                | UrnError::ScopeFieldNotText { .. }
-                | UrnError::ScopeValueNotText { .. }
-                | UrnError::ScopeItemNotText { .. }
-                | UrnError::RelationshipMissingSource
-                | UrnError::NoRelationshipTarget),
-            ) => Err(other.into()),
-        }
-    }
 }
 
 impl GenericExpander {
@@ -528,7 +483,7 @@ mod tests {
     }
 
     #[test]
-    fn a_composite_identity_over_a_missing_null_or_empty_field_fails_expansion_as_ungeneratable() {
+    fn a_composite_identity_over_a_missing_null_or_empty_field_fails_expansion_as_an_empty_identifier() {
         let expander = expander(
             r#"{
                 version: "v4",

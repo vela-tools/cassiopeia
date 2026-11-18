@@ -7,7 +7,8 @@ pub enum TransformCode {
     /// The NGSI-LD entity could not be assembled from its builder.
     EntityUnbuildable,
     /// An attribute's `observedAt` carried text that reads as no supported spelling of a date-time,
-    /// so the attribute was emitted without the qualifier (ETSI GS CIM 009 v1.9.1 clause 4.5.2.2).
+    /// whatever transformation it declares, so the attribute was emitted without the qualifier (ETSI
+    /// GS CIM 009 v1.9.1 clause 4.5.2.2).
     ObservedAtUnreadable,
     /// An attribute's `expiresAt` carried text that reads as no supported spelling of a date-time,
     /// so the attribute was emitted without the qualifier, whose value must be an NGSI-LD

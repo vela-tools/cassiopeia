@@ -2,7 +2,6 @@ use crate::{
     attribute::{Attribute, Attributes},
     error::{MappingError, Result},
     observation_slot::{AttributeSlots, SlotIndex},
-    observed_declaration::ObservedDeclaration,
     observed_template::{ObservedTemplate, ObservedTemplateIndex},
     template::{TemplateSource, error::TemplateError, resolver::TemplateResolver, runner::TemplateRunner, template_input::TemplateInput},
     template_location::TemplateLocation,
@@ -52,31 +51,28 @@ struct AttributeTemplates {
     instances: Vec<Option<ObservedTemplateIndex>>,
 }
 
-/// The distinct templates met while walking a mapping, with the declarations reading each.
+/// The distinct templates met while walking a mapping, with the attribute each declaration reading
+/// one qualifies.
 #[derive(Default)]
 struct TemplateTable {
-    entries: Vec<(TemplateSource, Vec<ObservedDeclaration>)>,
+    entries: Vec<(TemplateSource, Vec<NameBuf>)>,
 }
 
 impl TemplateTable {
-    /// Notes that the `observedAt` sub-attribute `observed_at`, named `key` and qualifying the
-    /// top-level attribute `attribute`, reads its template, and returns the template's index, or
-    /// `None` when the sub-attribute declares no template.
-    fn note(&mut self, attribute: &NameBuf, (key, observed_at): (&NameBuf, &Attribute)) -> Option<ObservedTemplateIndex> {
+    /// Notes that the `observedAt` sub-attribute `observed_at`, qualifying the top-level attribute
+    /// `attribute`, reads its template, and returns the template's index, or `None` when the
+    /// sub-attribute declares no template.
+    fn note(&mut self, attribute: &NameBuf, observed_at: &Attribute) -> Option<ObservedTemplateIndex> {
         let source = observed_at.declared_source()?;
-        let declaration = ObservedDeclaration {
-            attribute: attribute.clone(),
-            observed_at: key.clone(),
-            conversion: observed_at.conversion(),
-        };
         let index = if let Some(index) = self.entries.iter().position(|(known, _)| *known == source) {
             index
         } else {
             self.entries.push((source, Vec::new()));
             self.entries.len() - 1
         };
-        if let Some((_, declarations)) = self.entries.get_mut(index) {
-            declarations.push(declaration);
+        if let Some((_, attributes)) = self.entries.get_mut(index) {
+            // The table owns the name past the walk that borrows the mapping's attributes.
+            attributes.push(attribute.clone());
         }
         Some(ObservedTemplateIndex::new(index))
     }
@@ -85,7 +81,7 @@ impl TemplateTable {
     /// which qualify the top-level attribute `attribute`.
     fn note_beneath(&mut self, attribute: &NameBuf, declaration: &Attribute) {
         for nested in declaration.iter_recursive() {
-            if let Some(observed_at) = nested.observed_at() {
+            if let Some((_, observed_at)) = nested.observed_at() {
                 self.note(attribute, observed_at);
             }
         }
@@ -94,10 +90,10 @@ impl TemplateTable {
     /// Notes every `observedAt` the top-level attribute `name` declares, and returns the templates it
     /// and its instances carry as their own.
     fn note_attribute(&mut self, name: &NameBuf, attribute: &Attribute) -> AttributeTemplates {
-        let shared = attribute.observed_at().and_then(|observed_at| self.note(name, observed_at));
+        let shared = attribute.observed_at().and_then(|(_, observed_at)| self.note(name, observed_at));
         // The attribute's own `observedAt` was noted above; the walk notes what is nested beneath it.
         for nested in attribute.iter_recursive().skip(1) {
-            if let Some(observed_at) = nested.observed_at() {
+            if let Some((_, observed_at)) = nested.observed_at() {
                 self.note(name, observed_at);
             }
         }
@@ -112,7 +108,7 @@ impl TemplateTable {
             .map(|instance| {
                 let properties = instance.properties().as_ref();
                 let own = properties
-                    .and_then(|properties| properties.get_key_value("observedAt"))
+                    .and_then(|properties| properties.get("observedAt"))
                     .and_then(|observed_at| self.note(name, observed_at));
                 for property in properties.into_iter().flat_map(Attributes::values) {
                     self.note_beneath(name, property);
@@ -139,12 +135,12 @@ impl ObservationPlan {
         let templates = table
             .entries
             .into_iter()
-            .map(|(source, declarations)| {
+            .map(|(source, attributes)| {
                 let compiled = runner.compile(&source, &location).map_err(|error| MappingError::UncompilableTemplate {
                     location: location.clone(),
                     source: error,
                 })?;
-                Ok(ObservedTemplate::new(source, compiled, declarations))
+                Ok(ObservedTemplate::new(source, compiled, attributes))
             })
             .collect::<Result<Vec<ObservedTemplate>>>()?;
 
@@ -225,9 +221,14 @@ mod tests {
         template::{TemplateSource, run_variables::RunVariables, runner::TemplateRunner, template_input::TemplateInput},
         template_site::TemplateSite,
     };
+    use cassiopeia_ngsi_ld::entity::name::NameBuf;
     use pretty_assertions::assert_eq;
     use serde_json::json;
     use std::path::Path;
+
+    fn name(value: &str) -> NameBuf {
+        NameBuf::new(value).unwrap()
+    }
 
     fn plan(attributes: &str) -> (ObservationPlan, TemplateRunner) {
         let attributes: Attributes = serde_json5::from_str(attributes).unwrap();
@@ -250,7 +251,7 @@ mod tests {
 
         assert!(plan.is_temporal());
         assert_eq!(sources(&plan), ["{{ time }}"]);
-        assert_eq!(plan.templates()[0].declarations().len(), 2);
+        assert_eq!(plan.templates()[0].attributes(), [name("reading"), name("status")]);
         assert_eq!(plan.slot_templates(), &[]);
         assert_eq!(plan.slots_of(0), None);
     }
@@ -307,7 +308,7 @@ mod tests {
 
         assert!(plan.is_temporal());
         assert_eq!(sources(&plan), ["{{ ta }}"]);
-        assert_eq!(plan.templates()[0].declarations()[0].attribute.as_str(), "reading");
+        assert_eq!(plan.templates()[0].attributes(), [name("reading")]);
     }
 
     #[test]

@@ -5,11 +5,11 @@ input_file: crates/cassiopeia-pipeline/golden/qualifiers/observed-at/manifest.js
 {
   "diagnostics": [
     {
-      "code": "extractor-timestamp-unreadable",
+      "code": "transform-observed-at-unreadable",
       "occurrences": 1,
       "message": [
-        "! Attribute `observedAt` dropped: `soon` is not a date-time in any spelling Cassiopeia reads",
-        "  ╰─ attribute   observedAt"
+        "! Attribute `reading` emitted without `observedAt`: `soon` is not a date-time in any spelling Cassiopeia reads",
+        "  ╰─ attribute   reading"
       ]
     },
     {

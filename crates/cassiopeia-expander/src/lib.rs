@@ -15,6 +15,7 @@
 pub mod compiler;
 pub mod error;
 pub mod expander;
+mod expansion;
 pub mod expansion_losses;
 pub mod expiry_resolver;
 pub mod generic;

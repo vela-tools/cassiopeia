@@ -235,7 +235,7 @@ mod tests {
         template_site::TemplateSite,
         version::Version,
     };
-    use cassiopeia_ngsi_ld::{data_model::DataModel, entity::name::NameBuf, value::types::TemporalValueType};
+    use cassiopeia_ngsi_ld::{data_model::DataModel, entity::name::NameBuf};
     use indexmap::IndexMap;
     use pretty_assertions::assert_eq;
     use serde_json::json;
@@ -341,35 +341,14 @@ mod tests {
             },
         }"#;
 
-        let declarations: Vec<Vec<(String, String, Option<TemporalValueType>)>> = parse(document)
+        let attributes: Vec<Vec<String>> = parse(document)
             .observation_plan()
             .templates()
             .iter()
-            .map(|template| {
-                template
-                    .declarations()
-                    .iter()
-                    .map(|declaration| {
-                        (
-                            declaration.attribute.to_string(),
-                            declaration.observed_at.to_string(),
-                            declaration.conversion.temporal_reading(),
-                        )
-                    })
-                    .collect()
-            })
+            .map(|template| template.attributes().iter().map(ToString::to_string).collect())
             .collect();
 
-        assert_eq!(
-            declarations,
-            [
-                vec![
-                    ("reading".to_string(), "observedAt".to_string(), Some(TemporalValueType::DateTime)),
-                    ("reading".to_string(), "observedAt".to_string(), None),
-                ],
-                vec![("status".to_string(), "observedAt".to_string(), None)],
-            ]
-        );
+        assert_eq!(attributes, [vec!["reading", "reading"], vec!["status"]]);
     }
 
     #[test]

@@ -5,7 +5,7 @@ input_file: crates/cassiopeia-pipeline/golden/identity/literal-text-with-referen
 {
   "diagnostics": [
     {
-      "code": "expander-urn-ungeneratable",
+      "code": "expander-id-absent",
       "occurrences": 2,
       "message": [
         "! The identifier resolved for a 'Station' entity is empty, so no URN can be minted"
