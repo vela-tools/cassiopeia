@@ -5,10 +5,11 @@ use cassiopeia_sensorthings::read_kind::{ReadKind, SnapshotRecords};
 
 /// Refuses a SensorThings snapshot whose records the run's temporal output would not keep.
 ///
-/// A range or incremental snapshot holds one record per Observation. A current-state store keeps one
-/// record per entity and mapping, the one with the latest `observedAt` (ETSI GS CIM 009 v1.9.1
-/// clause 4.8), so in current-state output such a snapshot would keep one reading of each Thing and
-/// discard the rest without a word. It is read only into series output (clause 5.2.20), the rule a
+/// A range or incremental snapshot holds one record per Observation. A current-state store keeps,
+/// per entity and mapping, each attribute from the record with its latest `observedAt` (ETSI GS CIM
+/// 009 v1.9.1 clause 4.5.5.3), and a record that holds no value for an attribute still clears it
+/// when newer, so in current-state output such a snapshot would keep at most one reading of each
+/// Thing and discard the rest without a word. It is read only into series output (clause 5.2.20), the rule a
 /// remote range or incremental read follows. A latest snapshot holds one record per Thing, which
 /// every output keeps.
 ///

@@ -27,6 +27,7 @@ md5 = "0.8.1"
 serde = { version = "1.0.229", features = ["derive", "rc"] }
 serde_json = { version = "1.0.154", features = ["preserve_order"] }
 serde_json5 = "0.2.1"
+smallvec = "1.16.5"
 strsim = "0.11.1"
 strum = { version = "0.28.0", features = ["derive"] }
 tera = { version = "2.4.0", features = ["fast"] }

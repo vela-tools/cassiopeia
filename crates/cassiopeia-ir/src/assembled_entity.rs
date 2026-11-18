@@ -1,8 +1,9 @@
 use crate::{
     entity::{Entity, EntityParts},
     entity_relationships::EntityRelationships,
+    observed_records::{ObservedRecords, RecordChoice},
 };
-use cassiopeia_mapping::{mapping::Mapping, template::run_variables::RunVariables};
+use cassiopeia_mapping::{mapping::Mapping, observation_slot::SlotIndex, template::run_variables::RunVariables};
 use cassiopeia_ngsi_ld::entity::scope::NgsiLdScope;
 use chrono::{DateTime, Utc};
 use getset::Getters;
@@ -16,12 +17,19 @@ use urn_rs::Urn;
 ///
 /// Each fragment resolves through its own mapping against its own record: a current-state join of a
 /// static geometry mapping and a temporal state mapping keeps each mapping's record distinct rather
-/// than merging them, so two mappings that happen to read the same column do not collide.
+/// than merging them, so two mappings that happen to read the same column do not collide. A mapping
+/// whose attributes are observed at distinct times can keep several records of one entity, one per
+/// slot it ranks them in; the fragment then carries them beside its own record, which is the one
+/// observed last, and each attribute resolves against the record its slot kept.
 #[derive(Debug, Clone, Getters)]
 #[getset(get = "pub")]
 pub struct AssembledFragment {
-    /// The source record, exactly as the source gave it.
+    /// The source record, exactly as the source gave it: the one observed last, for a mapping whose
+    /// records are ranked.
     record: JsonValue,
+    /// The records some slot of the mapping kept besides `record`, or `None` when every attribute
+    /// comes from `record`.
+    observed: Option<Box<ObservedRecords>>,
     /// The mapping that renders the record.
     mapping: Arc<Mapping>,
     /// The run variables the mapping reads the record with.
@@ -29,10 +37,32 @@ pub struct AssembledFragment {
 }
 
 impl AssembledFragment {
-    /// Pairs a source record with the mapping that renders it and the run variables it is read with.
+    /// Pairs a source record, and the records the slots of its mapping kept besides it, with the
+    /// mapping that renders them and the run variables they are read with.
     #[must_use]
-    pub const fn new(record: JsonValue, mapping: Arc<Mapping>, variables: RunVariables) -> AssembledFragment {
-        AssembledFragment { record, mapping, variables }
+    pub const fn new(record: JsonValue, observed: Option<Box<ObservedRecords>>, mapping: Arc<Mapping>, variables: RunVariables) -> AssembledFragment {
+        AssembledFragment {
+            record,
+            observed,
+            mapping,
+            variables,
+        }
+    }
+
+    /// Which record the slot `slot` of the fragment's mapping kept: its own record for an attribute
+    /// no slot ranks, and for a fragment whose slots all kept it.
+    #[must_use]
+    pub fn choice(&self, slot: Option<SlotIndex>) -> RecordChoice {
+        match (slot, self.observed.as_deref()) {
+            (Some(slot), Some(observed)) => observed.choice(slot),
+            (None, _) | (Some(_), None) => RecordChoice::Newest,
+        }
+    }
+
+    /// The record `choice` names.
+    #[must_use]
+    pub fn record_of(&self, choice: RecordChoice) -> &JsonValue {
+        self.observed.as_deref().and_then(|observed| observed.record(choice)).unwrap_or(&self.record)
     }
 }
 
@@ -123,7 +153,7 @@ impl AssembledEntity {
             scope,
             expires_at,
             relationships: EntityRelationships::new(relationships, nested_relationships, instance_relationships),
-            fragments: smallvec![AssembledFragment::new(data, mapping, RunVariables::none())],
+            fragments: smallvec![AssembledFragment::new(data, None, mapping, RunVariables::none())],
         }
     }
 
@@ -143,13 +173,15 @@ impl AssembledEntity {
 #[cfg(test)]
 mod tests {
     use crate::{
-        assembled_entity::{AssembledEntity, AssembledEntityParts},
+        assembled_entity::{AssembledEntity, AssembledEntityParts, AssembledFragment},
         entity::Entity,
         instance_index::InstanceIndex,
+        observed_records::{ObservedRecords, RecordChoice},
         relationships::{InstanceObjects, InstanceRelationships},
     };
     use cassiopeia_mapping::{
         mapping::Mapping,
+        observation_slot::SlotIndex,
         template::{run_variables::RunVariables, runner::TemplateRunner},
     };
     use cassiopeia_ngsi_ld::entity::name::NameBuf;
@@ -168,6 +200,26 @@ mod tests {
 
     fn urn() -> Urn {
         "urn:ngsi-ld:Sensor:1".parse::<Urn>().unwrap()
+    }
+
+    #[test]
+    fn a_fragment_without_observed_records_resolves_every_slot_against_its_own_record() {
+        let fragment = AssembledFragment::new(json!({"v": 1}), None, mapping(), RunVariables::none());
+
+        assert_eq!(fragment.choice(Some(SlotIndex::new(0))), RecordChoice::Newest);
+        assert_eq!(fragment.choice(None), RecordChoice::Newest);
+        assert_eq!(fragment.record_of(RecordChoice::Observed(0)), &json!({"v": 1}));
+    }
+
+    #[test]
+    fn a_fragment_resolves_each_slot_against_the_record_it_kept() {
+        let observed = ObservedRecords::new(vec![json!({"v": 0})], vec![RecordChoice::Observed(0), RecordChoice::Newest]);
+        let fragment = AssembledFragment::new(json!({"v": 1}), Some(Box::new(observed)), mapping(), RunVariables::none());
+
+        let first = fragment.choice(Some(SlotIndex::new(0)));
+        assert_eq!(fragment.record_of(first), &json!({"v": 0}));
+        assert_eq!(fragment.record_of(fragment.choice(Some(SlotIndex::new(1)))), &json!({"v": 1}));
+        assert_eq!(fragment.record_of(fragment.choice(None)), &json!({"v": 1}));
     }
 
     #[test]

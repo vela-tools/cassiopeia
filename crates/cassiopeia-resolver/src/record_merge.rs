@@ -65,8 +65,8 @@ impl RecordMerge {
     ///
     /// Two kinds of mapping fold many records into one entity on purpose. A temporal mapping (one
     /// declaring `observedAt`) reads each record as one observation of the entity: the current-state
-    /// store keeps the latest and the series store keeps them all (ETSI GS CIM 009 v1.9.1 clause
-    /// 4.5.5 with 5.2.20). A `syntheticEntity` emits the entity a record names, which every record
+    /// store keeps each attribute from the record observed last and the series store keeps them all
+    /// (ETSI GS CIM 009 v1.9.1 clause 4.5.5 with 5.2.20). A `syntheticEntity` emits the entity a record names, which every record
     /// naming the same target names too. Every other mapping's records each describe an entity of
     /// their own, so a second record disagreeing on the same id is reported.
     #[must_use]

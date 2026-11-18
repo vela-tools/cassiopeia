@@ -45,7 +45,7 @@ fn a_list_relationship_is_written_with_each_target_as_an_object_member_in_the_no
         },
     }"#;
     for store in STORES {
-        let outcome = run_csv_end_to_end(store, "code,lines\nS1,U1 U4\n", &RunBinding::Mapping(mapping), &["Stop"]);
+        let outcome = run_csv_end_to_end(store, "code,lines\nS1,U1 U4\n", &RunBinding::Mapping(mapping), &["Stop"], "");
 
         // ETSI GS CIM 009 v1.9.1 clause 4.5.22.2: the normalized `objectList` holds one
         // `{ "object": URI }` object per target, not the concise bare strings.

@@ -1,10 +1,12 @@
 use crate::{
     entity_store::{
         concurrent_scopes::ConcurrentScopes,
+        discarded_timestamps::DiscardedTimestamps,
         entity_order::in_source_order,
         error::Result,
         mapping_expiry::{MappingExpiry, join_observations},
         mapping_reads::MappingReads,
+        retention::Retention,
         store::{AssembledFragment, AssembledFragments, EntityStore, FragmentWrite, StoredUnit},
     },
     store_write_strategy::StoreWriteStrategy,
@@ -67,6 +69,10 @@ impl EntityStore for DashMapSeriesEntityStore {
         StoreWriteStrategy::Concurrent
     }
 
+    fn retention(&self) -> Retention {
+        Retention::Series
+    }
+
     fn store_fragment(&self, write: FragmentWrite<'_>) -> Result<()> {
         let FragmentWrite {
             base_id,
@@ -83,9 +89,10 @@ impl EntityStore for DashMapSeriesEntityStore {
             fragment: AssembledFragment {
                 mapping_id,
                 data: source_data,
+                observed: None,
                 records: NonZeroU64::MIN,
                 conflict: None,
-                unresolvable_discards: 0,
+                discarded: DiscardedTimestamps::default(),
             },
             expires_at: MappingExpiry::first(expires_at),
         };
@@ -169,7 +176,6 @@ mod tests {
     use crate::{
         entity_store::{
             dashmap_series_store::DashMapSeriesEntityStore,
-            record_timestamp::RecordTimestamp,
             store::{
                 EntityStore,
                 FragmentWrite,
@@ -180,13 +186,13 @@ mod tests {
                     assert_merges_scopes_per_id,
                     assert_series_hands_observations_on_in_source_order,
                     assert_series_keeps_the_furthest_expiry_per_mapping,
+                    ranked,
                 },
             },
         },
         mapping_id::MappingId,
         test_order::{ReadsEverything, next_batch, next_position},
     };
-    use cassiopeia_mapping::observed_at::ObservedAt;
     use pretty_assertions::assert_eq;
     use serde_json::json;
     use urn_rs::Urn;
@@ -227,8 +233,7 @@ mod tests {
             position: next_position(),
             batch: next_batch(),
             mapping_id: MappingId::new(1),
-            temporal: true,
-            timestamp: RecordTimestamp::Declared(ObservedAt::new(observed_at)),
+            ranking: ranked(observed_at),
             scope: None,
             expires_at: None,
             reads: &READS_EVERYTHING,

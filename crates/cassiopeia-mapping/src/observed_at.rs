@@ -1,16 +1,13 @@
 use derive_more::{Deref, Display, Into};
 use serde::{Deserialize, Serialize};
 
-/// A record's `observedAt` temporal qualifier, as the exact text that flows into the temporal
-/// entity's URN.
+/// The text a record's `observedAt` rendered when it reads as no instant, as a report quotes it.
 ///
-/// Kept as the source's own text rather than a parsed `DateTime` because it becomes a URN
-/// r-component that must stay byte-identical to what the source declared: reformatting it through a
-/// datetime type would change the identity of every temporal entity, so this newtype preserves the
-/// value verbatim while still keeping it out of the bare-`String` domain.
-/// The `Into` conversion hands the verbatim text over without copying it, so a store that persists
-/// the qualifier as plain text moves it rather than re-allocating. It serializes as that bare text,
-/// so a disk-backed store persists it unchanged.
+/// A record is ranked by the instant its `observedAt` names; text that names none cannot be ranked
+/// by, and is kept only so the run can say which spelling it met. Kept as the source's own text
+/// rather than reformatted, because the report names what the source wrote, while still keeping it
+/// out of the bare-`String` domain. The `Into` conversion hands the text over without copying it. It
+/// serializes as that bare text, so a disk-backed store persists it unchanged.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Deref, Display, Into, Serialize, Deserialize)]
 #[serde(transparent)]
 pub struct ObservedAt(String);

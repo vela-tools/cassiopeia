@@ -221,26 +221,34 @@ impl Attribute {
         instance.value_type().as_ref().or(self.value_type.as_ref())
     }
 
+    /// The `observedAt` sub-attribute declared directly on this attribute, with the name it is
+    /// declared under, if any.
+    #[must_use]
+    pub fn observed_at(&self) -> Option<(&NameBuf, &Attribute)> {
+        self.properties.as_ref()?.get_key_value("observedAt")
+    }
+
     /// The raw `observedAt` template declared directly on this attribute, if any.
     ///
     /// A non-string declaration is stringified rather than rejected: `observedAt` may be written
     /// as a number when the source carries an epoch timestamp.
     #[must_use]
     pub fn observed_at_source(&self) -> Option<TemplateSource> {
-        let observed_at = NameBuf::new("observedAt").ok()?;
+        let (_, observed_at) = self.observed_at()?;
+        observed_at.declared_source()
+    }
 
-        match self.properties.as_ref()?.get(&observed_at)?.source.as_ref()? {
+    /// The template this declaration's `source` holds, as written, if it holds one.
+    ///
+    /// A non-string source is stringified rather than rejected, which is how a qualifier such as
+    /// `observedAt` written as a number reads.
+    pub(crate) fn declared_source(&self) -> Option<TemplateSource> {
+        match self.source.as_ref()? {
             JsonValue::String(source) => Some(TemplateSource::new(source)),
             other @ (JsonValue::Null | JsonValue::Bool(_) | JsonValue::Number(_) | JsonValue::Array(_) | JsonValue::Object(_)) => {
                 Some(TemplateSource::new(other.to_string()))
             }
         }
-    }
-
-    /// The first `observedAt` template found on this attribute or anything nested beneath it.
-    #[must_use]
-    pub fn find_observed_at_source(&self) -> Option<TemplateSource> {
-        self.iter_recursive().find_map(Attribute::observed_at_source)
     }
 
     /// Whether this attribute's `properties` subtree declares a nested Relationship or
@@ -304,11 +312,19 @@ mod tests {
     }
 
     #[test]
-    fn observed_at_is_found_through_a_nested_mapping() {
+    fn an_observed_at_declared_on_a_nested_mapping_is_not_the_attribute_s_own() {
         let attribute = parse(r#"{"mappings": {"inner": {"source": "{{ t }}", "properties": {"observedAt": {"source": "{{ timestamp }}"}}}}}"#);
 
         assert_eq!(attribute.observed_at_source(), None);
-        assert_eq!(attribute.find_observed_at_source(), Some(TemplateSource::new("{{ timestamp }}")));
+        assert_eq!(attribute.observed_at().map(|(name, _)| name.as_str()), None);
+    }
+
+    #[test]
+    fn an_observed_at_written_as_a_number_reads_as_its_text() {
+        let attribute = parse(r#"{"source": "{{ t }}", "properties": {"observedAt": {"source": 1775253620}}}"#);
+
+        assert_eq!(attribute.observed_at_source(), Some(TemplateSource::new("1775253620")));
+        assert_eq!(attribute.observed_at().map(|(name, _)| name.as_str()), Some("observedAt"));
     }
 
     #[test]

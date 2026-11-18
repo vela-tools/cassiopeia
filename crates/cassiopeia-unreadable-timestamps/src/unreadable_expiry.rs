@@ -31,8 +31,8 @@ impl UnreadableExpiry {
 }
 
 impl Recurring for UnreadableExpiry {
-    fn count_another(&mut self) {
-        self.unreadable.count_another();
+    fn count_more(&mut self, occurrences: NonZeroU64) {
+        self.unreadable.count_more(occurrences);
     }
 
     fn occurrences(&self) -> NonZeroU64 {

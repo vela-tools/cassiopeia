@@ -7,7 +7,8 @@ use std::path::Path;
 #[derive(Clone, Copy, Debug, strum::Display)]
 #[strum(serialize_all = "kebab-case")]
 pub(crate) enum History {
-    /// The current state: per entity and mapping, the record with the latest `observedAt`.
+    /// The current state: per entity and mapping, each attribute from the record with its latest
+    /// `observedAt`, and the attributes without one from the newest record.
     Current,
     /// Every observation of an entity, folded into one `EntityTemporal` (ETSI GS CIM 009 v1.9.1
     /// clause 5.2.20).

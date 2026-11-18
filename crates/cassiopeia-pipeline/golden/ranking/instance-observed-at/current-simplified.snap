@@ -1,0 +1,14 @@
+---
+source: crates/cassiopeia-pipeline/src/end_to_end/golden/mod.rs
+input_file: crates/cassiopeia-pipeline/golden/ranking/instance-observed-at/manifest.json5
+---
+[
+  {
+    "id": "urn:ngsi-ld:Forecast:F1",
+    "type": "Forecast",
+    "temperature": [
+      21.5,
+      24.0
+    ]
+  }
+]

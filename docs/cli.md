@@ -256,7 +256,7 @@ Generate a manifest file from command-line arguments
   - `simplified`:
     Flat key-value representation without metadata
 
-* `--temporal-representation <REPRESENTATION>` — Temporal output shape. `series` folds each id's observations into one temporal entity with instance arrays (ETSI GS CIM 009 v1.9.1 clause 5.2.20); absent writes current-state (one entity per id, holding per mapping the record with the latest `observedAt`; `--broker-operation temporal` sends each observation on its own instead). A general output shape, valid for the file writer and the broker
+* `--temporal-representation <REPRESENTATION>` — Temporal output shape. `series` folds each id's observations into one temporal entity with instance arrays (ETSI GS CIM 009 v1.9.1 clause 5.2.20); absent writes current-state (one entity per id, holding per mapping each attribute from the record with its latest `observedAt` and the attributes without one from the newest record; `--broker-operation temporal` sends each observation on its own instead). A general output shape, valid for the file writer and the broker
 * `--validation-representation <REPRESENTATION>` — NGSI-LD representation the validator serializes entities in
 
   Possible values:
@@ -470,7 +470,7 @@ Map data to a Smart Data Model
   - `simplified`:
     Flat key-value representation without metadata
 
-* `--temporal-representation <REPRESENTATION>` — Temporal output shape. `series` folds each id's observations into one temporal entity with instance arrays (ETSI GS CIM 009 v1.9.1 clause 5.2.20); absent writes current-state (one entity per id, holding per mapping the record with the latest `observedAt`; `--broker-operation temporal` sends each observation on its own instead). A general output shape, valid for the file writer and the broker
+* `--temporal-representation <REPRESENTATION>` — Temporal output shape. `series` folds each id's observations into one temporal entity with instance arrays (ETSI GS CIM 009 v1.9.1 clause 5.2.20); absent writes current-state (one entity per id, holding per mapping each attribute from the record with its latest `observedAt` and the attributes without one from the newest record; `--broker-operation temporal` sends each observation on its own instead). A general output shape, valid for the file writer and the broker
 * `-u`, `--broker-url <URL>` — Context Broker URL (required when --writer is context-broker)
 * `--broker-operation <OPERATION>` — Which NGSI-LD operation each request performs (context-broker writer only)
 

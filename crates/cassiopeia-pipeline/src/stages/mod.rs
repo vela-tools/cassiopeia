@@ -46,6 +46,7 @@ pub(crate) mod unreadable_features_of_interest_report;
 pub(crate) mod unreadable_historical_locations_report;
 pub(crate) mod unreadable_locations_report;
 pub(crate) mod unreadable_multi_results_report;
+pub(crate) mod unreadable_observation_report;
 pub(crate) mod unreadable_phenomenon_times_report;
 pub(crate) mod unreadable_tables_report;
 pub(crate) mod unreadable_timestamp_report;

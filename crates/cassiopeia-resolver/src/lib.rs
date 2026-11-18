@@ -15,8 +15,10 @@
 //!   found: each is a [`RecordMerge`](crate::record_merge::RecordMerge), tallied by type into
 //!   [`MergedRecords`](crate::merged_records::MergedRecords) for the caller to report. So are the
 //!   records a current-state store discarded because their `observedAt` template failed, tallied by
-//!   mapping into [`DiscardedObservations`](crate::discarded_observations::DiscardedObservations);
-//!   both travel in [`AssemblyLosses`](crate::assembly_losses::AssemblyLosses).
+//!   mapping into [`DiscardedObservations`](crate::discarded_observations::DiscardedObservations),
+//!   and those it discarded because their `observedAt` text reads as no instant, tallied by mapping
+//!   into [`UnreadableObservations`](crate::unreadable_observations::UnreadableObservations); all
+//!   three travel in [`AssemblyLosses`](crate::assembly_losses::AssemblyLosses).
 //!
 //! [`FragmentResolver`](crate::fragment_resolver::FragmentResolver) is the standard implementation
 //! of both traits, backed by pluggable entity and relationship stores. Its two halves live in
@@ -47,3 +49,4 @@ pub mod store_batch_failure;
 pub mod store_write_strategy;
 #[cfg(test)]
 pub(crate) mod test_order;
+pub mod unreadable_observations;

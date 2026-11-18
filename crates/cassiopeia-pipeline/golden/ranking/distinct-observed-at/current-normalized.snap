@@ -13,8 +13,8 @@ input_file: crates/cassiopeia-pipeline/golden/ranking/distinct-observed-at/manif
     },
     "status": {
       "type": "Property",
-      "value": "warm",
-      "observedAt": "2026-03-01T09:00:00Z"
+      "value": "ok",
+      "observedAt": "2026-03-01T12:00:00Z"
     }
   }
 ]

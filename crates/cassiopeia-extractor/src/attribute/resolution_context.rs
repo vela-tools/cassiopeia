@@ -1,4 +1,4 @@
-use crate::dropped_attributes::DroppedAttributes;
+use crate::{attribute::instance_selection::InstanceSelection, dropped_attributes::DroppedAttributes};
 use cassiopeia_ir::{entity_relationships::EntityRelationships, metadata::EntityMetadata};
 use cassiopeia_mapping::{
     attribute::declaration_trail::DeclarationTrail,
@@ -38,6 +38,8 @@ pub(crate) struct ResolutionContext<'a> {
     /// The declarations holding the ones this context resolves, or `None` at the top level, so a
     /// loss met beneath the top level is named by its whole path.
     pub(crate) owners: Option<&'a DeclarationTrail<'a>>,
+    /// Which instances of a top-level attribute declaring them are rendered.
+    pub(crate) instances: InstanceSelection<'a>,
     /// Where attribute-level properties are recorded, present only on the root context.
     pub(crate) metadata: Option<&'a mut EntityMetadata>,
 }
@@ -58,8 +60,15 @@ impl<'a> ResolutionContext<'a> {
             dropped,
             depth: 0,
             owners: None,
+            instances: InstanceSelection::All,
             metadata,
         }
+    }
+
+    /// The same context, rendering only the instances `instances` selects of an attribute that
+    /// declares them.
+    pub(crate) const fn selecting(self, instances: InstanceSelection<'a>) -> ResolutionContext<'a> {
+        ResolutionContext { instances, ..self }
     }
 
     /// Derives a deeper context over `record`, read with the same run variables, one level down and
@@ -72,6 +81,7 @@ impl<'a> ResolutionContext<'a> {
             dropped: self.dropped,
             depth: self.depth + 1,
             owners: self.owners,
+            instances: self.instances,
             metadata: None,
         }
     }
@@ -86,6 +96,7 @@ impl<'a> ResolutionContext<'a> {
             dropped: self.dropped,
             depth: self.depth,
             owners: Some(owner),
+            instances: self.instances,
             metadata: None,
         }
     }

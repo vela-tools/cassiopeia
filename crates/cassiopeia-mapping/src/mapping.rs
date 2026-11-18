@@ -6,12 +6,10 @@ use crate::{
     identity::Identity,
     instance_placement,
     mapping_role::MappingRole,
-    observed_at::ObservedAt,
+    observation_plan::ObservationPlan,
     scope::{CompiledScope, Scope},
     source_reads::SourceReads,
-    template::{CompiledTemplate, TemplateSource, error::TemplateError, resolver::TemplateResolver, runner::TemplateRunner, template_input::TemplateInput},
-    template_location::TemplateLocation,
-    template_site::TemplateSite,
+    template::{CompiledTemplate, TemplateSource, runner::TemplateRunner},
     value_type_placement,
     version::Version,
 };
@@ -19,8 +17,7 @@ use cassiopeia_common::error::io::{IoAction, IoError};
 use cassiopeia_ngsi_ld::data_model::DataModel;
 use getset::{CopyGetters, Getters, MutGetters, Setters};
 use serde::{Deserialize, Serialize};
-use serde_json::Value as JsonValue;
-use std::{fs::read_to_string, path::Path, result, sync::Arc};
+use std::{fs::read_to_string, path::Path};
 
 /// A mapping document: the declaration of how one source record becomes one NGSI-LD entity.
 ///
@@ -78,16 +75,12 @@ pub struct Mapping {
     #[getset(get = "pub", get_mut = "pub")]
     attributes: Attributes,
 
-    /// The `observedAt` template found anywhere in the attribute tree and compiled at load time,
-    /// so temporality is an O(1) check rather than a repeated traversal.
+    /// Every distinct `observedAt` template declared anywhere in the attribute tree, compiled at
+    /// load time, and which of them ranks each attribute, so temporality is an O(1) check rather
+    /// than a repeated traversal.
     #[serde(skip)]
     #[getset(get = "pub")]
-    temporal_source: Option<TemplateSource>,
-
-    /// The compiled form of `temporal_source`.
-    #[serde(skip)]
-    #[getset(get = "pub")]
-    observed_at_template: Option<CompiledTemplate>,
+    observation_plan: ObservationPlan,
 
     /// Whether any attribute declares a nested Relationship or `ListRelationship` sub-attribute,
     /// computed once at load time so the expander can gate its nested-minting recursion on an O(1)
@@ -140,8 +133,7 @@ impl Mapping {
             expires_at,
             compiled_expires_at: None,
             attributes,
-            temporal_source: None,
-            observed_at_template: None,
+            observation_plan: ObservationPlan::default(),
             has_nested_relationships: false,
             role: MappingRole::Document,
             source_reads: SourceReads::Everything,
@@ -195,11 +187,11 @@ impl Mapping {
         self.attributes.values().flat_map(Attribute::iter_recursive)
     }
 
-    /// Whether this mapping produces temporal entities, that is, whether any attribute carries an
-    /// `observedAt` declaration.
+    /// Whether this mapping produces temporal entities, that is, whether any attribute, any of its
+    /// instances, or anything nested beneath them carries an `observedAt` declaration.
     #[must_use]
     pub const fn is_temporal(&self) -> bool {
-        self.temporal_source.is_some()
+        self.observation_plan.is_temporal()
     }
 
     /// Whether any attribute declares a nested Relationship or `ListRelationship` sub-attribute.
@@ -210,27 +202,6 @@ impl Mapping {
     #[must_use]
     pub const fn has_nested_relationships(&self) -> bool {
         self.has_nested_relationships
-    }
-
-    /// Reads the `observedAt` value for one record, read with its run variables.
-    ///
-    /// Returns `None` when the mapping is not temporal, or when the record's timestamp field is
-    /// absent or empty; a missing timestamp drops the temporal qualifier rather than the record.
-    ///
-    /// # Errors
-    /// Returns the [`TemplateError`] when the template fails to render for the record. That is not
-    /// the same as a record without a timestamp: the failure has to reach the run's report, which a
-    /// record ranked as carrying no timestamp would never do.
-    pub fn extract_observed_at(&self, resolver: &TemplateResolver, input: TemplateInput<'_>) -> result::Result<Option<ObservedAt>, TemplateError> {
-        let Some(template) = self.observed_at_template.as_ref() else {
-            return Ok(None);
-        };
-
-        Ok(match resolver.resolve(template, input)? {
-            JsonValue::String(value) if !value.is_empty() => Some(ObservedAt::new(value)),
-            JsonValue::Number(value) => Some(ObservedAt::new(value.to_string())),
-            JsonValue::String(_) | JsonValue::Null | JsonValue::Bool(_) | JsonValue::Array(_) | JsonValue::Object(_) => None,
-        })
     }
 
     /// Marks this mapping as a `syntheticEntity` declaration rather than a document bound to an input.
@@ -244,19 +215,9 @@ impl Mapping {
         self.attributes.values().any(Attribute::declares_nested_relationship)
     }
 
-    /// Finds and compiles the `observedAt` template, once, at load time.
+    /// Finds and compiles every distinct `observedAt` template, once, at load time.
     fn compile_temporal_fields(&mut self, origin: &Path, runner: &mut TemplateRunner) -> Result<()> {
-        let temporal_source = self.iter_all_attributes().find_map(Attribute::observed_at_source);
-
-        if let Some(source) = &temporal_source {
-            let location = TemplateLocation::new(Arc::from(origin), TemplateSite::ObservedAt);
-            let compiled = runner
-                .compile(source, &location)
-                .map_err(|source| MappingError::UncompilableTemplate { location, source })?;
-            self.observed_at_template = Some(compiled);
-        }
-        self.temporal_source = temporal_source;
-
+        self.observation_plan = ObservationPlan::new(&self.attributes, origin, runner)?;
         Ok(())
     }
 }
@@ -269,13 +230,12 @@ mod tests {
         error::MappingError,
         identity::Identity,
         mapping::Mapping,
-        observed_at::ObservedAt,
         scope::Scope,
         template::{TemplateSource, run_variables::RunVariables, runner::TemplateRunner, template_input::TemplateInput},
         template_site::TemplateSite,
         version::Version,
     };
-    use cassiopeia_ngsi_ld::{data_model::DataModel, entity::name::NameBuf};
+    use cassiopeia_ngsi_ld::{data_model::DataModel, entity::name::NameBuf, value::types::TemporalValueType};
     use indexmap::IndexMap;
     use pretty_assertions::assert_eq;
     use serde_json::json;
@@ -324,61 +284,91 @@ mod tests {
         let mapping = parse(NON_TEMPORAL);
 
         assert!(!mapping.is_temporal());
-        assert_eq!(mapping.temporal_source(), &None);
+        assert_eq!(mapping.observation_plan().templates().len(), 0);
+    }
+
+    /// What `document`'s `observedAt` templates render for `record`, each rendered value or the site
+    /// of its failure.
+    fn observed(document: &str, record: &serde_json::Value) -> Vec<Result<serde_json::Value, TemplateSite>> {
+        let mut runner = TemplateRunner::new();
+        let mapping = Mapping::from_json5(document, Path::new("test.json5"), &mut runner).unwrap();
+        mapping
+            .observation_plan()
+            .observe(&runner.resolver(), TemplateInput::new(record, &RunVariables::none()))
+            .into_iter()
+            .map(|rendered| rendered.map_err(|error| error.location.site))
+            .collect()
     }
 
     #[test]
-    fn extracts_the_observed_at_value_from_a_record() {
-        let mut runner = TemplateRunner::new();
-        let mapping = Mapping::from_json5(TEMPORAL, Path::new("test.json5"), &mut runner).unwrap();
+    fn renders_the_observed_at_value_of_a_record() {
         let record = json!({"id": 1, "temperature": 21.5, "timestamp": "2026-04-03T22:00:20Z"});
 
-        assert_eq!(
-            mapping
-                .extract_observed_at(&runner.resolver(), TemplateInput::new(&record, &RunVariables::none()))
-                .unwrap(),
-            Some(ObservedAt::new("2026-04-03T22:00:20Z"))
-        );
+        assert_eq!(observed(TEMPORAL, &record), [Ok(json!("2026-04-03T22:00:20Z"))]);
     }
 
     #[test]
-    fn a_numeric_observed_at_value_is_stringified() {
-        let mut runner = TemplateRunner::new();
-        let mapping = Mapping::from_json5(TEMPORAL, Path::new("test.json5"), &mut runner).unwrap();
-        let record = json!({"id": 1, "timestamp": 1_775_253_620});
-
-        assert_eq!(
-            mapping
-                .extract_observed_at(&runner.resolver(), TemplateInput::new(&record, &RunVariables::none()))
-                .unwrap(),
-            Some(ObservedAt::new("1775253620"))
-        );
+    fn a_numeric_observed_at_value_is_rendered_as_the_number_it_is() {
+        assert_eq!(observed(TEMPORAL, &json!({"id": 1, "timestamp": 1_775_253_620})), [Ok(json!(1_775_253_620))]);
     }
 
     #[test]
-    fn a_missing_observed_at_field_yields_no_timestamp() {
-        let mut runner = TemplateRunner::new();
-        let mapping = Mapping::from_json5(TEMPORAL, Path::new("test.json5"), &mut runner).unwrap();
-
-        assert_eq!(
-            mapping
-                .extract_observed_at(&runner.resolver(), TemplateInput::new(&json!({"id": 1}), &RunVariables::none()))
-                .unwrap(),
-            None
-        );
+    fn a_missing_observed_at_field_renders_as_null() {
+        assert_eq!(observed(TEMPORAL, &json!({"id": 1})), [Ok(json!(null))]);
     }
 
     #[test]
-    fn a_non_temporal_mapping_never_yields_a_timestamp() {
-        let mut runner = TemplateRunner::new();
-        let mapping = Mapping::from_json5(NON_TEMPORAL, Path::new("test.json5"), &mut runner).unwrap();
-        let record = json!({"timestamp": "2026-04-03T22:00:20Z"});
+    fn a_non_temporal_mapping_renders_no_timestamp() {
+        assert_eq!(observed(NON_TEMPORAL, &json!({"timestamp": "2026-04-03T22:00:20Z"})), []);
+    }
+
+    #[test]
+    fn every_observed_at_reading_a_template_is_named_by_the_attribute_it_qualifies() {
+        let document = r#"{
+            version: "v4",
+            dataModel: "Sensor",
+            identity: { entityName: "{{ id }}" },
+            attributes: {
+                reading: {
+                    source: "{{ r }}",
+                    properties: {
+                        observedAt: { source: "{{ time }}", transformation: "datetime" },
+                        accuracy: { source: "{{ a }}", properties: { observedAt: { source: "{{ time }}" } } },
+                    },
+                },
+                status: { source: "{{ s }}", properties: { observedAt: { source: "{{ status_time }}" } } },
+                name: { source: "{{ name }}" },
+            },
+        }"#;
+
+        let declarations: Vec<Vec<(String, String, Option<TemporalValueType>)>> = parse(document)
+            .observation_plan()
+            .templates()
+            .iter()
+            .map(|template| {
+                template
+                    .declarations()
+                    .iter()
+                    .map(|declaration| {
+                        (
+                            declaration.attribute.to_string(),
+                            declaration.observed_at.to_string(),
+                            declaration.conversion.temporal_reading(),
+                        )
+                    })
+                    .collect()
+            })
+            .collect();
 
         assert_eq!(
-            mapping
-                .extract_observed_at(&runner.resolver(), TemplateInput::new(&record, &RunVariables::none()))
-                .unwrap(),
-            None
+            declarations,
+            [
+                vec![
+                    ("reading".to_string(), "observedAt".to_string(), Some(TemporalValueType::DateTime)),
+                    ("reading".to_string(), "observedAt".to_string(), None),
+                ],
+                vec![("status".to_string(), "observedAt".to_string(), None)],
+            ]
         );
     }
 
@@ -392,16 +382,8 @@ mod tests {
                 temperature: { source: "{{ t }}", properties: { observedAt: { source: "{{ ts | trim }}" } } },
             },
         }"#;
-        let mut runner = TemplateRunner::new();
-        let mapping = Mapping::from_json5(document, Path::new("test.json5"), &mut runner).unwrap();
 
-        let error = mapping
-            .extract_observed_at(
-                &runner.resolver(),
-                TemplateInput::new(&json!({"id": "A", "t": 21, "ts": null}), &RunVariables::none()),
-            )
-            .unwrap_err();
-        assert_eq!(error.location.site, TemplateSite::ObservedAt);
+        assert_eq!(observed(document, &json!({"id": "A", "t": 21, "ts": null})), [Err(TemplateSite::ObservedAt)]);
     }
 
     #[test]

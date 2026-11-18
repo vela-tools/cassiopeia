@@ -26,9 +26,10 @@ pub struct OutputFormatArgs {
 
     /// Temporal output shape. `series` folds each id's observations into one temporal entity with
     /// instance arrays (ETSI GS CIM 009 v1.9.1 clause 5.2.20); absent writes current-state (one entity
-    /// per id, holding per mapping the record with the latest `observedAt`; `--broker-operation temporal`
-    /// sends each observation on its own instead). A general output shape, valid for the file writer
-    /// and the broker.
+    /// per id, holding per mapping each attribute from the record with its latest `observedAt` and the
+    /// attributes without one from the newest record; `--broker-operation temporal` sends each
+    /// observation on its own instead). A general output shape, valid for the file writer and the
+    /// broker.
     #[arg(long = "temporal-representation", value_name = "REPRESENTATION", help_heading = "Output")]
     pub temporal_representation: Option<TemporalRepresentation>,
 }

@@ -38,7 +38,7 @@ fn a_current_state_file_lists_its_entities_in_the_order_of_their_first_records_o
     let mut runs = Vec::new();
     for store in STORES {
         for _ in 0..20 {
-            let outcome = run_csv_end_to_end(store, STATIONS, &RunBinding::Mapping(STATION_BY_CODE), &["Station"]);
+            let outcome = run_csv_end_to_end(store, STATIONS, &RunBinding::Mapping(STATION_BY_CODE), &["Station"], "");
             assert_eq!(ids(&outcome.entities), STATIONS_IN_SOURCE_ORDER, "{store:?}");
             runs.push(outcome.files);
         }
@@ -50,7 +50,7 @@ fn a_current_state_file_lists_its_entities_in_the_order_of_their_first_records_o
 fn an_entity_whose_records_are_spread_through_the_source_is_written_at_the_place_of_its_first_record() {
     let stations = "code,name\nS2,Branch\nS1,Main\nS2,Branch\nS3,Depot\nS1,Main\nS4,Annex\nS3,Depot\n";
     for store in STORES {
-        let outcome = run_csv_end_to_end(store, stations, &RunBinding::Mapping(STATION_BY_CODE), &["Station"]);
+        let outcome = run_csv_end_to_end(store, stations, &RunBinding::Mapping(STATION_BY_CODE), &["Station"], "");
         assert_eq!(
             ids(&outcome.entities),
             [

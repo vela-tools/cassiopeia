@@ -1,10 +1,17 @@
 use crate::{
-    entity_store::{error::Result, mapping_reads::MappingReads, record_timestamp::RecordTimestamp, write_batch::WriteBatch},
+    entity_store::{
+        discarded_timestamps::DiscardedTimestamps,
+        error::Result,
+        mapping_reads::MappingReads,
+        observations::RecordRanking,
+        retention::Retention,
+        write_batch::WriteBatch,
+    },
     field_path::FieldPath,
     mapping_id::MappingId,
     store_write_strategy::StoreWriteStrategy,
 };
-use cassiopeia_ir::source_position::SourcePosition;
+use cassiopeia_ir::{observed_records::ObservedRecords, source_position::SourcePosition};
 use cassiopeia_mapping::source_reads::SourceReads;
 use cassiopeia_ngsi_ld::entity::scope::NgsiLdScope;
 use chrono::{DateTime, Utc};
@@ -16,9 +23,9 @@ use urn_rs::Urn;
 /// The inputs for storing one fragment under its base entity id.
 ///
 /// Temporality is an attribute concern (ETSI GS CIM 009 v1.9.1 clause 4.5.5), so the store keys by
-/// the base id and every mapping and every observation of that id accumulates together. `temporal`
-/// and `timestamp` let a current-state store rank a temporal mapping's records by their record-level
-/// `observedAt`; a series store ignores them and keeps every observation.
+/// the base id and every mapping and every observation of that id accumulates together. `ranking`
+/// lets a current-state store rank a temporal mapping's records by their `observedAt`, attribute by
+/// attribute; a series store ignores it and keeps every observation.
 ///
 /// The write owns the record it carries. The resolver already owns the fragment it is storing and
 /// has no use for it afterwards, so handing ownership over lets an in-memory store move the record
@@ -36,11 +43,9 @@ pub struct FragmentWrite<'a> {
     pub batch: WriteBatch,
     /// The interned id of the mapping that produced the fragment.
     pub mapping_id: MappingId,
-    /// Whether the producing mapping is temporal (declares an `observedAt`).
-    pub temporal: bool,
-    /// What the record-level `observedAt` template yielded for the record: its timestamp verbatim,
-    /// monotonic under string compare for a fixed format, no timestamp, or a failure.
-    pub timestamp: RecordTimestamp,
+    /// What the record ranks by against the mapping's other records for the id: nothing, for a
+    /// mapping without `observedAt`, or the instants its `observedAt` templates name.
+    pub ranking: RecordRanking,
     /// The entity's scope, when one was resolved.
     pub scope: Option<NgsiLdScope>,
     /// The entity's `expiresAt`, when one was resolved (ETSI GS CIM 009 v1.9.1 clause 4.5.1).
@@ -59,8 +64,12 @@ pub struct FragmentWrite<'a> {
 pub struct AssembledFragment {
     /// The interned id of the mapping that produced the fragment.
     pub mapping_id: MappingId,
-    /// The source record the fragment was expanded from.
+    /// The source record the fragment was expanded from: for a temporal mapping in a current-state
+    /// store, the record observed last.
     pub data: Value,
+    /// The records some slot of a temporal mapping kept besides `data`, or `None` when every
+    /// attribute comes from `data`. Always `None` for a series observation.
+    pub observed: Option<Box<ObservedRecords>>,
     /// How many records the store folded into this fragment: always one for a series observation,
     /// and every record its mapping resolved to the id for a current-state slot.
     pub records: NonZeroU64,
@@ -68,10 +77,11 @@ pub struct AssembledFragment {
     /// discarded a value (see the crate-private `deep_merge`). Always `None`
     /// for a series observation, which is never merged in the store.
     pub conflict: Option<FieldPath>,
-    /// How many of the mapping's records whose `observedAt` template failed the slot discarded for a
-    /// later one (see [`SlotRanking`](crate::entity_store::supersession::SlotRanking)). Always zero
-    /// for a series observation, which discards nothing.
-    pub unresolvable_discards: u64,
+    /// The mapping's records the slot released for later ones whose `observedAt` template failed or
+    /// whose `observedAt` text reads as no instant (see
+    /// [`DiscardedTimestamps`](crate::entity_store::discarded_timestamps::DiscardedTimestamps)).
+    /// Always empty for a series observation, which releases nothing.
+    pub discarded: DiscardedTimestamps,
 }
 
 /// The fragments contributing to one emit-unit.
@@ -104,11 +114,16 @@ pub struct AssembledFragments {
 /// (`Send + Sync`): fragments are stored concurrently from many resolver threads.
 ///
 /// Two memory models exist, chosen at construction from the run's temporal target: a current-state
-/// store retains one fragment per mapping, a temporal mapping's latest record or a static mapping's
-/// merged records (O(mappings) per id); a series store retains the full append-only series per id.
+/// store retains one fragment per mapping, a temporal mapping's records observed last or a static
+/// mapping's merged records (O(mappings) per id); a series store retains the full append-only series
+/// per id.
 pub trait EntityStore: Debug + Send + Sync + 'static {
     /// The write pattern this backend is optimized for.
     fn write_strategy(&self) -> StoreWriteStrategy;
+
+    /// Which of a mapping's records for one id this store keeps, which decides whether a record's
+    /// observation times are read before it is stored.
+    fn retention(&self) -> Retention;
 
     /// Stores one fragment under its base entity id.
     ///
@@ -223,14 +238,18 @@ impl Clone for Box<dyn EntityStore> {
 pub(crate) mod tests {
     use crate::{
         entity_store::{
+            observations::{Observations, RecordRanking},
             record_timestamp::RecordTimestamp,
             store::{EntityStore, FragmentWrite},
         },
         mapping_id::MappingId,
         test_order::{ReadsEverything, next_batch, next_position},
     };
-    use cassiopeia_ir::source_position::SourcePosition;
-    use cassiopeia_mapping::{observed_at::ObservedAt, source_reads::SourceReads};
+    use cassiopeia_ir::{
+        observed_records::{ObservedRecords, RecordChoice},
+        source_position::SourcePosition,
+    };
+    use cassiopeia_mapping::{observed_template::ObservedTemplateIndex, source_reads::SourceReads};
     use cassiopeia_ngsi_ld::entity::scope::{NgsiLdScope, ScopeBuf};
     use chrono::{DateTime, TimeZone, Utc};
     use pretty_assertions::assert_eq;
@@ -241,6 +260,20 @@ pub(crate) mod tests {
     /// counts.
     pub(crate) static READS_EVERYTHING: SourceReads = SourceReads::Everything;
 
+    /// How a record of a mapping with one `observedAt` template, rendering `observed_at`, ranks.
+    pub(crate) fn ranked(observed_at: &str) -> RecordRanking {
+        RecordRanking::Ranked(Observations::of([RecordTimestamp::read(json!(observed_at))], &[]))
+    }
+
+    /// How a record of a mapping with two `observedAt` templates, each ranking a slot of its own and
+    /// rendering `a` and `b`, ranks.
+    pub(crate) fn ranked_in_two_slots(a: &str, b: &str) -> RecordRanking {
+        RecordRanking::Ranked(Observations::of(
+            [RecordTimestamp::read(json!(a)), RecordTimestamp::read(json!(b))],
+            &[ObservedTemplateIndex::new(0), ObservedTemplateIndex::new(1)],
+        ))
+    }
+
     fn write(base_id: &Urn, mapping: u32, scopes: &[&str]) -> FragmentWrite<'static> {
         FragmentWrite {
             base_id: base_id.clone(),
@@ -248,8 +281,7 @@ pub(crate) mod tests {
             position: next_position(),
             batch: next_batch(),
             mapping_id: MappingId::new(mapping),
-            temporal: false,
-            timestamp: RecordTimestamp::Absent,
+            ranking: RecordRanking::Unranked,
             scope: NgsiLdScope::from_scopes(scopes.iter().map(|scope| ScopeBuf::new(*scope).unwrap())),
             expires_at: None,
             reads: &READS_EVERYTHING,
@@ -268,8 +300,7 @@ pub(crate) mod tests {
     /// A write like [`write_expiring`] from a temporal mapping, observed at `observed_at`.
     fn write_observed(base_id: &Urn, mapping: u32, observed_at: &str, epoch_seconds: Option<i64>) -> FragmentWrite<'static> {
         FragmentWrite {
-            temporal: true,
-            timestamp: RecordTimestamp::Declared(ObservedAt::new(observed_at)),
+            ranking: ranked(observed_at),
             ..write_expiring(base_id, mapping, epoch_seconds)
         }
     }
@@ -373,6 +404,77 @@ pub(crate) mod tests {
         assert_eq!(store.assemble_entity(&shortened, &ReadsEverything).unwrap().expires_at, Some(instant(100)));
         assert_eq!(store.assemble_entity(&cleared, &ReadsEverything).unwrap().expires_at, None);
         assert_eq!(store.assemble_entity(&refined, &ReadsEverything).unwrap().expires_at, Some(instant(100)));
+    }
+
+    /// Contract every current-state [`EntityStore`] must honour: a temporal mapping's records rank by
+    /// the instant their `observedAt` names, not by its text (ETSI GS CIM 009 v1.9.1 clause 4.5.5.3
+    /// keeps the most recent `observedAt` `DateTime`). An offset is applied before instants compare, an
+    /// epoch ranks by the instant it names however many digits it has, text that reads as no instant
+    /// ranks below one that does, and a day-first date ranks by its day. Each pair is written in
+    /// source order across separate writes, and in reverse within one batch, and keeps the same
+    /// record either way.
+    pub(crate) fn assert_ranks_by_instant(store: &dyn EntityStore) {
+        let stations = [
+            ("S1", [("2026-03-01T11:00:00Z", 20.0), ("2026-03-01T12:00:00+02:00", 25.0)], 20.0),
+            ("S2", [("999999999", 7.0), ("1000000000", 8.0)], 8.0),
+            ("S3", [("2026-03-01T11:00:00Z", 30.0), ("soon", 31.0)], 30.0),
+            ("S4", [("02/03/2026", 40.0), ("01/04/2026", 41.0)], 41.0),
+        ];
+        let observation = |id: &Urn, record: usize, (time, t): (&str, f64)| FragmentWrite {
+            ranking: ranked(time),
+            ..write_at(id, at(record), json!({ "t": t }))
+        };
+        for (station, [first, second], kept) in stations {
+            let in_order: Urn = format!("urn:ngsi-ld:WeatherObserved:{station}-in-order").parse().unwrap();
+            let reversed: Urn = format!("urn:ngsi-ld:WeatherObserved:{station}-reversed").parse().unwrap();
+
+            store.store_fragment(observation(&in_order, 0, first)).unwrap();
+            store.store_fragment(observation(&in_order, 1, second)).unwrap();
+            store
+                .store_fragment_batch(vec![observation(&reversed, 1, second), observation(&reversed, 0, first)])
+                .unwrap();
+
+            for id in [in_order, reversed] {
+                let units = store.assemble_entity(&id, &ReadsEverything).unwrap().units;
+                assert_eq!(units[0][0].data, json!({ "t": kept }), "{id}");
+            }
+        }
+    }
+
+    /// Contract every current-state [`EntityStore`] must honour: a mapping whose attributes carry
+    /// distinct `observedAt` templates ranks its records in a slot per template (ETSI GS CIM 009
+    /// v1.9.1 clause 4.5.5.3 resolves conflicting instances per attribute). Of a record newer in the
+    /// first slot and a record newer in the second and over all, the fragment holds the second as the
+    /// record observed last and the first beside it for the first slot, whether the records arrive in
+    /// source order across separate writes or in reverse within one batch.
+    pub(crate) fn assert_ranks_each_slot_on_its_own(store: &dyn EntityStore) {
+        let written: Urn = "urn:ngsi-ld:Sensor:written".parse().unwrap();
+        let batched: Urn = "urn:ngsi-ld:Sensor:batched".parse().unwrap();
+        let first = |id: &Urn| FragmentWrite {
+            ranking: ranked_in_two_slots("2026-03-01T11:00:00Z", "2026-03-01T09:00:00Z"),
+            ..write_at(id, at(0), json!({ "record": 1 }))
+        };
+        let second = |id: &Urn| FragmentWrite {
+            ranking: ranked_in_two_slots("2026-03-01T10:00:00Z", "2026-03-01T12:00:00Z"),
+            ..write_at(id, at(1), json!({ "record": 2 }))
+        };
+
+        store.store_fragment(first(&written)).unwrap();
+        store.store_fragment(second(&written)).unwrap();
+        store.store_fragment_batch(vec![second(&batched), first(&batched)]).unwrap();
+
+        for id in [written, batched] {
+            let units = store.assemble_entity(&id, &ReadsEverything).unwrap().units;
+            assert_eq!(units[0][0].data, json!({ "record": 2 }), "{id}");
+            assert_eq!(
+                units[0][0].observed.as_deref(),
+                Some(&ObservedRecords::new(
+                    vec![json!({ "record": 1 })],
+                    vec![RecordChoice::Observed(0), RecordChoice::Newest]
+                )),
+                "{id}"
+            );
+        }
     }
 
     /// Contract every series [`EntityStore`] must honour: a mapping's observations contribute the

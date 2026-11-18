@@ -14,6 +14,7 @@ pub mod fragment;
 pub mod instance_index;
 pub mod mapped;
 pub mod metadata;
+pub mod observed_records;
 pub mod parent_context;
 pub mod payload;
 pub mod payload_origin;

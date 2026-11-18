@@ -1,5 +1,10 @@
 use crate::{
-    attribute::{resolution_context::ResolutionContext, resolution_error::ResolutionError, resolver::resolve},
+    attribute::{
+        observed_resolution::ObservedFragment,
+        resolution_context::ResolutionContext,
+        resolution_error::{ResolutionError, Result as ResolutionResult},
+        resolver::resolve,
+    },
     dropped_attributes::DroppedAttributes,
     error::{ExtractionError, Result},
     extractor::Extractor,
@@ -11,11 +16,14 @@ use cassiopeia_ir::{
     entity_relationships::EntityRelationshipsParts,
     mapped::{Mapped, Mappings},
     metadata::EntityMetadata,
+    resolved_attribute::ResolvedAttribute,
 };
 use cassiopeia_mapping::template::{resolver::TemplateResolver, template_input::TemplateInput};
+use cassiopeia_ngsi_ld::entity::name::NameBuf;
 use rayon::prelude::*;
 use serde_json::Value as JsonValue;
 use std::sync::Arc;
+use urn_rs::Urn;
 
 /// The standard [`Extractor`]: resolves each mapping attribute against the source record.
 ///
@@ -61,24 +69,31 @@ impl Extractor for EntityExtractor {
         // names across mappings make the union a concatenation, last-writer-wins on the rare collision.
         for fragment in &fragments {
             let mut unresolved = Vec::new();
-            {
+            let attributes = fragment.mapping().attributes();
+            if fragment.observed().is_some() {
+                // The mapping kept its attributes from several records, so each attribute resolves
+                // against the record its own observation was kept from.
+                let observed = ObservedFragment {
+                    fragment,
+                    resolver: &self.resolver,
+                    relationships: &relationships,
+                    dropped,
+                };
+                for (index, (name, config)) in attributes.iter().enumerate() {
+                    file(
+                        observed.resolve(index, name, config, &mut metadata),
+                        name,
+                        &id,
+                        &mut values,
+                        dropped,
+                        &mut unresolved,
+                    )?;
+                }
+            } else {
                 let input = TemplateInput::new(fragment.record(), fragment.variables());
                 let mut context = ResolutionContext::new(input, &self.resolver, &relationships, dropped, Some(&mut metadata));
-                for (name, config) in fragment.mapping().attributes() {
-                    match resolve(&mut context, name, config) {
-                        Ok(None) => {}
-                        Ok(Some(resolved)) => {
-                            values.insert(name.clone(), resolved);
-                        }
-                        // A template failure costs the attribute it belongs to, not the entity.
-                        // Resolution records an attribute's metadata only once the attribute has
-                        // resolved whole, so nothing of the failed attribute is left behind.
-                        Err(ResolutionError::Template { source }) => {
-                            dropped.templates.record(name, &id, source);
-                            unresolved.push(name);
-                        }
-                        Err(ResolutionError::RecursionLimitExceeded { depth }) => return Err(ExtractionError::RecursionLimitExceeded { depth }),
-                    }
+                for (name, config) in attributes {
+                    file(resolve(&mut context, name, config), name, &id, &mut values, dropped, &mut unresolved)?;
                 }
             }
             // A relationship's objects were minted upstream and travel on the entity, so a
@@ -113,6 +128,39 @@ impl Extractor for EntityExtractor {
             Parallelism::Sequential => entities.into_iter().map(|entity| self.extract(entity, dropped)).collect(),
         }
     }
+}
+
+/// Files what resolving the top-level attribute `name` of the entity `id` yielded: its value into
+/// `values`, nothing, or the template failure that cost it into `dropped`, naming it among the
+/// `unresolved` attributes.
+///
+/// A template failure costs the attribute it belongs to, not the entity. Resolution records an
+/// attribute's metadata only once the attribute has resolved whole, so nothing of the failed
+/// attribute is left behind.
+///
+/// # Errors
+/// Returns [`ExtractionError::RecursionLimitExceeded`] when the attribute nests past the guard depth,
+/// which fails the entity.
+fn file<'m>(
+    resolved: ResolutionResult<Option<ResolvedAttribute>>,
+    name: &'m NameBuf,
+    id: &Urn,
+    values: &mut AttributeValues,
+    dropped: &DroppedAttributes,
+    unresolved: &mut Vec<&'m NameBuf>,
+) -> Result<()> {
+    match resolved {
+        Ok(None) => {}
+        Ok(Some(resolved)) => {
+            values.insert(name.clone(), resolved);
+        }
+        Err(ResolutionError::Template { source }) => {
+            dropped.templates.record(name, id, source);
+            unresolved.push(name);
+        }
+        Err(ResolutionError::RecursionLimitExceeded { depth }) => return Err(ExtractionError::RecursionLimitExceeded { depth }),
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -1625,7 +1673,7 @@ mod tests {
             None,
             EntityRelationships::default(),
             // The fragment owns its record, while the test keeps the source to compare with.
-            smallvec![AssembledFragment::new(record.clone(), mapping, RunVariables::new(variables))],
+            smallvec![AssembledFragment::new(record.clone(), None, mapping, RunVariables::new(variables))],
         );
 
         let (result, _) = EntityExtractor::new(resolver)

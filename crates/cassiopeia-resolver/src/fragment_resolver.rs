@@ -1,5 +1,11 @@
 use crate::{
-    entity_store::{record_timestamp::RecordTimestamp, store::EntityStore, write_batch::WriteBatches},
+    entity_store::{
+        observations::{Observations, RecordRanking},
+        record_timestamp::RecordTimestamp,
+        retention::Retention,
+        store::EntityStore,
+        write_batch::WriteBatches,
+    },
     error::{ResolverError, Result},
     fragment_sink::FragmentSink,
     mapping_id::MappingId,
@@ -18,11 +24,11 @@ use cassiopeia_ir::{
 };
 use cassiopeia_mapping::{
     mapping::Mapping,
-    observed_at::ObservedAt,
-    template::{error::TemplateError, resolver::TemplateResolver, run_variables::RunVariables},
+    observation_plan::{ObservationPlan, RenderedObservations},
+    template::{resolver::TemplateResolver, run_variables::RunVariables},
 };
 use dashmap::DashMap;
-use std::{result, sync::Arc, time::Duration};
+use std::{sync::Arc, time::Duration};
 use urn_rs::Urn;
 
 /// Standard implementation of the [`FragmentSink`] and
@@ -43,8 +49,9 @@ use urn_rs::Urn;
 ///
 /// Temporality is an attribute concern (ETSI GS CIM 009 v1.9.1 clause 4.5.5): the store keys by the
 /// base entity id and every mapping and every observation of one id merges into one assembly. A
-/// temporal mapping's record-level `observedAt` is read once per record and passed to the store, which
-/// either ranks records by it (current-state) or keeps every observation (series).
+/// current-state store ranks a temporal mapping's records, so each distinct `observedAt` template of
+/// the mapping is read once per record and passed to it; a series store keeps every observation and
+/// is passed none.
 #[derive(Clone)]
 pub struct FragmentResolver {
     pub(crate) entity_store: Box<dyn EntityStore>,
@@ -53,6 +60,9 @@ pub struct FragmentResolver {
     pub(crate) resolver: TemplateResolver,
     pub(crate) parallelism: Parallelism,
     write_strategy: StoreWriteStrategy,
+    /// Which records the entity store keeps, which decides whether a record's observation times are
+    /// read.
+    pub(crate) retention: Retention,
     /// Deduplicates a temporal mapping's identical `(parent, property, child)` edges so a static
     /// relationship declared on every observation does not accumulate one duplicate per observation
     /// under the base-id key.
@@ -72,6 +82,7 @@ impl FragmentResolver {
     #[must_use]
     pub fn new(entity_store: Box<dyn EntityStore>, relationship_store: Box<dyn RelationshipStore>, resolver: TemplateResolver) -> FragmentResolver {
         let write_strategy = entity_store.write_strategy().combine(relationship_store.write_strategy());
+        let retention = entity_store.retention();
 
         FragmentResolver {
             entity_store,
@@ -80,25 +91,30 @@ impl FragmentResolver {
             resolver,
             parallelism: Parallelism::Parallel,
             write_strategy,
+            retention,
             temporal_edge_dedup: Arc::new(DashMap::with_hasher(RandomState::new())),
             observed_at_failures: Arc::new(ObservedAtFailures::new()),
             write_batches: Arc::new(WriteBatches::new()),
         }
     }
 
-    /// The timestamp a record of the mapping `mapping_id` ranks by, given what its `observedAt`
-    /// template yielded.
+    /// How a record of the mapping `mapping_id`, ranked as `plan` ranks it, ranks against the
+    /// mapping's other records, given what its `observedAt` templates rendered, or `None` when it is
+    /// not ranked.
     ///
-    /// A failed template ranks the record as carrying no timestamp, and its failure is kept for the
-    /// report that names the records a current-state store discards because of it.
-    pub(crate) fn record_timestamp(&self, mapping_id: MappingId, observed_at: result::Result<Option<ObservedAt>, TemplateError>) -> RecordTimestamp {
-        match observed_at {
-            Ok(observed_at) => RecordTimestamp::from(observed_at),
-            Err(error) => {
-                self.observed_at_failures.record(mapping_id, error);
-                RecordTimestamp::Unresolvable
-            }
-        }
+    /// A failed template ranks the record as carrying no instant under it, and its failure is kept
+    /// for the report that names the records a current-state store releases because of it.
+    pub(crate) fn record_ranking(&self, mapping_id: MappingId, plan: &ObservationPlan, observed: Option<RenderedObservations>) -> RecordRanking {
+        observed.map_or(RecordRanking::Unranked, |rendered| {
+            let timestamps = rendered.into_iter().map(|rendered| match rendered {
+                Ok(value) => RecordTimestamp::read(value),
+                Err(error) => {
+                    self.observed_at_failures.record(mapping_id, error);
+                    RecordTimestamp::Unresolvable
+                }
+            });
+            RecordRanking::Ranked(Observations::of(timestamps, plan.slot_templates()))
+        })
     }
 
     /// Registers `mapping` read with `variables` before any of its fragments arrive.
@@ -271,9 +287,15 @@ impl FragmentSink for FragmentResolver {
 mod tests {
     use crate::{
         entity_source::EntitySource,
-        entity_store::dashmap_latest_store::DashMapLatestEntityStore,
+        entity_store::{
+            dashmap_latest_store::DashMapLatestEntityStore,
+            observations::{Observations, RecordRanking},
+            record_timestamp::RecordTimestamp,
+        },
         fragment_resolver::FragmentResolver,
         fragment_sink::FragmentSink,
+        mapping_id::MappingId,
+        observed_at_failures::tests::failure,
         relationship_store::dashmap_store::DashMapRelationshipStore,
         test_order::next_position,
     };
@@ -286,11 +308,13 @@ mod tests {
     };
     use cassiopeia_mapping::{
         mapping::Mapping,
+        observed_at::ObservedAt,
         template::{run_variables::RunVariables, runner::TemplateRunner},
     };
     use cassiopeia_ngsi_ld::entity::name::NameBuf;
     use pretty_assertions::{assert_eq, assert_ne};
     use serde_json::{Map, json};
+    use smallvec::smallvec;
     use std::{path::Path, sync::Arc, time::Duration};
     use urn_rs::Urn;
 
@@ -373,6 +397,26 @@ mod tests {
             units.remove(0).relationships().top_level().get(&name("hasSite")).map(Vec::as_slice),
             Some(&[site][..])
         );
+    }
+
+    #[test]
+    fn a_record_ranks_by_what_its_observed_at_templates_rendered_and_a_failure_is_kept_for_the_report() {
+        let (resolver, mappings) = latest_resolver(&[TEMPORAL]);
+        let mapping_id = MappingId::new(1);
+
+        let plan = mappings[0].observation_plan();
+
+        assert_eq!(resolver.record_ranking(mapping_id, plan, None), RecordRanking::Unranked);
+        assert_eq!(
+            resolver.record_ranking(mapping_id, plan, Some(smallvec![Ok(json!("soon"))])),
+            RecordRanking::Ranked(Observations::of([RecordTimestamp::Unreadable(ObservedAt::new("soon"))], &[]))
+        );
+        assert!(resolver.observed_at_failures.take(mapping_id).is_none());
+        assert_eq!(
+            resolver.record_ranking(mapping_id, plan, Some(smallvec![Err(failure("{{ ts | trim }}"))])),
+            RecordRanking::Ranked(Observations::of([RecordTimestamp::Unresolvable], &[]))
+        );
+        assert!(resolver.observed_at_failures.take(mapping_id).is_some());
     }
 
     #[test]

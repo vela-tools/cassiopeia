@@ -3,7 +3,7 @@
 //! disk-backed store needs to stay at one round-trip per batch.
 
 use crate::{
-    entity_store::{error::EntityStoreError, record_timestamp::RecordTimestamp, store::FragmentWrite, write_batch::WriteBatch},
+    entity_store::{error::EntityStoreError, observations::RecordRanking, store::FragmentWrite, write_batch::WriteBatch},
     fragment_resolver::FragmentResolver,
     mapping_id::MappingId,
     prepared_fragment::PreparedFragment,
@@ -29,8 +29,7 @@ struct OwnedWrite {
     source_data: Value,
     position: SourcePosition,
     mapping_id: MappingId,
-    temporal: bool,
-    timestamp: RecordTimestamp,
+    ranking: RecordRanking,
     scope: Option<NgsiLdScope>,
     expires_at: Option<DateTime<Utc>>,
 }
@@ -93,8 +92,7 @@ impl FragmentResolver {
                     expires_at,
                     mapping,
                     mapping_id,
-                    observed_at,
-                    temporal,
+                    observed,
                     ..
                 } = prepared;
                 (
@@ -103,8 +101,7 @@ impl FragmentResolver {
                         source_data,
                         position,
                         mapping_id,
-                        temporal,
-                        timestamp: self.record_timestamp(mapping_id, observed_at),
+                        ranking: self.record_ranking(mapping_id, mapping.observation_plan(), observed),
                         scope,
                         expires_at,
                     },
@@ -121,8 +118,7 @@ impl FragmentResolver {
                 position: write.position,
                 batch,
                 mapping_id: write.mapping_id,
-                temporal: write.temporal,
-                timestamp: write.timestamp,
+                ranking: write.ranking,
                 scope: write.scope,
                 expires_at: write.expires_at,
                 reads: mapping.source_reads(),

@@ -8,6 +8,7 @@ use crate::{
         redb_key::{distinct_id_count, for_each_id_chunk_in_source_order, ids_in_source_order, make_prefix, prefix_end},
         redb_scope::{PendingScopes, SCOPES_TABLE, read_scope},
         redb_slot_value::{decode_slot, encode_slot, slot_first},
+        retention::Retention,
         store::{AssembledFragments, EntityStore, FragmentWrite, StoredUnit},
     },
     mapping_id::MappingId,
@@ -29,7 +30,8 @@ const DATA_TABLE: TableDefinition<&[u8], &[u8]> = TableDefinition::new("data");
 /// Each mapping's [`LatestSlot`] for a base id lives under the key `{base_id}\x1F{mapping_id_be}`,
 /// encoded with `rmp-serde` behind the position of the first record the mapping resolved to the id.
 /// A batch reads each key once, folds the batch's records into the slot by the current-state rule (a
-/// temporal mapping keeps the greatest-`observedAt` record, a static mapping merges in source order),
+/// temporal mapping keeps, attribute by attribute, the record observed last, a static mapping merges
+/// in source order),
 /// and commits once. The whole batch is in hand, so every slot it touched is sealed before it is
 /// written back. Assembly prefix-scans a base id's keys into one joined emit-unit, joining the expiry
 /// each key carries into the entity's. The ids are handed on in the order of their first records.
@@ -74,6 +76,10 @@ impl EntityStore for RedbLatestEntityStore {
         StoreWriteStrategy::TransactionalBatch
     }
 
+    fn retention(&self) -> Retention {
+        Retention::CurrentState
+    }
+
     fn store_fragment(&self, write: FragmentWrite<'_>) -> Result<()> {
         self.store_fragment_batch(vec![write])
     }
@@ -108,8 +114,7 @@ impl EntityStore for RedbLatestEntityStore {
                     position,
                     batch,
                     mapping_id,
-                    temporal,
-                    timestamp,
+                    ranking,
                     scope,
                     expires_at,
                     reads,
@@ -135,7 +140,7 @@ impl EntityStore for RedbLatestEntityStore {
                     data: source_data,
                     position,
                     batch,
-                    timestamp,
+                    ranking,
                     expires_at,
                 };
                 match &mut entry.slot {
@@ -143,7 +148,7 @@ impl EntityStore for RedbLatestEntityStore {
                         *first = (*first).min(position);
                         slot.absorb(incoming, reads);
                     }
-                    None => entry.slot = Some((position, LatestSlot::new(incoming, temporal))),
+                    None => entry.slot = Some((position, LatestSlot::new(incoming))),
                 }
                 if let Some(scope) = scope {
                     pending_scopes.add(&base_id, scope);
@@ -278,7 +283,7 @@ fn mapping_id_of(key: &[u8]) -> MappingId {
 mod tests {
     use crate::{
         entity_store::{
-            record_timestamp::RecordTimestamp,
+            observations::RecordRanking,
             redb_latest_store::RedbLatestEntityStore,
             store::{
                 EntityStore,
@@ -289,13 +294,15 @@ mod tests {
                     assert_hands_ids_on_in_order_of_their_first_records,
                     assert_joins_expiries_across_mappings,
                     assert_merges_scopes_per_id,
+                    assert_ranks_by_instant,
+                    assert_ranks_each_slot_on_its_own,
+                    ranked,
                 },
             },
         },
         mapping_id::MappingId,
         test_order::{ReadsEverything, next_batch, next_position},
     };
-    use cassiopeia_mapping::observed_at::ObservedAt;
     use pretty_assertions::assert_eq;
     use serde_json::json;
     use urn_rs::Urn;
@@ -320,19 +327,28 @@ mod tests {
     }
 
     #[test]
+    fn a_temporal_mapping_keeps_the_record_naming_the_latest_instant() {
+        assert_ranks_by_instant(&RedbLatestEntityStore::new().unwrap());
+    }
+
+    #[test]
+    fn each_slot_of_a_temporal_mapping_keeps_the_record_observed_last_in_it() {
+        assert_ranks_each_slot_on_its_own(&RedbLatestEntityStore::new().unwrap());
+    }
+
+    #[test]
     fn ids_are_handed_on_in_the_order_of_their_first_records() {
         assert_hands_ids_on_in_order_of_their_first_records(&RedbLatestEntityStore::new().unwrap());
     }
 
-    fn write(base_id: &Urn, data: serde_json::Value, mapping: u32, temporal: bool, observed_at: Option<&str>) -> FragmentWrite<'static> {
+    fn write(base_id: &Urn, data: serde_json::Value, mapping: u32, observed_at: Option<&str>) -> FragmentWrite<'static> {
         FragmentWrite {
             base_id: base_id.clone(),
             source_data: data,
             position: next_position(),
             batch: next_batch(),
             mapping_id: MappingId::new(mapping),
-            temporal,
-            timestamp: RecordTimestamp::from(observed_at.map(ObservedAt::new)),
+            ranking: observed_at.map_or(RecordRanking::Unranked, ranked),
             scope: None,
             expires_at: None,
             reads: &READS_EVERYTHING,
@@ -347,7 +363,7 @@ mod tests {
         let state = json!({"on": true});
 
         store
-            .store_fragment_batch(vec![write(&id, geometry, 1, false, None), write(&id, state, 2, false, None)])
+            .store_fragment_batch(vec![write(&id, geometry, 1, None), write(&id, state, 2, None)])
             .unwrap();
 
         let assembled = store.assemble_entity(&id, &ReadsEverything).unwrap();
@@ -367,9 +383,9 @@ mod tests {
         let late = json!({"on": true});
         let middle = json!({"on": false});
 
-        store.store_fragment(write(&id, early, 1, true, Some("2026-04-03T22:00:20Z"))).unwrap();
-        store.store_fragment(write(&id, late.clone(), 1, true, Some("2026-04-03T22:10:20Z"))).unwrap();
-        store.store_fragment(write(&id, middle, 1, true, Some("2026-04-03T22:05:20Z"))).unwrap();
+        store.store_fragment(write(&id, early, 1, Some("2026-04-03T22:00:20Z"))).unwrap();
+        store.store_fragment(write(&id, late.clone(), 1, Some("2026-04-03T22:10:20Z"))).unwrap();
+        store.store_fragment(write(&id, middle, 1, Some("2026-04-03T22:05:20Z"))).unwrap();
 
         let assembled = store.assemble_entity(&id, &ReadsEverything).unwrap();
         assert_eq!(assembled.units[0].len(), 1);
@@ -381,17 +397,15 @@ mod tests {
         let store = RedbLatestEntityStore::new().unwrap();
         let id = urn("urn:ngsi-ld:Camera:1");
 
-        store.store_fragment(write(&id, json!({"a": 1}), 1, false, None)).unwrap();
+        store.store_fragment(write(&id, json!({"a": 1}), 1, None)).unwrap();
         store
             .store_fragment_batch(vec![
-                write(&id, json!({"b": 2}), 1, false, None),
-                write(&id, json!({"c": 3}), 1, false, None),
-                write(&id, json!({"on": true}), 2, true, Some("2026-04-03T22:00:20Z")),
+                write(&id, json!({"b": 2}), 1, None),
+                write(&id, json!({"c": 3}), 1, None),
+                write(&id, json!({"on": true}), 2, Some("2026-04-03T22:00:20Z")),
             ])
             .unwrap();
-        store
-            .store_fragment(write(&id, json!({"on": false}), 2, true, Some("2026-04-03T21:00:20Z")))
-            .unwrap();
+        store.store_fragment(write(&id, json!({"on": false}), 2, Some("2026-04-03T21:00:20Z"))).unwrap();
 
         let unit = &store.assemble_entity(&id, &ReadsEverything).unwrap().units[0];
         let counts: Vec<u64> = unit.iter().map(|fragment| fragment.records.get()).collect();
@@ -405,13 +419,13 @@ mod tests {
         let store = RedbLatestEntityStore::new().unwrap();
         let id = urn("urn:ngsi-ld:Camera:1");
 
-        store.store_fragment(write(&id, json!({"a": 1, "z": 1}), 1, false, None)).unwrap();
-        store.store_fragment(write(&id, json!({"z": 2}), 1, false, None)).unwrap();
+        store.store_fragment(write(&id, json!({"a": 1, "z": 1}), 1, None)).unwrap();
+        store.store_fragment(write(&id, json!({"z": 2}), 1, None)).unwrap();
         store
-            .store_fragment_batch(vec![write(&id, json!({"b": 2}), 1, false, None), write(&id, json!({"a": 3}), 1, false, None)])
+            .store_fragment_batch(vec![write(&id, json!({"b": 2}), 1, None), write(&id, json!({"a": 3}), 1, None)])
             .unwrap();
-        store.store_fragment(write(&id, json!({"c": 1}), 2, false, None)).unwrap();
-        store.store_fragment(write(&id, json!({"c": 1}), 2, false, None)).unwrap();
+        store.store_fragment(write(&id, json!({"c": 1}), 2, None)).unwrap();
+        store.store_fragment(write(&id, json!({"c": 1}), 2, None)).unwrap();
 
         let unit = &store.assemble_entity(&id, &ReadsEverything).unwrap().units[0];
         let conflicts: Vec<Option<String>> = unit.iter().map(|fragment| fragment.conflict.as_ref().map(ToString::to_string)).collect();
@@ -424,8 +438,8 @@ mod tests {
         let store = RedbLatestEntityStore::new().unwrap();
         let id = urn("urn:ngsi-ld:Camera:1");
 
-        store.store_fragment(write(&id, json!({"a": 1}), 1, false, None)).unwrap();
-        store.store_fragment(write(&id, json!({"b": 2}), 1, false, None)).unwrap();
+        store.store_fragment(write(&id, json!({"a": 1}), 1, None)).unwrap();
+        store.store_fragment(write(&id, json!({"b": 2}), 1, None)).unwrap();
 
         let assembled = store.assemble_entity(&id, &ReadsEverything).unwrap();
         assert_eq!(assembled.units[0][0].data, json!({"a": 1, "b": 2}));
