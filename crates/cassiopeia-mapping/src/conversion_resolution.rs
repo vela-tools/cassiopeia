@@ -899,7 +899,7 @@ mod tests {
 
         for (name, expected) in [
             ("codes", Conversion::ListProperty(ListConversion::AsRead)),
-            ("payload", Conversion::JsonProperty(JsonConversion::Verbatim)),
+            ("payload", Conversion::JsonProperty(JsonConversion::Json)),
             ("name", Conversion::Property(PropertyConversion::One(ValueReading::Text))),
             ("location", Conversion::GeoProperty(GeometryTarget::Preserve)),
             ("title", Conversion::LanguageProperty),

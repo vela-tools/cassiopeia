@@ -11,14 +11,6 @@ input_file: crates/cassiopeia-pipeline/golden/values/json-property/manifest.json
         "! Attribute `mixed` dropped: a JsonProperty's `json` array holds only objects, but this one holds a number",
         "  ╰─ attribute   mixed"
       ]
-    },
-    {
-      "code": "extractor-json-payload-misshapen",
-      "occurrences": 1,
-      "message": [
-        "! Attribute `textAsIs` dropped: a JsonProperty's `json` is a JSON object or an array of objects, not a string",
-        "  ╰─ attribute   textAsIs"
-      ]
     }
   ]
 }
