@@ -115,6 +115,7 @@ mod tests {
     use cassiopeia_ngsi_ld::entity::{
         NgsiLdEntity,
         attribute::{NgsiLdAttribute, NgsiLdAttributeWrapper},
+        dataset_id::DatasetId,
         name::NameBuf,
         representation::NgsiLdSerializable,
     };
@@ -233,7 +234,7 @@ mod tests {
                 };
                 (
                     list.object_list.iter().map(Urn::to_string).collect(),
-                    list.dataset_id.as_ref().map(Urn::to_string),
+                    list.dataset_id.as_ref().map(DatasetId::to_string),
                 )
             })
             .collect()
@@ -270,7 +271,7 @@ mod tests {
                 let NgsiLdAttribute::Relationship(relationship) = instance else {
                     panic!("expected a relationship instance, got {instance:?}");
                 };
-                (relationship.object.to_string(), relationship.dataset_id.as_ref().map(Urn::to_string))
+                (relationship.object.to_string(), relationship.dataset_id.as_ref().map(DatasetId::to_string))
             })
             .collect();
         assert_eq!(

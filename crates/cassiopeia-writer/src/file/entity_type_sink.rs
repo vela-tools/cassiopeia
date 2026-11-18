@@ -246,6 +246,7 @@ mod parity_tests {
         entity::{
             NgsiLdEntity,
             attribute::{NgsiLdAttribute, NgsiLdAttributeWrapper, geo_property::NgsiLdGeoProperty, property::NgsiLdProperty, relationship::NgsiLdRelationship},
+            dataset_id::DatasetId,
             name::NameBuf,
             representation::NgsiLdSerializable,
         },
@@ -271,7 +272,7 @@ mod parity_tests {
 
         let mut property = NgsiLdProperty::new(Value::try_from(json!(21.5)).unwrap());
         property.observed_at = Some(Utc.with_ymd_and_hms(2024, 3, 13, 12, 0, 0).unwrap());
-        property.dataset_id = Some("urn:ngsi-ld:Dataset:indoor".parse::<Urn>().unwrap());
+        property.dataset_id = Some(DatasetId::new("urn:ngsi-ld:Dataset:indoor").unwrap());
         property.attributes = nested;
         NgsiLdAttributeWrapper::single(NgsiLdAttribute::Property(property))
     }
@@ -286,9 +287,9 @@ mod parity_tests {
     // Two dataset-distinguished instances, exercising the multi-instance array path.
     fn readings() -> NgsiLdAttributeWrapper {
         let mut first = NgsiLdProperty::new(Value::try_from(json!(1)).unwrap());
-        first.dataset_id = Some("urn:ngsi-ld:Dataset:a".parse::<Urn>().unwrap());
+        first.dataset_id = Some(DatasetId::new("urn:ngsi-ld:Dataset:a").unwrap());
         let mut second = NgsiLdProperty::new(Value::try_from(json!(2)).unwrap());
-        second.dataset_id = Some("urn:ngsi-ld:Dataset:b".parse::<Urn>().unwrap());
+        second.dataset_id = Some(DatasetId::new("urn:ngsi-ld:Dataset:b").unwrap());
         NgsiLdAttributeWrapper::Multi(vec![NgsiLdAttribute::Property(first), NgsiLdAttribute::Property(second)])
     }
 

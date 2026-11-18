@@ -165,6 +165,7 @@ pub fn build_list_relationship(objects: Vec<Urn>, object_type: Option<NameBuf>, 
     relationship.object_type = object_type;
     relationship.observed_at = meta.observed_at;
     relationship.expires_at = meta.expires_at;
+    relationship.dataset_id = meta.dataset_id;
     relationship.attributes = meta.custom_attributes;
 
     NgsiLdAttributeWrapper::single(NgsiLdAttribute::ListRelationship(relationship))

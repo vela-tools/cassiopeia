@@ -1,16 +1,25 @@
-use crate::{attribute_builder::build_sub_attribute, qualifier_cache::QualifierCache, qualifier_losses::QualifierLosses, unknown_unit_codes::UnknownUnitCodes};
+use crate::{
+    attribute_builder::build_sub_attribute,
+    qualifier_cache::QualifierCache,
+    qualifier_losses::QualifierLosses,
+    unknown_unit_codes::UnknownUnitCodes,
+    unusable_dataset_ids::UnusableDatasetIds,
+};
 use cassiopeia_ir::{
     metadata::EntityMetadata,
     sub_attribute::{SubAttribute, SubAttributes},
 };
 use cassiopeia_ngsi_ld::{
-    entity::{attribute::NestedAttributes, name::NameBuf, value_type::ValueType},
+    entity::{attribute::NestedAttributes, dataset_id::DatasetId, name::NameBuf, value_type::ValueType},
     value::types::Value,
 };
 use cassiopeia_unreadable_timestamps::{timestamp_loss::TimestampLoss, unreadable_timestamps::UnreadableTimestamps};
 use cefact_units::UnitCode;
 use chrono::{DateTime, Utc};
-use urn_rs::Urn;
+
+/// The JSON-LD keyword a `datasetId` names the default instance with (ETSI GS CIM 009 v1.9.1 clause
+/// 4.5.5.1).
+const DEFAULT_INSTANCE: &str = "@none";
 
 /// The NGSI-LD metadata resolved for one attribute (or one relationship instance).
 ///
@@ -25,8 +34,9 @@ pub struct MetadataSummary {
     pub expires_at: Option<DateTime<Utc>>,
     /// The `unitCode` qualifier, valid only on a Property.
     pub unit_code: Option<UnitCode>,
-    /// The `datasetId` qualifier (NGSI-LD 4.5.5: a URI).
-    pub dataset_id: Option<Urn>,
+    /// The `datasetId` qualifier (ETSI GS CIM 009 v1.9.1 clause 4.5.5.1), absent for the default
+    /// instance.
+    pub dataset_id: Option<DatasetId>,
     /// Any further declared sub-attributes, each built as the NGSI-LD kind it was declared as (a
     /// Property or one of its subclasses, ETSI GS CIM 009 v1.9.1 clause 4.5.2.2).
     pub custom_attributes: NestedAttributes,
@@ -50,8 +60,13 @@ impl MetadataSummary {
 /// when it is `None`, the attribute's shared metadata is read.
 ///
 /// `cache` carries the already-parsed `observedAt` texts and unit codes a mapping repeats across
-/// attributes, and `losses` gathers the qualifiers that had to be left off: an `observedAt` or
-/// `expiresAt` that would not read at all, and a `unitCode` that is no UN/CEFACT code.
+/// attributes, and `losses` gathers the qualifiers that could not be used: an `observedAt` or
+/// `expiresAt` that would not read at all, and a `unitCode` that is no UN/CEFACT code, each left off,
+/// and a `datasetId` that is no URI.
+///
+/// Returns `None` when the declaration's `datasetId` is no URI: the declaration cannot be written as
+/// the instance the mapping declared, so the caller drops the instance, or the attribute, it
+/// describes.
 #[must_use]
 pub fn transform_metadata(
     metadata: Option<&EntityMetadata>,
@@ -59,7 +74,7 @@ pub fn transform_metadata(
     index: Option<usize>,
     cache: &mut QualifierCache<'_>,
     losses: &QualifierLosses,
-) -> MetadataSummary {
+) -> Option<MetadataSummary> {
     let properties = metadata.and_then(|metadata| metadata.get(attr_name.as_str())).and_then(|storage| match index {
         Some(index) => storage.get_for_index(index),
         None => storage.as_shared(),
@@ -67,7 +82,39 @@ pub fn transform_metadata(
 
     match properties {
         Some(properties) => summary_from(properties, attr_name, cache, losses),
-        None => empty_summary(),
+        None => Some(empty_summary()),
+    }
+}
+
+/// What a declaration's `datasetId` qualifier names.
+enum DatasetIdQualifier {
+    /// The default instance: the qualifier carries no text, or `@none`.
+    Default,
+    /// The dataset the instance belongs to.
+    Named(DatasetId),
+    /// Text that names no dataset Cassiopeia can write, so the declaration carrying it is lost.
+    Refused,
+}
+
+/// Reads a `datasetId` qualifier, recording it against `attribute` when it names no dataset.
+///
+/// ETSI GS CIM 009 v1.9.1 clause 4.5.5.1 types a `datasetId` as a URI or the keyword `@none`, which
+/// names the default instance. The value is read as the run would quote it ([`Value::reported_text`]):
+/// a value the record does not carry, like `@none`, names the default instance, so only text that
+/// names a dataset is judged. Written without its `datasetId`, a refused instance would become the
+/// default instance, so the declaration is lost rather than left without the qualifier.
+fn dataset_id(value: &Value, attribute: &NameBuf, refused: &UnusableDatasetIds) -> DatasetIdQualifier {
+    let Some(text) = value.reported_text() else {
+        return DatasetIdQualifier::Default;
+    };
+    if text == DEFAULT_INSTANCE {
+        return DatasetIdQualifier::Default;
+    }
+    if let Ok(dataset_id) = DatasetId::new(&text) {
+        DatasetIdQualifier::Named(dataset_id)
+    } else {
+        refused.record(attribute, &text);
+        DatasetIdQualifier::Refused
     }
 }
 
@@ -129,11 +176,23 @@ fn empty_summary() -> MetadataSummary {
 /// sub-attribute whose builder rejects its value is dropped rather than emitted malformed.
 ///
 /// `attribute` names the attribute these properties qualify, so an `observedAt` or `expiresAt` that
-/// will not read, or a `unitCode` that is no code, is recorded against it, including one declared on
-/// a nested sub-attribute, which is a qualifier that same attribute lost.
-fn summary_from(props: &SubAttributes, attribute: &NameBuf, cache: &mut QualifierCache<'_>, losses: &QualifierLosses) -> MetadataSummary {
+/// will not read, a `unitCode` that is no code, or a `datasetId` that is no URI is recorded against
+/// it, including one declared on a nested sub-attribute, which is a qualifier that same attribute
+/// lost.
+///
+/// Returns `None` when the `datasetId` is no URI. It is read first, so a declaration lost to it
+/// reports no other qualifier it carried. A sub-attribute lost to its own `datasetId` drops only that
+/// sub-attribute.
+fn summary_from(props: &SubAttributes, attribute: &NameBuf, cache: &mut QualifierCache<'_>, losses: &QualifierLosses) -> Option<MetadataSummary> {
     let mut summary = empty_summary();
 
+    if let Some(declared) = props.get("datasetId").and_then(qualifier) {
+        match dataset_id(declared, attribute, &losses.dataset_ids) {
+            DatasetIdQualifier::Default => {}
+            DatasetIdQualifier::Named(dataset_id) => summary.dataset_id = Some(dataset_id),
+            DatasetIdQualifier::Refused => return None,
+        }
+    }
     if let Some(observed_at) = props.get("observedAt").and_then(qualifier) {
         match cache.instant(observed_at) {
             Some(datetime) => summary.observed_at = Some(datetime),
@@ -149,19 +208,17 @@ fn summary_from(props: &SubAttributes, attribute: &NameBuf, cache: &mut Qualifie
     if let Some(declared) = props.get("unitCode").and_then(qualifier) {
         summary.unit_code = unit_code(declared, attribute, cache, &losses.unit_codes);
     }
-    // An invalid `datasetId` is dropped rather than emitted malformed: the qualifier is optional
-    // (NGSI-LD 4.5.5) and must be a URI.
-    if let Some(dataset_id) = props.get("datasetId").and_then(qualifier).and_then(Value::as_str) {
-        summary.dataset_id = dataset_id.parse().ok();
-    }
 
     for (name, sub) in props {
         if matches!(name.as_str(), "observedAt" | "expiresAt" | "unitCode" | "datasetId") {
             continue;
         }
+        let Some(sub_meta) = summary_from(sub.metadata(), attribute, cache, losses) else {
+            continue;
+        };
         // Shared metadata answers for every instance, so each sub-attribute takes its own copy of the
         // datatype its declaration named.
-        let sub_meta = summary_from(sub.metadata(), attribute, cache, losses).with_value_type(sub.value_type().clone());
+        let sub_meta = sub_meta.with_value_type(sub.value_type().clone());
         // The metadata is borrowed rather than consumed because shared metadata answers for every
         // instance of a multi-instance attribute, so each sub-attribute built from it takes a copy.
         if let Some(wrapper) = build_sub_attribute(*sub.kind(), sub.value().clone(), sub.object_type().clone(), sub_meta) {
@@ -169,7 +226,7 @@ fn summary_from(props: &SubAttributes, attribute: &NameBuf, cache: &mut Qualifie
         }
     }
 
-    summary
+    Some(summary)
 }
 
 #[cfg(test)]
@@ -183,10 +240,15 @@ mod tests {
     };
     use cassiopeia_batch_sink::{batch_sink::BatchSink, recurring::Recurring};
     use cassiopeia_geometry::geometry::NgsiLdGeometry;
-    use cassiopeia_ir::{attribute_content::AttributeContent, metadata::MetadataStorage, sub_attribute::SubAttribute};
+    use cassiopeia_ir::{
+        attribute_content::AttributeContent,
+        metadata::MetadataStorage,
+        sub_attribute::{SubAttribute, SubAttributes},
+    };
     use cassiopeia_ngsi_ld::{
         entity::{
             attribute::{NgsiLdAttribute, NgsiLdAttributeKind, NgsiLdAttributeWrapper},
+            dataset_id::DatasetId,
             name::NameBuf,
             value_type::ValueType,
         },
@@ -238,7 +300,8 @@ mod tests {
             None,
             &mut QualifierCache::new(&mut InstantCache::new(), &mut UnitCodeCache::new()),
             &QualifierLosses::new(),
-        );
+        )
+        .unwrap();
 
         let NgsiLdAttribute::Property(formatted) = attribute(&summary, "formatted") else {
             panic!("expected a property sub-attribute");
@@ -255,7 +318,8 @@ mod tests {
             None,
             &mut QualifierCache::new(&mut InstantCache::new(), &mut UnitCodeCache::new()),
             &QualifierLosses::new(),
-        );
+        )
+        .unwrap();
 
         assert_eq!(summary.observed_at, None);
         assert_eq!(summary.unit_code, None);
@@ -278,7 +342,8 @@ mod tests {
             None,
             &mut QualifierCache::new(&mut InstantCache::new(), &mut UnitCodeCache::new()),
             &QualifierLosses::new(),
-        );
+        )
+        .unwrap();
 
         assert!(summary.observed_at.is_some());
         assert!(summary.unit_code.is_some());
@@ -303,6 +368,7 @@ mod tests {
             &mut QualifierCache::new(&mut InstantCache::new(), &mut UnitCodeCache::new()),
             losses,
         )
+        .unwrap()
     }
 
     #[test]
@@ -372,6 +438,7 @@ mod tests {
             &mut QualifierCache::new(&mut InstantCache::new(), &mut UnitCodeCache::new()),
             losses,
         )
+        .unwrap()
     }
 
     #[test]
@@ -441,7 +508,8 @@ mod tests {
             None,
             &mut QualifierCache::new(&mut InstantCache::new(), &mut UnitCodeCache::new()),
             &losses,
-        );
+        )
+        .unwrap();
 
         assert_eq!(summary.observed_at, None);
         assert_eq!(summary.expires_at, None);
@@ -477,6 +545,7 @@ mod tests {
             &mut QualifierCache::new(&mut InstantCache::new(), &mut UnitCodeCache::new()),
             losses,
         )
+        .unwrap()
     }
 
     /// Every unknown unit code `losses` recorded, as its attribute, its text, and how often it was met.
@@ -487,7 +556,8 @@ mod tests {
             .collect()
     }
 
-    fn unknown(attribute: &str, text: &str, occurrences: u64) -> (String, String, u64) {
+    /// One recorded loss, as its attribute, its text, and how often it was met.
+    fn entry(attribute: &str, text: &str, occurrences: u64) -> (String, String, u64) {
         (attribute.to_owned(), text.to_owned(), occurrences)
     }
 
@@ -509,7 +579,7 @@ mod tests {
 
         assert_eq!(summary.unit_code, None);
         assert!(summary.custom_attributes.is_empty());
-        assert_eq!(unknown_unit_codes(losses), [unknown("pm10", "ug/m3x", 1)]);
+        assert_eq!(unknown_unit_codes(losses), [entry("pm10", "ug/m3x", 1)]);
     }
 
     #[test]
@@ -519,7 +589,7 @@ mod tests {
         let summary = summary_with_unit_code(json!(5), &losses);
 
         assert_eq!(summary.unit_code, None);
-        assert_eq!(unknown_unit_codes(losses), [unknown("pm10", "5", 1)]);
+        assert_eq!(unknown_unit_codes(losses), [entry("pm10", "5", 1)]);
     }
 
     #[test]
@@ -571,13 +641,140 @@ mod tests {
             None,
             &mut QualifierCache::new(&mut InstantCache::new(), &mut UnitCodeCache::new()),
             &losses,
-        );
+        )
+        .unwrap();
 
         let NgsiLdAttribute::Property(max) = attribute(&summary, "max") else {
             panic!("expected a property sub-attribute");
         };
         assert_eq!(max.unit_code, None);
-        assert_eq!(unknown_unit_codes(losses), [unknown("temperature", "x", 1)]);
+        assert_eq!(unknown_unit_codes(losses), [entry("temperature", "x", 1)]);
+    }
+
+    /// The summary for a `temperature` whose qualifiers are `qualifiers`, or `None` when its
+    /// declaration was lost.
+    fn summary_with(qualifiers: SubAttributes, losses: &QualifierLosses) -> Option<MetadataSummary> {
+        let mut metadata = IndexMap::default();
+        metadata.insert(name("temperature"), MetadataStorage::shared(qualifiers));
+
+        transform_metadata(
+            Some(&metadata),
+            &name("temperature"),
+            None,
+            &mut QualifierCache::new(&mut InstantCache::new(), &mut UnitCodeCache::new()),
+            losses,
+        )
+    }
+
+    /// The summary for a `temperature` whose only qualifier is the `datasetId` `value`.
+    fn summary_with_dataset_id(value: JsonValue, losses: &QualifierLosses) -> Option<MetadataSummary> {
+        summary_with(
+            SubAttributes::from_iter([(name("datasetId"), sub(NgsiLdAttributeKind::Property, value))]),
+            losses,
+        )
+    }
+
+    /// Every unusable `datasetId` `losses` recorded, as its attribute, its first text, and how often
+    /// one was met.
+    fn unusable_dataset_ids(losses: QualifierLosses) -> Vec<(String, String, u64)> {
+        BatchSink::from(losses.dataset_ids)
+            .into_entries()
+            .map(|(attribute, record)| (attribute.to_string(), record.example.into_string(), record.occurrences.get()))
+            .collect()
+    }
+
+    #[test]
+    fn a_urn_dataset_id_is_kept() {
+        let losses = QualifierLosses::new();
+
+        let summary = summary_with_dataset_id(json!("urn:ngsi-ld:Dataset:gfs"), &losses).expect("the declaration is kept");
+
+        assert_eq!(summary.dataset_id.as_ref().map(DatasetId::as_str), Some("urn:ngsi-ld:Dataset:gfs"));
+        assert!(losses.dataset_ids.is_empty());
+    }
+
+    #[test]
+    fn an_absolute_uri_dataset_id_that_is_no_urn_is_kept_as_written() {
+        let losses = QualifierLosses::new();
+
+        let summary = summary_with_dataset_id(json!("https://example.org/datasets/gfs"), &losses).expect("the declaration is kept");
+
+        assert_eq!(summary.dataset_id.as_ref().map(DatasetId::as_str), Some("https://example.org/datasets/gfs"));
+        assert!(losses.dataset_ids.is_empty());
+    }
+
+    #[test]
+    fn a_none_dataset_id_names_the_default_instance() {
+        for none in ["@none", " @none "] {
+            let losses = QualifierLosses::new();
+
+            let summary = summary_with_dataset_id(json!(none), &losses).expect("the declaration is kept");
+
+            assert_eq!(summary.dataset_id, None, "{none:?}");
+            assert!(losses.dataset_ids.is_empty(), "{none:?}");
+        }
+    }
+
+    #[test]
+    fn a_blank_dataset_id_names_the_default_instance() {
+        let losses = QualifierLosses::new();
+
+        let summary = summary_with_dataset_id(json!("  "), &losses).expect("the declaration is kept");
+
+        assert_eq!(summary.dataset_id, None);
+        assert!(losses.dataset_ids.is_empty());
+    }
+
+    #[test]
+    fn a_dataset_id_that_is_no_uri_loses_the_declaration_and_is_recorded() {
+        let losses = QualifierLosses::new();
+
+        assert!(summary_with_dataset_id(json!("gfs model"), &losses).is_none());
+        assert_eq!(unusable_dataset_ids(losses), [entry("temperature", "gfs model", 1)]);
+    }
+
+    #[test]
+    fn a_relative_reference_dataset_id_loses_the_declaration_and_is_recorded() {
+        let losses = QualifierLosses::new();
+
+        assert!(summary_with_dataset_id(json!("datasets/gfs"), &losses).is_none());
+        assert_eq!(unusable_dataset_ids(losses), [entry("temperature", "datasets/gfs", 1)]);
+    }
+
+    #[test]
+    fn a_numeric_dataset_id_loses_the_declaration_and_is_recorded_by_its_json_text() {
+        let losses = QualifierLosses::new();
+
+        assert!(summary_with_dataset_id(json!(5), &losses).is_none());
+        assert_eq!(unusable_dataset_ids(losses), [entry("temperature", "5", 1)]);
+    }
+
+    #[test]
+    fn a_declaration_lost_to_its_dataset_id_reports_no_other_qualifier_loss() {
+        let losses = QualifierLosses::new();
+        let qualifiers = SubAttributes::from_iter([
+            (name("datasetId"), sub(NgsiLdAttributeKind::Property, json!("gfs model"))),
+            (name("unitCode"), sub(NgsiLdAttributeKind::Property, json!("bogus"))),
+        ]);
+
+        assert!(summary_with(qualifiers, &losses).is_none());
+        assert!(losses.unit_codes.is_empty());
+        assert_eq!(unusable_dataset_ids(losses), [entry("temperature", "gfs model", 1)]);
+    }
+
+    #[test]
+    fn a_sub_attribute_lost_to_its_own_dataset_id_leaves_its_attribute_and_is_recorded_against_it() {
+        let losses = QualifierLosses::new();
+        let accuracy = SubAttribute::new(
+            NgsiLdAttributeKind::Property,
+            AttributeContent::Value(Value::try_from(json!(0.5)).unwrap()),
+            SubAttributes::from_iter([(name("datasetId"), sub(NgsiLdAttributeKind::Property, json!("x y")))]),
+        );
+
+        let summary = summary_with(SubAttributes::from_iter([(name("accuracy"), accuracy)]), &losses).expect("the attribute is kept");
+
+        assert!(!summary.custom_attributes.contains_key(&name("accuracy")));
+        assert_eq!(unusable_dataset_ids(losses), [entry("temperature", "x y", 1)]);
     }
 
     #[test]
@@ -592,15 +789,16 @@ mod tests {
         let mut observed_at = InstantCache::new();
         let mut unit_codes = UnitCodeCache::new();
         let mut cache = QualifierCache::new(&mut observed_at, &mut unit_codes);
-        let first = transform_metadata(Some(&metadata), &name("import"), None, &mut cache, &QualifierLosses::new());
-        let second = transform_metadata(Some(&metadata), &name("export"), None, &mut cache, &QualifierLosses::new());
+        let first = transform_metadata(Some(&metadata), &name("import"), None, &mut cache, &QualifierLosses::new()).unwrap();
+        let second = transform_metadata(Some(&metadata), &name("export"), None, &mut cache, &QualifierLosses::new()).unwrap();
         let fresh = transform_metadata(
             Some(&metadata),
             &name("export"),
             None,
             &mut QualifierCache::new(&mut InstantCache::new(), &mut UnitCodeCache::new()),
             &QualifierLosses::new(),
-        );
+        )
+        .unwrap();
 
         assert_eq!(first.observed_at, second.observed_at);
         assert_eq!(first.unit_code, second.unit_code);
@@ -623,8 +821,8 @@ mod tests {
         let mut observed_at = InstantCache::new();
         let mut unit_codes = UnitCodeCache::new();
         let mut cache = QualifierCache::new(&mut observed_at, &mut unit_codes);
-        let energy = transform_metadata(Some(&metadata), &name("energy"), None, &mut cache, &QualifierLosses::new());
-        let voltage = transform_metadata(Some(&metadata), &name("voltage"), None, &mut cache, &QualifierLosses::new());
+        let energy = transform_metadata(Some(&metadata), &name("energy"), None, &mut cache, &QualifierLosses::new()).unwrap();
+        let voltage = transform_metadata(Some(&metadata), &name("voltage"), None, &mut cache, &QualifierLosses::new()).unwrap();
 
         assert!(energy.observed_at.is_some());
         assert!(voltage.observed_at.is_some());
@@ -639,6 +837,7 @@ mod tests {
                 &mut QualifierCache::new(&mut InstantCache::new(), &mut UnitCodeCache::new()),
                 &QualifierLosses::new(),
             )
+            .unwrap()
             .unit_code
         );
     }
@@ -659,7 +858,8 @@ mod tests {
             None,
             &mut QualifierCache::new(&mut InstantCache::new(), &mut UnitCodeCache::new()),
             &QualifierLosses::new(),
-        );
+        )
+        .unwrap();
 
         let NgsiLdAttribute::VocabProperty(property) = attribute(&summary, "level") else {
             panic!("expected a vocab property sub-attribute");
@@ -693,7 +893,8 @@ mod tests {
             None,
             &mut QualifierCache::new(&mut InstantCache::new(), &mut UnitCodeCache::new()),
             &QualifierLosses::new(),
-        );
+        )
+        .unwrap();
 
         assert!(matches!(attribute(&summary, "tags"), NgsiLdAttribute::ListProperty(_)));
         assert!(matches!(attribute(&summary, "label"), NgsiLdAttribute::LanguageProperty(_)));
@@ -730,7 +931,8 @@ mod tests {
             None,
             &mut QualifierCache::new(&mut InstantCache::new(), &mut UnitCodeCache::new()),
             &QualifierLosses::new(),
-        );
+        )
+        .unwrap();
 
         let NgsiLdAttribute::GeoProperty(footprint) = attribute(&summary, "footprint") else {
             panic!("expected a geo property sub-attribute");
@@ -751,7 +953,8 @@ mod tests {
             None,
             &mut QualifierCache::new(&mut InstantCache::new(), &mut UnitCodeCache::new()),
             &QualifierLosses::new(),
-        );
+        )
+        .unwrap();
 
         assert!(matches!(attribute(&summary, "accuracy"), NgsiLdAttribute::Property(_)));
     }
@@ -777,7 +980,8 @@ mod tests {
             None,
             &mut QualifierCache::new(&mut InstantCache::new(), &mut UnitCodeCache::new()),
             &QualifierLosses::new(),
-        );
+        )
+        .unwrap();
 
         let NgsiLdAttribute::Relationship(relationship) = attribute(&summary, "playsCharacter") else {
             panic!("expected a relationship sub-attribute");
@@ -805,7 +1009,8 @@ mod tests {
             None,
             &mut QualifierCache::new(&mut InstantCache::new(), &mut UnitCodeCache::new()),
             &QualifierLosses::new(),
-        );
+        )
+        .unwrap();
 
         let NgsiLdAttribute::VocabProperty(property) = attribute(&summary, "level") else {
             panic!("expected a vocab property sub-attribute");

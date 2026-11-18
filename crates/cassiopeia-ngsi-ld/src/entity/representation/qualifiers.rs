@@ -6,6 +6,7 @@
 use crate::{
     entity::{
         attribute::NestedAttributes,
+        dataset_id::DatasetId,
         name::NameBuf,
         representation::{DisplayStr, ReprAdapter},
         value_type::ValueType,
@@ -73,9 +74,9 @@ pub(crate) fn serialize_unit_code<M: SerializeMap>(map: &mut M, unit_code: Optio
 ///
 /// # Errors
 /// Returns the serializer's error if the dataset id cannot be serialized.
-pub(crate) fn serialize_dataset_id<M: SerializeMap>(map: &mut M, dataset_id: Option<&Urn>) -> Result<(), M::Error> {
+pub(crate) fn serialize_dataset_id<M: SerializeMap>(map: &mut M, dataset_id: Option<&DatasetId>) -> Result<(), M::Error> {
     if let Some(dataset_id) = dataset_id {
-        map.serialize_entry("datasetId", &DisplayStr(dataset_id))?;
+        map.serialize_entry("datasetId", dataset_id.as_str())?;
     }
     Ok(())
 }

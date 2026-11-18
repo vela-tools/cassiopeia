@@ -1,5 +1,6 @@
 use crate::entity::{
     attribute::NestedAttributes,
+    dataset_id::DatasetId,
     name::NameBuf,
     representation::{SerializeRepr, concise, normalized, simplified},
 };
@@ -23,9 +24,9 @@ pub struct NgsiLdRelationship {
     /// When the relationship ceases to hold (ETSI GS CIM 009 v1.9.1 clause 4.22).
     #[serde(rename = "expiresAt", skip_serializing_if = "Option::is_none")]
     pub expires_at: Option<DateTime<Utc>>,
-    /// The dataset this instance belongs to (a URI).
+    /// The dataset this instance belongs to (ETSI GS CIM 009 v1.9.1 clause 4.5.5.1).
     #[serde(rename = "datasetId", skip_serializing_if = "Option::is_none")]
-    pub dataset_id: Option<Urn>,
+    pub dataset_id: Option<DatasetId>,
     /// The broker-assigned instance identifier (a URI).
     #[serde(rename = "instanceId", skip_serializing_if = "Option::is_none")]
     pub instance_id: Option<Urn>,
@@ -37,8 +38,8 @@ pub struct NgsiLdRelationship {
 impl NgsiLdRelationship {
     /// Builds a relationship pointing at `object` with no qualifiers.
     #[must_use]
-    pub fn new(object: Urn) -> Self {
-        Self {
+    pub fn new(object: Urn) -> NgsiLdRelationship {
+        NgsiLdRelationship {
             object,
             object_type: None,
             observed_at: None,

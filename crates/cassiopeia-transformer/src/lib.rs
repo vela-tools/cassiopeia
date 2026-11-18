@@ -9,10 +9,11 @@
 //!
 //! A qualifier Cassiopeia cannot write is left off rather than emitted malformed: an `observedAt` or
 //! `expiresAt` whose text reads as no instant, and a `unitCode` that is no UN/CEFACT Recommendation
-//! No. 20 code (ETSI GS CIM 009 v1.9.1 clause 4.5.2). Each is recorded in the
-//! [`QualifierLosses`](crate::qualifier_losses::QualifierLosses) the caller supplies: the attribute
-//! still publishes, and the run can name the qualifier it lost instead of leaving the value without
-//! it unnoticed.
+//! No. 20 code (ETSI GS CIM 009 v1.9.1 clause 4.5.2). A `datasetId` that is neither a URI nor
+//! `@none` cannot be left off, because the instance would become the attribute's default instance
+//! (clause 4.5.5.1), so the instance, or the attribute, carrying it is dropped instead. Each loss is
+//! recorded in the [`QualifierLosses`](crate::qualifier_losses::QualifierLosses) the caller
+//! supplies, so the run can name it instead of leaving it unnoticed.
 
 pub mod attribute_builder;
 pub(crate) mod attribute_dispatch;
@@ -29,3 +30,4 @@ pub mod transformer;
 pub mod unit_code_cache;
 pub mod unknown_unit_code;
 pub mod unknown_unit_codes;
+pub mod unusable_dataset_ids;

@@ -1,5 +1,6 @@
 use crate::entity::{
     attribute::NestedAttributes,
+    dataset_id::DatasetId,
     name::NameBuf,
     representation::{SerializeRepr, concise, normalized, simplified},
 };
@@ -29,10 +30,11 @@ pub struct NgsiLdListRelationship {
     /// When it ceases to hold (ETSI GS CIM 009 v1.9.1 clause 4.22).
     #[serde(rename = "expiresAt", skip_serializing_if = "Option::is_none")]
     pub expires_at: Option<DateTime<Utc>>,
-    /// The dataset this instance belongs to (a URI), set when one attribute name carries several
-    /// `ListRelationship` instances (ETSI GS CIM 009 v1.9.1 clause 4.5.5).
+    /// The dataset this instance belongs to (ETSI GS CIM 009 v1.9.1 clause 4.5.5.1), set when one
+    /// attribute name carries several `ListRelationship` instances (clause 4.5.5), or when the
+    /// mapping names one for the single instance.
     #[serde(rename = "datasetId", skip_serializing_if = "Option::is_none")]
-    pub dataset_id: Option<Urn>,
+    pub dataset_id: Option<DatasetId>,
     /// Nested sub-attributes qualifying the list (ETSI GS CIM 009 v1.9.1 clause 4.5.2.2).
     #[serde(flatten, skip_serializing_if = "IndexMap::is_empty")]
     pub attributes: NestedAttributes,
@@ -41,8 +43,8 @@ pub struct NgsiLdListRelationship {
 impl NgsiLdListRelationship {
     /// Builds the attribute from its required value, with no qualifiers.
     #[must_use]
-    pub fn new(object_list: Vec<Urn>) -> Self {
-        Self {
+    pub fn new(object_list: Vec<Urn>) -> NgsiLdListRelationship {
+        NgsiLdListRelationship {
             object_list,
             object_type: None,
             observed_at: None,
@@ -65,7 +67,7 @@ impl SerializeRepr for NgsiLdListRelationship {
 
 #[cfg(test)]
 mod tests {
-    use crate::entity::attribute::list_relationship::NgsiLdListRelationship;
+    use crate::entity::{attribute::list_relationship::NgsiLdListRelationship, dataset_id::DatasetId};
     use pretty_assertions::assert_eq;
     use urn_rs::Urn;
 
@@ -80,7 +82,7 @@ mod tests {
     #[test]
     fn a_dataset_id_is_set_by_direct_field_assignment() {
         let mut rel = NgsiLdListRelationship::new(vec!["urn:ngsi-ld:A:1".parse::<Urn>().unwrap()]);
-        rel.dataset_id = Some("urn:ngsi-ld:dataset:role:departure".parse::<Urn>().unwrap());
+        rel.dataset_id = Some(DatasetId::new("urn:ngsi-ld:dataset:role:departure").unwrap());
 
         let value = serde_json::to_value(&rel).unwrap();
         assert_eq!(value["datasetId"], "urn:ngsi-ld:dataset:role:departure");

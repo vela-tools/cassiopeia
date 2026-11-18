@@ -17,7 +17,8 @@ input_file: crates/cassiopeia-pipeline/golden/qualifiers/dataset-id/manifest.jso
     "type": "Sensor",
     "forecast": {
       "type": "Property",
-      "value": 22.5
+      "value": 22.5,
+      "datasetId": "https://example.org/datasets/gfs"
     }
   },
   {
@@ -30,11 +31,7 @@ input_file: crates/cassiopeia-pipeline/golden/qualifiers/dataset-id/manifest.jso
   },
   {
     "id": "urn:ngsi-ld:Sensor:S4",
-    "type": "Sensor",
-    "forecast": {
-      "type": "Property",
-      "value": 24.5
-    }
+    "type": "Sensor"
   },
   {
     "id": "urn:ngsi-ld:Sensor:S5",
