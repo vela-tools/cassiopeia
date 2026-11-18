@@ -2,6 +2,7 @@
 //! the snapshot it wrote.
 
 use crate::{
+    collection_end::CollectionEnd,
     collection_warnings::CollectionWarnings,
     collector::Collector,
     downloader::Downloader,
@@ -75,8 +76,8 @@ pub(crate) fn resuming_collector(server: &ServerGuard, settings: &str, cursor: C
     ))
 }
 
-/// Runs `collector`, returning what it returned and every payload it sent.
-pub(crate) fn collect(collector: Box<SensorThingsCollector>) -> (Result<CollectionWarnings, CollectorError>, Vec<FilePayload>) {
+/// Runs `collector`, returning how its collection ended and every payload it sent.
+pub(crate) fn collect_to_end(collector: Box<SensorThingsCollector>) -> (Result<CollectionEnd, CollectorError>, Vec<FilePayload>) {
     let (sender, receiver) = channel(ChannelPolicy::Unbounded);
     let result = collector.collect(sender);
     let payloads = receiver
@@ -87,6 +88,17 @@ pub(crate) fn collect(collector: Box<SensorThingsCollector>) -> (Result<Collecti
         })
         .collect();
     (result, payloads)
+}
+
+/// Runs `collector`, which nobody stops, returning the warnings it collected with, or how it failed,
+/// and every payload it sent.
+pub(crate) fn collect(collector: Box<SensorThingsCollector>) -> (Result<CollectionWarnings, CollectorError>, Vec<FilePayload>) {
+    let (result, payloads) = collect_to_end(collector);
+    let warnings = result.map(|end| match end {
+        CollectionEnd::Collected(warnings) => warnings,
+        CollectionEnd::Stopped => panic!("a collector nobody stops was stopped"),
+    });
+    (warnings, payloads)
 }
 
 /// The lines of the one snapshot `payloads` holds, each read as JSON, removing the snapshot once it

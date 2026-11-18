@@ -13,9 +13,13 @@ pub fn failure_code(error: &Error) -> DiagnosticCode {
     match error {
         Error::Pipeline(error) => DiagnosticCode::from(error),
         Error::Cli(CliError::Cursor(_)) => DiagnosticCode::Run(RunCode::CursorUnusable),
-        Error::Config(_) | Error::Cli(_) | Error::Manifest(_) | Error::Reporter(_) | Error::CliValidation(_) | Error::ThreadPool { .. } | Error::CtrlC(_) => {
-            DiagnosticCode::Run(RunCode::Failed)
-        }
+        Error::Config(_)
+        | Error::Cli(_)
+        | Error::Manifest(_)
+        | Error::Reporter(_)
+        | Error::CliValidation(_)
+        | Error::ThreadPool { .. }
+        | Error::StopSignalHandler(_) => DiagnosticCode::Run(RunCode::Failed),
     }
 }
 

@@ -16,7 +16,10 @@ use std::{
     fs,
     io::ErrorKind,
     path::{Path, PathBuf},
-    sync::{Arc, Mutex, PoisonError, atomic::AtomicBool},
+    sync::{
+        Arc,
+        atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering},
+    },
 };
 use temp_dir::TempDir;
 
@@ -45,6 +48,39 @@ pub(crate) enum RunOutput<'a> {
     Declared(&'a str),
 }
 
+/// What stops an end-to-end run.
+#[derive(Clone, Copy)]
+pub(crate) struct RunStop {
+    /// The flag the run's stages read, the one a signal handler raises in a real run.
+    pub(crate) flag: &'static AtomicBool,
+    /// How many cycles end before the harness raises `flag` itself, between two cycles; `None`
+    /// leaves raising it to the test.
+    pub(crate) after_cycles: Option<usize>,
+}
+
+impl RunStop {
+    /// A stop nobody raises.
+    pub(crate) const fn never() -> RunStop {
+        RunStop {
+            flag: &SHUTDOWN,
+            after_cycles: None,
+        }
+    }
+
+    /// A stop the test raises through `flag`.
+    pub(crate) const fn raised_by(flag: &'static AtomicBool) -> RunStop {
+        RunStop { flag, after_cycles: None }
+    }
+
+    /// A stop the harness raises through `flag` once `cycles` cycles have ended.
+    pub(crate) const fn after_cycles(flag: &'static AtomicBool, cycles: usize) -> RunStop {
+        RunStop {
+            flag,
+            after_cycles: Some(cycles),
+        }
+    }
+}
+
 /// What an end-to-end run of declared inputs runs with besides its inputs.
 pub(crate) struct RunSetup<'a> {
     /// The schemas its entities are validated against.
@@ -53,22 +89,27 @@ pub(crate) struct RunSetup<'a> {
     pub(crate) output: RunOutput<'a>,
     /// The manifest schedule, or `None` for one cycle.
     pub(crate) schedule: Option<&'a str>,
+    /// The manifest's `onFailure` policy, written as the manifest writes it, or `None` for the
+    /// default.
+    pub(crate) on_failure: Option<&'a str>,
     /// The folder it keeps its cursors in, or `None` for one in the run's own folder.
     pub(crate) cursors: Option<&'a Path>,
-    /// The flag that stops it.
-    pub(crate) shutdown: &'static AtomicBool,
+    /// What stops it.
+    pub(crate) stop: RunStop,
 }
 
 impl<'a> RunSetup<'a> {
     /// One cycle into files with `output_extra` spliced into the output, validated against
-    /// `schemas`, with cursors in the run's own folder, never stopped.
+    /// `schemas`, under the default failure policy, with cursors in the run's own folder, never
+    /// stopped.
     pub(crate) const fn files(schemas: &'a RunSchemas<'a>, output_extra: &'a str) -> RunSetup<'a> {
         RunSetup {
             schemas,
             output: RunOutput::Files(output_extra),
             schedule: None,
+            on_failure: None,
             cursors: None,
-            shutdown: &SHUTDOWN,
+            stop: RunStop::never(),
         }
     }
 }
@@ -84,8 +125,13 @@ pub(crate) struct RunInput {
 pub(crate) struct RunOutcome {
     /// Every diagnostic the run reported, in the order it reported them.
     pub(crate) diagnostics: Vec<RecordedDiagnostic>,
-    /// The warning total of the run's one completed cycle.
+    /// Every info and success line the run logged, such as the line that reports a cycle, in the
+    /// order it logged them.
+    pub(crate) messages: Vec<String>,
+    /// The warning total of every cycle the run ran, as their summaries count them.
     pub(crate) warnings: u64,
+    /// The error total of every cycle the run ran, as their summaries count them.
+    pub(crate) errors: u64,
     /// Every entity the run wrote, file by file in the order of their names, each file's in the
     /// order it lists them.
     pub(crate) entities: Vec<Value>,
@@ -100,13 +146,38 @@ impl RunOutcome {
     }
 }
 
-/// An observer that keeps the warning total of every completed cycle.
-#[derive(Default)]
-struct WarningTotals(Mutex<Vec<u64>>);
+/// An observer that adds up the warnings and errors of every cycle that ends, and raises the run's
+/// stop once as many cycles have ended as the stop waits for.
+///
+/// A cycle ends, and decides whether it completed, before it tells its observer, so a stop raised
+/// here lands between that cycle and the next.
+struct CycleTotals {
+    warnings: AtomicU64,
+    errors: AtomicU64,
+    ended: AtomicUsize,
+    stop: RunStop,
+}
 
-impl RunObserver for WarningTotals {
+impl CycleTotals {
+    /// No cycle ended yet, under `stop`.
+    const fn new(stop: RunStop) -> CycleTotals {
+        CycleTotals {
+            warnings: AtomicU64::new(0),
+            errors: AtomicU64::new(0),
+            ended: AtomicUsize::new(0),
+            stop,
+        }
+    }
+}
+
+impl RunObserver for CycleTotals {
     fn on_complete(&self, result: &PipelineResult) {
-        self.0.lock().unwrap_or_else(PoisonError::into_inner).push(result.warnings);
+        self.warnings.fetch_add(result.warnings, Ordering::SeqCst);
+        self.errors.fetch_add(result.errors, Ordering::SeqCst);
+        let ended = self.ended.fetch_add(1, Ordering::SeqCst) + 1;
+        if self.stop.after_cycles == Some(ended) {
+            self.stop.flag.store(true, Ordering::SeqCst);
+        }
     }
 }
 
@@ -259,14 +330,18 @@ fn run_declared(store: StoreKind, root: &Path, declared: &[String], setup: &RunS
     };
 
     let schedule = setup.schedule.map(|schedule| format!(", schedule: {schedule}")).unwrap_or_default();
+    let on_failure = setup.on_failure.map(|policy| format!(", onFailure: {policy}")).unwrap_or_default();
     let output_object = match setup.output {
         RunOutput::Files(output_extra) => format!(r#"{{ target: "file", directory: "{}"{output_extra} }}"#, folders.output.display()),
         RunOutput::Declared(object) => object.to_owned(),
     };
-    let document = format!(r#"{{ version: "v1", inputs: [{}], output: {output_object}{schedule} }}"#, declared.join(", "));
+    let document = format!(
+        r#"{{ version: "v1", inputs: [{}], output: {output_object}{schedule}{on_failure} }}"#,
+        declared.join(", ")
+    );
     let manifest = Manifest::from_json5(&document, Path::new("manifest.json5")).unwrap();
 
-    run_manifest(store, &manifest, folders, ExtractionParallelism::Parallel, setup.shutdown)
+    run_manifest(store, &manifest, folders, ExtractionParallelism::Parallel, setup.stop)
 }
 
 /// The folders a run keeps its own files in.
@@ -280,7 +355,7 @@ pub(crate) struct RunFolders {
 }
 
 /// Runs a pipeline over `manifest` on `store`, with its own files in `folders`, extracting records
-/// as `extraction` says, stopped by `shutdown`, and returns how the run ended, or failed to be
+/// as `extraction` says, stopped as `stop` says, and returns how the run ended, or failed to be
 /// built, with what it reported and wrote.
 ///
 /// The run attaches no `@context` unless the manifest's output declares one.
@@ -289,11 +364,11 @@ pub(crate) fn run_manifest(
     manifest: &Manifest,
     folders: RunFolders,
     extraction: ExtractionParallelism,
-    shutdown: &'static AtomicBool,
+    stop: RunStop,
 ) -> (Result<(), PipelineError>, RunOutcome) {
     let RunFolders { schemas, cursors, output } = folders;
     let reporter: &'static RecordingReporter = Box::leak(Box::new(RecordingReporter::new()));
-    let totals = Arc::new(WarningTotals::default());
+    let totals = Arc::new(CycleTotals::new(stop));
     let observer: Arc<dyn RunObserver> = Arc::clone(&totals) as Arc<dyn RunObserver>;
     let mut engine = engine_config();
     engine.entity_store = store;
@@ -313,17 +388,18 @@ pub(crate) fn run_manifest(
         serde_json::Map::new(),
         engine,
         reporter as &'static dyn Reporter,
-        shutdown,
+        stop.flag,
         observer,
     );
     // The pipeline holds the run's cursor stores until it is dropped, at the end of this block.
     let result = built.and_then(|mut pipeline| pipeline.run());
 
-    let warnings = totals.0.lock().unwrap_or_else(PoisonError::into_inner).iter().sum();
     let files = written_files(&output);
     let outcome = RunOutcome {
         diagnostics: reporter.diagnostics(),
-        warnings,
+        messages: reporter.messages(),
+        warnings: totals.warnings.load(Ordering::SeqCst),
+        errors: totals.errors.load(Ordering::SeqCst),
         entities: files.values().flat_map(|file| file_entities(file)).collect(),
         files,
     };

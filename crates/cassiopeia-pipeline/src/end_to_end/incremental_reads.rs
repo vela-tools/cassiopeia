@@ -1,10 +1,9 @@
 use crate::{
     end_to_end::{
-        harness::{RunOutcome, RunOutput, RunSchemas, RunSetup, attempt_setup_end_to_end},
+        harness::{RunOutcome, RunOutput, RunSchemas, RunSetup, RunStop, attempt_setup_end_to_end},
         sensorthings::{MOCK_RANGE_THING, SERIES_OUTPUT, entity, fixture, instant_times},
     },
     error::PipelineError,
-    test_engine::SHUTDOWN,
 };
 use cassiopeia_common::store_kind::StoreKind;
 use cassiopeia_diagnostic::code::{diagnostic_code::DiagnosticCode, run_code::RunCode};
@@ -44,6 +43,18 @@ const METADATA: &str = "/v1.0/Datastreams?$top=1000&$expand=Thing/Locations,Obse
 /// The flag the cancellation test raises once the server answered the last request of collection.
 static STOPPED_AFTER_COLLECTION: AtomicBool = AtomicBool::new(false);
 
+/// The flag the atomic broker test raises once the server answered the last request of the second
+/// cycle's collection.
+static STOPPED_IN_SECOND_COLLECTION: AtomicBool = AtomicBool::new(false);
+
+/// A stop a mock server raises in one cycle: once it has answered that cycle's request for the
+/// Observations of PM10, the last data stream a cycle reads.
+#[derive(Clone, Copy)]
+struct StopInCycle {
+    flag: &'static AtomicBool,
+    cycle: usize,
+}
+
 /// The instant `time` on 2026-11-12, in UTC.
 fn at(time: &str) -> DateTime<Utc> {
     DateTime::parse_from_rfc3339(&format!("2026-11-12T{time}:00Z")).unwrap().to_utc()
@@ -73,9 +84,8 @@ struct RivmServer {
 }
 
 impl RivmServer {
-    /// The server, raising `stop` once it has answered a request for the Observations of PM10, the
-    /// last data stream a cycle reads, when given.
-    fn new(stop: Option<&'static AtomicBool>) -> RivmServer {
+    /// The server, raising `stop` in the cycle it names, when given.
+    fn new(stop: Option<StopInCycle>) -> RivmServer {
         let mut server = mockito::Server::new();
         let held: Arc<Mutex<Vec<Held>>> = Arc::default();
         let cycles: Arc<AtomicUsize> = Arc::default();
@@ -120,8 +130,9 @@ impl RivmServer {
                         answer.sort_by_key(|(time, _)| *time);
                         if datastream == PM10
                             && let Some(stop) = stop
+                            && stop.cycle == cycle
                         {
-                            stop.store(true, Ordering::SeqCst);
+                            stop.flag.store(true, Ordering::SeqCst);
                         }
                         json!({ "value": answer.into_iter().map(|(_, observation)| observation).collect::<Vec<_>>() })
                             .to_string()
@@ -211,7 +222,7 @@ fn run_into_files(server: &RivmServer, cursors: &Path) -> (Result<(), PipelineEr
 
 /// Runs the incremental input of `server` once into the broker's temporal API at `broker`, with
 /// `atomicity`, validating with `validation_mode` against the schemas of `schemas`, keeping its
-/// cursors in `cursors`.
+/// cursors in `cursors`, stopped as `stop` says.
 fn run_into_broker(
     server: &RivmServer,
     cursors: &Path,
@@ -219,6 +230,7 @@ fn run_into_broker(
     atomicity: &str,
     validation_mode: &str,
     schemas: &Path,
+    stop: RunStop,
 ) -> (Result<(), PipelineError>, RunOutcome) {
     let schemas = RunSchemas::Folder(schemas);
     let output = format!(
@@ -229,8 +241,9 @@ fn run_into_broker(
         schemas: &schemas,
         output: RunOutput::Declared(&output),
         schedule: None,
+        on_failure: None,
         cursors: Some(cursors),
-        shutdown: &SHUTDOWN,
+        stop,
     };
     attempt_setup_end_to_end(StoreKind::DashMap, &server.declared(), &setup)
 }
@@ -327,7 +340,7 @@ fn a_failed_cycle_does_not_advance_the_cursor() {
 
     run_into_files(&server, cursors.path()).0.unwrap();
     let after_success = committed(&server, cursors.path());
-    let (result, _) = run_into_broker(&server, cursors.path(), &failing, "streaming", "warn", &fixture("schemas"));
+    let (result, _) = run_into_broker(&server, cursors.path(), &failing, "streaming", "warn", &fixture("schemas"), RunStop::never());
     let after_failure = committed(&server, cursors.path());
     let (resumed, outcome) = run_into_files(&server, cursors.path());
 
@@ -341,14 +354,17 @@ fn a_failed_cycle_does_not_advance_the_cursor() {
 
 #[test]
 fn a_cancelled_cycle_does_not_advance_the_cursor() {
-    let server = RivmServer::new(Some(&STOPPED_AFTER_COLLECTION));
+    let server = RivmServer::new(Some(StopInCycle {
+        flag: &STOPPED_AFTER_COLLECTION,
+        cycle: 1,
+    }));
     server.hold(PM10, 1, 1, "06:00", 30.0);
     let cursors = TempDir::new().unwrap();
     let folder = fixture("schemas");
     let schemas = RunSchemas::Folder(&folder);
     let setup = RunSetup {
         cursors: Some(cursors.path()),
-        shutdown: &STOPPED_AFTER_COLLECTION,
+        stop: RunStop::raised_by(&STOPPED_AFTER_COLLECTION),
         ..RunSetup::files(&schemas, SERIES_OUTPUT)
     };
 
@@ -358,6 +374,43 @@ fn a_cancelled_cycle_does_not_advance_the_cursor() {
     assert!(STOPPED_AFTER_COLLECTION.load(Ordering::SeqCst));
     assert_eq!(server.lower_bounds(PM10).len(), 1);
     assert_eq!(committed(&server, cursors.path()), Positions::default());
+}
+
+#[test]
+fn a_cycle_stopped_while_collecting_sends_nothing_to_an_atomic_broker_and_keeps_the_earlier_positions() {
+    let server = RivmServer::new(Some(StopInCycle {
+        flag: &STOPPED_IN_SECOND_COLLECTION,
+        cycle: 2,
+    }));
+    server.hold(PM10, 1, 1, "06:00", 30.0);
+    server.hold(PM10, 2, 2, "07:00", 31.0);
+    let cursors = TempDir::new().unwrap();
+    let (accepting, bodies, _accepting_mock) = broker(201);
+
+    run_into_files(&server, cursors.path()).0.unwrap();
+    let earlier = committed(&server, cursors.path());
+    let (stopped, outcome) = run_into_broker(
+        &server,
+        cursors.path(),
+        &accepting,
+        "atomic",
+        "warn",
+        &fixture("schemas"),
+        RunStop::raised_by(&STOPPED_IN_SECOND_COLLECTION),
+    );
+
+    stopped.unwrap();
+    assert!(STOPPED_IN_SECOND_COLLECTION.load(Ordering::SeqCst));
+    assert_eq!(server.cycles(), 2);
+    assert_eq!(*bodies.lock().unwrap(), Vec::<Value>::new());
+    assert_eq!(pm10_high_water(&earlier), Some(at("06:00")));
+    assert_eq!(committed(&server, cursors.path()), earlier);
+    assert_eq!(outcome.errors, 0);
+    assert!(
+        outcome.messages.iter().any(|message| message.starts_with("Run stopped (")),
+        "{:?}",
+        outcome.messages
+    );
 }
 
 #[test]
@@ -377,10 +430,10 @@ fn an_atomic_cycle_that_fails_sends_nothing_and_the_next_sends_once() {
     .unwrap();
     let (accepting, bodies, _accepting_mock) = broker(201);
 
-    let (failed, _) = run_into_broker(&server, cursors.path(), &accepting, "atomic", "fail", rejecting.path());
+    let (failed, _) = run_into_broker(&server, cursors.path(), &accepting, "atomic", "fail", rejecting.path(), RunStop::never());
     let sent_by_failure = sent_pm10(&bodies);
     let after_failure = committed(&server, cursors.path());
-    let (delivered, _) = run_into_broker(&server, cursors.path(), &accepting, "atomic", "fail", &fixture("schemas"));
+    let (delivered, _) = run_into_broker(&server, cursors.path(), &accepting, "atomic", "fail", &fixture("schemas"), RunStop::never());
 
     assert!(failed.is_err());
     assert_eq!(sent_by_failure, Vec::<String>::new());

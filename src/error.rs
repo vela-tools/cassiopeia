@@ -34,8 +34,8 @@ pub enum Error {
     #[error("failed to build the worker thread pool")]
     ThreadPool { source: rayon::ThreadPoolBuildError },
 
-    #[error("failed to install the CTRL+C handler")]
-    CtrlC(#[from] ctrlc::Error),
+    #[error("failed to install the handler that stops a run on Ctrl+C, SIGTERM or SIGHUP")]
+    StopSignalHandler(#[from] ctrlc::Error),
 }
 
 /// The result type every command-line handler returns, fixing the error type to [`Error`](enum@Error).

@@ -1,4 +1,5 @@
 use crate::{
+    cycle_outcome::CycleOutcome,
     error::{PipelineError, Result},
     pipeline::Pipeline,
     pipeline_stage::PipelineStage,
@@ -13,6 +14,7 @@ use cassiopeia_diagnostic::{
 use cassiopeia_manifest::{failure_policy::FailurePolicy, schedule::Schedule};
 use cassiopeia_reporter::reporter::{ProgressStage, StageOutput};
 use cassiopeia_scheduler::{
+    payload::SchedulerPayload,
     sleep::{SleepOutcome, interruptible_sleep},
     stage::spawn_scheduler_thread,
     wait::Wait,
@@ -20,11 +22,22 @@ use cassiopeia_scheduler::{
 use chrono::Local;
 use std::{
     ops::ControlFlow,
+    sync::atomic::Ordering,
     time::{Duration, Instant},
 };
 
 /// The minimum zero-padding width for a run number in the scheduled-run log lines.
 const MIN_RUN_NUMBER_WIDTH: usize = 5;
+
+/// Whether a run fires one cycle or repeats on a schedule, which decides how its cycles are
+/// reported.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum Repetition {
+    /// The manifest declares no schedule: one cycle, with stage progress bars.
+    Once,
+    /// The cycles repeat on the manifest's schedule, each reported on a line of its own.
+    Scheduled,
+}
 
 impl Pipeline {
     /// Drives the pipeline through its schedule.
@@ -33,6 +46,7 @@ impl Pipeline {
     /// schedule suppresses the bars for compact per-run log lines. The run-level failure policy
     /// decides what a failed cycle does to the run: [`FailurePolicy::Abort`] stops at once,
     /// [`FailurePolicy::Continue`] and [`FailurePolicy::Ignore`] carry on to the remaining cycles.
+    /// A stopped cycle is no failure: the run reports it and ends, as the stop asked.
     ///
     /// # Errors
     ///
@@ -41,22 +55,23 @@ impl Pipeline {
     /// [`FailurePolicy::Continue`]. [`FailurePolicy::Ignore`] tolerates a failed cycle and returns
     /// `Ok`.
     pub(crate) fn run_schedule(&self, schedule: Option<Schedule>) -> Result<()> {
-        let is_once = schedule.is_none();
+        let repetition = if schedule.is_some() { Repetition::Scheduled } else { Repetition::Once };
 
-        if is_once {
-            let mut ordered: Vec<PipelineStage> = PipelineStage::all().to_vec();
-            // A series run folds observations into temporal entities between the validator and the
-            // writer, so the aggregator bar sits just before the writer's; a current-state run has no
-            // aggregator stage.
-            if self.output.is_series()
-                && let Some(position) = ordered.iter().position(|stage| *stage == PipelineStage::Writer)
-            {
-                ordered.insert(position, PipelineStage::Aggregator);
+        match repetition {
+            Repetition::Once => {
+                let mut ordered: Vec<PipelineStage> = PipelineStage::all().to_vec();
+                // A series run folds observations into temporal entities between the validator and
+                // the writer, so the aggregator bar sits just before the writer's; a current-state
+                // run has no aggregator stage.
+                if self.output.is_series()
+                    && let Some(position) = ordered.iter().position(|stage| *stage == PipelineStage::Writer)
+                {
+                    ordered.insert(position, PipelineStage::Aggregator);
+                }
+                let stages: Vec<Box<dyn ProgressStage>> = ordered.iter().map(|stage| Box::new(*stage) as Box<dyn ProgressStage>).collect();
+                self.context.reporter.pre_register_stages(&stages);
             }
-            let stages: Vec<Box<dyn ProgressStage>> = ordered.iter().map(|stage| Box::new(*stage) as Box<dyn ProgressStage>).collect();
-            self.context.reporter.pre_register_stages(&stages);
-        } else {
-            self.context.reporter.set_quiet_stages(StageOutput::Quiet);
+            Repetition::Scheduled => self.context.reporter.set_quiet_stages(StageOutput::Quiet),
         }
 
         let scheduler_rx = spawn_scheduler_thread(schedule, self.context.reporter, self.context.shutdown);
@@ -66,45 +81,15 @@ impl Pipeline {
         for signal in scheduler_rx {
             match signal {
                 Signal::Data(payload) => {
-                    let run_start = Instant::now();
-                    let run_number = payload.run_number.get();
-                    let pad_width = run_number_width(payload.total_runs);
-                    // The run's start is taken once, before its first attempt, so every attempt builds
-                    // the same requests.
-                    let run = ScheduledRun {
-                        meta: payload.into_meta(),
-                        start: CycleStart::now(),
-                    };
-
-                    match self.run_with_retry(&run) {
-                        Ok(()) => {
-                            if !is_once {
-                                let now = Local::now().format("%H:%M:%S");
-                                self.context.reporter.success(&format!(
-                                    "[{now}] #{run_number:0>pad_width$} completed ({:.2}s)",
-                                    run_start.elapsed().as_secs_f64()
-                                ));
-                            }
-                        }
-                        Err(error) => {
-                            let now = Local::now().format("%H:%M:%S");
-                            // Built before the policy takes ownership of the failure, so the cycle's
-                            // own line carries the failure's chain either way.
-                            let diagnostic = DiagnosticBuilder::new(
-                                Severity::Error,
-                                DiagnosticCode::Run(RunCode::CycleFailed),
-                                format!("[{now}] #{run_number:0>pad_width$} failed"),
-                            )
-                            .because(&error)
-                            .build();
-                            match record_cycle_failure(self.schedule.failure_policy, error, &mut first_failure) {
-                                // Aborting propagates the failure, which the top of the process
-                                // reports once with its whole chain; reporting it here as well would
-                                // print it twice.
-                                ControlFlow::Break(error) => return Err(error),
-                                ControlFlow::Continue(()) => self.context.reporter.report(&diagnostic),
-                            }
-                        }
+                    // The scheduler hands its next cycle over on a rendezvous, so a cycle that fell
+                    // due while the one before ran is handed over once that one ends, even when the
+                    // run is being stopped by then. A scheduled run that is being stopped starts no
+                    // further cycle.
+                    if repetition == Repetition::Scheduled && self.context.shutdown.load(Ordering::Acquire) {
+                        break;
+                    }
+                    if let ControlFlow::Break(error) = self.run_handed_cycle(payload, repetition, &mut first_failure) {
+                        return Err(error);
                     }
                 }
                 Signal::Stop => break,
@@ -114,7 +99,7 @@ impl Pipeline {
             }
         }
 
-        if !is_once {
+        if repetition == Repetition::Scheduled {
             self.context
                 .reporter
                 .info(&format!("Schedule finished (total {:.1}s)", start_time.elapsed().as_secs_f64()));
@@ -128,16 +113,70 @@ impl Pipeline {
         }
     }
 
+    /// Runs the cycle the scheduler handed over as `payload` and reports how it ended.
+    ///
+    /// A scheduled run reports every cycle on a line of its own: completed, stopped or failed. A
+    /// one-shot run reports a stopped or failed cycle only, since its summary already shows what a
+    /// completed one did. A failed cycle goes to the run-level failure policy, and the flow breaks
+    /// with the failure when the run aborts; a stopped one never breaks it, since a stop is no
+    /// failure.
+    fn run_handed_cycle(&self, payload: SchedulerPayload, repetition: Repetition, first_failure: &mut Option<PipelineError>) -> ControlFlow<PipelineError> {
+        let run_start = Instant::now();
+        let run_number = payload.run_number.get();
+        let pad_width = run_number_width(payload.total_runs);
+        // The run's start is taken once, before its first attempt, so every attempt builds the same
+        // requests.
+        let run = ScheduledRun {
+            meta: payload.into_meta(),
+            start: CycleStart::now(),
+        };
+
+        let outcome = self.run_with_retry(&run);
+        let seconds = run_start.elapsed().as_secs_f64();
+        match (outcome, repetition) {
+            (Ok(CycleOutcome::Completed), Repetition::Scheduled) => {
+                self.context
+                    .reporter
+                    .success(&format!("{} completed ({seconds:.2}s)", cycle_label(run_number, pad_width)));
+            }
+            (Ok(CycleOutcome::Completed), Repetition::Once) => {}
+            (Ok(CycleOutcome::Stopped), Repetition::Scheduled) => {
+                self.context
+                    .reporter
+                    .info(&format!("{} stopped ({seconds:.2}s)", cycle_label(run_number, pad_width)));
+            }
+            (Ok(CycleOutcome::Stopped), Repetition::Once) => self.context.reporter.info(&format!("Run stopped ({seconds:.2}s)")),
+            (Err(error), Repetition::Scheduled | Repetition::Once) => {
+                // Built before the policy takes ownership of the failure, so the cycle's own line
+                // carries the failure's chain either way.
+                let diagnostic = DiagnosticBuilder::new(
+                    Severity::Error,
+                    DiagnosticCode::Run(RunCode::CycleFailed),
+                    format!("{} failed", cycle_label(run_number, pad_width)),
+                )
+                .because(&error)
+                .build();
+                match record_cycle_failure(self.schedule.failure_policy, error, first_failure) {
+                    // Aborting propagates the failure, which the top of the process reports once
+                    // with its whole chain; reporting it here as well would print it twice.
+                    ControlFlow::Break(error) => return ControlFlow::Break(error),
+                    ControlFlow::Continue(()) => self.context.reporter.report(&diagnostic),
+                }
+            }
+        }
+        ControlFlow::Continue(())
+    }
+
     /// Runs one cycle, retrying it up to the retry policy's attempt count with an interruptible
-    /// backoff between tries.
-    fn run_with_retry(&self, run: &ScheduledRun) -> Result<()> {
+    /// backoff between tries. A stopped cycle is not retried.
+    fn run_with_retry(&self, run: &ScheduledRun) -> Result<CycleOutcome> {
         let max_attempts = self.schedule.retry.as_ref().map_or(1, |retry| retry.max_attempts().get());
         let backoff = self.schedule.retry.as_ref().map_or(Duration::ZERO, |retry| *retry.backoff());
         let mut attempt: u32 = 1;
 
         loop {
             match self.run_cycle(run) {
-                Ok(()) => return Ok(()),
+                Ok(outcome) => return Ok(outcome),
                 Err(error) => {
                     if attempt >= max_attempts {
                         return Err(error);
@@ -159,6 +198,12 @@ impl Pipeline {
             }
         }
     }
+}
+
+/// The local time and the zero-padded number, `pad_width` digits wide, that open the line of the
+/// scheduled cycle `run_number`, such as `[14:18:14] #00001`.
+fn cycle_label(run_number: u32, pad_width: usize) -> String {
+    format!("[{}] #{run_number:0>pad_width$}", Local::now().format("%H:%M:%S"))
 }
 
 /// Applies the run-level failure policy to one failed cycle.
@@ -194,10 +239,11 @@ mod tests {
     use crate::{
         error::PipelineError,
         pipeline_stage::PipelineStage,
-        schedule_driver::{record_cycle_failure, run_number_width},
+        schedule_driver::{cycle_label, record_cycle_failure, run_number_width},
     };
     use cassiopeia_common::run::RunCount;
     use cassiopeia_manifest::failure_policy::FailurePolicy;
+    use chrono::NaiveTime;
     use pretty_assertions::assert_eq;
     use std::ops::ControlFlow;
 
@@ -254,6 +300,15 @@ mod tests {
         assert_eq!(run_number_width(Some(RunCount::new(1))), 5);
         assert_eq!(run_number_width(Some(RunCount::new(9999))), 5);
         assert_eq!(run_number_width(None), 5);
+    }
+
+    #[test]
+    fn a_cycle_line_opens_with_the_local_time_and_the_padded_run_number() {
+        let label = cycle_label(7, 5);
+        let (time, number) = label.strip_prefix('[').and_then(|rest| rest.split_once("] ")).unwrap();
+
+        assert_eq!(number, "#00007");
+        assert!(NaiveTime::parse_from_str(time, "%H:%M:%S").is_ok(), "{label}");
     }
 
     #[test]

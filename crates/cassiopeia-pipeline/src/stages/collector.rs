@@ -9,6 +9,7 @@ use crate::{
     },
 };
 use cassiopeia_collector::{
+    collection_end::CollectionEnd,
     collector::Collector,
     downloader::Downloader,
     error::CollectorError,
@@ -67,7 +68,8 @@ pub(crate) fn lane_collector(
 /// [`CollectorError`] travels on the channel; the consumer (the profiler splitter) counts each
 /// payload against the collector stage and bridges the error to the pipeline error type. What the
 /// collector met that the run carries on past is reported to `sink` once it has collected, and
-/// counted among the run's warnings.
+/// counted among the run's warnings. A collection the run's stop ended counts neither: the cycle
+/// reports itself stopped.
 pub(crate) fn spawn_collector_thread(
     collector: Box<dyn Collector>,
     channel_policy: ChannelPolicy,
@@ -88,13 +90,14 @@ pub(crate) fn spawn_collector_thread(
 
         let service = stage.service_span();
         match collector.collect(tx.clone()) {
-            Ok(warnings) => telemetry.add_warnings(
+            Ok(CollectionEnd::Collected(warnings)) => telemetry.add_warnings(
                 report_limits_reached(sink, &warnings)
                     + report_empty_ranges(sink, &warnings)
                     + report_missing_datastreams(sink, &warnings)
                     + report_unread_multi_datastreams(sink, &warnings)
                     + report_unserved_features_of_interest(sink, &warnings),
             ),
+            Ok(CollectionEnd::Stopped) => {}
             Err(error) => {
                 stage.failed(1);
                 telemetry.add_errors(1);

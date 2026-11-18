@@ -1,4 +1,5 @@
 use crate::{
+    collection_end::CollectionEnd,
     collection_warnings::CollectionWarnings,
     collector::Collector,
     downloader::Downloader,
@@ -36,7 +37,7 @@ impl GenericCollector {
 }
 
 impl Collector for GenericCollector {
-    fn collect(self: Box<Self>, sender: ChannelSender<Signal<CollectedPayload, CollectorError>>) -> Result<CollectionWarnings, CollectorError> {
+    fn collect(self: Box<Self>, sender: ChannelSender<Signal<CollectedPayload, CollectorError>>) -> Result<CollectionEnd, CollectorError> {
         let GenericCollector {
             source,
             format_hint,
@@ -61,7 +62,7 @@ impl Collector for GenericCollector {
         }
 
         // Files are read as they are found, so collecting them meets nothing to warn about.
-        Ok(CollectionWarnings::default())
+        Ok(CollectionEnd::Collected(CollectionWarnings::default()))
     }
 }
 

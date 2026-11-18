@@ -108,7 +108,7 @@ I/O-bound work is concurrent at the edges. Schema catalog downloads use asynchro
 
 Batch size, channel capacity, extraction parallelism, and storage backend are runtime settings. The low-memory profile combines smaller batches, tighter channel bounds, disk-backed stores, and reduced extraction parallelism.
 
-Cancellation is shared across the stages in a cycle. Workers check it between units of work and finish at a stage boundary. Atomic output is committed only after successful completion, so cancellation does not publish an incomplete result.
+Cancellation is shared across the stages in a cycle. SIGINT, SIGTERM and SIGHUP all raise it. Workers check it between units of work and finish at a stage boundary. Atomic output is committed only after successful completion, so cancellation does not publish an incomplete result. A cycle ends completed, stopped or failed. One that ends while the run is being stopped is stopped, wherever its stages were, and commits no cursor. A stop is not a failure, so the failure policy, the retries and the exit status never see it. A collector the stop ends reports a stop, not an error, so the run summary counts no error for it.
 
 ## Strong typing and intermediate data
 

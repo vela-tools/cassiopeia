@@ -134,7 +134,7 @@ docker run --rm \
 
 A running job holds each cursor it reads through, so a second container that reads through the same cursor in the same volume is refused before it sends any request. See [Reading new readings](source-formats.md#reading-new-readings).
 
-To list, show or reset the cursors, run a cursor command against the same volume while no job holds them:
+To list, show or reset the cursors, run a cursor command against the same volume while no job holds them. Stop a scheduled job with `docker stop` first:
 
 ```bash
 docker run --rm \
@@ -240,6 +240,8 @@ docker run -d --name cassiopeia-hourly \
     ghcr.io/vela-tools/cassiopeia:latest \
     map -i /data/stations.csv -m /data/station.json5 -o /out --every 1h
 ```
+
+`docker stop cassiopeia-hourly` sends SIGTERM, which ends the job once its current cycle reaches a stopping point, as Ctrl+C does. The log then ends with `Schedule finished`, and the container exits with code 0. Between two cycles, the job ends within a second. `docker stop` waits 10 seconds before it kills the container. Give a cycle that can take longer to reach a stopping point more time with `docker stop -t 60 cassiopeia-hourly`, or with `--stop-timeout 60` on `docker run`. See [Stop a run](running.md#stop-a-run) for what a stopped cycle keeps.
 
 The [scheduling guide](scheduling.md) explains timezone handling for `--cron` and `--at`. To set the container's timezone, add `-e TZ=Europe/Ljubljana`.
 

@@ -65,6 +65,11 @@ pub enum CollectorError {
 
     /// The run was being stopped, so collection from a SensorThings server ended before its next
     /// request.
+    ///
+    /// A read unwinds through this error once the run is being stopped. A
+    /// [`Collector`](crate::collector::Collector) ends such a read with
+    /// [`CollectionEnd::Stopped`](crate::collection_end::CollectionEnd::Stopped) rather than with
+    /// this error, so only a command that reads a server outside a run fails with it.
     #[error("Collection from '{root}' stopped because the run is being stopped")]
     Interrupted {
         /// The service root collection read from. Boxed so a root does not enlarge every `Result`

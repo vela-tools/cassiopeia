@@ -2,6 +2,7 @@ use crate::{
     context_resolution::resolve_context_source,
     controller::{AtomicBoolController, RunController},
     cursor_stores::CycleCursors,
+    cycle_outcome::CycleOutcome,
     error::{PipelineError, Result},
     first_cycle::CycleOrder,
     ignored_key_report::report_ignored_keys,
@@ -44,9 +45,10 @@ impl Pipeline {
     /// resolver reports a failure, a validation abort or writer failure tears the output phase down,
     /// or a cursor's positions cannot be read before the cycle or committed after it.
     ///
-    /// The cursors of incremental inputs advance only once the whole cycle has succeeded and was not
-    /// cancelled; otherwise the next cycle reads from where this one did.
-    pub(crate) fn run_cycle(&self, run: &ScheduledRun) -> Result<()> {
+    /// A cycle that did not fail is [`CycleOutcome::Stopped`] once the run is being stopped, and
+    /// [`CycleOutcome::Completed`] otherwise. The cursors of incremental inputs advance only in a
+    /// completed cycle; otherwise the next cycle reads from where this one did.
+    pub(crate) fn run_cycle(&self, run: &ScheduledRun) -> Result<CycleOutcome> {
         let mut runner = TemplateRunner::new();
 
         // Compile every input's mappings into the shared runner, deduplicating by path so a mapping
@@ -140,7 +142,7 @@ impl Pipeline {
             Arc::clone(&controller),
             Arc::clone(&telemetry),
         );
-        let cycle_result = phase2_result.and_then(|()| self.advance_cursors(cursors, controller.as_ref()));
+        let cycle_result = phase2_result.and_then(|()| self.close_cycle(cursors, controller.as_ref()));
         drop(memory_sampler);
         let telemetry_snapshot = telemetry.snapshot();
         // The reasons a run's failures grouped under are the reporter's own tally; the pipeline
@@ -167,13 +169,18 @@ impl Pipeline {
         cycle_result
     }
 
-    /// Commits the cursor updates of a cycle that succeeded, unless it was cancelled: a cancelled
-    /// cycle may have stopped any stage early, so what it read is read again by the next cycle.
-    fn advance_cursors(&self, cursors: CycleCursors, controller: &dyn RunController) -> Result<()> {
+    /// Ends a cycle that succeeded: stopped, when the run is being stopped, or completed, once its
+    /// cursor updates are committed.
+    ///
+    /// A stop may have cut any stage short, so a stopped cycle commits nothing and the next cycle
+    /// reads what it read again. The stop is read once, here, so the outcome a cycle reports and
+    /// whether its cursors moved always agree.
+    fn close_cycle(&self, cursors: CycleCursors, controller: &dyn RunController) -> Result<CycleOutcome> {
         if controller.should_cancel() {
-            return Ok(());
+            return Ok(CycleOutcome::Stopped);
         }
-        self.cursors.commit(cursors)
+        self.cursors.commit(cursors)?;
+        Ok(CycleOutcome::Completed)
     }
 }
 
