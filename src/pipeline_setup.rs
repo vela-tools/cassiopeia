@@ -14,14 +14,14 @@ use cassiopeia_pipeline::{
     pipeline::{Pipeline, ValidationOverrides},
 };
 use cassiopeia_reporter::reporter::Reporter;
-use std::sync::Arc;
+use std::{env, sync::Arc};
 
 /// Runs the `map` command: builds or loads the manifest, then drives the pipeline to completion.
 pub fn run_mapping(args: &MapArgs, config: &Config, reporter: &'static dyn Reporter) -> Result<()> {
     args.validate()?;
 
     let manifest = load_or_build_manifest(args)?;
-    let mut pipeline_config = pipeline_config(config, default_user_agent());
+    let mut pipeline_config = pipeline_config(config, default_user_agent(), env::temp_dir());
     pipeline_config.mode = args.mode;
 
     // All inline-only, so they are `None` under `--manifest`, where the manifest's own `output`

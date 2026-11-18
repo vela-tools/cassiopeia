@@ -1,4 +1,5 @@
 use crate::{
+    attempt_scratch::AttemptScratch,
     context_resolution::resolve_context_source,
     controller::{AtomicBoolController, RunController},
     cursor_stores::CycleCursors,
@@ -103,6 +104,9 @@ impl Pipeline {
         // the peak and average are complete when the summary reads them.
         let memory_sampler = MemorySampler::start(Arc::clone(&telemetry));
 
+        // Every collector of the attempt downloads into this one folder, so a retried attempt starts
+        // from an empty one, and dropping it removes every download however the attempt ends.
+        let scratch = AttemptScratch::create(&self.config.temporary_folder, self.context.reporter)?;
         let mut cursors = self.cursors.start_cycle()?;
         // A key a mapping declares without effect stays so for the whole run, so only the run's
         // first cycle names it, before any record is read; the same cycle makes the run's one check
@@ -117,11 +121,13 @@ impl Pipeline {
         };
         let lanes = loaded
             .into_iter()
-            .map(|(input, router)| CycleLane {
+            .zip(0_u32..)
+            .map(|((input, router), collector)| CycleLane {
                 input,
                 router,
                 cursor: cursors.claim(&input.source),
                 unread_check,
+                scratch: scratch.files_of(collector),
             })
             .collect();
         let resolved_count = self.run_phase1(lanes, &template_resolver, &fragment_resolver, run, &controller, Arc::clone(&telemetry))?;
@@ -145,6 +151,10 @@ impl Pipeline {
         let cycle_result = phase2_result.and_then(|()| self.close_cycle(cursors, controller.as_ref()));
         drop(memory_sampler);
         let telemetry_snapshot = telemetry.snapshot();
+        // The attempt's scratch folder goes once its tallies are taken and before it reports how it
+        // ended. A stop can leave a stage still running, and one that then fails to read a download
+        // removed under it counts against nothing the cycle reports.
+        drop(scratch);
         // The reasons a run's failures grouped under are the reporter's own tally; the pipeline
         // hands it none, and the deduplicating middleware appends what it collected.
         self.context.reporter.summary(&telemetry_snapshot, &[]);

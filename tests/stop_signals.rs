@@ -1,6 +1,6 @@
 //! A scheduled run stops on the signals a container runtime, a service manager and a closed terminal
 //! send as it stops on Ctrl+C: its current cycle ends at a stopping point, it reports that the
-//! schedule finished, and it exits with status 0.
+//! schedule finished, it leaves nothing in the temporary folder, and it exits with status 0.
 
 #![cfg(unix)]
 
@@ -13,7 +13,7 @@ use std::{
     fs,
     io::{BufRead, BufReader},
     mem,
-    path::Path,
+    path::{Path, PathBuf},
     process::{Child, Command, ExitStatus, Stdio},
     sync::mpsc::{self, Receiver},
     thread,
@@ -61,10 +61,12 @@ struct Run {
 
 impl Run {
     /// Starts `cassiopeia map --manifest run.json5` in `folder`, with an empty configuration file and
-    /// every folder the run keeps files in under `folder`, so nothing outside it shapes the run.
+    /// every folder the run keeps files in under `folder`, the temporary folder `tmp` among them, so
+    /// nothing outside it shapes the run.
     fn start(folder: &Path) -> Run {
         let config = folder.join("config.toml");
         fs::write(&config, "").unwrap();
+        fs::create_dir(folder.join("tmp")).unwrap();
         let mut child = Command::new(env!("CARGO_BIN_EXE_cassiopeia"))
             .current_dir(folder)
             .arg("--config")
@@ -73,6 +75,7 @@ impl Run {
             .env("CASSIOPEIA_SCHEMAS__FOLDER", folder.join("schemas"))
             .env("CASSIOPEIA_MAPPINGS__FOLDER", folder.join("mappings"))
             .env("CASSIOPEIA_CURSORS__FOLDER", folder.join("cursors"))
+            .env("TMPDIR", folder.join("tmp"))
             .stdin(Stdio::null())
             .stdout(Stdio::null())
             .stderr(Stdio::piped())
@@ -139,7 +142,7 @@ impl Drop for Run {
 }
 
 /// Starts the scheduled run, sends it `signal` once its first cycle has completed, and asserts that
-/// it ends as a stopped schedule ends.
+/// it ends as a stopped schedule ends, its temporary folder as empty as it found it.
 fn assert_signal_stops_the_schedule(signal: Signal) {
     let folder = TempDir::new().unwrap();
     fs::write(folder.path().join("stations.csv"), STATIONS).unwrap();
@@ -154,6 +157,8 @@ fn assert_signal_stops_the_schedule(signal: Signal) {
     assert_eq!(status.code(), Some(0), "{lines:?}");
     assert!(lines.last().is_some_and(|line| line.contains("Schedule finished")), "{lines:?}");
     assert!(!lines.iter().any(|line| line.contains("#00002")), "{lines:?}");
+    let left: Vec<PathBuf> = fs::read_dir(folder.path().join("tmp")).unwrap().map(|entry| entry.unwrap().path()).collect();
+    assert_eq!(left, Vec::<PathBuf>::new());
 }
 
 #[test]

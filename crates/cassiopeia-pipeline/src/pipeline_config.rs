@@ -42,6 +42,10 @@ pub struct PipelineConfig {
     pub schemas_folder: PathBuf,
     /// Where the cursor stores of incremental reads are kept.
     pub cursors_folder: PathBuf,
+    /// The folder every attempt at a cycle creates its scratch folder in, the one its downloads go
+    /// into. Supplied by the composition root as the system temporary folder, not read from
+    /// configuration.
+    pub temporary_folder: PathBuf,
     /// How the `@context` is resolved, when the manifest output does not state its own mode.
     pub context_mode: AtContextMode,
     /// The `User-Agent` a remote source is fetched with, and the one the broker writer sends when
@@ -108,6 +112,7 @@ mod tests {
             relationship_store: StoreKind::DashMap,
             schemas_folder: PathBuf::from("schemas"),
             cursors_folder: PathBuf::from("cursors"),
+            temporary_folder: PathBuf::from("tmp"),
             context_mode: AtContextMode::Default,
             default_user_agent: UserAgent::from("test".to_owned()),
             channel_policy: ChannelPolicy::Bounded(NonZeroUsize::new(64).unwrap()),

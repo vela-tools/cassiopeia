@@ -14,7 +14,7 @@ use cassiopeia_transformer::error::TransformationError;
 use cassiopeia_validator::error::ValidatorError;
 use cassiopeia_value_type_expansion::error::ExpansionError;
 use cassiopeia_writer::error::WriterError;
-use std::result;
+use std::{io, path::PathBuf, result};
 use thiserror::Error;
 use url::Url;
 use urn_rs::Urn;
@@ -158,6 +158,16 @@ pub enum PipelineError {
     /// The expander every declared `valueType` is checked through could not be set up.
     #[error("The valueType declarations cannot be checked")]
     ValueTypeExpander(#[source] ExpansionError),
+
+    /// The scratch folder an attempt at a cycle downloads its sources into could not be created.
+    #[error("The scratch folder of the cycle could not be created in '{}'", folder.display())]
+    ScratchFolder {
+        /// The temporary folder the scratch folder was to be created in.
+        folder: PathBuf,
+        /// The operating-system failure.
+        #[source]
+        source: io::Error,
+    },
 
     /// A stage's worker thread panicked, so the run cannot continue.
     #[error("The {stage} stage panicked")]

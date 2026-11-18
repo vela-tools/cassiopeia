@@ -7,7 +7,7 @@ use cassiopeia_common::{
     store_kind::StoreKind,
     user_agent::UserAgent,
 };
-use std::{num::NonZeroUsize, path::PathBuf, sync::atomic::AtomicBool};
+use std::{env, num::NonZeroUsize, path::PathBuf, sync::atomic::AtomicBool};
 
 /// The shutdown flag every test pipeline runs under, which no test ever raises.
 pub(crate) static SHUTDOWN: AtomicBool = AtomicBool::new(false);
@@ -23,6 +23,7 @@ pub(crate) fn engine_config() -> PipelineConfig {
         relationship_store: StoreKind::DashMap,
         schemas_folder: PathBuf::from("schemas"),
         cursors_folder: PathBuf::from("cursors"),
+        temporary_folder: env::temp_dir(),
         context_mode: AtContextMode::Default,
         default_user_agent: UserAgent::from("test".to_owned()),
         channel_policy: ChannelPolicy::Bounded(NonZeroUsize::new(64).unwrap()),

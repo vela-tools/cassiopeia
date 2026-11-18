@@ -14,6 +14,7 @@ use cassiopeia_collector::{
     downloader::Downloader,
     error::CollectorError,
     generic::GenericCollector,
+    scratch_files::ScratchFiles,
     sensorthings::{collector::SensorThingsCollector, cursor_cycle::CursorCycle, unread_check::UnreadCheck},
 };
 use cassiopeia_common::{
@@ -61,7 +62,8 @@ pub(crate) fn lane_collector(
     }
 }
 
-/// Spawns the collector for one lane, returning the configured channel its payloads flow through.
+/// Spawns the collector for one lane, writing what it downloads to `scratch`, returning the
+/// configured channel its payloads flow through.
 ///
 /// The `Collector` trait is handed the stage channel directly, so the collector produces without an
 /// intermediate pump thread and inherits the run's throughput or back-pressure policy. Its own
@@ -72,6 +74,7 @@ pub(crate) fn lane_collector(
 /// reports itself stopped.
 pub(crate) fn spawn_collector_thread(
     collector: Box<dyn Collector>,
+    scratch: ScratchFiles,
     channel_policy: ChannelPolicy,
     sink: &'static dyn DiagnosticSink,
     telemetry: Arc<RunTelemetry>,
@@ -89,7 +92,7 @@ pub(crate) fn spawn_collector_thread(
         }
 
         let service = stage.service_span();
-        match collector.collect(tx.clone()) {
+        match collector.collect(scratch, tx.clone()) {
             Ok(CollectionEnd::Collected(warnings)) => telemetry.add_warnings(
                 report_limits_reached(sink, &warnings)
                     + report_empty_ranges(sink, &warnings)

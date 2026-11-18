@@ -1,8 +1,9 @@
 use crate::{
     error::PipelineError,
-    observer::{PipelineResult, RunObserver},
+    observer::{PipelineProgress, PipelineResult, RunObserver},
     pipeline::{Pipeline, ValidationOverrides},
     pipeline_config::ExtractionParallelism,
+    pipeline_stage::PipelineStage,
     test_engine::{SHUTDOWN, engine_config},
     test_reporter::{RecordedDiagnostic, RecordingReporter},
 };
@@ -15,9 +16,11 @@ use std::{
     collections::BTreeMap,
     fs,
     io::ErrorKind,
+    mem,
     path::{Path, PathBuf},
     sync::{
         Arc,
+        Mutex,
         atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering},
     },
 };
@@ -137,6 +140,14 @@ pub(crate) struct RunOutcome {
     pub(crate) entities: Vec<Value>,
     /// Every file the run wrote, by name, as it wrote it.
     pub(crate) files: BTreeMap<PathBuf, String>,
+    /// The name of every file the run's temporary folder held, at any depth, once each cycle had
+    /// read its inputs, cycle by cycle.
+    pub(crate) temporary_files_read: Vec<Vec<String>>,
+    /// Every entry the run's temporary folder held, at any depth, as each cycle ended, cycle by
+    /// cycle.
+    pub(crate) temporary_entries_after_cycles: Vec<Vec<PathBuf>>,
+    /// Every entry the run's temporary folder held, at any depth, once the run ended.
+    pub(crate) temporary_entries_after_run: Vec<PathBuf>,
 }
 
 impl RunOutcome {
@@ -146,38 +157,84 @@ impl RunOutcome {
     }
 }
 
-/// An observer that adds up the warnings and errors of every cycle that ends, and raises the run's
-/// stop once as many cycles have ended as the stop waits for.
+/// An observer that adds up the warnings and errors of every cycle that ends, reads back what the
+/// run's temporary folder holds once each cycle has read its inputs and as each cycle ends, and
+/// raises the run's stop once as many cycles have ended as the stop waits for.
 ///
-/// A cycle ends, and decides whether it completed, before it tells its observer, so a stop raised
-/// here lands between that cycle and the next.
+/// A cycle ends, decides whether it completed, and removes its scratch folder before it tells its
+/// observer, so a stop raised here lands between that cycle and the next.
 struct CycleTotals {
     warnings: AtomicU64,
     errors: AtomicU64,
     ended: AtomicUsize,
     stop: RunStop,
+    /// The temporary folder the run's attempts create their scratch folders in.
+    temporary: PathBuf,
+    /// The name of every file the temporary folder held once each cycle had read its inputs.
+    files_read: Mutex<Vec<Vec<String>>>,
+    /// Every entry the temporary folder held as each cycle ended.
+    entries_after_cycles: Mutex<Vec<Vec<PathBuf>>>,
 }
 
 impl CycleTotals {
-    /// No cycle ended yet, under `stop`.
-    const fn new(stop: RunStop) -> CycleTotals {
+    /// No cycle ended yet, under `stop`, with scratch folders in `temporary`.
+    const fn new(stop: RunStop, temporary: PathBuf) -> CycleTotals {
         CycleTotals {
             warnings: AtomicU64::new(0),
             errors: AtomicU64::new(0),
             ended: AtomicUsize::new(0),
             stop,
+            temporary,
+            files_read: Mutex::new(Vec::new()),
+            entries_after_cycles: Mutex::new(Vec::new()),
         }
     }
 }
 
 impl RunObserver for CycleTotals {
+    fn on_progress(&self, progress: &PipelineProgress) {
+        // A cycle reports the resolver's tally once its input phase, the one that reads what its
+        // collectors handed on, has ended.
+        if progress.stage == PipelineStage::ResolverSink {
+            let names = entries_under(&self.temporary)
+                .into_iter()
+                .filter(|entry| self.temporary.join(entry).is_file())
+                .map(|entry| entry.file_name().unwrap().to_str().unwrap().to_owned())
+                .collect();
+            self.files_read.lock().unwrap().push(names);
+        }
+    }
+
     fn on_complete(&self, result: &PipelineResult) {
+        self.entries_after_cycles.lock().unwrap().push(entries_under(&self.temporary));
         self.warnings.fetch_add(result.warnings, Ordering::SeqCst);
         self.errors.fetch_add(result.errors, Ordering::SeqCst);
         let ended = self.ended.fetch_add(1, Ordering::SeqCst) + 1;
         if self.stop.after_cycles == Some(ended) {
             self.stop.flag.store(true, Ordering::SeqCst);
         }
+    }
+}
+
+/// Every entry under `folder`, at any depth, relative to it, in order.
+fn entries_under(folder: &Path) -> Vec<PathBuf> {
+    let mut found = Vec::new();
+    collect_entries(folder, Path::new(""), &mut found);
+    found.sort();
+    found
+}
+
+/// Adds every entry under `folder` to `found`, at any depth, each as `relative` to the folder the walk
+/// started from, joined with its own name.
+fn collect_entries(folder: &Path, relative: &Path, found: &mut Vec<PathBuf>) {
+    for entry in fs::read_dir(folder).unwrap() {
+        let entry = entry.unwrap();
+        let path = entry.path();
+        let name = relative.join(entry.file_name());
+        if path.is_dir() {
+            collect_entries(&path, &name, found);
+        }
+        found.push(name);
     }
 }
 
@@ -269,6 +326,14 @@ pub(crate) fn attempt_declared_end_to_end(
     run_declared(store, directory.path(), &[declared.to_owned()], &RunSetup::files(schemas, output_extra))
 }
 
+/// Runs a pipeline over one input that reads `source`, a path or a URL, bound as `binding`, on
+/// `store`, as `setup` says, and returns how the run ended with what it reported and wrote.
+pub(crate) fn attempt_source_end_to_end(store: StoreKind, source: &str, binding: &RunBinding, setup: &RunSetup<'_>) -> (Result<(), PipelineError>, RunOutcome) {
+    let directory = TempDir::new().unwrap();
+    let declared = format!(r#"{{ source: "{source}", {} }}"#, declare_binding(directory.path(), 0, binding));
+    run_declared(store, directory.path(), &[declared], setup)
+}
+
 /// Runs a pipeline over the one manifest input `declared`, written as a manifest writes it, on
 /// `store`, as `setup` says, and returns how the run ended with what it reported and wrote.
 pub(crate) fn attempt_setup_end_to_end(store: StoreKind, declared: &str, setup: &RunSetup<'_>) -> (Result<(), PipelineError>, RunOutcome) {
@@ -327,6 +392,7 @@ fn run_declared(store: StoreKind, root: &Path, declared: &[String], setup: &RunS
         schemas: schemas_folder(root, setup.schemas),
         cursors: setup.cursors.map_or_else(|| root.join("cursors"), Path::to_path_buf),
         output: root.join("out"),
+        temporary: root.join("tmp"),
     };
 
     let schedule = setup.schedule.map(|schedule| format!(", schedule: {schedule}")).unwrap_or_default();
@@ -352,6 +418,9 @@ pub(crate) struct RunFolders {
     pub(crate) cursors: PathBuf,
     /// The folder its manifest's output writes entities into, read back once the run ends.
     pub(crate) output: PathBuf,
+    /// The temporary folder its attempts create their scratch folders in, created for the run and
+    /// read back as it goes.
+    pub(crate) temporary: PathBuf,
 }
 
 /// Runs a pipeline over `manifest` on `store`, with its own files in `folders`, extracting records
@@ -366,9 +435,16 @@ pub(crate) fn run_manifest(
     extraction: ExtractionParallelism,
     stop: RunStop,
 ) -> (Result<(), PipelineError>, RunOutcome) {
-    let RunFolders { schemas, cursors, output } = folders;
+    let RunFolders {
+        schemas,
+        cursors,
+        output,
+        temporary,
+    } = folders;
+    fs::create_dir_all(&temporary).unwrap();
     let reporter: &'static RecordingReporter = Box::leak(Box::new(RecordingReporter::new()));
-    let totals = Arc::new(CycleTotals::new(stop));
+    // The observer reads the temporary folder back while the engine creates scratch folders in it.
+    let totals = Arc::new(CycleTotals::new(stop, temporary.clone()));
     let observer: Arc<dyn RunObserver> = Arc::clone(&totals) as Arc<dyn RunObserver>;
     let mut engine = engine_config();
     engine.entity_store = store;
@@ -377,6 +453,7 @@ pub(crate) fn run_manifest(
     engine.extraction = extraction;
     engine.schemas_folder = schemas;
     engine.cursors_folder = cursors;
+    engine.temporary_folder = temporary;
     let built = Pipeline::from_manifest(
         manifest,
         ValidationOverrides {
@@ -402,6 +479,9 @@ pub(crate) fn run_manifest(
         errors: totals.errors.load(Ordering::SeqCst),
         entities: files.values().flat_map(|file| file_entities(file)).collect(),
         files,
+        temporary_files_read: mem::take(&mut *totals.files_read.lock().unwrap()),
+        temporary_entries_after_cycles: mem::take(&mut *totals.entries_after_cycles.lock().unwrap()),
+        temporary_entries_after_run: entries_under(&totals.temporary),
     };
     (result, outcome)
 }

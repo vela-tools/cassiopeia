@@ -4,6 +4,7 @@ use crate::{
     collector::Collector,
     downloader::Downloader,
     error::CollectorError,
+    scratch_files::ScratchFiles,
     sensorthings::{
         cursor_cycle::CursorCycle,
         feature_of_interest_check::FeatureOfInterestCheck,
@@ -31,21 +32,21 @@ use cassiopeia_sensorthings::{
     },
 };
 use std::{
-    env,
-    fs::{self, File},
+    fs::File,
     io::{BufWriter, Write},
     ops::ControlFlow,
     path::Path,
     sync::atomic::AtomicBool,
 };
-use temp_dir::TempDir;
-use tracing::debug;
 
 /// Collects one cycle of a SensorThings API server into a snapshot file and hands the snapshot on as
 /// a downloaded `sensorthings` file, whose source is the service root.
 ///
 /// From there the snapshot is profiled and ingested as a local one would be, so a read from a server
 /// and a replay of its snapshot give the same records.
+///
+/// The snapshot is written to the collector's scratch file. A read that fails or is stopped leaves
+/// what it wrote there, for the attempt to remove with the rest of its scratch folder.
 pub struct SensorThingsCollector {
     /// The server and how it is read.
     service: SensorThingsService,
@@ -87,7 +88,11 @@ impl SensorThingsCollector {
 }
 
 impl Collector for SensorThingsCollector {
-    fn collect(self: Box<Self>, sender: ChannelSender<Signal<CollectedPayload, CollectorError>>) -> Result<CollectionEnd, CollectorError> {
+    fn collect(
+        self: Box<Self>,
+        scratch: ScratchFiles,
+        sender: ChannelSender<Signal<CollectedPayload, CollectorError>>,
+    ) -> Result<CollectionEnd, CollectorError> {
         let SensorThingsCollector {
             service,
             cursor,
@@ -96,35 +101,25 @@ impl Collector for SensorThingsCollector {
             downloader,
             shutdown,
         } = *self;
-        let directory = TempDir::new().map_err(|source| CollectorError::Io { source, path: env::temp_dir() })?;
-        // The snapshot must outlive the collector, because the profiler and the ingestor read it
-        // later; cleanup is the caller's responsibility, as for every downloaded source.
-        let directory = directory.dont_delete_on_drop();
-        let path = directory.path().join(format!("snapshot.{}", DataFormat::SensorThings.extension()));
+        let path = scratch.only(DataFormat::SensorThings.extension());
 
         let warnings = match write_snapshot(&service, cursor, unread_check, cycle_start, downloader, shutdown, &path) {
             Ok(warnings) => warnings,
-            Err(error) => {
-                // Nothing reads a snapshot whose read failed, so it does not outlive the collector.
-                if let Err(cleanup) = fs::remove_dir_all(directory.path()) {
-                    debug!("The partial snapshot in {} could not be removed: {cleanup}", directory.path().display());
-                }
-                return match error {
-                    // A read unwinds through its error path once the run is being stopped, and a
-                    // stop is no failure of the read.
-                    CollectorError::Interrupted { .. } => Ok(CollectionEnd::Stopped),
-                    failure @ (CollectorError::ClientInit { .. }
-                    | CollectorError::Http { .. }
-                    | CollectorError::HttpStatus { .. }
-                    | CollectorError::Io { .. }
-                    | CollectorError::ChannelClosed
-                    | CollectorError::CursorWithheld { .. }
-                    | CollectorError::LinkLoop { .. }
-                    | CollectorError::NextLink { .. }
-                    | CollectorError::PageUnreadable { .. }
-                    | CollectorError::InvalidFileExtension { .. }) => Err(failure),
-                };
-            }
+            // A read unwinds through its error path once the run is being stopped, and a stop is no
+            // failure of the read.
+            Err(CollectorError::Interrupted { .. }) => return Ok(CollectionEnd::Stopped),
+            Err(
+                failure @ (CollectorError::ClientInit { .. }
+                | CollectorError::Http { .. }
+                | CollectorError::HttpStatus { .. }
+                | CollectorError::Io { .. }
+                | CollectorError::ChannelClosed
+                | CollectorError::CursorWithheld { .. }
+                | CollectorError::LinkLoop { .. }
+                | CollectorError::NextLink { .. }
+                | CollectorError::PageUnreadable { .. }
+                | CollectorError::InvalidFileExtension { .. }),
+            ) => return Err(failure),
         };
 
         let source = MaskedUrl::plain(service.into_root().into());
@@ -263,7 +258,6 @@ mod tests {
     use pretty_assertions::assert_eq;
     use serde_json::{Value, json};
     use std::{
-        fs,
         num::NonZeroU64,
         sync::atomic::{AtomicBool, Ordering},
         time::{Duration, Instant},
@@ -318,7 +312,7 @@ mod tests {
         let mut server = mockito::Server::new();
         let discovery = serve(&mut server, LATEST, page(&[56775, 56776], None));
 
-        let (result, payloads) = collect(collector(&server, "{}", RequestHeaders::default(), &RUNNING));
+        let (result, payloads, _scratch) = collect(collector(&server, "{}", RequestHeaders::default(), &RUNNING));
 
         assert_eq!(result.unwrap(), CollectionWarnings::default());
         discovery.assert();
@@ -351,7 +345,7 @@ mod tests {
         });
         let discovery = serve(&mut server, LATEST_WITH_FEATURES, json!({ "value": [&datastream] }).to_string());
 
-        let (result, payloads) = collect(collector(&server, r#"{"featuresOfInterest": true}"#, RequestHeaders::default(), &RUNNING));
+        let (result, payloads, _scratch) = collect(collector(&server, r#"{"featuresOfInterest": true}"#, RequestHeaders::default(), &RUNNING));
 
         assert_eq!(result.unwrap(), CollectionWarnings::default());
         discovery.assert();
@@ -372,7 +366,7 @@ mod tests {
         ];
         let discovery = serve(&mut server, LATEST_WITH_FEATURES, json!({ "value": datastreams }).to_string());
 
-        let (result, payloads) = collect(collector(&server, r#"{"featuresOfInterest": true}"#, RequestHeaders::default(), &RUNNING));
+        let (result, payloads, _scratch) = collect(collector(&server, r#"{"featuresOfInterest": true}"#, RequestHeaders::default(), &RUNNING));
 
         let warnings = result.unwrap();
         discovery.assert();
@@ -407,7 +401,7 @@ mod tests {
         });
         let discovery = serve(&mut server, LATEST, json!({ "value": [&datastream] }).to_string());
 
-        let (result, payloads) = collect(collector(&server, "{}", RequestHeaders::default(), &RUNNING));
+        let (result, payloads, _scratch) = collect(collector(&server, "{}", RequestHeaders::default(), &RUNNING));
 
         // The newest Observation has no FeatureOfInterest, which a read that did not ask for one
         // does not report.
@@ -421,7 +415,7 @@ mod tests {
         let mut server = mockito::Server::new();
         let discovery = serve(&mut server, LATEST, page(&[7], None));
 
-        let (result, _) = collect(collector(&server, r#"{"featuresOfInterest": false}"#, RequestHeaders::default(), &RUNNING));
+        let (result, _, _) = collect(collector(&server, r#"{"featuresOfInterest": false}"#, RequestHeaders::default(), &RUNNING));
 
         result.unwrap();
         discovery.assert();
@@ -432,7 +426,7 @@ mod tests {
         let mut server = mockito::Server::new();
         let pages = three_pages(&mut server);
 
-        let (result, payloads) = collect(collector(&server, "{}", RequestHeaders::default(), &RUNNING));
+        let (result, payloads, _scratch) = collect(collector(&server, "{}", RequestHeaders::default(), &RUNNING));
 
         result.unwrap();
         pages.iter().for_each(Mock::assert);
@@ -445,7 +439,7 @@ mod tests {
         let first = serve(&mut server, LATEST, page(&[1], Some("Datastreams?$skip=1000")));
         let second = serve(&mut server, "/v1.1/Datastreams?$skip=1000", page(&[2], None));
 
-        let (result, payloads) = collect(collector(&server, "{}", RequestHeaders::default(), &RUNNING));
+        let (result, payloads, _scratch) = collect(collector(&server, "{}", RequestHeaders::default(), &RUNNING));
 
         result.unwrap();
         first.assert();
@@ -461,7 +455,7 @@ mod tests {
         let untouched = other.mock("GET", Matcher::Any).expect(0).create();
         serve(&mut server, LATEST, page(&[1], Some(&foreign)));
 
-        let (result, payloads) = collect(collector(&server, "{}", RequestHeaders::default(), &RUNNING));
+        let (result, payloads, _scratch) = collect(collector(&server, "{}", RequestHeaders::default(), &RUNNING));
 
         let error = result.unwrap_err();
         assert!(
@@ -478,7 +472,7 @@ mod tests {
         let itself = format!("{}{LATEST}", server.url());
         let discovery = serve(&mut server, LATEST, page(&[1], Some(&itself)));
 
-        let (result, _) = collect(collector(&server, "{}", RequestHeaders::default(), &RUNNING));
+        let (result, _, _) = collect(collector(&server, "{}", RequestHeaders::default(), &RUNNING));
 
         discovery.assert();
         assert!(matches!(result, Err(CollectorError::LinkLoop { link }) if link.as_str() == itself));
@@ -492,7 +486,7 @@ mod tests {
         let busy = server.mock("GET", "/v1.1/Datastreams?$skip=1").with_status(503).expect(1).create();
         let delivered = serve(&mut server, "/v1.1/Datastreams?$skip=1", page(&[2], None));
 
-        let (result, payloads) = collect(collector(&server, "{}", RequestHeaders::default(), &RUNNING));
+        let (result, payloads, _scratch) = collect(collector(&server, "{}", RequestHeaders::default(), &RUNNING));
 
         result.unwrap();
         busy.assert();
@@ -507,7 +501,7 @@ mod tests {
         serve(&mut server, LATEST, page(&[1], Some(&second)));
         let failing = server.mock("GET", "/v1.1/Datastreams?$skip=1").with_status(500).expect(3).create();
 
-        let (result, _) = collect(collector(&server, "{}", RequestHeaders::default(), &RUNNING));
+        let (result, _, _) = collect(collector(&server, "{}", RequestHeaders::default(), &RUNNING));
 
         failing.assert();
         let error = result.unwrap_err();
@@ -530,7 +524,7 @@ mod tests {
         );
         let third = server.mock("GET", "/v1.1/Datastreams?$skip=2").expect(0).create();
 
-        let (result, payloads) = collect(collector(&server, r#"{"limits": {"pages": 2}}"#, RequestHeaders::default(), &RUNNING));
+        let (result, payloads, _scratch) = collect(collector(&server, r#"{"limits": {"pages": 2}}"#, RequestHeaders::default(), &RUNNING));
 
         third.assert();
         assert_eq!(
@@ -566,7 +560,7 @@ mod tests {
         });
         let headers = RequestHeaders::new(vec![RequestHeader::new("Authorization", "Bearer t").unwrap()]);
 
-        let (result, payloads) = collect(collector(&server, "{}", headers, &RUNNING));
+        let (result, payloads, _scratch) = collect(collector(&server, "{}", headers, &RUNNING));
 
         result.unwrap();
         pages.iter().for_each(Mock::assert);
@@ -578,7 +572,7 @@ mod tests {
         let mut server = mockito::Server::new();
         serve(&mut server, LATEST, "<html>".to_owned());
 
-        let (result, payloads) = collect(collector(&server, "{}", RequestHeaders::default(), &RUNNING));
+        let (result, payloads, _scratch) = collect(collector(&server, "{}", RequestHeaders::default(), &RUNNING));
 
         let error = result.unwrap_err();
         assert!(
@@ -595,7 +589,7 @@ mod tests {
         three_pages(&mut server);
         let started = Instant::now();
 
-        let (result, payloads) = collect(collector(&server, r#"{"delay": "50ms"}"#, RequestHeaders::default(), &RUNNING));
+        let (result, payloads, _scratch) = collect(collector(&server, r#"{"delay": "50ms"}"#, RequestHeaders::default(), &RUNNING));
 
         result.unwrap();
         assert!(started.elapsed() >= Duration::from_millis(100), "took {:?}", started.elapsed());
@@ -616,7 +610,7 @@ mod tests {
             .create();
         let second = server.mock("GET", "/v1.1/Datastreams?$skip=1").expect(0).create();
 
-        let (result, payloads) = collect_to_end(collector(&server, "{}", RequestHeaders::default(), &STOPPED_AFTER_PAGE_ONE));
+        let (result, payloads, _scratch) = collect_to_end(collector(&server, "{}", RequestHeaders::default(), &STOPPED_AFTER_PAGE_ONE));
 
         second.assert();
         assert_eq!(result.unwrap(), CollectionEnd::Stopped);
@@ -628,14 +622,13 @@ mod tests {
         let mut server = mockito::Server::new();
         serve(&mut server, LATEST, page(&[1], None));
 
-        let (result, payloads) = collect(collector(&server, "{}", RequestHeaders::default(), &RUNNING));
+        let (result, payloads, scratch) = collect(collector(&server, "{}", RequestHeaders::default(), &RUNNING));
 
         result.unwrap();
         let [payload] = <[FilePayload; 1]>::try_from(payloads).unwrap();
         assert_eq!(payload.format_hint(), &Some(DataFormat::SensorThings));
         let (path, source) = payload.into_path_and_source();
-        fs::remove_dir_all(path.parent().unwrap()).unwrap();
-        assert_eq!(path.extension().and_then(|extension| extension.to_str()), Some("jsonl"));
+        assert_eq!(path, scratch.path().join("input-0.jsonl"));
         assert_eq!(source.to_string(), format!("{}/v1.1", server.url()));
         assert!(matches!(source, Input::Remote(_)));
     }
@@ -664,7 +657,7 @@ mod tests {
             ),
         ];
 
-        let (result, payloads) = collect(collector(&server, r#"{"things": true}"#, RequestHeaders::default(), &RUNNING));
+        let (result, payloads, _scratch) = collect(collector(&server, r#"{"things": true}"#, RequestHeaders::default(), &RUNNING));
 
         assert_eq!(result.unwrap(), CollectionWarnings::default());
         mocks.iter().for_each(Mock::assert);
@@ -691,7 +684,7 @@ mod tests {
             ),
         ];
 
-        let (result, payloads) = collect(collector(
+        let (result, payloads, _scratch) = collect(collector(
             &server,
             r#"{"things": "startswith(name,'ILM_')"}"#,
             RequestHeaders::default(),
@@ -710,7 +703,7 @@ mod tests {
             let discovery = serve(&mut server, LATEST, page(&[7], None));
             let untouched = server.mock("GET", Matcher::Regex("^/v1.1/Things".to_owned())).expect(0).create();
 
-            let (result, payloads) = collect(collector(&server, settings, RequestHeaders::default(), &RUNNING));
+            let (result, payloads, _scratch) = collect(collector(&server, settings, RequestHeaders::default(), &RUNNING));
 
             result.unwrap();
             discovery.assert();
@@ -737,7 +730,7 @@ mod tests {
         ];
         let untouched = server.mock("GET", "/v1.1/Things?$skip=2").expect(0).create();
 
-        let (result, payloads) = collect(collector(
+        let (result, payloads, _scratch) = collect(collector(
             &server,
             r#"{"things": true, "pageSize": 2, "limits": {"pages": 1}}"#,
             RequestHeaders::default(),
@@ -775,7 +768,7 @@ mod tests {
             serve(&mut server, "/v1.1/Things?$skip=1", json!({"value": [thing(2, "Kennedylaan")]}).to_string()),
         ];
 
-        let (result, payloads) = collect(collector(
+        let (result, payloads, _scratch) = collect(collector(
             &server,
             r#"{"things": true, "multiDatastreams": true}"#,
             RequestHeaders::default(),
@@ -820,7 +813,7 @@ mod tests {
             serve(&mut server, MULTI_LATEST, json!({ "value": [&wind] }).to_string()),
         ];
 
-        let (result, payloads) = collect(collector(&server, r#"{"multiDatastreams": true}"#, RequestHeaders::default(), &RUNNING));
+        let (result, payloads, _scratch) = collect(collector(&server, r#"{"multiDatastreams": true}"#, RequestHeaders::default(), &RUNNING));
 
         result.unwrap();
         mocks.iter().for_each(Mock::assert);
@@ -841,7 +834,7 @@ mod tests {
         ];
         let untouched = server.mock("GET", MULTI_LATEST).expect(0).create();
 
-        let (result, payloads) = collect(checking_collector(&server, "{}"));
+        let (result, payloads, _scratch) = collect(checking_collector(&server, "{}"));
 
         mocks.iter().for_each(Mock::assert);
         untouched.assert();
@@ -856,7 +849,7 @@ mod tests {
         let root_document = serve(&mut server, "/v1.1", service_document(&["Datastreams"]));
         let untouched = server.mock("GET", ANY_MULTI_DATASTREAM).expect(0).create();
 
-        let (result, _) = collect(checking_collector(&server, "{}"));
+        let (result, _, _) = collect(checking_collector(&server, "{}"));
 
         root_document.assert();
         untouched.assert();
@@ -870,7 +863,7 @@ mod tests {
         serve(&mut server, "/v1.1", service_document(&["Datastreams", "MultiDatastreams"]));
         let probe = serve(&mut server, ANY_MULTI_DATASTREAM, json!({"value": []}).to_string());
 
-        let (result, _) = collect(checking_collector(&server, "{}"));
+        let (result, _, _) = collect(checking_collector(&server, "{}"));
 
         probe.assert();
         assert_eq!(result.unwrap(), CollectionWarnings::default());
@@ -882,7 +875,7 @@ mod tests {
         serve(&mut server, LATEST, page(&[1], None));
         server.mock("GET", "/v1.1").with_status(404).create();
 
-        let (result, payloads) = collect(checking_collector(&server, "{}"));
+        let (result, payloads, _scratch) = collect(checking_collector(&server, "{}"));
 
         assert_eq!(result.unwrap(), CollectionWarnings::default());
         assert_eq!(snapshot_lines(payloads).len(), 2);
@@ -895,7 +888,7 @@ mod tests {
         serve(&mut server, MULTI_LATEST, page(&[], None));
         let untouched = server.mock("GET", "/v1.1").expect(0).create();
 
-        let (result, _) = collect(checking_collector(&server, r#"{"multiDatastreams": true}"#));
+        let (result, _, _) = collect(checking_collector(&server, r#"{"multiDatastreams": true}"#));
 
         untouched.assert();
         assert_eq!(result.unwrap(), CollectionWarnings::default());
@@ -907,7 +900,7 @@ mod tests {
         serve(&mut server, LATEST, page(&[1], None));
         let untouched = server.mock("GET", "/v1.1").expect(0).create();
 
-        let (result, _) = collect(collector(&server, "{}", RequestHeaders::default(), &RUNNING));
+        let (result, _, _) = collect(collector(&server, "{}", RequestHeaders::default(), &RUNNING));
 
         untouched.assert();
         assert_eq!(result.unwrap(), CollectionWarnings::default());

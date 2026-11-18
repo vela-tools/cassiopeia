@@ -7,6 +7,7 @@ use crate::{
     collector::Collector,
     downloader::Downloader,
     error::CollectorError,
+    scratch_files::ScratchFiles,
     sensorthings::{collector::SensorThingsCollector, cursor_cycle::CursorCycle, unread_check::UnreadCheck},
 };
 use cassiopeia_common::{
@@ -22,6 +23,7 @@ use chrono::DateTime;
 use mockito::ServerGuard;
 use serde_json::Value;
 use std::{fs, sync::atomic::AtomicBool};
+use tempfile::TempDir;
 use url::Url;
 
 /// A shutdown flag never set, as in a run nobody stops.
@@ -76,10 +78,12 @@ pub(crate) fn resuming_collector(server: &ServerGuard, settings: &str, cursor: C
     ))
 }
 
-/// Runs `collector`, returning how its collection ended and every payload it sent.
-pub(crate) fn collect_to_end(collector: Box<SensorThingsCollector>) -> (Result<CollectionEnd, CollectorError>, Vec<FilePayload>) {
+/// Runs `collector` in a scratch folder of its own, returning how its collection ended, every
+/// payload it sent, and the scratch folder, which holds what it wrote until it is dropped.
+pub(crate) fn collect_to_end(collector: Box<SensorThingsCollector>) -> (Result<CollectionEnd, CollectorError>, Vec<FilePayload>, TempDir) {
+    let scratch = TempDir::new().unwrap();
     let (sender, receiver) = channel(ChannelPolicy::Unbounded);
-    let result = collector.collect(sender);
+    let result = collector.collect(ScratchFiles::new(scratch.path().into(), 0), sender);
     let payloads = receiver
         .iter()
         .filter_map(|signal| match signal {
@@ -87,26 +91,24 @@ pub(crate) fn collect_to_end(collector: Box<SensorThingsCollector>) -> (Result<C
             Signal::Data(CollectedPayload::Bytes(_)) | Signal::Start | Signal::Stop | Signal::Error(_) | Signal::Meta(_) => None,
         })
         .collect();
-    (result, payloads)
+    (result, payloads, scratch)
 }
 
-/// Runs `collector`, which nobody stops, returning the warnings it collected with, or how it failed,
-/// and every payload it sent.
-pub(crate) fn collect(collector: Box<SensorThingsCollector>) -> (Result<CollectionWarnings, CollectorError>, Vec<FilePayload>) {
-    let (result, payloads) = collect_to_end(collector);
+/// Runs `collector`, which nobody stops, in a scratch folder of its own, returning the warnings it
+/// collected with, or how it failed, every payload it sent, and the scratch folder, which holds what
+/// it wrote until it is dropped.
+pub(crate) fn collect(collector: Box<SensorThingsCollector>) -> (Result<CollectionWarnings, CollectorError>, Vec<FilePayload>, TempDir) {
+    let (result, payloads, scratch) = collect_to_end(collector);
     let warnings = result.map(|end| match end {
         CollectionEnd::Collected(warnings) => warnings,
         CollectionEnd::Stopped => panic!("a collector nobody stops was stopped"),
     });
-    (warnings, payloads)
+    (warnings, payloads, scratch)
 }
 
-/// The lines of the one snapshot `payloads` holds, each read as JSON, removing the snapshot once it
-/// is read.
+/// The lines of the one snapshot `payloads` holds, each read as JSON.
 pub(crate) fn snapshot_lines(payloads: Vec<FilePayload>) -> Vec<Value> {
     let [payload] = <[FilePayload; 1]>::try_from(payloads).unwrap();
-    let path = payload.into_path();
-    let text = fs::read_to_string(&path).unwrap();
-    fs::remove_dir_all(path.parent().unwrap()).unwrap();
+    let text = fs::read_to_string(payload.path()).unwrap();
     text.lines().map(|line| serde_json::from_str(line).unwrap()).collect()
 }

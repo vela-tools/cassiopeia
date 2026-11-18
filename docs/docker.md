@@ -83,6 +83,9 @@ Inside a container, Cassiopeia switches from its per-user host directories to th
 | Smart Data Models catalog | `/var/lib/cassiopeia/schemas` | Downloaded application data |
 | Cursor stores | `/var/lib/cassiopeia/cursors` | Read positions a later run resumes from |
 | Log files | `/var/log/cassiopeia/logs` | Volatile run state |
+| Scratch folders | `/tmp` | The current cycle's downloads, removed when the cycle ends |
+
+A cycle downloads remote inputs and writes SensorThings snapshots into a scratch folder under `/tmp`, in the container's writable layer, and removes it when the cycle ends, whether it completed, failed, or was stopped. A scheduled container's disk use therefore does not grow from one cycle to the next. `/tmp` needs room for one cycle's downloads at a time; mount a volume there to keep large downloads out of the writable layer. See [Choose the source](running.md#choose-the-source).
 
 Cassiopeia detects the container from the markers provided by Docker. If the runtime is not recognised, it falls back to the host-style layout under `/root`. You can also set these paths explicitly in configuration or through the environment, as described in [Configuration and environment](#configuration-and-environment).
 

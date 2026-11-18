@@ -46,6 +46,7 @@ fn run_on_store(case: &GoldenCase, view: View, store: StoreKind) -> ViewRecord {
         schemas: root.join("schemas"),
         cursors: root.join("cursors"),
         output: root.join("out"),
+        temporary: root.join("tmp"),
     };
     fs::create_dir_all(&folders.schemas).unwrap();
     let manifest = case.manifest(view, &folders.output);

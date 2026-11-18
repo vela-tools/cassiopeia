@@ -1,5 +1,6 @@
 //! A cycle the run's stop cut short is reported as stopped, never as completed, and a stop is no
-//! error: the summary counts none, and the run ends with exit status 0.
+//! error: the summary counts none, and the run ends with exit status 0. Whatever the cycle downloaded
+//! before the stop goes with its scratch folder.
 
 use crate::{
     end_to_end::harness::{RunOutcome, RunSchemas, RunSetup, RunStop, attempt_setup_end_to_end},
@@ -172,6 +173,8 @@ fn a_scheduled_cycle_stopped_between_two_pages_is_reported_stopped_and_counts_no
     assert!(outcome.coded(DiagnosticCode::Run(RunCode::CycleFailed)).is_empty());
     assert_eq!(outcome.entities, Vec::<Value>::new());
     assert!(finished_its_schedule(&outcome), "{:?}", outcome.messages);
+    assert_eq!(outcome.temporary_entries_after_cycles, [Vec::<PathBuf>::new()]);
+    assert_eq!(outcome.temporary_entries_after_run, Vec::<PathBuf>::new());
 }
 
 #[test]
@@ -205,6 +208,8 @@ fn a_scheduled_csv_cycle_stopped_while_its_download_is_in_flight_is_reported_sto
     assert_eq!(outcome.errors, 0);
     assert_eq!(outcome.entities, Vec::<Value>::new());
     assert!(finished_its_schedule(&outcome), "{:?}", outcome.messages);
+    assert_eq!(outcome.temporary_entries_after_cycles, [Vec::<PathBuf>::new()]);
+    assert_eq!(outcome.temporary_entries_after_run, Vec::<PathBuf>::new());
 }
 
 #[test]
@@ -250,6 +255,8 @@ fn a_one_shot_run_stopped_while_collecting_says_it_was_stopped_and_counts_no_err
     assert_eq!(stopped, 1, "{:?}", outcome.messages);
     assert_eq!(cycle_lines(&outcome), Vec::<String>::new());
     assert_eq!(outcome.errors, 0);
+    assert_eq!(outcome.temporary_entries_after_cycles, [Vec::<PathBuf>::new()]);
+    assert_eq!(outcome.temporary_entries_after_run, Vec::<PathBuf>::new());
 }
 
 #[test]

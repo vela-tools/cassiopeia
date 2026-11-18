@@ -1,6 +1,7 @@
 use cassiopeia_common::{channel::ChannelPolicy, context::mode::AtContextMode, user_agent::UserAgent};
 use cassiopeia_configuration::{config::Config, pipeline::ExtractionMode};
 use cassiopeia_pipeline::pipeline_config::{ExtractionParallelism, PipelineConfig};
+use std::path::PathBuf;
 
 /// Translates the loaded configuration into the pipeline engine's own configuration.
 ///
@@ -12,9 +13,10 @@ use cassiopeia_pipeline::pipeline_config::{ExtractionParallelism, PipelineConfig
 /// manifest, so `context_mode` is only the fallback used when the manifest output does not set one;
 /// [`AtContextMode::None`] keeps a manifest that declares no `@context` from acquiring the default.
 ///
-/// `default_user_agent` has no configuration source at all: it is the build-time identifier the
-/// binary derives, so it is passed in rather than read from `config`.
-pub fn pipeline_config(config: &Config, default_user_agent: UserAgent) -> PipelineConfig {
+/// `default_user_agent` and `temporary_folder` have no configuration source at all: the first is the
+/// build-time identifier the binary derives, the second the system temporary folder the process
+/// environment names, so both are passed in rather than read from `config`.
+pub fn pipeline_config(config: &Config, default_user_agent: UserAgent, temporary_folder: PathBuf) -> PipelineConfig {
     PipelineConfig {
         batch_size: config.pipeline.batch_size.get(),
         extraction: extraction_parallelism(config.pipeline.extraction_mode),
@@ -23,6 +25,7 @@ pub fn pipeline_config(config: &Config, default_user_agent: UserAgent) -> Pipeli
         relationship_store: config.resolver.relationship_store,
         schemas_folder: config.schemas.folder.clone(),
         cursors_folder: config.cursors.folder.clone(),
+        temporary_folder,
         context_mode: AtContextMode::None,
         default_user_agent,
         channel_policy: match config.pipeline.channel_capacity {
@@ -65,18 +68,30 @@ mod tests {
         UserAgent::from("cassiopeia/1.0.0".to_owned())
     }
 
+    /// The system temporary folder the composition root supplies to every translation.
+    fn temporary_folder() -> PathBuf {
+        PathBuf::from("/var/tmp")
+    }
+
     #[test]
     fn the_context_mode_starts_unset_so_the_manifest_governs_it() {
         let config = Config::default();
 
-        assert_eq!(pipeline_config(&config, user_agent()).context_mode, AtContextMode::None);
+        assert_eq!(pipeline_config(&config, user_agent(), temporary_folder()).context_mode, AtContextMode::None);
     }
 
     #[test]
     fn the_default_user_agent_is_the_one_the_composition_root_supplies() {
         let config = Config::default();
 
-        assert_eq!(pipeline_config(&config, user_agent()).default_user_agent, user_agent());
+        assert_eq!(pipeline_config(&config, user_agent(), temporary_folder()).default_user_agent, user_agent());
+    }
+
+    #[test]
+    fn the_temporary_folder_is_the_one_the_composition_root_supplies() {
+        let config = Config::default();
+
+        assert_eq!(pipeline_config(&config, user_agent(), temporary_folder()).temporary_folder, temporary_folder());
     }
 
     #[test]
@@ -84,13 +99,16 @@ mod tests {
         let mut config = Config::default();
         config.cursors.folder = PathBuf::from("/srv/cursors");
 
-        assert_eq!(pipeline_config(&config, user_agent()).cursors_folder, PathBuf::from("/srv/cursors"));
+        assert_eq!(
+            pipeline_config(&config, user_agent(), temporary_folder()).cursors_folder,
+            PathBuf::from("/srv/cursors")
+        );
     }
 
     #[test]
     fn the_batch_size_and_channel_policy_carry_the_configured_values() {
         let config = Config::default();
-        let translated = pipeline_config(&config, user_agent());
+        let translated = pipeline_config(&config, user_agent(), temporary_folder());
 
         assert_eq!(translated.batch_size, config.pipeline.batch_size.get());
         assert_eq!(translated.channel_policy, ChannelPolicy::Unbounded);
@@ -102,6 +120,9 @@ mod tests {
         let capacity = NonZeroUsize::new(12).unwrap();
         config.pipeline.channel_capacity = Some(capacity);
 
-        assert_eq!(pipeline_config(&config, user_agent()).channel_policy, ChannelPolicy::Bounded(capacity));
+        assert_eq!(
+            pipeline_config(&config, user_agent(), temporary_folder()).channel_policy,
+            ChannelPolicy::Bounded(capacity)
+        );
     }
 }

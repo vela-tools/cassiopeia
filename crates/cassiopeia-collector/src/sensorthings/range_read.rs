@@ -200,7 +200,7 @@ mod tests {
             serve(&mut server, &observations_path(2, LAST_DAY), page(&observations(&[21]), None)),
         ];
 
-        let (result, payloads) = collect(collector(&server, &range_read(r#"{"last": "24h"}"#, ""), RequestHeaders::default(), &RUNNING));
+        let (result, payloads, _scratch) = collect(collector(&server, &range_read(r#"{"last": "24h"}"#, ""), RequestHeaders::default(), &RUNNING));
 
         result.unwrap();
         mocks.iter().for_each(Mock::assert);
@@ -227,7 +227,7 @@ mod tests {
             serve(&mut server, &observations_path(1, LAST_DAY), page(&observations(&[11]), None)),
         ];
 
-        let (result, payloads) = collect(collector(&server, &range_read(r#"{"last": "24h"}"#, ""), RequestHeaders::default(), &RUNNING));
+        let (result, payloads, _scratch) = collect(collector(&server, &range_read(r#"{"last": "24h"}"#, ""), RequestHeaders::default(), &RUNNING));
 
         result.unwrap();
         mocks.iter().for_each(Mock::assert);
@@ -259,7 +259,7 @@ mod tests {
             ),
         ];
 
-        let (result, payloads) = collect(collector(
+        let (result, payloads, _scratch) = collect(collector(
             &server,
             &range_read(r#"{"last": "24h"}"#, r#", "featuresOfInterest": true"#),
             RequestHeaders::default(),
@@ -295,7 +295,7 @@ mod tests {
             serve(&mut server, &observations_with_features_path(2, LAST_DAY), page(&observations(&[21]), None)),
         ];
 
-        let (result, payloads) = collect(collector(
+        let (result, payloads, _scratch) = collect(collector(
             &server,
             &range_read(r#"{"last": "24h"}"#, r#", "featuresOfInterest": true"#),
             RequestHeaders::default(),
@@ -331,7 +331,7 @@ mod tests {
             serve(&mut server, &observations_with_features_path(1, LAST_DAY), page(&items, None)),
         ];
 
-        let (result, _) = collect(collector(
+        let (result, _, _) = collect(collector(
             &server,
             &range_read(r#"{"last": "24h"}"#, r#", "featuresOfInterest": true, "limits": {"observations": 2}"#),
             RequestHeaders::default(),
@@ -355,7 +355,7 @@ mod tests {
             serve(&mut server, &observations_path(1, LAST_DAY), page(&observations(&[11]), None)),
         ];
 
-        let (result, _) = collect(collector(
+        let (result, _, _) = collect(collector(
             &server,
             &range_read(r#"{"last": "24h"}"#, r#", "featuresOfInterest": false"#),
             RequestHeaders::default(),
@@ -375,7 +375,7 @@ mod tests {
             serve(&mut server, &observations_path(1, bounds), page(&observations(&[11]), None)),
         ];
 
-        let (result, payloads) = collect(collector(
+        let (result, payloads, _scratch) = collect(collector(
             &server,
             &range_read(r#"{"from": "2026-11-01T00:00:00Z", "to": "2026-11-02T00:00:00Z"}"#, ""),
             RequestHeaders::default(),
@@ -399,7 +399,7 @@ mod tests {
             ),
         ];
 
-        let (result, payloads) = collect(collector(
+        let (result, payloads, _scratch) = collect(collector(
             &server,
             &range_read(r#"{"from": "2026-11-01T00:00:00Z"}"#, ""),
             RequestHeaders::default(),
@@ -418,7 +418,7 @@ mod tests {
         let discovered = serve(&mut server, METADATA, page(slice::from_ref(&ended), None));
         let untouched = server.mock("GET", Matcher::Regex(r"^/v1\.1/Datastreams\(1\)/".to_owned())).expect(0).create();
 
-        let (result, payloads) = collect(collector(&server, &range_read(r#"{"last": "24h"}"#, ""), RequestHeaders::default(), &RUNNING));
+        let (result, payloads, _scratch) = collect(collector(&server, &range_read(r#"{"last": "24h"}"#, ""), RequestHeaders::default(), &RUNNING));
 
         result.unwrap();
         discovered.assert();
@@ -434,7 +434,7 @@ mod tests {
             serve(&mut server, &observations_path(1, LAST_DAY), page(&observations(&[11]), None)),
         ];
 
-        let (result, _) = collect(collector(&server, &range_read(r#"{"last": "24h"}"#, ""), RequestHeaders::default(), &RUNNING));
+        let (result, _, _) = collect(collector(&server, &range_read(r#"{"last": "24h"}"#, ""), RequestHeaders::default(), &RUNNING));
 
         result.unwrap();
         mocks.iter().for_each(Mock::assert);
@@ -450,7 +450,7 @@ mod tests {
             serve(&mut server, "/v1.1/Datastreams(1)/Observations?$skip=2", page(&observations(&[2, 3]), None)),
         ];
 
-        let (result, payloads) = collect(collector(&server, &range_read(r#"{"last": "24h"}"#, ""), RequestHeaders::default(), &RUNNING));
+        let (result, payloads, _scratch) = collect(collector(&server, &range_read(r#"{"last": "24h"}"#, ""), RequestHeaders::default(), &RUNNING));
 
         result.unwrap();
         mocks.iter().for_each(Mock::assert);
@@ -469,7 +469,7 @@ mod tests {
             serve(&mut server, &observations_path(2, LAST_DAY), page(&observations(&[5, 6, 7, 8]), None)),
         ];
 
-        let (result, payloads) = collect(collector(
+        let (result, payloads, _scratch) = collect(collector(
             &server,
             &range_read(r#"{"last": "24h"}"#, r#", "limits": {"observations": 5}"#),
             RequestHeaders::default(),
@@ -508,7 +508,7 @@ mod tests {
         ];
         let unfollowed = server.mock("GET", Matcher::Regex(r"\$skip=1$".to_owned())).expect(0).create();
 
-        let (result, payloads) = collect(collector(
+        let (result, payloads, _scratch) = collect(collector(
             &server,
             &range_read(r#"{"last": "24h"}"#, r#", "limits": {"pages": 1}"#),
             RequestHeaders::default(),
@@ -533,7 +533,7 @@ mod tests {
         let mut server = mockito::Server::new();
         let untouched = server.mock("GET", Matcher::Any).expect(0).create();
 
-        let (result, payloads) = collect(collector(
+        let (result, payloads, _scratch) = collect(collector(
             &server,
             &range_read(r#"{"from": "2026-11-13T00:00:00Z"}"#, ""),
             RequestHeaders::default(),
@@ -560,7 +560,7 @@ mod tests {
             serve(&mut server, &observations_path(9, LAST_DAY), page(&observations(&[91]), None)),
         ];
 
-        let (result, payloads) = collect(collector(&server, &range_read(r#"{"last": "24h"}"#, ""), RequestHeaders::default(), &RUNNING));
+        let (result, payloads, _scratch) = collect(collector(&server, &range_read(r#"{"last": "24h"}"#, ""), RequestHeaders::default(), &RUNNING));
 
         result.unwrap();
         mocks.iter().for_each(Mock::assert);
@@ -620,7 +620,7 @@ mod tests {
             ),
         ];
 
-        let (result, payloads) = collect(collector(
+        let (result, payloads, _scratch) = collect(collector(
             &server,
             &range_read(r#"{"last": "24h"}"#, r#", "multiDatastreams": true"#),
             RequestHeaders::default(),
@@ -653,7 +653,7 @@ mod tests {
             serve(&mut server, &multi_observations_path(4, LAST_DAY), page(&multi_observations(&[3, 4]), None)),
         ];
 
-        let (result, payloads) = collect(collector(
+        let (result, payloads, _scratch) = collect(collector(
             &server,
             &range_read(r#"{"last": "24h"}"#, r#", "multiDatastreams": true, "limits": {"observations": 3}"#),
             RequestHeaders::default(),
@@ -745,7 +745,7 @@ mod tests {
             ),
         ];
 
-        let (result, payloads) = collect(collector(&server, &history_read(""), RequestHeaders::default(), &RUNNING));
+        let (result, payloads, _scratch) = collect(collector(&server, &history_read(""), RequestHeaders::default(), &RUNNING));
 
         assert_eq!(result.unwrap(), CollectionWarnings::default());
         mocks.iter().for_each(Mock::assert);
@@ -773,7 +773,7 @@ mod tests {
         ];
         let untouched = server.mock("GET", Matcher::Regex(r"^/v1\.1/Things".to_owned())).expect(0).create();
 
-        let (result, payloads) = collect(collector(
+        let (result, payloads, _scratch) = collect(collector(
             &server,
             &range_read(r#"{"last": "24h"}"#, r#", "historicalLocations": false"#),
             RequestHeaders::default(),
@@ -801,7 +801,7 @@ mod tests {
         ];
         let unfollowed = server.mock("GET", Matcher::Regex(r"\$skip=2$".to_owned())).expect(0).create();
 
-        let (result, payloads) = collect(collector(
+        let (result, payloads, _scratch) = collect(collector(
             &server,
             &history_read(r#", "pageSize": 2, "limits": {"pages": 1}"#),
             RequestHeaders::default(),
@@ -837,7 +837,7 @@ mod tests {
             ),
         ];
 
-        let (result, payloads) = collect(collector(
+        let (result, payloads, _scratch) = collect(collector(
             &server,
             &history_read(r#", "limits": {"observations": 1}"#),
             RequestHeaders::default(),
@@ -871,7 +871,7 @@ mod tests {
             ),
         ];
 
-        let (result, payloads) = collect(collector(&server, &history_read(""), RequestHeaders::default(), &RUNNING));
+        let (result, payloads, _scratch) = collect(collector(&server, &history_read(""), RequestHeaders::default(), &RUNNING));
 
         result.unwrap();
         mocks.iter().for_each(Mock::assert);

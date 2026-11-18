@@ -31,6 +31,8 @@ Every run needs an input and a mapping that shapes it:
 
 The [source-format guide](source-formats.md) describes the records each format produces and how detection works.
 
+A local input is read where it is. A remote input is downloaded first, into a scratch folder in the system temporary folder: `TMPDIR` on Linux and macOS (`/tmp` when it is unset), `TMP` or `TEMP` on Windows. A SensorThings read writes its snapshot there too. Each attempt at a cycle, a retried one included, creates its own scratch folder, named `cassiopeia-` and a random suffix, and removes it with everything in it when the attempt ends, whether it completed, failed, or was stopped. The temporary folder therefore needs room for one cycle's downloads at a time, and a run leaves nothing in it.
+
 ## Choose the destination
 
 `--writer` (`-w`) selects where entities go: `file` (the default) or `context-broker`.
