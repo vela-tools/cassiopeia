@@ -1,58 +1,50 @@
-use crate::template::{CompiledTemplate, TemplateSource};
+use crate::unread_keys::UnreadKeys;
 use cassiopeia_ngsi_ld::data_model::DataModel;
-use getset::{Getters, Setters};
+use getset::{Getters, MutGetters};
 use serde::{Deserialize, Serialize};
 use typed_builder::TypedBuilder;
 
 /// The entity a relationship attribute points at.
 ///
-/// A relationship's object is another entity's URN, so the mapping has to say which model that
-/// entity belongs to and how to reconstruct its identity from the current record.
-#[derive(Debug, Clone, Serialize, Deserialize, Getters, Setters, TypedBuilder)]
+/// A relationship's object is another entity's URN, minted from the attribute's `source` under the
+/// data model the target names.
+#[derive(Debug, Clone, Serialize, Deserialize, Getters, MutGetters, TypedBuilder)]
 #[serde(rename_all = "camelCase")]
 pub struct Target {
     /// The data model of the entity being pointed at.
     #[getset(get = "pub")]
     entity: DataModel,
 
-    /// The source field holding the target's identifier, when it is not derived from `id_pattern`.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    #[builder(default = Default::default())]
-    #[getset(get = "pub")]
-    source_field: Option<TemplateSource>,
-
-    /// The template producing the target's entity name, when it is not a plain field value.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    #[builder(default = Default::default())]
-    #[getset(get = "pub")]
-    id_pattern: Option<TemplateSource>,
-
-    /// The compiled `id_pattern`, filled in once the mapping is loaded.
-    #[serde(skip)]
-    #[builder(default = Default::default())]
-    #[getset(get = "pub", set = "pub")]
-    compiled_id_pattern: Option<CompiledTemplate>,
+    /// The keys this target holds that it does not read, taken out when the mapping loads so each
+    /// can be warned about.
+    #[serde(flatten, skip_serializing)]
+    #[builder(default = Default::default(), setter(skip))]
+    #[getset(get_mut = "pub(crate)")]
+    unread_keys: UnreadKeys,
 }
 
 #[cfg(test)]
 mod tests {
-    use crate::{target::Target, template::TemplateSource};
+    use crate::target::Target;
     use pretty_assertions::assert_eq;
 
     #[test]
     fn reads_a_target_naming_only_its_entity() {
-        let target: Target = serde_json::from_str(r#"{"entity": "dataModel.Transportation/Road"}"#).unwrap();
+        let mut target: Target = serde_json::from_str(r#"{"entity": "dataModel.Transportation/Road"}"#).unwrap();
 
         assert_eq!(target.entity().entity_type().as_str(), "Road");
-        assert_eq!(target.source_field(), &None);
+        assert_eq!(target.unread_keys_mut().take().count(), 0);
     }
 
     #[test]
-    fn reads_a_target_with_a_source_field_and_id_pattern() {
-        let target: Target = serde_json::from_str(r#"{"entity": "Road", "sourceField": "road_id", "idPattern": "Road-{{ road_id }}"}"#).unwrap();
+    fn a_target_keeps_the_keys_it_does_not_read() {
+        let mut target: Target = serde_json::from_str(r#"{"entity": "Road", "sourceField": "road_id", "idPattern": "Road-{{ road_id }}"}"#).unwrap();
 
-        assert_eq!(target.source_field(), &Some(TemplateSource::new("road_id")));
-        assert_eq!(target.id_pattern(), &Some(TemplateSource::new("Road-{{ road_id }}")));
+        assert_eq!(target.entity().entity_type().as_str(), "Road");
+        assert_eq!(
+            target.unread_keys_mut().take().map(|key| key.to_string()).collect::<Vec<_>>(),
+            ["sourceField", "idPattern"]
+        );
     }
 
     #[test]

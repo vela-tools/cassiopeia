@@ -14,6 +14,7 @@ pub mod expander_code;
 pub mod extractor_code;
 pub mod geometry_code;
 pub mod ingest_code;
+pub mod mapping_code;
 pub mod resolver_code;
 pub mod run_code;
 pub mod schema_code;

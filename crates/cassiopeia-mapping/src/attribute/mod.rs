@@ -9,6 +9,7 @@ use crate::{
     target::Target,
     template::{CompiledTemplate, TemplateSource},
     transformation::Transformation,
+    unread_keys::UnreadKeys,
 };
 use cassiopeia_geometry::policy::GeometryPolicy;
 use cassiopeia_ngsi_ld::entity::{attribute::NgsiLdAttributeKind, name::NameBuf, value_type::ValueType};
@@ -119,8 +120,10 @@ pub struct Attribute {
     ///
     /// A synthetic entity is an entity body without its own document `version`; it shares the
     /// parent document's version and is lifted into a full [`Mapping`] at load time (see
-    /// the private `deserialize_synthetic_entity`). Mutable access exists so the expansion stage can compile
-    /// the synthetic mapping in place.
+    /// the private `deserialize_synthetic_entity`). Loading the document keeps it only on a top-level
+    /// Relationship or `ListRelationship`, the attribute that links the main entity to it, and drops
+    /// it anywhere else with a warning. Mutable access exists so the expansion stage can compile the
+    /// synthetic mapping in place.
     #[serde(
         default,
         rename = "syntheticEntity",
@@ -132,9 +135,11 @@ pub struct Attribute {
     synthetic_entity: Option<Mapping>,
 
     /// The entity a relationship attribute points at.
+    ///
+    /// Mutable access exists so loading the mapping can take the keys the target does not read.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[builder(default = Default::default())]
-    #[getset(get = "pub")]
+    #[getset(get = "pub", get_mut = "pub(crate)")]
     target: Option<Target>,
 
     /// Attribute-level sub-attributes: qualifiers such as `observedAt` or `unitCode`, and any further
@@ -181,6 +186,13 @@ pub struct Attribute {
     #[builder(default = unresolved_conversion())]
     #[getset(get_copy = "pub", set = "pub(crate)")]
     conversion: Conversion,
+
+    /// The keys this declaration holds that it does not read, taken out when the mapping loads so
+    /// each can be warned about.
+    #[serde(flatten, skip_serializing)]
+    #[builder(default = Default::default(), setter(skip))]
+    #[getset(get_mut = "pub(crate)")]
+    unread_keys: UnreadKeys,
 }
 
 /// Deserializes a `syntheticEntity` declaration into a [`Mapping`].
@@ -364,7 +376,7 @@ mod tests {
     fn a_synthetic_entity_without_a_version_inherits_the_document_version() {
         let attribute = parse(
             r#"{
-                "type": "Property",
+                "type": "Relationship",
                 "syntheticEntity": {
                     "dataModel": "dataModel.Hl7/Organization",
                     "identity": {"entityName": "Owner"},

@@ -205,6 +205,14 @@ pub(crate) fn attempt_setup_end_to_end(store: StoreKind, declared: &str, setup: 
     run_declared(store, directory.path(), &[declared.to_owned()], setup)
 }
 
+/// Runs a one-shot pipeline over the `declared` manifest inputs, written as a manifest writes them,
+/// writing files, on `store`, validating against an accept-anything schema for each of
+/// `entity_types`, and returns how the run ended with what it reported and wrote.
+pub(crate) fn attempt_inputs_end_to_end(store: StoreKind, declared: &[String], entity_types: &[&str]) -> (Result<(), PipelineError>, RunOutcome) {
+    let directory = TempDir::new().unwrap();
+    run_declared(store, directory.path(), declared, &RunSetup::files(&RunSchemas::Permissive(entity_types), ""))
+}
+
 /// Runs a pipeline over the one manifest input `declared` on the manifest schedule `schedule`, written
 /// as a manifest writes it, and otherwise as [`attempt_declared_end_to_end`] does, and returns how the
 /// run ended with what it reported and wrote.

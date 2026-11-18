@@ -4,6 +4,7 @@ use cassiopeia_csv_column::renamed_column::RenamedColumn;
 use cassiopeia_ngsi_ld::entity::{attribute_path::AttributePath, name::NameBuf};
 use http::StatusCode;
 use iri_rs::IriBuf;
+use std::path::PathBuf;
 use strum::EnumDiscriminants;
 use urn_rs::Urn;
 
@@ -52,6 +53,9 @@ pub enum ContextField {
     /// The source involved: a local file, or the URL a downloaded one was fetched from, which stays
     /// the same across runs where the downloaded copy's path does not.
     Source(Input),
+    /// The mapping document involved, as the path it was loaded from, so two documents declaring
+    /// the same attribute stay two findings.
+    MappingDocument(PathBuf),
     /// Which retry attempt this was, out of how many.
     Attempt {
         /// The 1-based attempt number.

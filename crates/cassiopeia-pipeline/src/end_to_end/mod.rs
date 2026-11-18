@@ -11,6 +11,7 @@ mod incremental_reads;
 mod json_collections;
 mod local_contexts;
 mod locations;
+mod mapping_keys;
 mod multi_datastreams;
 mod observation_ranking;
 mod reason_codes;

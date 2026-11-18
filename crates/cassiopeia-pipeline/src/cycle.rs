@@ -3,6 +3,8 @@ use crate::{
     controller::{AtomicBoolController, RunController},
     cursor_stores::CycleCursors,
     error::{PipelineError, Result},
+    first_cycle::CycleOrder,
+    ignored_key_report::report_ignored_keys,
     input_config::InputConfig,
     memory_sampler::MemorySampler,
     observer::{PipelineProgress, PipelineResult},
@@ -12,6 +14,7 @@ use crate::{
     scheduled_run::ScheduledRun,
     schema_resolution::resolve_custom_schemas,
 };
+use cassiopeia_collector::sensorthings::unread_check::UnreadCheck;
 use cassiopeia_common::{telemetry::run::RunTelemetry, user_agent::UserAgent};
 use cassiopeia_expander::{
     compiler::ExpanderCompiler,
@@ -24,6 +27,7 @@ use cassiopeia_ngsi_ld::{
     entity::{context::ContextSource, name::NameBuf},
 };
 use cassiopeia_value_type_expansion::value_type_expander::ValueTypeExpander;
+use indexmap::IndexMap;
 use std::{
     collections::HashMap,
     path::{Path, PathBuf},
@@ -47,8 +51,9 @@ impl Pipeline {
 
         // Compile every input's mappings into the shared runner, deduplicating by path so a mapping
         // referenced by two collections (or two inputs) compiles once and is shared behind one `Arc`.
-        // Each input's binding becomes a router the expander selects mappings from.
-        let mut compiled: HashMap<PathBuf, Arc<Mapping>> = HashMap::new();
+        // Each input's binding becomes a router the expander selects mappings from. The mappings keep
+        // the order they were first loaded in, which is the order their warnings are reported in.
+        let mut compiled: IndexMap<PathBuf, Arc<Mapping>> = IndexMap::new();
         let mut loaded: Vec<(&InputConfig, MappingRouter)> = Vec::with_capacity(self.inputs.len());
         for input in &self.inputs {
             let router = build_router(&input.mapping_binding, &mut compiled, &mut runner)?;
@@ -97,7 +102,17 @@ impl Pipeline {
         let memory_sampler = MemorySampler::start(Arc::clone(&telemetry));
 
         let mut cursors = self.cursors.start_cycle()?;
-        let unread_check = self.unread_checks.claim();
+        // A key a mapping declares without effect stays so for the whole run, so only the run's
+        // first cycle names it, before any record is read; the same cycle makes the run's one check
+        // for unread `MultiDatastreams`.
+        let unread_check = match self.first_cycle.claim() {
+            CycleOrder::First => {
+                let mappings = compiled.iter().map(|(path, mapping)| (path.as_path(), mapping.as_ref()));
+                telemetry.add_warnings(report_ignored_keys(self.context.reporter, mappings));
+                UnreadCheck::Due
+            }
+            CycleOrder::Later => UnreadCheck::Done,
+        };
         let lanes = loaded
             .into_iter()
             .map(|(input, router)| CycleLane {
@@ -163,7 +178,7 @@ impl Pipeline {
 }
 
 /// Builds the mapping router for one input's binding, compiling each distinct path once.
-fn build_router(binding: &MappingBinding, compiled: &mut HashMap<PathBuf, Arc<Mapping>>, runner: &mut TemplateRunner) -> Result<MappingRouter> {
+fn build_router(binding: &MappingBinding, compiled: &mut IndexMap<PathBuf, Arc<Mapping>>, runner: &mut TemplateRunner) -> Result<MappingRouter> {
     match binding {
         MappingBinding::Single { mapping } => Ok(MappingRouter::Single(compile_mapping(compiled, runner, mapping)?)),
         MappingBinding::Collections { mappings } => {
@@ -179,7 +194,7 @@ fn build_router(binding: &MappingBinding, compiled: &mut HashMap<PathBuf, Arc<Ma
 }
 
 /// Loads and compiles a mapping, reusing an already-compiled one for the same path.
-fn compile_mapping(compiled: &mut HashMap<PathBuf, Arc<Mapping>>, runner: &mut TemplateRunner, path: &Path) -> Result<Arc<Mapping>> {
+fn compile_mapping(compiled: &mut IndexMap<PathBuf, Arc<Mapping>>, runner: &mut TemplateRunner, path: &Path) -> Result<Arc<Mapping>> {
     if let Some(existing) = compiled.get(path) {
         return Ok(Arc::clone(existing));
     }
@@ -222,9 +237,9 @@ mod tests {
     use cassiopeia_manifest::mapping_binding::{CollectionMapping, MappingBinding};
     use cassiopeia_mapping::{error::MappingError, mapping::Mapping, template::runner::TemplateRunner, template_site::TemplateSite};
     use cassiopeia_ngsi_ld::entity::{attribute_path::AttributePath, context::ContextSource, name::NameBuf};
+    use indexmap::IndexMap;
     use pretty_assertions::assert_eq;
     use std::{
-        collections::HashMap,
         fs,
         path::{Path, PathBuf},
         sync::Arc,
@@ -270,7 +285,7 @@ mod tests {
         let path = write_mapping(&dir, "camera.json5", "Camera");
         let binding = MappingBinding::Single { mapping: path };
 
-        let mut compiled = HashMap::new();
+        let mut compiled = IndexMap::new();
         let mut runner = TemplateRunner::new();
         let router = build_router(&binding, &mut compiled, &mut runner).unwrap();
 
@@ -291,7 +306,7 @@ mod tests {
             ],
         };
 
-        let mut compiled = HashMap::new();
+        let mut compiled = IndexMap::new();
         let mut runner = TemplateRunner::new();
         let router = build_router(&binding, &mut compiled, &mut runner).unwrap();
 
@@ -318,7 +333,7 @@ mod tests {
         .unwrap();
         let binding = MappingBinding::Single { mapping: path.clone() };
 
-        let mut compiled = HashMap::new();
+        let mut compiled = IndexMap::new();
         let Err(error) = build_router(&binding, &mut compiled, &mut TemplateRunner::new()) else {
             panic!("a mapping with an uncompilable template must not build a router");
         };
@@ -348,7 +363,7 @@ mod tests {
         .unwrap();
         let binding = MappingBinding::Single { mapping: path };
 
-        let mut compiled = HashMap::new();
+        let mut compiled = IndexMap::new();
         let Err(error) = build_router(&binding, &mut compiled, &mut TemplateRunner::new()) else {
             panic!("a mapping declaring a transformation its type does not admit must not build a router");
         };
@@ -377,7 +392,7 @@ mod tests {
         .unwrap();
         let binding = MappingBinding::Single { mapping: path.clone() };
 
-        let mut compiled = HashMap::new();
+        let mut compiled = IndexMap::new();
         let Err(error) = build_router(&binding, &mut compiled, &mut TemplateRunner::new()) else {
             panic!("a mapping with an illegal literal scope must not build a router");
         };
@@ -416,7 +431,7 @@ mod tests {
         .unwrap();
         let binding = MappingBinding::Single { mapping: path };
 
-        let Err(error) = build_router(&binding, &mut HashMap::new(), &mut TemplateRunner::new()) else {
+        let Err(error) = build_router(&binding, &mut IndexMap::new(), &mut TemplateRunner::new()) else {
             panic!("a mapping with an uncompilable template must not build a router");
         };
         let diagnostic = from_error(Severity::Error, DiagnosticCode::from(&error), &error).build();

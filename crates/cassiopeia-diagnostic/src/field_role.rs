@@ -7,7 +7,8 @@ use crate::context_field::{ContextField, ContextFieldKind};
 /// out of the key. Anything that names *why* something failed is defining; anything that names
 /// *which occurrence* is incidental. A source file is defining: a diagnostic that names one is about
 /// that file, such as the rows skipped from it, so two files' diagnostics are two findings, and
-/// folding the second into the first would hide what it says about its own file.
+/// folding the second into the first would hide what it says about its own file. A mapping document
+/// is defining for the same reason.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub enum FieldRole {
     /// The field distinguishes one failure from another, so it belongs to the identity.
@@ -32,7 +33,8 @@ impl ContextField {
             | ContextFieldKind::Detail
             | ContextFieldKind::RenamedColumn
             | ContextFieldKind::UnitText
-            | ContextFieldKind::Source => FieldRole::Defining,
+            | ContextFieldKind::Source
+            | ContextFieldKind::MappingDocument => FieldRole::Defining,
             ContextFieldKind::Entities
             | ContextFieldKind::Attempt
             | ContextFieldKind::PayloadBytes
@@ -87,6 +89,7 @@ mod tests {
                 additional: 99,
             },
             ContextField::Source(Input::Local(PathBuf::from("/data/air.csv"))),
+            ContextField::MappingDocument(PathBuf::from("/maps/air.json5")),
             ContextField::Attempt { attempt: 2, limit: 3 },
             ContextField::PayloadBytes(4096),
             ContextField::BodyEcho(CapturedBody::capped(b"<html>".to_vec(), 2048)),

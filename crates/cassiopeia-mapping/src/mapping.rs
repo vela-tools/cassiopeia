@@ -4,6 +4,8 @@ use crate::{
     entity_members::EntityMembers,
     error::{MappingError, Result},
     identity::Identity,
+    ignored_key::IgnoredKey,
+    ignored_keys,
     instance_placement,
     mapping_role::MappingRole,
     observation_plan::ObservationPlan,
@@ -101,11 +103,22 @@ pub struct Mapping {
     #[serde(skip)]
     #[getset(get = "pub", set = "pub")]
     source_reads: SourceReads,
+
+    /// The keys the document declares that loading it ignored, in document order, so the run can
+    /// warn about each before it reads a record. A synthetic entity's are gathered into the
+    /// document's, named by the attribute declaring it.
+    #[serde(skip)]
+    #[getset(get = "pub")]
+    ignored_keys: Vec<IgnoredKey>,
 }
 
 impl Mapping {
     /// Declares a mapping, resolving each attribute's conversion and its temporal fields. `origin`
     /// names the document in error messages.
+    ///
+    /// The keys the attributes hold without effect are taken out into
+    /// [`ignored_keys`](Mapping::ignored_keys), and a `syntheticEntity` no entity is written from is
+    /// dropped, as when a document is parsed.
     ///
     /// # Errors
     /// Returns a [`MappingError`] when a declaration below the top level declares `instances` (see
@@ -121,6 +134,7 @@ impl Mapping {
         origin: &Path,
         runner: &mut TemplateRunner,
     ) -> Result<Mapping> {
+        let ignored_keys = ignored_keys::take(&mut attributes);
         instance_placement::check(&attributes)?;
         resolve(&mut attributes)?;
         let EntityMembers { scope, expires_at } = members;
@@ -137,6 +151,7 @@ impl Mapping {
             has_nested_relationships: false,
             role: MappingRole::Document,
             source_reads: SourceReads::Everything,
+            ignored_keys,
         };
         mapping.compile_temporal_fields(origin, runner)?;
         mapping.has_nested_relationships = mapping.detect_nested_relationships();
@@ -164,6 +179,11 @@ impl Mapping {
     /// Only the `observedAt` template is compiled here; the expansion stage compiles the rest, and
     /// reports a template it cannot compile against the same `origin`.
     ///
+    /// A key a declaration below the top level does not read, and a key that has no effect where it
+    /// is declared, does not refuse the document: each is taken out into
+    /// [`ignored_keys`](Mapping::ignored_keys), and a `syntheticEntity` no entity is written from is
+    /// dropped.
+    ///
     /// # Errors
     /// Returns a [`MappingError`] when the document cannot be parsed, declares `instances` below the
     /// top level, declares a `valueType` where none can be written, declares an attribute that cannot
@@ -173,6 +193,7 @@ impl Mapping {
             path: origin.to_path_buf(),
             source,
         })?;
+        mapping.ignored_keys = ignored_keys::take(mapping.attributes_mut());
         instance_placement::check(mapping.attributes())?;
         value_type_placement::check(mapping.attributes())?;
         resolve(mapping.attributes_mut())?;
@@ -229,6 +250,7 @@ mod tests {
         entity_members::EntityMembers,
         error::MappingError,
         identity::Identity,
+        ignored_key::{IgnoredKeyKind, IneffectiveKey},
         mapping::Mapping,
         scope::Scope,
         template::{TemplateSource, run_variables::RunVariables, runner::TemplateRunner, template_input::TemplateInput},
@@ -723,6 +745,36 @@ mod tests {
         );
 
         assert!(matches!(result, Err(MappingError::InstancesBelowTopLevel { attribute }) if attribute.to_string() == "temperature.accuracy"));
+    }
+
+    #[test]
+    fn a_declared_mapping_drops_a_synthetic_entity_on_a_property_naming_the_attribute() {
+        let maker: Attribute = serde_json5::from_str(
+            r#"{ source: "{{ maker }}", syntheticEntity: { dataModel: "Organization", identity: { entityName: "{{ maker }}" }, attributes: {} } }"#,
+        )
+        .unwrap();
+        let attributes = IndexMap::from([(NameBuf::new("manufacturer").unwrap(), maker)]);
+
+        let mapping = Mapping::new(
+            Version::V4,
+            "Device".parse::<DataModel>().unwrap(),
+            Identity::new(TemplateSource::new("{{ id }}")),
+            EntityMembers::default(),
+            attributes,
+            Path::new("device.json5"),
+            &mut TemplateRunner::new(),
+        )
+        .unwrap();
+
+        assert!(mapping.attributes()[0].synthetic_entity().is_none());
+        assert_eq!(
+            mapping.ignored_keys().iter().map(|ignored| ignored.site().to_string()).collect::<Vec<_>>(),
+            ["`manufacturer`"]
+        );
+        assert!(matches!(
+            mapping.ignored_keys()[0].kind(),
+            IgnoredKeyKind::WithoutEffect(IneffectiveKey::SyntheticEntity)
+        ));
     }
 
     #[test]

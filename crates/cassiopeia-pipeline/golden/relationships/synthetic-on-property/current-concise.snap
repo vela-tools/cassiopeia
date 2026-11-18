@@ -7,10 +7,5 @@ input_file: crates/cassiopeia-pipeline/golden/relationships/synthetic-on-propert
     "id": "urn:ngsi-ld:Asset:A1",
     "type": "Asset",
     "ownerName": "City council"
-  },
-  {
-    "id": "urn:ngsi-ld:Organization:O1",
-    "type": "Organization",
-    "name": "City council"
   }
 ]

@@ -989,6 +989,7 @@ mod tests {
                 identity: { entityName: "Station-{{ id }}" },
                 attributes: {
                     device: {
+                        type: "Relationship",
                         syntheticEntity: {
                             version: "v4",
                             dataModel: "Device",
@@ -1024,6 +1025,7 @@ mod tests {
                 identity: { entityName: "Station-{{ id }}" },
                 attributes: {
                     device: {
+                        type: "Relationship",
                         syntheticEntity: {
                             version: "v4",
                             dataModel: "Device",

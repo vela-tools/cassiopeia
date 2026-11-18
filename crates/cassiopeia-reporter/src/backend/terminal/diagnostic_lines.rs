@@ -94,6 +94,7 @@ fn qualifier(field: &ContextField) -> Option<String> {
         | ContextField::UnitText(_)
         | ContextField::Entities { .. }
         | ContextField::Source(_)
+        | ContextField::MappingDocument(_)
         | ContextField::Attempt { .. }
         | ContextField::PayloadBytes(_)
         | ContextField::BodyEcho(_)
@@ -118,6 +119,7 @@ const fn explanation(field: &ContextField) -> Option<&str> {
         | ContextField::UnitText(_)
         | ContextField::Entities { .. }
         | ContextField::Source(_)
+        | ContextField::MappingDocument(_)
         | ContextField::Attempt { .. }
         | ContextField::PayloadBytes(_)
         | ContextField::BodyEcho(_)
@@ -187,6 +189,7 @@ fn field_row(field: &ContextField) -> (&'static str, String) {
             },
         ),
         ContextField::Source(source) => ("source", source.to_string()),
+        ContextField::MappingDocument(document) => ("mapping", document.display().to_string()),
         ContextField::Attempt { attempt, limit } => ("attempt", format!("{attempt}/{limit}")),
         ContextField::PayloadBytes(bytes) => ("payload", human_size(*bytes)),
         ContextField::BodyEcho(body) => ("body", body_value(body)),
@@ -213,7 +216,14 @@ mod tests {
     use cassiopeia_common::masked_url::MaskedUrl;
     use cassiopeia_csv_column::{column_key::ColumnKey, column_number::ColumnNumber, renamed_column::RenamedColumn};
     use cassiopeia_diagnostic::{
-        code::{broker_code::BrokerCode, diagnostic_code::DiagnosticCode, ingest_code::IngestCode, schema_code::SchemaCode, transform_code::TransformCode},
+        code::{
+            broker_code::BrokerCode,
+            diagnostic_code::DiagnosticCode,
+            ingest_code::IngestCode,
+            mapping_code::MappingCode,
+            schema_code::SchemaCode,
+            transform_code::TransformCode,
+        },
         context_field::ContextField,
         detail::Detail,
         diagnostic::Diagnostic,
@@ -226,6 +236,7 @@ mod tests {
     use http::StatusCode;
     use iri_rs::IriBuf;
     use pretty_assertions::assert_eq;
+    use std::path::PathBuf;
     use url::Url;
 
     const ESCAPE: char = '\u{1b}';
@@ -350,6 +361,23 @@ mod tests {
         assert_eq!(
             diagnostic_lines(&diagnostic, Verbosity::Full, Rendering::Plain)[1],
             "  \u{2570}\u{2500} unit code   ug/m3"
+        );
+    }
+
+    #[test]
+    fn a_mapping_document_is_listed_only_in_the_verbose_form() {
+        let diagnostic = DiagnosticBuilder::new(
+            Severity::Warning,
+            DiagnosticCode::Mapping(MappingCode::V4UnknownKey),
+            "Attribute `temperature` in the mapping document at '/maps/sensors.json5' declares a key that has no effect",
+        )
+        .with_context(ContextField::MappingDocument(PathBuf::from("/maps/sensors.json5")))
+        .build();
+
+        assert_eq!(diagnostic_lines(&diagnostic, Verbosity::Concise, Rendering::Plain).len(), 1);
+        assert_eq!(
+            diagnostic_lines(&diagnostic, Verbosity::Full, Rendering::Plain)[1],
+            "  \u{2570}\u{2500} mapping     /maps/sensors.json5"
         );
     }
 
