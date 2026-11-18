@@ -12,10 +12,11 @@ use cefact_units::UnitCode;
 use chrono::{DateTime, Utc};
 use indexmap::IndexMap;
 use serde::{Deserialize, Serialize, Serializer};
+use typed_builder::TypedBuilder;
 use urn_rs::Urn;
 
 /// An NGSI-LD `Property` attribute (ETSI GS CIM 009 v1.9.1, clause 4.5.2).
-#[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, TypedBuilder)]
 pub struct NgsiLdProperty {
     /// The property's value.
     pub value: Value,
@@ -23,24 +24,31 @@ pub struct NgsiLdProperty {
     ///
     /// Absent, a time value still carries the datatype its [`Value::temporal_type`] names.
     #[serde(rename = "valueType", default, skip_serializing_if = "Option::is_none")]
+    #[builder(default)]
     pub value_type: Option<ValueType>,
     /// When the value was observed, if temporal.
     #[serde(rename = "observedAt", skip_serializing_if = "Option::is_none")]
+    #[builder(default)]
     pub observed_at: Option<DateTime<Utc>>,
     /// When the value ceases to hold (ETSI GS CIM 009 v1.9.1 clause 4.22).
     #[serde(rename = "expiresAt", skip_serializing_if = "Option::is_none")]
+    #[builder(default)]
     pub expires_at: Option<DateTime<Utc>>,
     /// The UN/CEFACT unit code the value is expressed in.
     #[serde(rename = "unitCode", skip_serializing_if = "Option::is_none")]
+    #[builder(default)]
     pub unit_code: Option<UnitCode>,
     /// The dataset this instance belongs to (ETSI GS CIM 009 v1.9.1 clause 4.5.5.1).
     #[serde(rename = "datasetId", skip_serializing_if = "Option::is_none")]
+    #[builder(default)]
     pub dataset_id: Option<DatasetId>,
     /// The broker-assigned instance identifier (NGSI-LD 5.2.5: a URI).
     #[serde(rename = "instanceId", skip_serializing_if = "Option::is_none")]
+    #[builder(default)]
     pub instance_id: Option<Urn>,
     /// Nested sub-attributes.
     #[serde(flatten, skip_serializing_if = "IndexMap::is_empty")]
+    #[builder(default)]
     pub attributes: NestedAttributes,
 }
 
@@ -48,16 +56,7 @@ impl NgsiLdProperty {
     /// Builds a property holding `value`, with no qualifiers.
     #[must_use]
     pub fn new(value: impl Into<Value>) -> NgsiLdProperty {
-        NgsiLdProperty {
-            value: value.into(),
-            value_type: None,
-            observed_at: None,
-            expires_at: None,
-            unit_code: None,
-            dataset_id: None,
-            instance_id: None,
-            attributes: NestedAttributes::default(),
-        }
+        NgsiLdProperty::builder().value(value.into()).build()
     }
 }
 

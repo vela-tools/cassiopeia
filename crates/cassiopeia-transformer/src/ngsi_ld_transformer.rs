@@ -13,7 +13,7 @@ use cassiopeia_ir::{
     entity::{Entity, EntityParts},
     mapped::Mapped,
 };
-use cassiopeia_ngsi_ld::entity::{NgsiLdEntity, builder::NgsiLdEntityBuilder};
+use cassiopeia_ngsi_ld::entity::NgsiLdEntity;
 use rayon::prelude::*;
 
 /// The standard [`Transformer`]: assembles an [`NgsiLdEntity`] from an extracted entity.
@@ -66,13 +66,6 @@ fn transform_entity(mapped: Mapped<Entity>, unit_codes: &mut UnitCodeCache, loss
     // Every carried mapping targets the same id, so their data models agree on the entity type (it
     // is embedded in the URN); the first names it.
     let entity_type = mappings[0].data_model().entity_type().clone();
-    let mut builder = NgsiLdEntityBuilder::new(id, entity_type);
-    if let Some(scope) = scope {
-        builder = builder.scope(scope);
-    }
-    if let Some(expires_at) = expires_at {
-        builder = builder.expires_at(expires_at);
-    }
 
     // One instant memo per entity: a mapping repeats the same `observedAt` and `expiresAt`
     // templates across its attributes, so each distinct text is parsed once per entity instead of
@@ -91,15 +84,19 @@ fn transform_entity(mapped: Mapped<Entity>, unit_codes: &mut UnitCodeCache, loss
 
     // A joined entity carries one mapping per contributing fragment; each mapping's attributes read
     // their own value or objects from the shared maps, building every attribute exactly once.
-    for mapping in &mappings {
-        for (name, config) in mapping.attributes() {
-            if let Some(wrapper) = build_attribute(name, config, &mut store, &mut cache, losses) {
-                builder = builder.attribute(name.clone(), wrapper);
-            }
-        }
-    }
+    let attributes = mappings
+        .iter()
+        .flat_map(|mapping| mapping.attributes())
+        .filter_map(|(name, config)| Some((name.clone(), build_attribute(name, config, &mut store, &mut cache, losses)?)))
+        .collect();
 
-    builder.build()
+    NgsiLdEntity::builder()
+        .id(id)
+        .entity_type(entity_type)
+        .scope(scope)
+        .expires_at(expires_at)
+        .attributes(attributes)
+        .build()
 }
 
 impl Transformer for NgsiLdTransformer {

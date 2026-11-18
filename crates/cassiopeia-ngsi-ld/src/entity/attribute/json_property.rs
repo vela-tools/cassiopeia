@@ -11,27 +11,33 @@ use cassiopeia_common::representation::NgsiLdRepresentation;
 use chrono::{DateTime, Utc};
 use indexmap::IndexMap;
 use serde::{Deserialize, Serialize, Serializer};
+use typed_builder::TypedBuilder;
 
 /// An NGSI-LD `JsonProperty` attribute (ETSI GS CIM 009 v1.9.1, clause 4.5.24).
-#[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, TypedBuilder)]
 pub struct NgsiLdJsonProperty {
     /// The raw JSON object, or array of objects, carried verbatim (clause 4.5.24.2).
     #[serde(rename = "json")]
     pub has_json: JsonPayload,
     /// The datatype the mapping declared for the value (ETSI GS CIM 009 v1.9.1 table 5.2.38-1).
     #[serde(rename = "valueType", default, skip_serializing_if = "Option::is_none")]
+    #[builder(default)]
     pub value_type: Option<ValueType>,
     /// When it was observed.
     #[serde(rename = "observedAt", skip_serializing_if = "Option::is_none")]
+    #[builder(default)]
     pub observed_at: Option<DateTime<Utc>>,
     /// When it ceases to hold (ETSI GS CIM 009 v1.9.1 clause 4.22).
     #[serde(rename = "expiresAt", skip_serializing_if = "Option::is_none")]
+    #[builder(default)]
     pub expires_at: Option<DateTime<Utc>>,
     /// The dataset this instance belongs to (ETSI GS CIM 009 v1.9.1 clause 4.5.5.1).
     #[serde(rename = "datasetId", skip_serializing_if = "Option::is_none")]
+    #[builder(default)]
     pub dataset_id: Option<DatasetId>,
     /// Nested sub-attributes.
     #[serde(flatten, skip_serializing_if = "IndexMap::is_empty")]
+    #[builder(default)]
     pub attributes: NestedAttributes,
 }
 
@@ -39,14 +45,7 @@ impl NgsiLdJsonProperty {
     /// Builds the attribute from its required value, with no qualifiers.
     #[must_use]
     pub fn new(has_json: JsonPayload) -> NgsiLdJsonProperty {
-        NgsiLdJsonProperty {
-            has_json,
-            value_type: None,
-            observed_at: None,
-            expires_at: None,
-            dataset_id: None,
-            attributes: NestedAttributes::default(),
-        }
+        NgsiLdJsonProperty::builder().has_json(has_json).build()
     }
 }
 
@@ -65,7 +64,7 @@ mod tests {
     use crate::{
         entity::{
             NgsiLdEntity,
-            attribute::{NgsiLdAttribute, NgsiLdAttributeWrapper, json_property::NgsiLdJsonProperty},
+            attribute::{Attributes, NgsiLdAttribute, NgsiLdAttributeWrapper, json_property::NgsiLdJsonProperty},
             name::NameBuf,
             representation::NgsiLdSerializable,
         },
@@ -79,11 +78,13 @@ mod tests {
     fn entity_carrying(payload: serde_json::Value) -> NgsiLdEntity {
         let id: Urn = "urn:ngsi-ld:Sensor:1".parse().expect("valid urn");
         let property = NgsiLdJsonProperty::new(JsonPayload::try_from(payload).expect("an object"));
-        NgsiLdEntity::builder(id, NameBuf::new("Sensor").expect("valid name"))
-            .attribute(
+        NgsiLdEntity::builder()
+            .id(id)
+            .entity_type(NameBuf::new("Sensor").expect("valid name"))
+            .attributes(Attributes::from_iter([(
                 NameBuf::new("payload").expect("valid name"),
                 NgsiLdAttributeWrapper::single(NgsiLdAttribute::JsonProperty(property)),
-            )
+            )]))
             .build()
     }
 

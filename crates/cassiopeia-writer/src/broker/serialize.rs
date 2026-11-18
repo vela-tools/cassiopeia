@@ -83,7 +83,7 @@ mod tests {
     use cassiopeia_common::representation::NgsiLdRepresentation;
     use cassiopeia_ngsi_ld::entity::{
         NgsiLdEntity,
-        attribute::{NgsiLdAttribute, NgsiLdAttributeWrapper, list_relationship::NgsiLdListRelationship},
+        attribute::{Attributes, NgsiLdAttribute, NgsiLdAttributeWrapper, list_relationship::NgsiLdListRelationship},
         name::NameBuf,
         representation::NgsiLdSerializable,
     };
@@ -118,14 +118,14 @@ mod tests {
     fn a_normalized_list_relationship_reaches_the_broker_as_the_object_list_a_file_holds() {
         let ctx = context(RequestShape::PerEntity);
         let targets = ["urn:ngsi-ld:Line:U1", "urn:ngsi-ld:Line:U4"].map(|target| target.parse::<Urn>().unwrap());
-        let entities = [
-            NgsiLdEntity::builder("urn:ngsi-ld:Stop:S1".parse::<Urn>().unwrap(), NameBuf::new("Stop").unwrap())
-                .attribute(
-                    NameBuf::new("servedBy").unwrap(),
-                    NgsiLdAttributeWrapper::single(NgsiLdAttribute::ListRelationship(NgsiLdListRelationship::new(targets.into()))),
-                )
-                .build(),
-        ];
+        let entities = [NgsiLdEntity::builder()
+            .id("urn:ngsi-ld:Stop:S1".parse::<Urn>().unwrap())
+            .entity_type(NameBuf::new("Stop").unwrap())
+            .attributes(Attributes::from_iter([(
+                NameBuf::new("servedBy").unwrap(),
+                NgsiLdAttributeWrapper::single(NgsiLdAttribute::ListRelationship(NgsiLdListRelationship::new(targets.into()))),
+            )]))
+            .build()];
         let mut scratch = Vec::new();
 
         let payload = serialize_batch(&ctx, &entities, &mut scratch).unwrap();

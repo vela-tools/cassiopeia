@@ -1964,6 +1964,33 @@ fn attributes_are_reachable_and_removable_by_a_plain_string_key() {
     assert!(attributes.get("observedAt").is_none());
 }
 
+#[test]
+fn an_entity_built_from_its_id_and_type_alone_has_no_optional_member_and_no_attribute() {
+    let entity = NgsiLdEntity::builder()
+        .id("urn:ngsi-ld:Sensor:1".parse::<Urn>().unwrap())
+        .entity_type(NameBuf::new("Sensor").unwrap())
+        .build();
+
+    assert_eq!(entity.entity_type.as_str(), "Sensor");
+    assert!(entity.context.is_none());
+    assert!(entity.scope.is_none());
+    assert_eq!(entity.expires_at, None);
+    assert!(entity.attributes.is_empty());
+}
+
+#[test]
+fn the_entity_builder_carries_a_set_expiry() {
+    let expires_at = Utc.with_ymd_and_hms(2026, 10, 25, 13, 0, 0).unwrap();
+
+    let entity = NgsiLdEntity::builder()
+        .id("urn:ngsi-ld:Sensor:1".parse::<Urn>().unwrap())
+        .entity_type(NameBuf::new("Sensor").unwrap())
+        .expires_at(Some(expires_at))
+        .build();
+
+    assert_eq!(entity.expires_at, Some(expires_at));
+}
+
 /// A `Sensor` carrying a `scope`, an entity `expiresAt`, and one `temperature` attribute.
 fn scoped_expiring_entity() -> NgsiLdEntity {
     let mut attributes = Attributes::default();
