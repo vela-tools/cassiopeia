@@ -1,6 +1,6 @@
 use crate::{
-    attribute_builder::{build_list_relationship, build_relationship},
-    metadata::{MetadataSummary, transform_metadata},
+    attribute_builder::{build_list_relationship, build_relationship, list_relationship_instance, relationship_instance},
+    metadata::transform_metadata,
     qualifier_cache::QualifierCache,
     qualifier_losses::QualifierLosses,
 };
@@ -10,11 +10,9 @@ use cassiopeia_ir::{
 };
 use cassiopeia_mapping::attribute::Attribute;
 use cassiopeia_ngsi_ld::entity::{
-    attribute::{NgsiLdAttribute, NgsiLdAttributeWrapper, list_relationship::NgsiLdListRelationship},
-    builder::attribute::RelationshipBuilder,
+    attribute::{NgsiLdAttribute, NgsiLdAttributeWrapper},
     name::NameBuf,
 };
-use urn_rs::Urn;
 
 /// The entity type a relationship's target points at, when the declaration names one.
 fn object_type(config: &Attribute) -> Option<NameBuf> {
@@ -64,28 +62,6 @@ pub(crate) fn build_list_relationship_attribute(
     Some(build_list_relationship(objects, object_type(config), meta))
 }
 
-/// Builds one `Relationship` instance of a multi-attribute Relationship from its object and the
-/// metadata recorded for its instance.
-fn build_relationship_instance(object: Urn, object_type: Option<&NameBuf>, meta: MetadataSummary) -> NgsiLdAttribute {
-    let mut builder = RelationshipBuilder::new(object);
-    if let Some(object_type) = object_type {
-        builder = builder.object_type(object_type.clone());
-    }
-    if let Some(observed_at) = meta.observed_at {
-        builder = builder.observed_at(observed_at);
-    }
-    if let Some(expires_at) = meta.expires_at {
-        builder = builder.expires_at(expires_at);
-    }
-    if let Some(dataset_id) = meta.dataset_id {
-        builder = builder.dataset_id(dataset_id);
-    }
-    for (name, wrapper) in meta.custom_attributes {
-        builder = builder.attribute(name, *wrapper);
-    }
-    NgsiLdAttribute::Relationship(builder.build())
-}
-
 /// Builds a multi-attribute Relationship: one `Relationship` instance per `datasetId`, each with its
 /// own object (ETSI GS CIM 009 v1.9.1 clause 4.5.5).
 ///
@@ -110,7 +86,8 @@ pub(crate) fn build_multi_instance_relationship(
         .filter_map(|(index, objects)| {
             let object = objects.into_iter().next()?;
             let meta = transform_metadata(metadata, name, Some(usize::from(index)), cache, losses)?;
-            Some(build_relationship_instance(object, object_type.as_ref(), meta))
+            // The declaration names one object type for every instance, so each takes its own copy.
+            Some(relationship_instance(object, object_type.clone(), meta))
         })
         .collect::<Vec<NgsiLdAttribute>>();
 
@@ -144,16 +121,8 @@ pub(crate) fn build_multi_instance_list_relationship(
         .filter(|(_, object_list)| !object_list.is_empty())
         .filter_map(|(index, object_list)| {
             let meta = transform_metadata(metadata, name, Some(usize::from(index)), cache, losses)?;
-            // The shared object type is cloned per instance; a struct literal keeps this an
-            // initialization rather than a re-assignment over the `None` the constructor would set.
-            Some(NgsiLdAttribute::ListRelationship(NgsiLdListRelationship {
-                object_list,
-                object_type: object_type.clone(),
-                observed_at: meta.observed_at,
-                expires_at: meta.expires_at,
-                dataset_id: meta.dataset_id,
-                attributes: meta.custom_attributes,
-            }))
+            // The declaration names one object type for every instance, so each takes its own copy.
+            Some(list_relationship_instance(object_list, object_type.clone(), meta))
         })
         .collect::<Vec<NgsiLdAttribute>>();
 

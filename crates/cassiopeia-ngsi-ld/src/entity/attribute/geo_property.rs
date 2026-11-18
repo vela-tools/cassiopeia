@@ -7,42 +7,41 @@ use cassiopeia_common::representation::NgsiLdRepresentation;
 use cassiopeia_geometry::geometry::NgsiLdGeometry;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize, Serializer};
+use typed_builder::TypedBuilder;
 use urn_rs::Urn;
 
 /// An NGSI-LD `GeoProperty` attribute (ETSI GS CIM 009 v1.9.1, clause 4.7).
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, TypedBuilder)]
 pub struct NgsiLdGeoProperty {
     /// The geometry, restricted to the six types clause 4.7 admits.
     pub value: NgsiLdGeometry,
     /// The datatype the mapping declared for the value (ETSI GS CIM 009 v1.9.1 table 5.2.7-1).
     #[serde(rename = "valueType", default, skip_serializing_if = "Option::is_none")]
+    #[builder(default)]
     pub value_type: Option<ValueType>,
     /// When the geometry was observed.
     #[serde(rename = "observedAt", skip_serializing_if = "Option::is_none")]
+    #[builder(default)]
     pub observed_at: Option<DateTime<Utc>>,
     /// When the geometry ceases to hold (ETSI GS CIM 009 v1.9.1 clause 4.22).
     #[serde(rename = "expiresAt", skip_serializing_if = "Option::is_none")]
+    #[builder(default)]
     pub expires_at: Option<DateTime<Utc>>,
     /// The dataset this instance belongs to (ETSI GS CIM 009 v1.9.1 clause 4.5.5.1).
     #[serde(rename = "datasetId", skip_serializing_if = "Option::is_none")]
+    #[builder(default)]
     pub dataset_id: Option<DatasetId>,
     /// The broker-assigned instance identifier (a URI).
     #[serde(rename = "instanceId", skip_serializing_if = "Option::is_none")]
+    #[builder(default)]
     pub instance_id: Option<Urn>,
 }
 
 impl NgsiLdGeoProperty {
     /// Builds a geo property carrying `geometry` with no qualifiers.
     #[must_use]
-    pub const fn new(geometry: NgsiLdGeometry) -> NgsiLdGeoProperty {
-        NgsiLdGeoProperty {
-            value: geometry,
-            value_type: None,
-            observed_at: None,
-            expires_at: None,
-            dataset_id: None,
-            instance_id: None,
-        }
+    pub fn new(geometry: NgsiLdGeometry) -> NgsiLdGeoProperty {
+        NgsiLdGeoProperty::builder().value(geometry).build()
     }
 }
 

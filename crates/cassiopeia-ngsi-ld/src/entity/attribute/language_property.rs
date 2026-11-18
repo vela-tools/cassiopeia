@@ -10,6 +10,7 @@ use foldhash::fast::RandomState;
 use indexmap::IndexMap;
 use langtag::LangTagBuf;
 use serde::{Deserialize, Serialize, Serializer};
+use typed_builder::TypedBuilder;
 
 /// A `languageMap`: localized text keyed by BCP-47 language tag (ETSI GS CIM 009 v1.9.1 clause
 /// 4.5.18).
@@ -19,7 +20,7 @@ use serde::{Deserialize, Serialize, Serializer};
 pub type LanguageMap = IndexMap<LangTagBuf, String, RandomState>;
 
 /// An NGSI-LD `LanguageProperty` attribute (ETSI GS CIM 009 v1.9.1, clause 4.5.18).
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, TypedBuilder)]
 pub struct NgsiLdLanguageProperty {
     /// A map of BCP-47 language tag to localized text.
     #[serde(rename = "languageMap")]
@@ -27,18 +28,23 @@ pub struct NgsiLdLanguageProperty {
     /// The datatype of the `languageMap`, which can only be `langString` (ETSI GS CIM 009 v1.9.1
     /// table 5.2.32-1), written as the mapping declared it.
     #[serde(rename = "valueType", default, skip_serializing_if = "Option::is_none")]
+    #[builder(default)]
     pub value_type: Option<ValueType>,
     /// When it was observed.
     #[serde(rename = "observedAt", skip_serializing_if = "Option::is_none")]
+    #[builder(default)]
     pub observed_at: Option<DateTime<Utc>>,
     /// When it ceases to hold (ETSI GS CIM 009 v1.9.1 clause 4.22).
     #[serde(rename = "expiresAt", skip_serializing_if = "Option::is_none")]
+    #[builder(default)]
     pub expires_at: Option<DateTime<Utc>>,
     /// The dataset this instance belongs to (ETSI GS CIM 009 v1.9.1 clause 4.5.5.1).
     #[serde(rename = "datasetId", skip_serializing_if = "Option::is_none")]
+    #[builder(default)]
     pub dataset_id: Option<DatasetId>,
     /// Nested sub-attributes.
     #[serde(flatten, skip_serializing_if = "IndexMap::is_empty")]
+    #[builder(default)]
     pub attributes: NestedAttributes,
 }
 
@@ -46,14 +52,7 @@ impl NgsiLdLanguageProperty {
     /// Builds a language property from a map of BCP-47 language tags to text.
     #[must_use]
     pub fn new(language_map: LanguageMap) -> NgsiLdLanguageProperty {
-        NgsiLdLanguageProperty {
-            language_map,
-            value_type: None,
-            observed_at: None,
-            expires_at: None,
-            dataset_id: None,
-            attributes: NestedAttributes::default(),
-        }
+        NgsiLdLanguageProperty::builder().language_map(language_map).build()
     }
 }
 

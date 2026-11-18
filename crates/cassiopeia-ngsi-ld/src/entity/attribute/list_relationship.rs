@@ -8,6 +8,7 @@ use cassiopeia_common::representation::NgsiLdRepresentation;
 use chrono::{DateTime, Utc};
 use indexmap::IndexMap;
 use serde::{Deserialize, Serialize, Serializer};
+use typed_builder::TypedBuilder;
 use urn_rs::Urn;
 
 /// An NGSI-LD `ListRelationship` attribute (ETSI GS CIM 009 v1.9.1, clause 4.5.22).
@@ -16,27 +17,32 @@ use urn_rs::Urn;
 /// 009 v1.9.1 clause 4.5.2.2): a Property or Relationship qualifying the list as a whole. The
 /// `attributes` map holds them, flattened into the same JSON object as the list's own members. Its
 /// `Eq` derive is dropped because a sub-attribute's value is not `Eq`; `PartialEq` is kept.
-#[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, TypedBuilder)]
 pub struct NgsiLdListRelationship {
     /// The URNs of the target entities.
     #[serde(rename = "objectList")]
     pub object_list: Vec<Urn>,
     /// The type name of the target entities.
     #[serde(rename = "objectType", skip_serializing_if = "Option::is_none")]
+    #[builder(default)]
     pub object_type: Option<NameBuf>,
     /// When it was observed.
     #[serde(rename = "observedAt", skip_serializing_if = "Option::is_none")]
+    #[builder(default)]
     pub observed_at: Option<DateTime<Utc>>,
     /// When it ceases to hold (ETSI GS CIM 009 v1.9.1 clause 4.22).
     #[serde(rename = "expiresAt", skip_serializing_if = "Option::is_none")]
+    #[builder(default)]
     pub expires_at: Option<DateTime<Utc>>,
     /// The dataset this instance belongs to (ETSI GS CIM 009 v1.9.1 clause 4.5.5.1), set when one
     /// attribute name carries several `ListRelationship` instances (clause 4.5.5), or when the
     /// mapping names one for the single instance.
     #[serde(rename = "datasetId", skip_serializing_if = "Option::is_none")]
+    #[builder(default)]
     pub dataset_id: Option<DatasetId>,
     /// Nested sub-attributes qualifying the list (ETSI GS CIM 009 v1.9.1 clause 4.5.2.2).
     #[serde(flatten, skip_serializing_if = "IndexMap::is_empty")]
+    #[builder(default)]
     pub attributes: NestedAttributes,
 }
 
@@ -44,14 +50,7 @@ impl NgsiLdListRelationship {
     /// Builds the attribute from its required value, with no qualifiers.
     #[must_use]
     pub fn new(object_list: Vec<Urn>) -> NgsiLdListRelationship {
-        NgsiLdListRelationship {
-            object_list,
-            object_type: None,
-            observed_at: None,
-            expires_at: None,
-            dataset_id: None,
-            attributes: NestedAttributes::default(),
-        }
+        NgsiLdListRelationship::builder().object_list(object_list).build()
     }
 }
 

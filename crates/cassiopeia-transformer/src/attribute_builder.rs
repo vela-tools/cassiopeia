@@ -12,9 +12,10 @@ use cassiopeia_ngsi_ld::{
             language_property::{LanguageMap, NgsiLdLanguageProperty},
             list_property::NgsiLdListProperty,
             list_relationship::NgsiLdListRelationship,
+            property::NgsiLdProperty,
+            relationship::NgsiLdRelationship,
             vocab_property::NgsiLdVocabProperty,
         },
-        builder::attribute::{IntoAttributeWrapper, PropertyBuilder, RelationshipBuilder},
         name::NameBuf,
     },
     value::{json_payload::JsonPayload, types::Value},
@@ -25,50 +26,40 @@ use urn_rs::Urn;
 /// Builds a Property carrying the value and every qualifier its metadata declared.
 #[must_use]
 pub fn build_property(value: Value, meta: MetadataSummary) -> NgsiLdAttributeWrapper {
-    let mut builder = PropertyBuilder::new(value);
-    if let Some(value_type) = meta.value_type {
-        builder = builder.value_type(value_type);
-    }
-    if let Some(observed_at) = meta.observed_at {
-        builder = builder.observed_at(observed_at);
-    }
-    if let Some(expires_at) = meta.expires_at {
-        builder = builder.expires_at(expires_at);
-    }
-    if let Some(unit_code) = meta.unit_code {
-        builder = builder.unit_code(unit_code);
-    }
-    if let Some(dataset_id) = meta.dataset_id {
-        builder = builder.dataset_id(dataset_id);
-    }
-    for (name, wrapper) in meta.custom_attributes {
-        builder = builder.attribute(name, *wrapper);
-    }
+    let property = NgsiLdProperty::builder()
+        .value(value)
+        .value_type(meta.value_type)
+        .observed_at(meta.observed_at)
+        .expires_at(meta.expires_at)
+        .unit_code(meta.unit_code)
+        .dataset_id(meta.dataset_id)
+        .attributes(meta.custom_attributes)
+        .build();
 
-    builder.build().into_wrapper()
+    NgsiLdAttributeWrapper::single(NgsiLdAttribute::Property(property))
 }
 
 /// Builds a Relationship pointing at one object URN.
 #[must_use]
 pub fn build_relationship(object: Urn, object_type: Option<NameBuf>, meta: MetadataSummary) -> NgsiLdAttributeWrapper {
-    let mut builder = RelationshipBuilder::new(object);
-    if let Some(object_type) = object_type {
-        builder = builder.object_type(object_type);
-    }
-    if let Some(observed_at) = meta.observed_at {
-        builder = builder.observed_at(observed_at);
-    }
-    if let Some(expires_at) = meta.expires_at {
-        builder = builder.expires_at(expires_at);
-    }
-    if let Some(dataset_id) = meta.dataset_id {
-        builder = builder.dataset_id(dataset_id);
-    }
-    for (name, wrapper) in meta.custom_attributes {
-        builder = builder.attribute(name, *wrapper);
-    }
+    NgsiLdAttributeWrapper::single(relationship_instance(object, object_type, meta))
+}
 
-    builder.build().into_wrapper()
+/// One Relationship instance pointing at one object URN, carrying every qualifier its metadata
+/// declared: the single instance of a plain Relationship, or one instance of a multi-attribute
+/// (ETSI GS CIM 009 v1.9.1 clause 4.5.5).
+#[must_use]
+pub(crate) fn relationship_instance(object: Urn, object_type: Option<NameBuf>, meta: MetadataSummary) -> NgsiLdAttribute {
+    NgsiLdAttribute::Relationship(
+        NgsiLdRelationship::builder()
+            .object(object)
+            .object_type(object_type)
+            .observed_at(meta.observed_at)
+            .expires_at(meta.expires_at)
+            .dataset_id(meta.dataset_id)
+            .attributes(meta.custom_attributes)
+            .build(),
+    )
 }
 
 /// Builds a `GeoProperty` around one of the six geometry types ETSI GS CIM 009 v1.9.1 clause 4.7
@@ -83,13 +74,15 @@ pub fn build_relationship(object: Urn, object_type: Option<NameBuf>, meta: Metad
 /// built around something that is not one.
 #[must_use]
 pub fn build_geo_property(geometry: NgsiLdGeometry, meta: MetadataSummary) -> NgsiLdAttributeWrapper {
-    let mut geo = NgsiLdGeoProperty::new(geometry);
-    geo.value_type = meta.value_type;
-    geo.observed_at = meta.observed_at;
-    geo.expires_at = meta.expires_at;
-    geo.dataset_id = meta.dataset_id;
+    let geo = NgsiLdGeoProperty::builder()
+        .value(geometry)
+        .value_type(meta.value_type)
+        .observed_at(meta.observed_at)
+        .expires_at(meta.expires_at)
+        .dataset_id(meta.dataset_id)
+        .build();
 
-    geo.into_wrapper()
+    NgsiLdAttributeWrapper::single(NgsiLdAttribute::GeoProperty(geo))
 }
 
 /// Builds a `LanguageProperty` around the `languageMap` extraction typed (ETSI GS CIM 009 v1.9.1
@@ -99,12 +92,14 @@ pub fn build_geo_property(geometry: NgsiLdGeometry, meta: MetadataSummary) -> Ng
 /// is taken exactly as it is.
 #[must_use]
 pub fn build_language_property(language_map: LanguageMap, meta: MetadataSummary) -> NgsiLdAttributeWrapper {
-    let mut property = NgsiLdLanguageProperty::new(language_map);
-    property.value_type = meta.value_type;
-    property.observed_at = meta.observed_at;
-    property.expires_at = meta.expires_at;
-    property.dataset_id = meta.dataset_id;
-    property.attributes = meta.custom_attributes;
+    let property = NgsiLdLanguageProperty::builder()
+        .language_map(language_map)
+        .value_type(meta.value_type)
+        .observed_at(meta.observed_at)
+        .expires_at(meta.expires_at)
+        .dataset_id(meta.dataset_id)
+        .attributes(meta.custom_attributes)
+        .build();
 
     NgsiLdAttributeWrapper::single(NgsiLdAttribute::LanguageProperty(property))
 }
@@ -115,12 +110,14 @@ pub fn build_language_property(language_map: LanguageMap, meta: MetadataSummary)
 /// Extraction refuses, and records, a value that is no IRI, so the IRI is taken exactly as it is.
 #[must_use]
 pub fn build_vocab_property(has_vocab: IriBuf, meta: MetadataSummary) -> NgsiLdAttributeWrapper {
-    let mut property = NgsiLdVocabProperty::new(has_vocab);
-    property.value_type = meta.value_type;
-    property.observed_at = meta.observed_at;
-    property.expires_at = meta.expires_at;
-    property.dataset_id = meta.dataset_id;
-    property.attributes = meta.custom_attributes;
+    let property = NgsiLdVocabProperty::builder()
+        .has_vocab(has_vocab)
+        .value_type(meta.value_type)
+        .observed_at(meta.observed_at)
+        .expires_at(meta.expires_at)
+        .dataset_id(meta.dataset_id)
+        .attributes(meta.custom_attributes)
+        .build();
 
     NgsiLdAttributeWrapper::single(NgsiLdAttribute::VocabProperty(property))
 }
@@ -134,12 +131,14 @@ pub fn build_list_property(value: Value, meta: MetadataSummary) -> NgsiLdAttribu
         Value::Boolean(_) | Value::Number(_) | Value::String(_) | Value::Temporal(_) | Value::Geospatial(_) | Value::Object(_) => vec![value],
     };
 
-    let mut property = NgsiLdListProperty::new(has_value_list);
-    property.value_type = meta.value_type;
-    property.observed_at = meta.observed_at;
-    property.expires_at = meta.expires_at;
-    property.dataset_id = meta.dataset_id;
-    property.attributes = meta.custom_attributes;
+    let property = NgsiLdListProperty::builder()
+        .has_value_list(has_value_list)
+        .value_type(meta.value_type)
+        .observed_at(meta.observed_at)
+        .expires_at(meta.expires_at)
+        .dataset_id(meta.dataset_id)
+        .attributes(meta.custom_attributes)
+        .build();
 
     NgsiLdAttributeWrapper::single(NgsiLdAttribute::ListProperty(property))
 }
@@ -147,12 +146,14 @@ pub fn build_list_property(value: Value, meta: MetadataSummary) -> NgsiLdAttribu
 /// Builds a `JsonProperty` carrying its raw JSON verbatim.
 #[must_use]
 pub fn build_json_property(payload: JsonPayload, meta: MetadataSummary) -> NgsiLdAttributeWrapper {
-    let mut property = NgsiLdJsonProperty::new(payload);
-    property.value_type = meta.value_type;
-    property.observed_at = meta.observed_at;
-    property.expires_at = meta.expires_at;
-    property.dataset_id = meta.dataset_id;
-    property.attributes = meta.custom_attributes;
+    let property = NgsiLdJsonProperty::builder()
+        .has_json(payload)
+        .value_type(meta.value_type)
+        .observed_at(meta.observed_at)
+        .expires_at(meta.expires_at)
+        .dataset_id(meta.dataset_id)
+        .attributes(meta.custom_attributes)
+        .build();
 
     NgsiLdAttributeWrapper::single(NgsiLdAttribute::JsonProperty(property))
 }
@@ -161,14 +162,24 @@ pub fn build_json_property(payload: JsonPayload, meta: MetadataSummary) -> NgsiL
 /// sub-attributes qualifying the list as a whole (ETSI GS CIM 009 v1.9.1 clause 4.5.2.2).
 #[must_use]
 pub fn build_list_relationship(objects: Vec<Urn>, object_type: Option<NameBuf>, meta: MetadataSummary) -> NgsiLdAttributeWrapper {
-    let mut relationship = NgsiLdListRelationship::new(objects);
-    relationship.object_type = object_type;
-    relationship.observed_at = meta.observed_at;
-    relationship.expires_at = meta.expires_at;
-    relationship.dataset_id = meta.dataset_id;
-    relationship.attributes = meta.custom_attributes;
+    NgsiLdAttributeWrapper::single(list_relationship_instance(objects, object_type, meta))
+}
 
-    NgsiLdAttributeWrapper::single(NgsiLdAttribute::ListRelationship(relationship))
+/// One `ListRelationship` instance pointing at every object URN, carrying every qualifier its
+/// metadata declared: the single instance of a plain `ListRelationship`, or one instance of a
+/// multi-attribute (ETSI GS CIM 009 v1.9.1 clause 4.5.5, EXAMPLE 19).
+#[must_use]
+pub(crate) fn list_relationship_instance(objects: Vec<Urn>, object_type: Option<NameBuf>, meta: MetadataSummary) -> NgsiLdAttribute {
+    NgsiLdAttribute::ListRelationship(
+        NgsiLdListRelationship::builder()
+            .object_list(objects)
+            .object_type(object_type)
+            .observed_at(meta.observed_at)
+            .expires_at(meta.expires_at)
+            .dataset_id(meta.dataset_id)
+            .attributes(meta.custom_attributes)
+            .build(),
+    )
 }
 
 /// Builds one sub-attribute from the NGSI-LD kind it was declared as, its content, its target type

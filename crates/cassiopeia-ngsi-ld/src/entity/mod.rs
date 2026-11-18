@@ -1,6 +1,5 @@
 pub mod attribute;
 pub mod attribute_path;
-pub mod builder;
 pub mod context;
 pub mod context_document_error;
 pub mod dataset_id;
@@ -27,13 +26,18 @@ use cassiopeia_common::representation::NgsiLdRepresentation;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize, Serializer, ser::SerializeMap};
 use serde_json::Value as JsonValue;
+use typed_builder::TypedBuilder;
 use urn_rs::Urn;
 
 /// A single NGSI-LD entity (ETSI GS CIM 009 v1.9.1, clause 4.5.1).
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+///
+/// Construction is infallible: the id ([`Urn`]) and type ([`NameBuf`]) are validated by their own
+/// types, and entity-wide structural validation is provided separately by the validation module.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, TypedBuilder)]
 pub struct NgsiLdEntity {
     /// The JSON-LD `@context`, when one is attached.
     #[serde(rename = "@context", skip_serializing_if = "Option::is_none")]
+    #[builder(default)]
     pub context: Option<NgsiLdContext>,
     /// The entity identifier (a URN).
     pub id: Urn,
@@ -45,6 +49,7 @@ pub struct NgsiLdEntity {
     /// Written by [`SerializeRepr`] rather than the derived serializer, which skips it, and only in
     /// the normalized and concise representations (clause 4.5.4).
     #[serde(skip)]
+    #[builder(default)]
     pub scope: Option<NgsiLdScope>,
     /// The instant after which the entity ceases to hold (ETSI GS CIM 009 v1.9.1 clause 4.22), an
     /// optional member of the entity (clause 4.5.1), absent when no mapping resolved one.
@@ -52,9 +57,11 @@ pub struct NgsiLdEntity {
     /// Written by [`SerializeRepr`] rather than the derived serializer, which skips it, and only in
     /// the normalized and concise representations (clause 4.5.4).
     #[serde(skip)]
+    #[builder(default)]
     pub expires_at: Option<DateTime<Utc>>,
     /// The entity's attributes, flattened into the top-level object on serialization.
     #[serde(flatten)]
+    #[builder(default)]
     pub attributes: Attributes,
 }
 
@@ -62,14 +69,7 @@ impl NgsiLdEntity {
     /// Builds an entity with the given id and type and no attributes.
     #[must_use]
     pub fn new(id: Urn, entity_type: NameBuf) -> NgsiLdEntity {
-        NgsiLdEntity {
-            context: None,
-            id,
-            entity_type,
-            scope: None,
-            expires_at: None,
-            attributes: Attributes::default(),
-        }
+        NgsiLdEntity::builder().id(id).entity_type(entity_type).build()
     }
 }
 

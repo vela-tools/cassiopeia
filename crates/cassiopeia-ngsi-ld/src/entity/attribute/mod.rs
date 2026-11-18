@@ -135,7 +135,7 @@ mod tests {
     use crate::{
         entity::{
             NgsiLdEntity,
-            attribute::{NgsiLdAttribute, NgsiLdAttributeWrapper, property::NgsiLdProperty},
+            attribute::{Attributes, NgsiLdAttribute, NgsiLdAttributeWrapper, property::NgsiLdProperty},
             name::NameBuf,
             representation::NgsiLdSerializable,
         },
@@ -153,8 +153,10 @@ mod tests {
 
     fn entity_with(name: &str, wrapper: NgsiLdAttributeWrapper) -> NgsiLdEntity {
         let id: Urn = "urn:ngsi-ld:Sensor:1".parse().expect("valid urn");
-        NgsiLdEntity::builder(id, NameBuf::new("Sensor").expect("valid name"))
-            .attribute(NameBuf::new(name).expect("valid name"), wrapper)
+        NgsiLdEntity::builder()
+            .id(id)
+            .entity_type(NameBuf::new("Sensor").expect("valid name"))
+            .attributes(Attributes::from_iter([(NameBuf::new(name).expect("valid name"), wrapper)]))
             .build()
     }
 
