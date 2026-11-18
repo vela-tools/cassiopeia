@@ -1,0 +1,27 @@
+// Two inputs read through one mapping each give one stop's relationships targets. The targets follow
+// the order of the inputs in the manifest, then of the records in each: the `Relationship` keeps the
+// first input's first target, and the `ListRelationship` lists the first input's targets first, a
+// target the second input repeats staying at its first place.
+{
+    version: "v4",
+    dataModel: "Stop",
+    identity: {
+        entityName: "{{ code }}",
+    },
+    attributes: {
+        operator: {
+            type: "Relationship",
+            source: "{{ operator }}",
+            target: {
+                entity: "Organization",
+            },
+        },
+        servedBy: {
+            type: "ListRelationship",
+            source: "{{ lines }}",
+            target: {
+                entity: "Line",
+            },
+        },
+    },
+}

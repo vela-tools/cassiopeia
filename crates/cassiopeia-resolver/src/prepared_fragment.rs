@@ -6,6 +6,7 @@ use crate::{
     error::Result,
     fragment_resolver::FragmentResolver,
     mapping_id::MappingId,
+    relationship_store::relationship_edge::{FragmentEdges, RelationshipEdge},
 };
 use cassiopeia_ir::{
     fragment::{Fragment, FragmentParts},
@@ -43,8 +44,8 @@ pub(crate) struct PreparedFragment {
     /// ranked. It is read as what the record ranks by only when the fragment is written, since a
     /// failure is kept against the mapping in the order the writes happen.
     pub(crate) observed: Option<RenderedObservations>,
-    /// The parent-child edges the fragment records.
-    pub(crate) edges: Vec<(Urn, String, Urn)>,
+    /// The parent-child edges the fragment records, in the order its record names their targets.
+    pub(crate) edges: Vec<RelationshipEdge>,
 }
 
 impl FragmentResolver {
@@ -73,7 +74,7 @@ impl FragmentResolver {
             parent_context,
             variables: _,
         } = fragment.into_parts();
-        let edges = self.build_edges(&base_id, parent_context.as_ref(), temporal);
+        let edges = self.build_edges(&base_id, parent_context.as_ref(), temporal, position);
 
         PreparedFragment {
             base_id,
@@ -88,8 +89,8 @@ impl FragmentResolver {
         }
     }
 
-    /// Writes one prepared fragment's relationship edges, then the fragment itself, each straight to
-    /// its store, as part of `batch`.
+    /// Writes one prepared fragment's relationship edges, at its position, then the fragment itself,
+    /// each straight to its store, as part of `batch`.
     ///
     /// # Errors
     ///
@@ -106,8 +107,8 @@ impl FragmentResolver {
             observed,
             edges,
         } = prepared;
-        for (parent, property, child) in &edges {
-            self.relationship_store.add_child(parent, property, child)?;
+        if !edges.is_empty() {
+            self.relationship_store.add_edges(FragmentEdges { position, edges: &edges })?;
         }
         let ranking = self.record_ranking(mapping_id, mapping.observation_plan(), observed);
         self.entity_store.store_fragment(FragmentWrite {

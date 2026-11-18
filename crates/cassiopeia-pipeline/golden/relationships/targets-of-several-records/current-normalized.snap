@@ -1,0 +1,139 @@
+---
+source: crates/cassiopeia-pipeline/src/end_to_end/golden/mod.rs
+input_file: crates/cassiopeia-pipeline/golden/relationships/targets-of-several-records/manifest.json5
+---
+[
+  {
+    "id": "urn:ngsi-ld:Route:R1",
+    "type": "Route",
+    "operator": {
+      "type": "Relationship",
+      "object": "urn:ngsi-ld:Organization:O2",
+      "objectType": "Organization"
+    },
+    "servedBy": {
+      "type": "ListRelationship",
+      "objectList": [
+        {
+          "object": "urn:ngsi-ld:Line:U3"
+        },
+        {
+          "object": "urn:ngsi-ld:Line:U1"
+        },
+        {
+          "object": "urn:ngsi-ld:Line:U2"
+        },
+        {
+          "object": "urn:ngsi-ld:Line:U4"
+        }
+      ],
+      "objectType": "Line"
+    },
+    "status": {
+      "type": "Property",
+      "value": "active",
+      "reportedBy": {
+        "type": "ListRelationship",
+        "objectList": [
+          {
+            "object": "urn:ngsi-ld:Device:D2"
+          },
+          {
+            "object": "urn:ngsi-ld:Device:D1"
+          },
+          {
+            "object": "urn:ngsi-ld:Device:D3"
+          }
+        ],
+        "objectType": "Device"
+      }
+    },
+    "servesAirports": [
+      {
+        "type": "ListRelationship",
+        "objectList": [
+          {
+            "object": "urn:ngsi-ld:Airport:A3"
+          },
+          {
+            "object": "urn:ngsi-ld:Airport:A1"
+          },
+          {
+            "object": "urn:ngsi-ld:Airport:A2"
+          }
+        ],
+        "objectType": "Airport",
+        "datasetId": "urn:ngsi-ld:dataset:primary"
+      },
+      {
+        "type": "ListRelationship",
+        "objectList": [
+          {
+            "object": "urn:ngsi-ld:Airport:A9"
+          },
+          {
+            "object": "urn:ngsi-ld:Airport:A8"
+          },
+          {
+            "object": "urn:ngsi-ld:Airport:A7"
+          }
+        ],
+        "objectType": "Airport",
+        "datasetId": "urn:ngsi-ld:dataset:backup"
+      }
+    ]
+  },
+  {
+    "id": "urn:ngsi-ld:Route:R2",
+    "type": "Route",
+    "operator": {
+      "type": "Relationship",
+      "object": "urn:ngsi-ld:Organization:O5",
+      "objectType": "Organization"
+    },
+    "servedBy": {
+      "type": "ListRelationship",
+      "objectList": [
+        {
+          "object": "urn:ngsi-ld:Line:U5"
+        }
+      ],
+      "objectType": "Line"
+    },
+    "status": {
+      "type": "Property",
+      "value": "active",
+      "reportedBy": {
+        "type": "ListRelationship",
+        "objectList": [
+          {
+            "object": "urn:ngsi-ld:Device:D5"
+          }
+        ],
+        "objectType": "Device"
+      }
+    },
+    "servesAirports": [
+      {
+        "type": "ListRelationship",
+        "objectList": [
+          {
+            "object": "urn:ngsi-ld:Airport:A5"
+          }
+        ],
+        "objectType": "Airport",
+        "datasetId": "urn:ngsi-ld:dataset:primary"
+      },
+      {
+        "type": "ListRelationship",
+        "objectList": [
+          {
+            "object": "urn:ngsi-ld:Airport:A6"
+          }
+        ],
+        "objectType": "Airport",
+        "datasetId": "urn:ngsi-ld:dataset:backup"
+      }
+    ]
+  }
+]

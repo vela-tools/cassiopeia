@@ -1,0 +1,17 @@
+---
+source: crates/cassiopeia-pipeline/src/end_to_end/golden/mod.rs
+input_file: crates/cassiopeia-pipeline/golden/relationships/targets-over-two-inputs/manifest.json5
+---
+{
+  "diagnostics": [
+    {
+      "code": "resolver-records-merged",
+      "occurrences": 1,
+      "message": [
+        "! 4 records resolved to `urn:ngsi-ld:Stop:S1` and disagreed on `lines`; one value of each disagreeing field was kept and the others were discarded",
+        "  ├─ entity type Stop",
+        "  ╰─ entities    urn:ngsi-ld:Stop:S1"
+      ]
+    }
+  ]
+}

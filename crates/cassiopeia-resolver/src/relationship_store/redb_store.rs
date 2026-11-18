@@ -1,26 +1,23 @@
 use crate::{
     relationship_store::{
         error::{RelationshipStoreError, Result},
-        store::{RelationshipStore, StoredRelationships},
+        relationship_edge::FragmentEdges,
+        store::{RelationshipStore, StoredRelationships, join},
     },
     store_action::StoreAction,
     store_write_strategy::StoreWriteStrategy,
 };
-use redb::{Database, Durability, ReadableDatabase, ReadableTable, TableDefinition};
-use std::{
-    fs,
-    path::PathBuf,
-    str::from_utf8,
-    sync::{
-        Arc,
-        atomic::{AtomicU64, Ordering},
-    },
-};
+use cassiopeia_ir::source_position::{SOURCE_POSITION_BYTES, SourcePosition};
+use redb::{Database, Durability, ReadableDatabase, ReadableTable, Table, TableDefinition};
+use std::{fs, path::PathBuf, str::from_utf8, sync::Arc};
 use tracing::info;
 use urn_rs::Urn;
 
-/// Unit separator delimiting components in composite keys.
+/// Unit separator delimiting components in composite keys and values.
 const KEY_SEPARATOR: u8 = 0x1F;
+
+/// The number of bytes a target's place among its fragment's targets takes in a key.
+const ORDINAL_BYTES: usize = 4;
 
 /// Target cache size (256 MiB). Matches the entity-store sizing rationale.
 const CACHE_BYTES: usize = 256 * 1024 * 1024;
@@ -29,26 +26,24 @@ const RELATIONSHIPS_TABLE: TableDefinition<&[u8], &[u8]> = TableDefinition::new(
 
 /// Persistent disk-backed relationship store using [redb](https://docs.rs/redb).
 ///
-/// Keys are `{parent}\x1F{property}\x1F{seq_be}` (an 8-byte big-endian
-/// insertion sequence number) mapping to the child URN bytes as the value.
-/// Sequencing edges rather than keying on the child makes a prefix range scan
-/// return each `(parent, property)` list in exact insertion order; a repeated
-/// edge is stored again and collapses onto its first position when read,
-/// matching [`DashMapRelationshipStore`](crate::relationship_store::dashmap_store::DashMapRelationshipStore).
-/// [`add_child`](RelationshipStore::add_child) and
-/// [`add_child_batch`](RelationshipStore::add_child_batch) commit a single
+/// Keys are `{parent}\x1F{position_be}{ordinal_be}`: the parent, the 16-byte big-endian
+/// [`SourcePosition`] of the fragment that gave the target, then the 4-byte big-endian place of the
+/// target among that fragment's targets. Each maps to `{property}\x1F{child}`. Big-endian positions
+/// sort bytewise as the positions do, so a prefix range scan of one parent returns its targets in the
+/// order of the source without a sort, however the writes of a batch were ordered; a repeated edge
+/// is stored again and collapses onto its earliest place when read, matching
+/// [`DashMapRelationshipStore`](crate::relationship_store::dashmap_store::DashMapRelationshipStore).
+/// No two fragments share a position and each records its edges in one call, so no two edges share
+/// a key. [`add_edges`](RelationshipStore::add_edges) and
+/// [`add_edge_batch`](RelationshipStore::add_edge_batch) commit a single
 /// `WriteTransaction`; [`take_all_relationships`](RelationshipStore::take_all_relationships)
 /// prefix-scans and removes in one write transaction (collecting keys first,
 /// since the range iterator borrows the table and rules out in-iter removal).
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct RedbRelationshipStore {
     db: Arc<Database>,
     temp_dir_path: PathBuf,
     db_path: PathBuf,
-    /// Monotonic edge counter shared across clones. Every edge, a repeated
-    /// `(parent, property, child)` one included, gets a distinct key, so
-    /// insertion order is recoverable by byte-sorting the big-endian sequence.
-    next_seq: Arc<AtomicU64>,
 }
 
 impl RedbRelationshipStore {
@@ -95,20 +90,28 @@ impl RedbRelationshipStore {
             db: Arc::new(db),
             temp_dir_path,
             db_path,
-            next_seq: Arc::new(AtomicU64::new(0)),
         })
     }
 
-    fn make_key(parent_urn: &Urn, property: &str, seq: u64) -> Vec<u8> {
+    /// The key of the target at `ordinal` among those the fragment at `position` gave `parent_urn`.
+    fn make_key(parent_urn: &Urn, position: SourcePosition, ordinal: u32) -> Vec<u8> {
         let parent = parent_urn.as_str();
-        let seq_be = seq.to_be_bytes();
-        let mut key = Vec::with_capacity(parent.len() + 1 + property.len() + 1 + seq_be.len());
+        let mut key = Vec::with_capacity(parent.len() + 1 + SOURCE_POSITION_BYTES + ORDINAL_BYTES);
         key.extend_from_slice(parent.as_bytes());
         key.push(KEY_SEPARATOR);
-        key.extend_from_slice(property.as_bytes());
-        key.push(KEY_SEPARATOR);
-        key.extend_from_slice(&seq_be);
+        key.extend_from_slice(&position.to_be_bytes());
+        key.extend_from_slice(&ordinal.to_be_bytes());
         key
+    }
+
+    /// The value of a target `child_urn` given under the relationship key `property`.
+    fn make_value(property: &str, child_urn: &Urn) -> Vec<u8> {
+        let child = child_urn.as_str();
+        let mut value = Vec::with_capacity(property.len() + 1 + child.len());
+        value.extend_from_slice(property.as_bytes());
+        value.push(KEY_SEPARATOR);
+        value.extend_from_slice(child.as_bytes());
+        value
     }
 
     fn make_parent_prefix(parent_urn: &Urn) -> Vec<u8> {
@@ -129,33 +132,34 @@ impl RedbRelationshipStore {
         end
     }
 
-    /// Extracts the property name from a key remainder of the form
-    /// `{property}\x1F{seq_be}`. Only the bytes up to the first separator are
-    /// UTF-8 decoded; the trailing 8-byte big-endian sequence is opaque and may
-    /// itself contain `0x1F` bytes, so it is never scanned or parsed.
-    fn parse_property(remainder: &[u8]) -> Result<String> {
-        let sep_pos = remainder
-            .iter()
-            .position(|&byte| byte == KEY_SEPARATOR)
-            .ok_or_else(|| RelationshipStoreError::InvalidKey {
-                key: String::from_utf8_lossy(remainder).to_string(),
-            })?;
-
-        let property_bytes = &remainder[..sep_pos];
-        let property = from_utf8(property_bytes).map_err(|_| RelationshipStoreError::InvalidKey {
-            key: String::from_utf8_lossy(property_bytes).to_string(),
-        })?;
-        Ok(property.to_string())
+    /// Reads a stored value of the form `{property}\x1F{child}` back into the relationship key and
+    /// the child URN. Neither an NGSI-LD relationship key nor a URN holds the separator, so the first
+    /// one splits them.
+    fn parse_value(value: &[u8]) -> Result<(&str, Urn)> {
+        let invalid = || RelationshipStoreError::InvalidKey {
+            key: String::from_utf8_lossy(value).to_string(),
+        };
+        let mut parts = value.splitn(2, |&byte| byte == KEY_SEPARATOR);
+        let (Some(property), Some(child)) = (parts.next(), parts.next()) else {
+            return Err(invalid());
+        };
+        let property = from_utf8(property).map_err(|_| invalid())?;
+        let child = from_utf8(child).map_err(|_| invalid())?.parse::<Urn>().map_err(|_| invalid())?;
+        Ok((property, child))
     }
 
-    /// Parses a child URN from the stored value bytes.
-    fn parse_child(value_bytes: &[u8]) -> Result<Urn> {
-        let child_str = from_utf8(value_bytes).map_err(|_| RelationshipStoreError::InvalidKey {
-            key: String::from_utf8_lossy(value_bytes).to_string(),
-        })?;
-        child_str
-            .parse::<Urn>()
-            .map_err(|_| RelationshipStoreError::InvalidKey { key: child_str.to_string() })
+    /// Writes the edges of every fragment in `batch` into `table`.
+    fn insert_edges(&self, table: &mut Table<'_, &'static [u8], &'static [u8]>, batch: &[FragmentEdges<'_>]) -> Result<()> {
+        for fragment in batch {
+            for (ordinal, edge) in (0_u32..).zip(fragment.edges) {
+                let key = Self::make_key(&edge.parent, fragment.position, ordinal);
+                let value = Self::make_value(&edge.property, &edge.child);
+                table
+                    .insert(key.as_slice(), value.as_slice())
+                    .map_err(|e| self.redb_err(e.into(), StoreAction::Insert))?;
+            }
+        }
+        Ok(())
     }
 
     fn redb_err(&self, source: redb::Error, action: StoreAction) -> RelationshipStoreError {
@@ -167,44 +171,17 @@ impl RedbRelationshipStore {
     }
 }
 
-impl Clone for RedbRelationshipStore {
-    fn clone(&self) -> RedbRelationshipStore {
-        RedbRelationshipStore {
-            db: Arc::clone(&self.db),
-            temp_dir_path: self.temp_dir_path.clone(),
-            db_path: self.db_path.clone(),
-            next_seq: Arc::clone(&self.next_seq),
-        }
-    }
-}
-
 impl RelationshipStore for RedbRelationshipStore {
     fn write_strategy(&self) -> StoreWriteStrategy {
         StoreWriteStrategy::TransactionalBatch
     }
 
-    fn add_child(&self, parent_urn: &Urn, property: &str, child_urn: &Urn) -> Result<()> {
-        let seq = self.next_seq.fetch_add(1, Ordering::Relaxed);
-        let key = Self::make_key(parent_urn, property, seq);
-
-        let mut write_txn = self.db.begin_write().map_err(|e| self.redb_err(e.into(), StoreAction::BeginTransaction))?;
-        write_txn
-            .set_durability(Durability::None)
-            .map_err(|e| self.redb_err(e.into(), StoreAction::SetDurability))?;
-        {
-            let mut table = write_txn
-                .open_table(RELATIONSHIPS_TABLE)
-                .map_err(|e| self.redb_err(e.into(), StoreAction::OpenTable))?;
-            table
-                .insert(key.as_slice(), child_urn.as_str().as_bytes())
-                .map_err(|e| self.redb_err(e.into(), StoreAction::Insert))?;
-        }
-        write_txn.commit().map_err(|e| self.redb_err(e.into(), StoreAction::CommitTransaction))?;
-        Ok(())
+    fn add_edges(&self, edges: FragmentEdges<'_>) -> Result<()> {
+        self.add_edge_batch(&[edges])
     }
 
-    fn add_child_batch(&self, entries: &[(Urn, &str, Urn)]) -> Result<()> {
-        if entries.is_empty() {
+    fn add_edge_batch(&self, batch: &[FragmentEdges<'_>]) -> Result<()> {
+        if batch.iter().all(|fragment| fragment.edges.is_empty()) {
             return Ok(());
         }
 
@@ -216,13 +193,7 @@ impl RelationshipStore for RedbRelationshipStore {
             let mut table = write_txn
                 .open_table(RELATIONSHIPS_TABLE)
                 .map_err(|e| self.redb_err(e.into(), StoreAction::OpenTable))?;
-            for (parent, property, child) in entries {
-                let seq = self.next_seq.fetch_add(1, Ordering::Relaxed);
-                let key = Self::make_key(parent, property, seq);
-                table
-                    .insert(key.as_slice(), child.as_str().as_bytes())
-                    .map_err(|e| self.redb_err(e.into(), StoreAction::Insert))?;
-            }
+            self.insert_edges(&mut table, batch)?;
         }
         write_txn.commit().map_err(|e| self.redb_err(e.into(), StoreAction::CommitTransaction))?;
         Ok(())
@@ -250,12 +221,9 @@ impl RelationshipStore for RedbRelationshipStore {
                     .map_err(|e| self.redb_err(e.into(), StoreAction::Iterate))?;
                 for entry in range {
                     let (key, value) = entry.map_err(|e| self.redb_err(e.into(), StoreAction::Iterate))?;
-                    let key_bytes = key.value();
-                    let remainder = &key_bytes[prefix.len()..];
-                    let property = Self::parse_property(remainder)?;
-                    let child_urn = Self::parse_child(value.value())?;
-                    result.entry(property).or_default().insert(child_urn);
-                    keys_to_remove.push(key_bytes.to_vec());
+                    let (property, child_urn) = Self::parse_value(value.value())?;
+                    join(&mut result, property, child_urn);
+                    keys_to_remove.push(key.value().to_vec());
                 }
             }
 
@@ -280,17 +248,14 @@ impl RelationshipStore for RedbRelationshipStore {
             .open_table(RELATIONSHIPS_TABLE)
             .map_err(|e| self.redb_err(e.into(), StoreAction::OpenTable))?;
 
-        let mut result = StoredRelationships::default();
         let range = table
             .range(prefix.as_slice()..end.as_slice())
             .map_err(|e| self.redb_err(e.into(), StoreAction::Iterate))?;
+        let mut result = StoredRelationships::default();
         for entry in range {
-            let (key, value) = entry.map_err(|e| self.redb_err(e.into(), StoreAction::Iterate))?;
-            let key_bytes = key.value();
-            let remainder = &key_bytes[prefix.len()..];
-            let property = Self::parse_property(remainder)?;
-            let child_urn = Self::parse_child(value.value())?;
-            result.entry(property).or_default().insert(child_urn);
+            let (_, value) = entry.map_err(|e| self.redb_err(e.into(), StoreAction::Iterate))?;
+            let (property, child_urn) = Self::parse_value(value.value())?;
+            join(&mut result, property, child_urn);
         }
         Ok(result)
     }
@@ -326,124 +291,116 @@ impl Drop for RedbRelationshipStore {
 #[cfg(test)]
 mod tests {
     use crate::relationship_store::{
+        error::RelationshipStoreError,
         redb_store::RedbRelationshipStore,
+        relationship_edge::FragmentEdges,
         store::{
             RelationshipStore,
-            tests::{assert_keeps_first_insertion_order_without_repeats, in_order},
+            tests::{assert_honours_the_contract, edges, in_order, record},
         },
     };
+    use cassiopeia_ir::source_position::SourcePosition;
     use pretty_assertions::assert_eq;
     use urn_rs::Urn;
 
     #[test]
-    fn honours_cross_backend_order_and_repeat_contract() {
-        let store = RedbRelationshipStore::new().unwrap();
-        assert_keeps_first_insertion_order_without_repeats(&store);
+    fn honours_the_cross_backend_contract() {
+        assert_honours_the_contract(|| Box::new(RedbRelationshipStore::new().unwrap()));
     }
 
     #[test]
-    fn read_back_is_insertion_order_not_sorted() {
+    fn a_key_holds_the_parent_then_the_position_then_the_place_among_the_fragment_s_targets() {
+        let parent: Urn = "urn:ngsi-ld:Stop:S1".parse().unwrap();
+        let position = SourcePosition::first_of(2).advanced(258).nth_fragment(3);
+
+        let key = RedbRelationshipStore::make_key(&parent, position, 5);
+
+        let mut expected = b"urn:ngsi-ld:Stop:S1\x1F".to_vec();
+        expected.extend_from_slice(&[0, 0, 0, 2, 0, 0, 0, 0, 0, 0, 1, 2, 0, 0, 0, 3]);
+        expected.extend_from_slice(&[0, 0, 0, 5]);
+        assert_eq!(key, expected);
+    }
+
+    #[test]
+    fn the_keys_of_one_parent_sort_bytewise_in_the_order_of_the_source() {
+        let parent: Urn = "urn:ngsi-ld:Stop:S1".parse().unwrap();
+        let keys = [
+            RedbRelationshipStore::make_key(&parent, record(0), 0),
+            RedbRelationshipStore::make_key(&parent, record(0), 1),
+            RedbRelationshipStore::make_key(&parent, record(0), 256),
+            RedbRelationshipStore::make_key(&parent, record(0).nth_fragment(1), 0),
+            RedbRelationshipStore::make_key(&parent, record(1), 0),
+            RedbRelationshipStore::make_key(&parent, record(256), 0),
+            RedbRelationshipStore::make_key(&parent, SourcePosition::first_of(1), 0),
+        ];
+        assert!(keys.is_sorted());
+    }
+
+    #[test]
+    fn a_value_reads_back_into_its_key_and_its_child() {
+        let child: Urn = "urn:ngsi-ld:Airport:A1".parse().unwrap();
+
+        let value = RedbRelationshipStore::make_value("servesAirports#1", &child);
+
+        assert_eq!(RedbRelationshipStore::parse_value(&value).unwrap(), ("servesAirports#1", child));
+    }
+
+    #[test]
+    fn a_value_without_a_separator_or_a_urn_is_an_invalid_key() {
+        for value in [
+            b"servedBy".as_slice(),
+            b"servedBy\x1Fnot a urn".as_slice(),
+            b"\xFF\x1Furn:ngsi-ld:Line:U1".as_slice(),
+        ] {
+            assert!(matches!(
+                RedbRelationshipStore::parse_value(value),
+                Err(RelationshipStoreError::InvalidKey { .. })
+            ));
+        }
+    }
+
+    #[test]
+    fn get_all_is_non_destructive_while_take_drains() {
         let store = RedbRelationshipStore::new().unwrap();
         let parent: Urn = "urn:ngsi-ld:Parent:1".parse().unwrap();
-        let child_c: Urn = "urn:ngsi-ld:Child:C".parse().unwrap();
-        let child_a: Urn = "urn:ngsi-ld:Child:A".parse().unwrap();
-        let child_b: Urn = "urn:ngsi-ld:Child:B".parse().unwrap();
+        let written = edges(parent.as_str(), "hasPart", &["urn:ngsi-ld:Child:A"]);
 
         store
-            .add_child_batch(&[
-                (parent.clone(), "hasPart", child_c.clone()),
-                (parent.clone(), "hasPart", child_a.clone()),
-                (parent.clone(), "hasPart", child_b.clone()),
-            ])
+            .add_edges(FragmentEdges {
+                position: record(0),
+                edges: &written,
+            })
             .unwrap();
 
-        let rels = store.take_all_relationships(&parent).unwrap();
-        assert_eq!(in_order(&rels, "hasPart"), [&child_c, &child_a, &child_b]);
-    }
-
-    #[test]
-    fn a_repeated_edge_is_read_back_once() {
-        let store = RedbRelationshipStore::new().unwrap();
-        let parent: Urn = "urn:ngsi-ld:Parent:1".parse().unwrap();
-        let child: Urn = "urn:ngsi-ld:Child:X".parse().unwrap();
-
-        store.add_child(&parent, "hasPart", &child).unwrap();
-        store.add_child(&parent, "hasPart", &child).unwrap();
-
-        let rels = store.take_all_relationships(&parent).unwrap();
-        assert_eq!(in_order(&rels, "hasPart"), [&child]);
-    }
-
-    #[test]
-    fn each_property_keeps_its_own_insertion_order() {
-        let store = RedbRelationshipStore::new().unwrap();
-        let parent: Urn = "urn:ngsi-ld:Parent:1".parse().unwrap();
-        let first_b: Urn = "urn:ngsi-ld:First:B".parse().unwrap();
-        let first_a: Urn = "urn:ngsi-ld:First:A".parse().unwrap();
-        let second_b: Urn = "urn:ngsi-ld:Second:B".parse().unwrap();
-        let second_a: Urn = "urn:ngsi-ld:Second:A".parse().unwrap();
-
-        store
-            .add_child_batch(&[
-                (parent.clone(), "first", first_b.clone()),
-                (parent.clone(), "second", second_b.clone()),
-                (parent.clone(), "first", first_a.clone()),
-                (parent.clone(), "second", second_a.clone()),
-            ])
-            .unwrap();
-
-        let rels = store.take_all_relationships(&parent).unwrap();
-        assert_eq!(in_order(&rels, "first"), [&first_b, &first_a]);
-        assert_eq!(in_order(&rels, "second"), [&second_b, &second_a]);
-    }
-
-    #[test]
-    fn add_and_take_roundtrip() {
-        let store = RedbRelationshipStore::new().unwrap();
-        let parent: Urn = "urn:ngsi-ld:Parent:1".parse().unwrap();
-        let child_a: Urn = "urn:ngsi-ld:Child:A".parse().unwrap();
-        let child_b: Urn = "urn:ngsi-ld:Child:B".parse().unwrap();
-
-        store
-            .add_child_batch(&[(parent.clone(), "hasPart", child_a.clone()), (parent.clone(), "hasPart", child_b.clone())])
-            .unwrap();
-
-        let rels = store.take_all_relationships(&parent).unwrap();
-        assert_eq!(in_order(&rels, "hasPart"), [&child_a, &child_b]);
-
-        let rels_again = store.take_all_relationships(&parent).unwrap();
-        assert!(rels_again.is_empty());
-    }
-
-    #[test]
-    fn get_all_is_non_destructive() {
-        let store = RedbRelationshipStore::new().unwrap();
-        let parent: Urn = "urn:ngsi-ld:Parent:1".parse().unwrap();
-        let child: Urn = "urn:ngsi-ld:Child:A".parse().unwrap();
-
-        store.add_child(&parent, "hasPart", &child).unwrap();
-
-        let first = store.get_all_relationships(&parent).unwrap();
-        assert_eq!(in_order(&first, "hasPart"), [&child]);
-
-        let second = store.get_all_relationships(&parent).unwrap();
-        assert_eq!(in_order(&second, "hasPart"), [&child]);
+        for _ in 0..2 {
+            assert_eq!(in_order(&store.get_all_relationships(&parent).unwrap(), "hasPart"), ["urn:ngsi-ld:Child:A"]);
+        }
+        assert_eq!(in_order(&store.take_all_relationships(&parent).unwrap(), "hasPart"), ["urn:ngsi-ld:Child:A"]);
+        assert!(store.take_all_relationships(&parent).unwrap().is_empty());
     }
 
     #[test]
     fn prefix_scan_does_not_pick_up_other_parents() {
         let store = RedbRelationshipStore::new().unwrap();
         let parent_a: Urn = "urn:ngsi-ld:Parent:1".parse().unwrap();
-        let parent_b: Urn = "urn:ngsi-ld:Parent:2".parse().unwrap();
-        let child: Urn = "urn:ngsi-ld:Child:X".parse().unwrap();
+        let parent_b: Urn = "urn:ngsi-ld:Parent:12".parse().unwrap();
+        let to_a = edges(parent_a.as_str(), "has", &["urn:ngsi-ld:Child:X"]);
+        let to_b = edges(parent_b.as_str(), "has", &["urn:ngsi-ld:Child:Y"]);
 
-        store.add_child(&parent_a, "has", &child).unwrap();
-        store.add_child(&parent_b, "has", &child).unwrap();
+        store
+            .add_edge_batch(&[
+                FragmentEdges {
+                    position: record(0),
+                    edges: &to_a,
+                },
+                FragmentEdges {
+                    position: record(1),
+                    edges: &to_b,
+                },
+            ])
+            .unwrap();
 
-        let rels_a = store.take_all_relationships(&parent_a).unwrap();
-        assert_eq!(in_order(&rels_a, "has"), [&child]);
-
-        let rels_b = store.take_all_relationships(&parent_b).unwrap();
-        assert_eq!(in_order(&rels_b, "has"), [&child]);
+        assert_eq!(in_order(&store.take_all_relationships(&parent_a).unwrap(), "has"), ["urn:ngsi-ld:Child:X"]);
+        assert_eq!(in_order(&store.take_all_relationships(&parent_b).unwrap(), "has"), ["urn:ngsi-ld:Child:Y"]);
     }
 }
