@@ -26,7 +26,8 @@ struct SkippedGroup<E> {
     occurrences: NonZeroU64,
 }
 
-/// The records one batch could not process, grouped by why.
+/// The records one batch could not process, or for the expander the entities of its records it could
+/// not write, grouped by why.
 ///
 /// The map is an [`IndexMap`] so a run over the same source reports its reasons in the same order
 /// every time. There is no lock: all three stages that use this walk their batch's results

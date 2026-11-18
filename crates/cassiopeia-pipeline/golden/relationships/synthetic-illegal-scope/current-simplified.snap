@@ -9,6 +9,10 @@ input_file: crates/cassiopeia-pipeline/golden/relationships/synthetic-illegal-sc
     "owner": "urn:ngsi-ld:Organization:O1"
   },
   {
+    "id": "urn:ngsi-ld:Asset:A2",
+    "type": "Asset"
+  },
+  {
     "id": "urn:ngsi-ld:Organization:O1",
     "type": "Organization",
     "name": "City council"

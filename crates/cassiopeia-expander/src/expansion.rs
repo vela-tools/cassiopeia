@@ -3,14 +3,15 @@ use cassiopeia_ir::{relationship_path::RelationshipPath, source_position::Source
 use cassiopeia_mapping::template::template_input::TemplateInput;
 use urn_rs::Urn;
 
-/// The record one expansion is working through: its entity, its data with the run variables it is
-/// read with, its place in the source, and where its losses go.
+/// The record one expansion is working through: the entity that holds its links, its data with the
+/// run variables it is read with, its place in the source, and where its losses go.
 ///
 /// Every relationship the record declares is minted against the same four, so they travel
 /// together rather than as four parameters threaded through each minting step.
 pub(crate) struct Expansion<'a> {
-    /// The entity the record expands into, which every link it loses is recorded against.
-    pub(crate) entity: &'a Urn,
+    /// The entity that holds the record's links, which every link it loses is recorded against, or
+    /// `None` when that entity is not written, so its links have nothing to be left out of.
+    pub(crate) holder: Option<&'a Urn>,
     /// The record's data and run variables, read by every relationship source and synthetic identity.
     pub(crate) input: TemplateInput<'a>,
     /// The record's place in the source; each fragment it expands into takes the place of the
@@ -25,17 +26,22 @@ impl Expansion<'_> {
     ///
     /// A source that resolves to no identifier names no target, exactly as an absent foreign key
     /// does. A template that fails to render is the same gap in the data, so it too costs only the
-    /// link, not the record: the failure is recorded under the relationship's `path`, built only
-    /// then, so the run can still name it. Every other failure is a fault in the mapping and fails
-    /// the record.
+    /// link, not the entity that holds it: the failure is recorded under the relationship's `path`,
+    /// built only then, so the run can still name it. With no holder written there is no link to
+    /// leave out, so the failure is the failure of the entity the link names, which is then not
+    /// written either. Every other failure is a fault in the mapping and fails the entity being
+    /// built.
     pub(crate) fn keep<T>(&self, minted: Result<T, UrnError>, path: impl FnOnce() -> RelationshipPath) -> Result<Option<T>, ExpanderError> {
         match minted {
             Ok(minted) => Ok(Some(minted)),
             Err(UrnError::GeneratedIdEmpty { .. }) => Ok(None),
-            Err(UrnError::Template(error)) => {
-                self.losses.links.record(&path(), self.entity, error);
-                Ok(None)
-            }
+            Err(UrnError::Template(error)) => match self.holder {
+                Some(holder) => {
+                    self.losses.links.record(&path(), holder, error);
+                    Ok(None)
+                }
+                None => Err(UrnError::Template(error).into()),
+            },
             Err(other @ (UrnError::BuildUrn { .. } | UrnError::RelationshipMissingSource | UrnError::NoRelationshipTarget)) => Err(other.into()),
         }
     }
@@ -99,14 +105,13 @@ mod tests {
         lost: Vec<(String, String)>,
     }
 
-    /// Keeps `minted` for a record of the `Building:A` entity.
-    fn keep(minted: Result<u8, UrnError>) -> Kept {
-        let entity = entity();
+    /// Keeps `minted` for a record whose links are held by `holder`.
+    fn keep_held_by(holder: Option<&Urn>, minted: Result<u8, UrnError>) -> Kept {
         let record = json!({});
         let variables = RunVariables::none();
         let losses = ExpansionLosses::new();
         let expansion = Expansion {
-            entity: &entity,
+            holder,
             input: TemplateInput::new(&record, &variables),
             position: SourcePosition::first_of(0),
             losses: &losses,
@@ -118,6 +123,11 @@ mod tests {
             .map(|(path, lost)| (path.to_string(), lost.entity.to_string()))
             .collect();
         Kept { kept, lost }
+    }
+
+    /// Keeps `minted` for a record of the `Building:A` entity.
+    fn keep(minted: Result<u8, UrnError>) -> Kept {
+        keep_held_by(Some(&entity()), minted)
     }
 
     #[test]
@@ -147,7 +157,28 @@ mod tests {
     }
 
     #[test]
-    fn a_relationship_without_a_source_fails_the_record() {
+    fn a_link_with_no_holder_whose_source_fails_to_render_fails_what_it_names_without_a_lost_link() {
+        let Kept { kept, lost } = keep_held_by(None, Err(UrnError::Template(failure())));
+
+        assert!(matches!(kept, Err(ExpanderError::Urn(UrnError::Template(_)))), "{kept:?}");
+        assert_eq!(lost, NO_LOSS);
+    }
+
+    #[test]
+    fn a_link_with_no_holder_whose_source_names_no_target_is_dropped_without_a_loss() {
+        let Kept { kept, lost } = keep_held_by(
+            None,
+            Err(UrnError::GeneratedIdEmpty {
+                target_entity_type: name("Owner"),
+            }),
+        );
+
+        assert_eq!(kept.unwrap(), None);
+        assert_eq!(lost, NO_LOSS);
+    }
+
+    #[test]
+    fn a_relationship_without_a_source_fails_the_entity_being_built() {
         let Kept { kept, lost } = keep(Err(UrnError::RelationshipMissingSource));
 
         assert!(matches!(kept, Err(ExpanderError::Urn(UrnError::RelationshipMissingSource))), "{kept:?}");

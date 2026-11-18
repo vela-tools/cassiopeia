@@ -46,13 +46,11 @@ impl<'a> FragmentEmitter<'a> {
         }
     }
 
-    /// Accepts one record's fragments, flushing whenever the batch fills.
-    fn accept(&mut self, fragments: Vec<Mapped<Fragment>>, stage: &StageGuard, run: &RunTelemetry) -> ControlFlow<()> {
-        for fragment in fragments {
-            self.pending.push(fragment);
-            if self.pending.len() >= self.batch_size {
-                self.flush(stage, run)?;
-            }
+    /// Accepts one entity's fragment, flushing whenever the batch fills.
+    fn accept(&mut self, fragment: Mapped<Fragment>, stage: &StageGuard, run: &RunTelemetry) -> ControlFlow<()> {
+        self.pending.push(fragment);
+        if self.pending.len() >= self.batch_size {
+            self.flush(stage, run)?;
         }
         ControlFlow::Continue(())
     }
@@ -85,8 +83,9 @@ impl<'a> FragmentEmitter<'a> {
 /// Fragments are written straight onto the shared resolver intake channel (`tx`, one clone per lane),
 /// so every lane merges into the resolver with no intermediate per-lane channel or bridge thread.
 ///
-/// A record that fails to expand is registered as a stage warning and skipped, so one bad record
-/// does not abort the lane. The refusals are grouped by reason and reported once each with a count,
+/// An entity that fails to expand, or a record that no mapping is bound to, is registered as a stage
+/// warning and not written, so one bad entity costs neither the other entities of its record nor the
+/// lane. The refusals are grouped by reason and reported once each with a count,
 /// rather than surfacing as an anonymous tally. An entity `expiresAt` that resolves to text no
 /// instant reads is dropped from the fragments and named beside the refusals, counted the same way,
 /// and so is a relationship whose source, or whose synthetic entity's identity, failed to render:
@@ -148,8 +147,8 @@ pub(crate) fn spawn_expander_thread(
                     let mut broken = false;
                     for result in results {
                         match result {
-                            Ok(fragments) => {
-                                if emitter.accept(fragments, &expander_stage, &telemetry).is_break() {
+                            Ok(fragment) => {
+                                if emitter.accept(fragment, &expander_stage, &telemetry).is_break() {
                                     broken = true;
                                     break;
                                 }

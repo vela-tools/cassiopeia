@@ -204,7 +204,10 @@ mod tests {
         };
 
         let expander = GenericExpander::new(MappingRouter::Single(Arc::clone(&mapping)), resolver.clone(), RunVariables::none());
-        let fragments = Expander::expand(&expander, Record::new(None, data), SourcePosition::first_of(0), &ExpansionLosses::new()).unwrap();
+        let fragments = Expander::expand(&expander, Record::new(None, data), SourcePosition::first_of(0), &ExpansionLosses::new())
+            .into_iter()
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap();
         let fragment_resolver = FragmentResolver::new(
             Box::new(DashMapLatestEntityStore::new()),
             Box::new(DashMapRelationshipStore::new()),

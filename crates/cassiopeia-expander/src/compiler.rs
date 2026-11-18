@@ -77,8 +77,9 @@ impl ExpanderCompiler {
     /// scope.
     ///
     /// A literal resolves to the same text for every record, so a literal that is no legal scope,
-    /// or is the NGSI-LD Null that clause 4.18 reserves for a deleted scope, would skip every record
-    /// the mapping reads. An empty literal is kept: it contributes no scope.
+    /// or is the NGSI-LD Null that clause 4.18 reserves for a deleted scope, would keep the
+    /// mapping's entity from being written for every record it reads. An empty literal is kept: it
+    /// contributes no scope.
     fn compile_scope(source: &TemplateSource, document: &Arc<Path>, runner: &mut TemplateRunner, reads: &mut SourceReads) -> Result<CompiledScopeTemplate> {
         let compiled = Self::compile_template(source, document, runner, TemplateSite::Scope, reads)?;
         match &compiled {
