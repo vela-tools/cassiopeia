@@ -5,7 +5,7 @@ input_file: crates/cassiopeia-pipeline/golden/scope/illegal-template-value/manif
 {
   "diagnostics": [
     {
-      "code": "expander-urn-ungeneratable",
+      "code": "expander-scope-unreadable",
       "occurrences": 1,
       "message": [
         "! The resolved scope '/Novo mesto' cannot be the entity's scope",

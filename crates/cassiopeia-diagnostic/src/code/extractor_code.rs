@@ -9,7 +9,9 @@ pub enum ExtractorCode {
     /// The mapping's nested attributes recursed past the guard depth.
     RecursionLimitExceeded,
     /// An attribute declared a temporal transformation and its source carried text that reads as no
-    /// supported spelling of a date-time, so the attribute was dropped.
+    /// supported spelling of a date-time, so the attribute was dropped. An `observedAt` that does not
+    /// read is the qualifier loss of the attribute it qualifies instead, whatever transformation it
+    /// declares.
     TimestampUnreadable,
     /// An attribute's source value held nulls, which NGSI-LD admits nowhere in an entity, so the
     /// attribute was written without them.

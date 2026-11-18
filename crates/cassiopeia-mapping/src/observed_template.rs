@@ -1,7 +1,5 @@
-use crate::{
-    observed_declaration::ObservedDeclaration,
-    template::{CompiledTemplate, TemplateSource},
-};
+use crate::template::{CompiledTemplate, TemplateSource};
+use cassiopeia_ngsi_ld::entity::name::NameBuf;
 use serde::{Deserialize, Serialize};
 
 /// The position of one distinct `observedAt` template among those a mapping declares, in the order
@@ -23,8 +21,8 @@ impl ObservedTemplateIndex {
     }
 }
 
-/// One distinct `observedAt` template a mapping declares, compiled once, with every declaration
-/// reading it.
+/// One distinct `observedAt` template a mapping declares, compiled once, with the attribute every
+/// declaration reading it qualifies.
 ///
 /// Templates are told apart by their source text: two declarations that spell one template read the
 /// same value off every record, so it is rendered once for both.
@@ -34,19 +32,17 @@ pub struct ObservedTemplate {
     source: TemplateSource,
     /// The template, compiled.
     compiled: CompiledTemplate,
-    /// Every `observedAt` sub-attribute whose template this is.
-    declarations: Vec<ObservedDeclaration>,
+    /// The top-level attribute each `observedAt` sub-attribute whose template this is qualifies,
+    /// directly or through the attributes nested beneath it, one entry per sub-attribute.
+    attributes: Vec<NameBuf>,
 }
 
 impl ObservedTemplate {
-    /// The template `source`, compiled as `compiled`, read by `declarations`.
+    /// The template `source`, compiled as `compiled`, read by one `observedAt` sub-attribute
+    /// qualifying each of `attributes`.
     #[must_use]
-    pub const fn new(source: TemplateSource, compiled: CompiledTemplate, declarations: Vec<ObservedDeclaration>) -> ObservedTemplate {
-        ObservedTemplate {
-            source,
-            compiled,
-            declarations,
-        }
+    pub const fn new(source: TemplateSource, compiled: CompiledTemplate, attributes: Vec<NameBuf>) -> ObservedTemplate {
+        ObservedTemplate { source, compiled, attributes }
     }
 
     /// The template as written.
@@ -61,10 +57,11 @@ impl ObservedTemplate {
         &self.compiled
     }
 
-    /// Every `observedAt` sub-attribute whose template this is.
+    /// The top-level attribute each `observedAt` sub-attribute whose template this is qualifies,
+    /// one entry per sub-attribute, so an attribute declaring two of them is named twice.
     #[must_use]
-    pub fn declarations(&self) -> &[ObservedDeclaration] {
-        &self.declarations
+    pub fn attributes(&self) -> &[NameBuf] {
+        &self.attributes
     }
 }
 

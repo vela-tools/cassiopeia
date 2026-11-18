@@ -7,10 +7,10 @@ use cassiopeia_unreadable_timestamps::{timestamp_loss::TimestampLoss, unreadable
 /// returns how many losses that is.
 ///
 /// A discarded record never reaches the extractor or the transformer, which report the same text
-/// when its record is the one kept. Each declaration that reads the text is named here with the
-/// loss the record would have cost it had it been kept (see
-/// [`TimestampLoss::of_unreadable_observed_at`]), so unreadable text reads the same in a report
-/// whichever record of an entity won its ranking, under the same code and on the same line.
+/// when its record is the one kept. Each `observedAt` that reads the text is named here as the
+/// qualifier loss the record would have cost its attribute had it been kept, whatever
+/// transformation it declares, so unreadable text reads the same in a report whichever record of
+/// an entity won its ranking, under the same code and on the same line.
 pub(crate) fn report_unreadable_observations(sink: &dyn DiagnosticSink, unreadable: UnreadableObservations) -> u64 {
     if unreadable.is_empty() {
         return 0;
@@ -18,10 +18,8 @@ pub(crate) fn report_unreadable_observations(sink: &dyn DiagnosticSink, unreadab
 
     let timestamps = UnreadableTimestamps::new();
     for entry in unreadable.into_entries() {
-        for declaration in entry.declarations() {
-            let (loss, attribute) =
-                TimestampLoss::of_unreadable_observed_at(declaration.conversion.temporal_reading(), &declaration.observed_at, &declaration.attribute);
-            timestamps.record_occurrences(loss, attribute, entry.example.as_str(), entry.records);
+        for attribute in entry.attributes() {
+            timestamps.record_occurrences(TimestampLoss::ObservedAt, attribute, entry.example.as_str(), entry.records);
         }
     }
     report_sink(sink, timestamps, unreadable_timestamp_diagnostic)
@@ -30,13 +28,14 @@ pub(crate) fn report_unreadable_observations(sink: &dyn DiagnosticSink, unreadab
 #[cfg(test)]
 mod tests {
     use crate::{stages::unreadable_observation_report::report_unreadable_observations, test_reporter::RecordingReporter};
-    use cassiopeia_diagnostic::code::{diagnostic_code::DiagnosticCode, extractor_code::ExtractorCode, transform_code::TransformCode};
+    use cassiopeia_diagnostic::code::{diagnostic_code::DiagnosticCode, transform_code::TransformCode};
     use cassiopeia_mapping::{mapping::Mapping, observed_at::ObservedAt, observed_template::ObservedTemplateIndex, template::runner::TemplateRunner};
     use cassiopeia_resolver::{entity_store::discarded_timestamps::UnreadableDiscards, mapping_id::MappingId, unreadable_observations::UnreadableObservations};
     use pretty_assertions::assert_eq;
     use std::{num::NonZeroU64, path::Path, sync::Arc};
 
-    /// A mapping whose `reading` reads `time` as a date-time and whose `status` keeps it as written.
+    /// A mapping whose `reading` reads its `observedAt` from `time` as a date-time and whose `status`
+    /// reads it from `time` as written.
     const SENSOR: &str = r#"{
         version: "v4",
         dataModel: "Sensor",
@@ -71,7 +70,7 @@ mod tests {
     }
 
     #[test]
-    fn each_declaration_reading_the_text_is_named_with_the_loss_a_kept_record_would_have_cost_it() {
+    fn each_attribute_whose_observed_at_reads_the_text_is_named_with_the_qualifier_a_kept_record_would_have_cost_it() {
         let sink = RecordingReporter::new();
 
         let total = report_unreadable_observations(&sink, unreadable(3));
@@ -79,10 +78,10 @@ mod tests {
         let reported = sink.diagnostics();
         assert_eq!(total, 6);
         assert_eq!(reported.len(), 2);
-        assert_eq!(reported[0].code, DiagnosticCode::Extractor(ExtractorCode::TimestampUnreadable));
+        assert_eq!(reported[0].code, DiagnosticCode::Transform(TransformCode::ObservedAtUnreadable));
         assert_eq!(
             reported[0].headline,
-            "Attribute `observedAt` dropped: `soon` is not a date-time in any spelling Cassiopeia reads"
+            "Attribute `reading` emitted without `observedAt`: `soon` is not a date-time in any spelling Cassiopeia reads"
         );
         assert_eq!(reported[0].occurrences, 3);
         assert_eq!(reported[1].code, DiagnosticCode::Transform(TransformCode::ObservedAtUnreadable));

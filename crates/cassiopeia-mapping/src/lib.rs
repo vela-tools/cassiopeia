@@ -10,7 +10,6 @@ pub mod mapping_role;
 pub mod observation_plan;
 pub mod observation_slot;
 pub mod observed_at;
-pub mod observed_declaration;
 pub mod observed_template;
 pub mod scope;
 pub mod source_reads;

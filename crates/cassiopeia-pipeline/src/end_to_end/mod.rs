@@ -13,6 +13,7 @@ mod local_contexts;
 mod locations;
 mod multi_datastreams;
 mod observation_ranking;
+mod reason_codes;
 mod record_merges;
 mod relationships;
 mod sensors;

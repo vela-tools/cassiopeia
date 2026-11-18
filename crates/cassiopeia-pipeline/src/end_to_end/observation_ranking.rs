@@ -3,12 +3,12 @@ use crate::end_to_end::{
     sensorthings::SERIES_OUTPUT,
 };
 use cassiopeia_common::store_kind::StoreKind;
-use cassiopeia_diagnostic::code::{diagnostic_code::DiagnosticCode, extractor_code::ExtractorCode};
+use cassiopeia_diagnostic::code::{diagnostic_code::DiagnosticCode, transform_code::TransformCode};
 use pretty_assertions::assert_eq;
 use serde_json::{Value, json};
 
-/// The code an unreadable `observedAt` read as a date-time is published under.
-const TIMESTAMP_UNREADABLE: DiagnosticCode = DiagnosticCode::Extractor(ExtractorCode::TimestampUnreadable);
+/// The code an unreadable `observedAt` is published under, whatever transformation it declares.
+const OBSERVED_AT_UNREADABLE: DiagnosticCode = DiagnosticCode::Transform(TransformCode::ObservedAtUnreadable);
 
 /// Pairs of records of one station whose `observedAt` texts sort in the opposite order to the
 /// instants they name, or do not read at all.
@@ -86,10 +86,10 @@ fn the_unreadable_time_of_a_discarded_record_is_reported_once_in_every_store() {
     for store in STORES {
         let outcome = run(store, STATIONS, WEATHER_OBSERVED, "WeatherObserved", "");
 
-        let reported = outcome.coded(TIMESTAMP_UNREADABLE);
+        let reported = outcome.coded(OBSERVED_AT_UNREADABLE);
         assert_eq!(reported.len(), 1, "{store:?}");
         assert_eq!(
-            reported[0].headline, "Attribute `observedAt` dropped: `soon` is not a date-time in any spelling Cassiopeia reads",
+            reported[0].headline, "Attribute `temperature` emitted without `observedAt`: `soon` is not a date-time in any spelling Cassiopeia reads",
             "{store:?}"
         );
         assert_eq!(reported[0].occurrences, 1, "{store:?}");

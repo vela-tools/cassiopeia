@@ -12,7 +12,7 @@ use cassiopeia_unreadable_timestamps::{attribute_loss::AttributeLoss, timestamp_
 /// The code the loss of one attribute timestamp is published under.
 ///
 /// The three losses look the same to a mapping author (a source spelling Cassiopeia does not read),
-/// but they cost different things and are met by different stages, so each publishes its own code.
+/// but they cost different things, so each publishes its own code.
 const fn code(loss: TimestampLoss) -> DiagnosticCode {
     match loss {
         TimestampLoss::AttributeValue => DiagnosticCode::Extractor(ExtractorCode::TimestampUnreadable),

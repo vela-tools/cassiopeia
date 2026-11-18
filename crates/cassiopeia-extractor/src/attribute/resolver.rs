@@ -235,7 +235,12 @@ fn bind_refusal<T>(ctx: &ResolutionContext, attr_name: &NameBuf, outcome: result
             None
         }
         Err(AttributeRefusal::UnreadableTimestamp { text }) => {
-            ctx.dropped.timestamps.record(TimestampLoss::AttributeValue, attr_name, &text);
+            // An `observedAt` that does not read costs its attribute the qualifier whatever
+            // transformation it declares, so the loss is the qualifier's, filed under that attribute.
+            match ctx.observed_at_owner(attr_name) {
+                Some(attribute) => ctx.dropped.timestamps.record(TimestampLoss::ObservedAt, attribute, &text),
+                None => ctx.dropped.timestamps.record(TimestampLoss::AttributeValue, attr_name, &text),
+            }
             None
         }
         Err(AttributeRefusal::UnusableValue { required, text }) => {

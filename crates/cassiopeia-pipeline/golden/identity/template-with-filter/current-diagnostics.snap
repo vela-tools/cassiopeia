@@ -5,7 +5,7 @@ input_file: crates/cassiopeia-pipeline/golden/identity/template-with-filter/mani
 {
   "diagnostics": [
     {
-      "code": "expander-urn-ungeneratable",
+      "code": "expander-id-unresolvable",
       "occurrences": 1,
       "message": [
         "! The identity.entityName template in the mapping document at '[case]/mapping.json5' could not be resolved",

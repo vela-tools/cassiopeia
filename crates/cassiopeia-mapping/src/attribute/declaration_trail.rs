@@ -52,6 +52,16 @@ impl<'a> DeclarationTrail<'a> {
         self.parent
     }
 
+    /// The top-level attribute this frame is held beneath, or that this frame descended through
+    /// when it is the outermost one.
+    #[must_use]
+    pub const fn root(&self) -> &'a NameBuf {
+        match self.parent {
+            Some(parent) => parent.root(),
+            None => self.name,
+        }
+    }
+
     /// The path of `leaf`, a declaration held beneath the declarations `owners` frames, or a
     /// top-level attribute when `owners` is `None`.
     #[must_use]
@@ -99,6 +109,25 @@ mod tests {
         assert_eq!(inner.nesting(), Nesting::Member);
         assert_eq!(inner.parent().map(DeclarationTrail::name), Some(&outer_name));
         assert!(outer.parent().is_none());
+    }
+
+    #[test]
+    fn the_root_of_the_outermost_frame_is_its_own_declaration() {
+        let temperature = name("temperature");
+        let frame = DeclarationTrail::below(&temperature, Nesting::SubAttribute, None);
+
+        assert_eq!(frame.root(), &temperature);
+    }
+
+    #[test]
+    fn the_root_of_a_nested_frame_is_the_top_level_attribute_it_is_held_beneath() {
+        let (temperature, accuracy, origin) = (name("temperature"), name("accuracy"), name("origin"));
+        let outer = DeclarationTrail::below(&temperature, Nesting::SubAttribute, None);
+        let middle = DeclarationTrail::below(&accuracy, Nesting::Member, Some(&outer));
+        let inner = DeclarationTrail::below(&origin, Nesting::SubAttribute, Some(&middle));
+
+        assert_eq!(inner.root(), &temperature);
+        assert_eq!(middle.root(), &temperature);
     }
 
     #[test]

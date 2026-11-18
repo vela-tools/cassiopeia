@@ -4,8 +4,19 @@ use strum::{Display, EnumCount, EnumIter};
 #[derive(Clone, Copy, Debug, Display, EnumCount, EnumIter, Eq, Hash, Ord, PartialEq, PartialOrd)]
 #[strum(serialize_all = "kebab-case")]
 pub enum ExpanderCode {
-    /// The entity URN or scope a record maps to could not be generated.
-    UrnUngeneratable,
+    /// The record's entity identity resolved to nothing, so it names no entity and the record was
+    /// skipped.
+    IdAbsent,
+    /// The record's entity identity could not be minted into a URN, because its template failed to
+    /// render, its entity type cannot form a URN, or a relationship it declares has no `source` to
+    /// mint from, so the record was skipped.
+    IdUnresolvable,
+    /// A `scope` template failed to render for the record, so the record was skipped.
+    ScopeUnresolvable,
+    /// A `scope` resolved for the record to a value that cannot be the scope of a written entity:
+    /// text that is no legal NGSI-LD scope, the NGSI-LD Null, or a value that is not text (ETSI GS
+    /// CIM 009 v1.9.1 clause 4.18), so the record was skipped.
+    ScopeUnreadable,
     /// The entity `expiresAt` a record resolved to reads as no instant, so the entity publishes
     /// without the member (ETSI GS CIM 009 v1.9.1 clause 4.5.1).
     ExpiresAtUnreadable,
@@ -22,7 +33,7 @@ pub enum ExpanderCode {
 
 #[cfg(test)]
 mod tests {
-    use crate::code::expander_code::ExpanderCode;
+    use crate::code::{diagnostic_code::DiagnosticCode, expander_code::ExpanderCode};
     use pretty_assertions::assert_eq;
 
     #[test]
@@ -31,5 +42,16 @@ mod tests {
         assert_eq!(ExpanderCode::ExpiresAtUnreadable.to_string(), "expires-at-unreadable");
         assert_eq!(ExpanderCode::ExpiresAtUnresolvable.to_string(), "expires-at-unresolvable");
         assert_eq!(ExpanderCode::RelationshipUnresolvable.to_string(), "relationship-unresolvable");
+    }
+
+    #[test]
+    fn each_reason_a_record_is_skipped_for_its_identity_or_scope_renders_its_own_code() {
+        assert_eq!(DiagnosticCode::Expander(ExpanderCode::IdAbsent).to_string(), "expander-id-absent");
+        assert_eq!(DiagnosticCode::Expander(ExpanderCode::IdUnresolvable).to_string(), "expander-id-unresolvable");
+        assert_eq!(
+            DiagnosticCode::Expander(ExpanderCode::ScopeUnresolvable).to_string(),
+            "expander-scope-unresolvable"
+        );
+        assert_eq!(DiagnosticCode::Expander(ExpanderCode::ScopeUnreadable).to_string(), "expander-scope-unreadable");
     }
 }

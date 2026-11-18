@@ -5,7 +5,7 @@ input_file: crates/cassiopeia-pipeline/golden/scope/list-read-whole/manifest.jso
 {
   "diagnostics": [
     {
-      "code": "expander-urn-ungeneratable",
+      "code": "expander-scope-unreadable",
       "occurrences": 1,
       "message": [
         "! The scope template `{{ areas }}` gives a list whose item 1 holds a number, not a scope"

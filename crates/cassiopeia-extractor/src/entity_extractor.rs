@@ -371,6 +371,99 @@ mod tests {
         assert_eq!(entries[0].1.occurrences.get(), 1);
     }
 
+    /// Extracts one `Sensor` record holding `t` as `soon` under the mapping declaring `attributes`,
+    /// returning the extracted entity and every unreadable timestamp it lost, as its loss, the
+    /// attribute it is filed under, its example text and how many times it was met.
+    fn extract_unreadable_observed_at(attributes: &str) -> (Entity, Vec<(AttributeLoss, String, u64)>) {
+        let (resolver, mapping) = prepare(
+            &r#"{
+                version: "v4",
+                dataModel: "Sensor",
+                identity: { entityName: "Sensor-{{ id }}" },
+                attributes: ATTRIBUTES,
+            }"#
+            .replace("ATTRIBUTES", attributes),
+        );
+        let dropped = DroppedAttributes::new();
+        let record = json!({"id": "001", "temperature": 21.5, "accuracy": 0.1, "t": "soon"});
+
+        let mapped = AssembledEntity::from_single(entity("urn:ngsi-ld:Sensor:001", record), mapping);
+        let (result, _) = EntityExtractor::new(resolver).extract(mapped, &dropped).unwrap().into_parts();
+        let losses = BatchSink::from(dropped.timestamps)
+            .into_entries()
+            .map(|(loss, lost)| (loss, lost.example.to_string(), lost.occurrences.get()))
+            .collect();
+        (result, losses)
+    }
+
+    /// The names of the sub-attributes `attribute` carries as shared metadata, none when it carries
+    /// no metadata at all.
+    fn shared_metadata_names(result: &Entity, attribute: &str) -> Vec<String> {
+        result
+            .metadata()
+            .as_ref()
+            .and_then(|metadata| metadata.get(&name(attribute)))
+            .and_then(MetadataStorage::as_shared)
+            .map(|shared| shared.keys().map(ToString::to_string).collect())
+            .unwrap_or_default()
+    }
+
+    #[test]
+    fn an_unreadable_observed_at_read_as_a_date_time_keeps_its_attribute_and_is_filed_as_its_qualifier() {
+        let (result, losses) = extract_unreadable_observed_at(
+            r#"{
+                temperature: {
+                    source: "{{ temperature }}",
+                    properties: { observedAt: { source: "{{ t }}", transformation: "datetime" } },
+                },
+            }"#,
+        );
+
+        assert!(result.values().as_ref().expect("values set").contains_key(&name("temperature")));
+        assert!(!shared_metadata_names(&result, "temperature").contains(&"observedAt".to_owned()));
+        assert_eq!(
+            losses,
+            [(
+                AttributeLoss {
+                    loss: TimestampLoss::ObservedAt,
+                    attribute: name("temperature")
+                },
+                "soon".to_owned(),
+                1
+            )]
+        );
+    }
+
+    #[test]
+    fn an_unreadable_observed_at_on_a_sub_attribute_is_filed_under_the_top_level_attribute() {
+        let (result, losses) = extract_unreadable_observed_at(
+            r#"{
+                temperature: {
+                    source: "{{ temperature }}",
+                    properties: {
+                        accuracy: {
+                            source: "{{ accuracy }}",
+                            properties: { observedAt: { source: "{{ t }}", transformation: "datetime" } },
+                        },
+                    },
+                },
+            }"#,
+        );
+
+        assert_eq!(shared_metadata_names(&result, "temperature"), ["accuracy"]);
+        assert_eq!(
+            losses,
+            [(
+                AttributeLoss {
+                    loss: TimestampLoss::ObservedAt,
+                    attribute: name("temperature")
+                },
+                "soon".to_owned(),
+                1
+            )]
+        );
+    }
+
     #[test]
     fn a_composite_property_over_a_missing_null_or_empty_field_is_absent_rather_than_holding_the_text_null() {
         let (resolver, mapping) = prepare(
