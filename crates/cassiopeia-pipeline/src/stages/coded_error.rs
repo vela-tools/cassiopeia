@@ -106,7 +106,8 @@ mod tests {
     use serde_json::{Value, json};
     use std::{path::Path, sync::Arc};
 
-    /// The code the expander stage publishes when expanding `data` under the mapping `document` fails.
+    /// The code the expander stage publishes when an entity of `data` under the mapping `document`
+    /// fails to expand.
     fn expansion_code(document: &str, data: Value) -> ExpanderCode {
         let mut runner = TemplateRunner::new();
         let mut mapping = Mapping::from_json5(document, Path::new("sites.json5"), &mut runner).unwrap();
@@ -116,7 +117,10 @@ mod tests {
             panic!("test record must be a JSON object");
         };
 
-        let Err(error) = Expander::expand(&expander, Record::new(None, data), SourcePosition::first_of(0), &ExpansionLosses::new()) else {
+        let Some(error) = Expander::expand(&expander, Record::new(None, data), SourcePosition::first_of(0), &ExpansionLosses::new())
+            .into_iter()
+            .find_map(Result::err)
+        else {
             panic!("the record expanded");
         };
         error.code()
@@ -136,7 +140,7 @@ mod tests {
         .replace("SCOPE", &scope)
     }
 
-    /// The code a `Site` record named by `{{ site }}` is skipped under for its `scope`.
+    /// The code a `Site` entity named by `{{ site }}` is not written under for its `scope`.
     fn scope_code(scope: &str, data: Value) -> ExpanderCode {
         expansion_code(&site_mapping("{{ site }}", Some(scope)), data)
     }

@@ -1,26 +1,31 @@
 use strum::{Display, EnumCount, EnumIter};
 
-/// Why a source record could not be expanded into fragments.
+/// Why an entity a source record describes, or the record as a whole, could not be expanded into
+/// fragments.
+///
+/// Each entity of a record stands on its own, so a code that keeps one entity from being written
+/// costs no other entity of the record.
 #[derive(Clone, Copy, Debug, Display, EnumCount, EnumIter, Eq, Hash, Ord, PartialEq, PartialOrd)]
 #[strum(serialize_all = "kebab-case")]
 pub enum ExpanderCode {
-    /// The record's entity identity resolved to nothing, so it names no entity and the record was
-    /// skipped.
+    /// The record's main entity identity resolved to nothing, so the record names no main entity
+    /// and only its synthetic entities were written.
     IdAbsent,
-    /// The record's entity identity could not be minted into a URN, because its template failed to
-    /// render, its entity type cannot form a URN, or a relationship it declares has no `source` to
-    /// mint from, so the record was skipped.
+    /// An entity's identity could not be minted into a URN, because its template failed to render,
+    /// its entity type cannot form a URN, or a relationship it declares has no `source` to mint
+    /// from, so the entity was not written.
     IdUnresolvable,
-    /// A `scope` template failed to render for the record, so the record was skipped.
+    /// An entity's `scope` template failed to render for the record, so the entity was not written.
     ScopeUnresolvable,
-    /// A `scope` resolved for the record to a value that cannot be the scope of a written entity:
-    /// text that is no legal NGSI-LD scope, the NGSI-LD Null, or a value that is not text (ETSI GS
-    /// CIM 009 v1.9.1 clause 4.18), so the record was skipped.
+    /// An entity's `scope` resolved for the record to a value that cannot be the scope of a written
+    /// entity: text that is no legal NGSI-LD scope, the NGSI-LD Null, or a value that is not text
+    /// (ETSI GS CIM 009 v1.9.1 clause 4.18), so the entity was not written.
     ScopeUnreadable,
     /// The entity `expiresAt` a record resolved to reads as no instant, so the entity publishes
     /// without the member (ETSI GS CIM 009 v1.9.1 clause 4.5.1).
     ExpiresAtUnreadable,
-    /// The entity `expiresAt` template failed to render for a record, so the record was skipped.
+    /// An entity's `expiresAt` template failed to render for a record, so the entity was not
+    /// written.
     ExpiresAtUnresolvable,
     /// A relationship's source, or its synthetic entity's identity, failed to render for a record,
     /// so the entity was kept without that link and without the synthetic entity it would have named.
@@ -45,7 +50,7 @@ mod tests {
     }
 
     #[test]
-    fn each_reason_a_record_is_skipped_for_its_identity_or_scope_renders_its_own_code() {
+    fn each_reason_an_entity_is_not_written_for_its_identity_or_scope_renders_its_own_code() {
         assert_eq!(DiagnosticCode::Expander(ExpanderCode::IdAbsent).to_string(), "expander-id-absent");
         assert_eq!(DiagnosticCode::Expander(ExpanderCode::IdUnresolvable).to_string(), "expander-id-unresolvable");
         assert_eq!(

@@ -1,4 +1,5 @@
-// A record whose main identity resolves to nothing while it declares a synthetic entity.
+// A record whose main identity resolves to nothing still writes the synthetic entity it declares,
+// linked from no entity.
 {
     version: "v4",
     dataModel: "Asset",

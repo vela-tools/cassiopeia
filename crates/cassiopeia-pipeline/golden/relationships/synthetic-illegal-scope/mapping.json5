@@ -1,5 +1,5 @@
-// A synthetic entity's scope is checked like the main entity's, and an illegal one skips the whole
-// record, the main entity included.
+// A synthetic entity's scope is checked like the main entity's. An illegal one keeps that entity and
+// the link to it from being written, and the main entity is still written.
 {
     version: "v4",
     dataModel: "Asset",

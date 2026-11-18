@@ -64,7 +64,7 @@ Coordinate conversion is part of input preparation. Source coordinates are repro
 
 Following ingestion, the data enters the Expander for structural expansion. A source record often contains data for more than one logical entity, so one record can produce several partial contributions. For example, a row describing a transit station may produce a station contribution and contributions for associated equipment.
 
-The Expander applies the selected mapping, derives entity identities, and creates relationship references. A record whose identity resolves to nothing is skipped with a warning, while a relationship whose target resolves to nothing is left out and the entity is kept. A mapping can also ask it to materialize a related synthetic entity from the same record. The [mapping guide](mapping.md) covers those mapping features in detail. The Expander creates the pieces that the resolver will combine; it does not build the final NGSI-LD document.
+The Expander applies the selected mapping, derives entity identities, and creates relationship references. An entity whose identity resolves to nothing is not written, with a warning, while a relationship whose target resolves to nothing is left out and the entity is kept. A mapping can also ask it to materialize a related synthetic entity from the same record. Each entity of a record stands on its own, so one that cannot be written costs no other. The [mapping guide](mapping.md) covers those mapping features in detail. The Expander creates the pieces that the resolver will combine; it does not build the final NGSI-LD document.
 
 ### Resolution
 
@@ -138,7 +138,7 @@ The mapping engine resolves the simplest templates directly, without Tera. A dir
 
 Every template is compiled when the mapping is loaded, before any record is read. A malformed template, an unknown filter, function, or test, or a field name Tera would misread fails the run at that point, with an error that names the mapping file and the template's place in it.
 
-Mappings can clean values, perform calculations, work with time, and construct geometry. A non-finite calculation removes the affected attribute. A template that fails to render for one record removes its attribute with a warning, and a template that names an entity, such as its identity, skips the record with a warning. The rest of the run continues in each case.
+Mappings can clean values, perform calculations, work with time, and construct geometry. A non-finite calculation removes the affected attribute. A template that fails to render for one record removes its attribute with a warning, and a template that names an entity, such as its identity, keeps that entity from being written with a warning, while the other entities of the record are still written. The rest of the run continues in each case.
 
 Knowledge of unit notations lives in a crate of its own, so the `cefact_unit` filter and any later component read units the same way. It resolves a QUDT unit IRI, a symbol, a UCUM or UDUNITS code, or a unit name to the UN/CEFACT code `unitCode` holds. Its notations come from Recommendation No. 20 itself and from a table generated from a QUDT release by a separate generator crate. The hand-kept part is limited to corrections of QUDT units whose published code is wrong, rulings for notations that name more than one unit, and a few notations in common use that no source lists, and tests fail when a source update makes any of them stale.
 

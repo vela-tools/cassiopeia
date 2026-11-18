@@ -12,5 +12,10 @@ input_file: crates/cassiopeia-pipeline/golden/relationships/main-identity-resolv
     "id": "urn:ngsi-ld:Organization:O1",
     "type": "Organization",
     "name": "City council"
+  },
+  {
+    "id": "urn:ngsi-ld:Organization:O2",
+    "type": "Organization",
+    "name": "Orphaned owner"
   }
 ]
