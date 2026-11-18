@@ -1,13 +1,13 @@
 use crate::{
     entity_store::{
-        error::Result,
+        error::{EntityStoreError, Result},
         latest_slot::{IncomingRecord, LatestSlot},
         mapping_expiry::join,
         mapping_reads::MappingReads,
         redb_database::RedbDatabase,
         redb_key::{distinct_id_count, for_each_id_chunk_in_source_order, ids_in_source_order, make_prefix, prefix_end},
         redb_scope::{PendingScopes, SCOPES_TABLE, read_scope},
-        redb_slot_value::{decode_slot, encode_slot, slot_first},
+        redb_slot_value::{EncodedInputs, decode_slot, decoded, encode_slot, joined, slot_first, undecoded},
         retention::Retention,
         store::{AssembledFragments, EntityStore, FragmentWrite, StoredUnit},
     },
@@ -31,9 +31,11 @@ const DATA_TABLE: TableDefinition<&[u8], &[u8]> = TableDefinition::new("data");
 /// encoded with `rmp-serde` behind the position of the first record the mapping resolved to the id.
 /// A batch reads each key once, folds the batch's records into the slot by the current-state rule (a
 /// temporal mapping keeps, attribute by attribute, the record observed last, a static mapping merges
-/// in source order),
-/// and commits once. The whole batch is in hand, so every slot it touched is sealed before it is
-/// written back. Assembly prefix-scans a base id's keys into one joined emit-unit, joining the expiry
+/// each input's records in the order of the input), and commits once. A static mapping's slot keeps
+/// each input's merge encoded on its own, and a batch decodes only the merges of the inputs its
+/// records come from, writing the others back as it read them. The whole batch is in hand, so every
+/// slot it touched is sealed before it is written back. Assembly prefix-scans a base id's keys into
+/// one joined emit-unit, joining a static mapping's inputs in the order of the manifest and the expiry
 /// each key carries into the entity's. The ids are handed on in the order of their first records.
 /// Durability is `Durability::None`: the database lives in a temporary directory cleaned up at the
 /// end of the run, so fsync would be pure waste.
@@ -67,6 +69,9 @@ struct BatchSlot<'a> {
     /// The key's slot and the position of the first record it took, seeded from disk; `None` until a
     /// record has landed on it.
     slot: Option<(SourcePosition, LatestSlot)>,
+    /// The merges of the slot's inputs that no record of the batch has reached yet, as they were read
+    /// from disk.
+    untouched: EncodedInputs,
     /// The read set of the mapping, from the batch's writes.
     reads: &'a SourceReads,
 }
@@ -125,14 +130,15 @@ impl EntityStore for RedbLatestEntityStore {
                     Entry::Vacant(vacant) => {
                         // Seed the accumulator from disk once per key.
                         let existing = data_table.get(vacant.key().as_slice()).map_err(|e| self.db.err(e.into(), StoreAction::Read))?;
-                        let slot = match existing {
+                        let (slot, untouched) = match existing {
                             Some(guard) => {
                                 let (first, stored) = decode_slot(guard.value())?;
-                                Some((first, LatestSlot::from_stored(stored, batch)))
+                                let (stored, untouched) = undecoded(stored);
+                                (Some((first, LatestSlot::from_stored(stored, batch))), untouched)
                             }
-                            None => None,
+                            None => (None, EncodedInputs::new()),
                         };
-                        vacant.insert(BatchSlot { slot, reads })
+                        vacant.insert(BatchSlot { slot, untouched, reads })
                     }
                 };
 
@@ -145,6 +151,11 @@ impl EntityStore for RedbLatestEntityStore {
                 };
                 match &mut entry.slot {
                     Some((first, slot)) => {
+                        // A record of an input the batch has not reached yet takes that input's merge
+                        // back first, decoding it now and only now.
+                        if let Some(at) = entry.untouched.iter().position(|encoded| encoded.input() == position.input()) {
+                            slot.restore_input(entry.untouched.remove(at).decode()?, batch);
+                        }
                         *first = (*first).min(position);
                         slot.absorb(incoming, reads);
                     }
@@ -155,10 +166,11 @@ impl EntityStore for RedbLatestEntityStore {
                 }
             }
 
-            for (key, BatchSlot { slot, reads }) in grouped {
+            for (key, BatchSlot { slot, untouched, reads }) in grouped {
                 if let Some((first, slot)) = slot {
-                    // Every record of the batch is in, so the slot is written back with them merged.
-                    let bytes = encode_slot(first, &slot.into_stored(reads))?;
+                    // Every record of the batch is in, so the slot is written back with them merged,
+                    // beside the inputs the batch did not reach.
+                    let bytes = encode_slot(first, &joined(slot.into_stored(reads), untouched)?)?;
                     data_table
                         .insert(key.as_slice(), bytes.as_slice())
                         .map_err(|e| self.db.err(e.into(), StoreAction::Insert))?;
@@ -184,7 +196,7 @@ impl EntityStore for RedbLatestEntityStore {
         for_each_id_chunk_in_source_order(&self.db, DATA_TABLE, |_key, value| slot_first(value), chunk_size, callback)
     }
 
-    fn assemble_entity(&self, base_id: &Urn, _mappings: &dyn MappingReads) -> Result<AssembledFragments> {
+    fn assemble_entity(&self, base_id: &Urn, mappings: &dyn MappingReads) -> Result<AssembledFragments> {
         let prefix = make_prefix(base_id);
         let end = prefix_end(&prefix);
 
@@ -203,10 +215,16 @@ impl EntityStore for RedbLatestEntityStore {
             .map_err(|e| self.db.err(e.into(), StoreAction::Iterate))?
         {
             let (key, value) = entry.map_err(|e| self.db.err(e.into(), StoreAction::Iterate))?;
-            // Every batch writes the slots it touched back with their records merged, so a stored slot
-            // needs no read set to finish.
+            // Every batch writes the slots it touched back with each input's records merged, while
+            // the inputs are joined only now, once no record of an earlier input can still arrive,
+            // which takes the mapping's read set.
+            let mapping_id = mapping_id_of(key.value());
+            let reads = mappings.reads(mapping_id).ok_or_else(|| EntityStoreError::UnregisteredMapping {
+                entity: base_id.clone(),
+                mapping_id,
+            })?;
             let (_first, stored) = decode_slot(value.value())?;
-            let (fragment, expiry) = stored.into_fragment(mapping_id_of(key.value()));
+            let (fragment, expiry) = decoded(stored)?.into_fragment(mapping_id, reads);
             expiries.push(expiry);
             unit.push(fragment);
         }
@@ -293,6 +311,7 @@ mod tests {
                     assert_expiry_follows_the_retained_record,
                     assert_hands_ids_on_in_order_of_their_first_records,
                     assert_joins_expiries_across_mappings,
+                    assert_joins_inputs_in_the_order_of_the_manifest,
                     assert_merges_scopes_per_id,
                     assert_ranks_by_instant,
                     assert_ranks_each_slot_on_its_own,
@@ -334,6 +353,11 @@ mod tests {
     #[test]
     fn each_slot_of_a_temporal_mapping_keeps_the_record_observed_last_in_it() {
         assert_ranks_each_slot_on_its_own(&RedbLatestEntityStore::new().unwrap());
+    }
+
+    #[test]
+    fn the_records_of_several_inputs_sharing_a_mapping_join_in_the_order_of_the_manifest() {
+        assert_joins_inputs_in_the_order_of_the_manifest(&RedbLatestEntityStore::new().unwrap());
     }
 
     #[test]

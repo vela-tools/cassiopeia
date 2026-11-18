@@ -1434,6 +1434,91 @@ mod tests {
         },
     }"#;
 
+    /// Resolves each `(input, record)` of `arrivals`, in order, onto one id through the one `SIMPLE`
+    /// mapping in `store`, each as its own batch and as the next record of the input at `input` in the
+    /// manifest, then returns the record the id kept and the merge assembling it reveals.
+    fn kept_over_inputs(store: Box<dyn EntityStore>, arrivals: &[(u32, serde_json::Value)]) -> (serde_json::Value, Option<RecordMerge>) {
+        let (resolver, mappings) = resolver_with(store, &[SIMPLE]);
+        let station = urn("urn:ngsi-ld:AirQualityObserved:Station");
+        for (arrival, (input, record)) in arrivals.iter().enumerate() {
+            let batch = vec![Mapped::new(
+                Fragment::builder()
+                    .source_data(record.clone())
+                    .target_urn(station.clone())
+                    .position(SourcePosition::first_of(*input).advanced(arrival))
+                    .build(),
+                Arc::clone(&mappings[0]),
+            )];
+            assert!(resolver.resolve_batch(batch).iter().all(Result::is_ok));
+        }
+        let assembled = resolver.assemble(&station).unwrap();
+        (assembled.units[0].fragments()[0].record().clone(), assembled.merge)
+    }
+
+    #[test]
+    fn a_field_two_inputs_disagree_on_keeps_the_first_input_s_value_and_is_reported_in_either_order_of_arrival_and_every_store() {
+        let north = json!({"temperature": 20});
+        let south = json!({"temperature": 21, "humidity": 0.4});
+        // The second case swaps the two inputs in the manifest.
+        for (north_input, south_input, kept) in [(0, 1, 20), (1, 0, 21)] {
+            let arrivals = [(north_input, north.clone()), (south_input, south.clone())];
+            for order in [[0, 1], [1, 0]] {
+                for store in current_state_stores() {
+                    let debug = format!("{store:?} {order:?} {north_input}");
+
+                    let (record, merge) = kept_over_inputs(store, &order.map(|index| arrivals[index].clone()));
+
+                    assert_eq!(record, json!({"temperature": kept, "humidity": 0.4}), "{debug}");
+                    assert_eq!(
+                        merge,
+                        Some(RecordMerge {
+                            id: urn("urn:ngsi-ld:AirQualityObserved:Station"),
+                            entity_type: name("AirQualityObserved"),
+                            records: records(2),
+                            field: FieldPath::new(&["temperature"]),
+                        }),
+                        "{debug}"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn three_inputs_keep_the_earliest_input_s_value_and_take_a_field_only_a_later_one_holds_in_every_order_of_arrival_and_store() {
+        let inputs = [
+            (0, json!({"temperature": 20})),
+            (1, json!({"temperature": 21, "humidity": 0.4})),
+            (2, json!({"temperature": 22, "humidity": 0.4, "pressure": 1013})),
+        ];
+        for order in [[0, 1, 2], [0, 2, 1], [1, 0, 2], [1, 2, 0], [2, 0, 1], [2, 1, 0]] {
+            for store in current_state_stores() {
+                let debug = format!("{store:?} {order:?}");
+
+                let (record, merge) = kept_over_inputs(store, &order.map(|index| inputs[index].clone()));
+
+                assert_eq!(record, json!({"temperature": 20, "humidity": 0.4, "pressure": 1013}), "{debug}");
+                assert_eq!(
+                    merge.map(|merge| (merge.records, merge.field.to_string())),
+                    Some((records(3), "temperature".to_string())),
+                    "{debug}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn inputs_that_only_add_fields_to_one_another_assemble_without_a_merge_in_every_store() {
+        for store in current_state_stores() {
+            let debug = format!("{store:?}");
+
+            let (record, merge) = kept_over_inputs(store, &[(1, json!({"humidity": 0.4})), (0, json!({"temperature": 20}))]);
+
+            assert_eq!(record, json!({"temperature": 20, "humidity": 0.4}), "{debug}");
+            assert_eq!(merge, None, "{debug}");
+        }
+    }
+
     /// Resolves `records` of [`TRIMMED_TIMESTAMP`] onto one id in `store`, each as its own batch, then
     /// drives assembly, returning the records the id kept and what the scan found lost.
     fn discards_of(store: Box<dyn EntityStore>, records: &[serde_json::Value]) -> (Vec<serde_json::Value>, AssemblyLosses) {

@@ -1,0 +1,13 @@
+{
+    version: "v1",
+    inputs: [
+        {
+            source: "north.csv",
+            mapping: "mapping.json5",
+        },
+        {
+            source: "south.csv",
+            mapping: "mapping.json5",
+        },
+    ],
+}

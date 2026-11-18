@@ -41,7 +41,8 @@ struct EntitySlots {
 /// In-memory current-state entity store using [`DashMap`] for lock-free concurrent access.
 ///
 /// Each base [`Urn`] maps to one [`LatestSlot`] per mapping: a temporal mapping keeps, attribute by
-/// attribute, the record observed last, a static mapping merges its records in source order. This
+/// attribute, the record observed last, a static mapping merges each input's records in the order of
+/// the input and joins the inputs in the order of the manifest at assembly. This
 /// is O(mappings) per id, so a temporal id's many observations never grow the stored footprint. Each
 /// slot carries the expiry its records contribute, and the entity's own is joined from them at
 /// assembly. The ids are handed on in the order of their first records. Keys compare by `Urn`
@@ -140,7 +141,7 @@ impl EntityStore for DashMapLatestEntityStore {
                         entity: base_id.clone(),
                         mapping_id,
                     })?;
-                    let (fragment, expiry) = slot.into_stored(reads).into_fragment(mapping_id);
+                    let (fragment, expiry) = slot.into_stored(reads).into_fragment(mapping_id, reads);
                     unit.push(fragment);
                     expiries.push(expiry);
                 }
@@ -207,6 +208,7 @@ mod tests {
                     assert_expiry_follows_the_retained_record,
                     assert_hands_ids_on_in_order_of_their_first_records,
                     assert_joins_expiries_across_mappings,
+                    assert_joins_inputs_in_the_order_of_the_manifest,
                     assert_merges_scopes_per_id,
                     assert_ranks_by_instant,
                     assert_ranks_each_slot_on_its_own,
@@ -248,6 +250,11 @@ mod tests {
     #[test]
     fn each_slot_of_a_temporal_mapping_keeps_the_record_observed_last_in_it() {
         assert_ranks_each_slot_on_its_own(&DashMapLatestEntityStore::new());
+    }
+
+    #[test]
+    fn the_records_of_several_inputs_sharing_a_mapping_join_in_the_order_of_the_manifest() {
+        assert_joins_inputs_in_the_order_of_the_manifest(&DashMapLatestEntityStore::new());
     }
 
     #[test]

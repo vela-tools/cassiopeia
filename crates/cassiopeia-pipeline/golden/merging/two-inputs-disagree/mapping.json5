@@ -1,0 +1,22 @@
+// Two inputs read through one mapping give one station records that disagree on its capacity. The
+// inputs are merged in the order of the manifest: the capacity keeps the first input's value, and the
+// zone, which only the second input holds, is taken from it.
+{
+    version: "v4",
+    dataModel: "Station",
+    identity: {
+        entityName: "{{ code }}",
+    },
+    attributes: {
+        name: {
+            source: "{{ name }}",
+        },
+        capacity: {
+            source: "{{ capacity }}",
+            transformation: "integer",
+        },
+        zone: {
+            source: "{{ zone }}",
+        },
+    },
+}

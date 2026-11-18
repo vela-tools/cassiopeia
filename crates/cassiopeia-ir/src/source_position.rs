@@ -51,6 +51,12 @@ impl SourcePosition {
         }
     }
 
+    /// The place in the manifest of the input that read the fragment's record.
+    #[must_use]
+    pub const fn input(self) -> u32 {
+        self.input
+    }
+
     /// The position as big-endian bytes, which sort bytewise exactly as the positions do, so a store
     /// can key by them and read them back in source order. [`from_be_bytes`](SourcePosition::from_be_bytes)
     /// reads them back.
@@ -100,6 +106,12 @@ mod tests {
     fn every_record_of_an_earlier_input_comes_before_any_record_of_a_later_one() {
         assert!(SourcePosition::first_of(0).advanced(1_000_000).nth_fragment(9) < SourcePosition::first_of(1));
         assert!(SourcePosition::first_of(1).advanced(3) < SourcePosition::first_of(2));
+    }
+
+    #[test]
+    fn a_position_names_the_place_of_its_input_in_the_manifest_whatever_record_and_fragment_it_holds() {
+        assert_eq!(SourcePosition::first_of(0).input(), 0);
+        assert_eq!(SourcePosition::first_of(3).advanced(41).nth_fragment(2).input(), 3);
     }
 
     #[test]
