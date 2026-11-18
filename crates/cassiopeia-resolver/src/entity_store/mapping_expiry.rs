@@ -26,11 +26,13 @@ impl MappingExpiry {
         self.0 = declared;
     }
 
-    /// Takes the expiry of a record merged into the retained one when it declares one, as a merged
-    /// record overrides only the fields it carries.
-    pub const fn refine(&mut self, declared: Option<DateTime<Utc>>) {
-        if declared.is_some() {
-            self.0 = declared;
+    /// Takes the expiry of records merged into the retained ones, all of them later in the source,
+    /// when they contribute one, as a merged record overrides only the fields it carries: a record
+    /// declaring no expiry clears nothing, and of several merged records the last to declare one
+    /// overrides the others.
+    pub const fn refine(&mut self, later: MappingExpiry) {
+        if later.0.is_some() {
+            self.0 = later.0;
         }
     }
 
@@ -94,11 +96,30 @@ mod tests {
     #[test]
     fn a_merged_record_overrides_the_expiry_only_when_it_declares_one() {
         let mut expiry = MappingExpiry::first(instant(300));
-        expiry.refine(instant(100));
+        expiry.refine(MappingExpiry::first(instant(100)));
         assert_eq!(expiry, MappingExpiry::first(instant(100)));
 
-        expiry.refine(None);
+        expiry.refine(MappingExpiry::first(None));
         assert_eq!(expiry, MappingExpiry::first(instant(100)));
+    }
+
+    #[test]
+    fn records_merged_apart_refine_the_expiry_as_if_merged_one_by_one() {
+        let declared = [instant(300), None, instant(100), None];
+        let mut one_by_one = MappingExpiry::first(instant(500));
+        for expiry in declared {
+            one_by_one.refine(MappingExpiry::first(expiry));
+        }
+
+        let mut apart = MappingExpiry::first(declared[0]);
+        for expiry in &declared[1..] {
+            apart.refine(MappingExpiry::first(*expiry));
+        }
+        let mut joined = MappingExpiry::first(instant(500));
+        joined.refine(apart);
+
+        assert_eq!(joined, one_by_one);
+        assert_eq!(joined, MappingExpiry::first(instant(100)));
     }
 
     #[test]

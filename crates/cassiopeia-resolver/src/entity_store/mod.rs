@@ -4,6 +4,7 @@ pub mod dashmap_series_store;
 pub mod discarded_timestamps;
 pub(crate) mod entity_order;
 pub mod error;
+pub(crate) mod input_merge;
 pub(crate) mod latest_slot;
 pub mod mapping_expiry;
 pub mod mapping_reads;

@@ -242,6 +242,7 @@ pub(crate) mod tests {
             record_timestamp::RecordTimestamp,
             store::{EntityStore, FragmentWrite},
         },
+        field_path::FieldPath,
         mapping_id::MappingId,
         test_order::{ReadsEverything, next_batch, next_position},
     };
@@ -472,6 +473,63 @@ pub(crate) mod tests {
                     vec![json!({ "record": 1 })],
                     vec![RecordChoice::Observed(0), RecordChoice::Newest]
                 )),
+                "{id}"
+            );
+        }
+    }
+
+    /// Contract every current-state [`EntityStore`] must honour: the records several inputs give one
+    /// static mapping for an id are merged input by input and joined in the order of the inputs in
+    /// the manifest, whatever order the inputs' records arrive in. A field the inputs disagree on keeps
+    /// the value of the earliest input that holds it, a field only a later input holds is taken from
+    /// that input, an input whose records arrive in several batches merges them in its own order, the
+    /// disagreement is the fragment's conflict, and the fragment counts the records of every input.
+    /// This holds across separate writes as well as within one batch.
+    pub(crate) fn assert_joins_inputs_in_the_order_of_the_manifest(store: &dyn EntityStore) {
+        let written: Urn = "urn:ngsi-ld:Station:written".parse().unwrap();
+        let batched: Urn = "urn:ngsi-ld:Station:batched".parse().unwrap();
+        // Each `(input, record)` in the order the records arrive, the second record of input 1 after
+        // every other input's.
+        let arrivals = [
+            (2, json!({"capacity": 44, "zone": "C", "level": 3})),
+            (1, json!({"capacity": 42, "zone": "B"})),
+            (0, json!({"name": "Main", "capacity": 40})),
+            (1, json!({"capacity": 43, "level": 1})),
+        ];
+        let record = |id: &Urn, arrival: usize| {
+            let (input, data) = &arrivals[arrival];
+            FragmentWrite {
+                source_data: data.clone(),
+                position: SourcePosition::first_of(*input).advanced(arrival),
+                ..write(id, 1, &[])
+            }
+        };
+
+        for arrival in 0..arrivals.len() {
+            store.store_fragment(record(&written, arrival)).unwrap();
+        }
+        let batch = next_batch();
+        store
+            .store_fragment_batch(
+                [3, 0, 2, 1]
+                    .map(|arrival| FragmentWrite {
+                        batch,
+                        ..record(&batched, arrival)
+                    })
+                    .into(),
+            )
+            .unwrap();
+
+        for id in [written, batched] {
+            let units = store.assemble_entity(&id, &ReadsEverything).unwrap().units;
+            let fragment = &units[0][0];
+            assert_eq!(
+                (&fragment.data, fragment.records.get(), &fragment.conflict),
+                (
+                    &json!({"name": "Main", "capacity": 40, "zone": "B", "level": 1}),
+                    4,
+                    &Some(FieldPath::new(&["capacity"]))
+                ),
                 "{id}"
             );
         }
