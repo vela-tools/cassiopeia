@@ -9,6 +9,7 @@ use crate::{
     instance_placement,
     mapping_role::MappingRole,
     observation_plan::ObservationPlan,
+    reserved_names,
     scope::{CompiledScope, Scope},
     source_reads::SourceReads,
     template::{CompiledTemplate, TemplateSource, runner::TemplateRunner},
@@ -121,8 +122,10 @@ impl Mapping {
     /// dropped, as when a document is parsed.
     ///
     /// # Errors
-    /// Returns a [`MappingError`] when a declaration below the top level declares `instances` (see
-    /// [`instance_placement::check`]), when an attribute declares a conversion that cannot run (see
+    /// Returns [`MappingError::ReservedAttributeName`] when an attribute of the entity, or of a
+    /// `syntheticEntity`, takes a name NGSI-LD reserves, a [`MappingError`] when a declaration below
+    /// the top level declares `instances` (see [`instance_placement::check`]), when an attribute
+    /// declares a conversion that cannot run (see
     /// [`resolve`]), or [`MappingError::UncompilableTemplate`] when the `observedAt` template cannot
     /// be compiled.
     pub fn new(
@@ -135,6 +138,7 @@ impl Mapping {
         runner: &mut TemplateRunner,
     ) -> Result<Mapping> {
         let ignored_keys = ignored_keys::take(&mut attributes);
+        reserved_names::check(&attributes)?;
         instance_placement::check(&attributes)?;
         resolve(&mut attributes)?;
         let EntityMembers { scope, expires_at } = members;
@@ -185,15 +189,17 @@ impl Mapping {
     /// dropped.
     ///
     /// # Errors
-    /// Returns a [`MappingError`] when the document cannot be parsed, declares `instances` below the
-    /// top level, declares a `valueType` where none can be written, declares an attribute that cannot
-    /// run, or its `observedAt` template cannot be compiled.
+    /// Returns a [`MappingError`] when the document cannot be parsed, names an attribute of the entity
+    /// or of a `syntheticEntity` after a name NGSI-LD reserves, declares `instances` below the top
+    /// level, declares a `valueType` where none can be written, declares an attribute that cannot run,
+    /// or its `observedAt` template cannot be compiled.
     pub fn from_json5(content: &str, origin: &Path, runner: &mut TemplateRunner) -> Result<Mapping> {
         let mut mapping: Mapping = serde_json5::from_str(content).map_err(|source| MappingError::Parse {
             path: origin.to_path_buf(),
             source,
         })?;
         mapping.ignored_keys = ignored_keys::take(mapping.attributes_mut());
+        reserved_names::check(mapping.attributes())?;
         instance_placement::check(mapping.attributes())?;
         value_type_placement::check(mapping.attributes())?;
         resolve(mapping.attributes_mut())?;
@@ -745,6 +751,24 @@ mod tests {
         );
 
         assert!(matches!(result, Err(MappingError::InstancesBelowTopLevel { attribute }) if attribute.to_string() == "temperature.accuracy"));
+    }
+
+    #[test]
+    fn a_declared_mapping_with_an_attribute_named_after_an_entity_member_is_refused() {
+        let kind: Attribute = serde_json5::from_str(r#"{ source: "{{ kind }}" }"#).unwrap();
+        let attributes = IndexMap::from([(NameBuf::new("type").unwrap(), kind)]);
+
+        let result = Mapping::new(
+            Version::V4,
+            "Device".parse::<DataModel>().unwrap(),
+            Identity::new(TemplateSource::new("{{ id }}")),
+            EntityMembers::default(),
+            attributes,
+            Path::new("device.json5"),
+            &mut TemplateRunner::new(),
+        );
+
+        assert!(matches!(result, Err(MappingError::ReservedAttributeName { attribute, .. }) if attribute.as_str() == "type"));
     }
 
     #[test]
