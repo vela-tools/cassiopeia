@@ -171,6 +171,8 @@ attributes: {
 
 The key on the left, such as `name` or `capacity`, becomes the NGSI-LD attribute name. The `source` expression tells Cassiopeia where the value comes from. The optional `transformation` converts it before Cassiopeia builds the entity.
 
+Some names are not attribute names (ETSI GS CIM 009 v1.9.1 clause 4.5.1). Every entity carries `id`, `type`, `scope`, and `expiresAt` as members beside its attributes, so an attribute of one of these names would be written as a second member of that name, and a reader would keep one or the other. The terms the NGSI-LD core context defines as non-reified Properties are kept from attributes as well: `datasetId`, `instanceId`, `observedAt`, `createdAt`, `modifiedAt`, `deletedAt`, `lastUsedAt`, `unitCode`, `valueType`, and `lang`. A mapping that names an attribute of its entity, or of a [`syntheticEntity`](#emit-a-related-entity), after one of them fails when it loads, and the error names the attribute. Set the entity's own `scope` and `expiresAt` with the top-level [`scope`](#assign-scopes) and [`expiresAt`](#set-an-expiry) keys, and an attribute's `observedAt`, `unitCode`, or `datasetId` under its [`properties`](#add-attribute-metadata). A name that differs in case, such as `Type`, is a different name, and names such as `name`, `location`, and `status` are accepted.
+
 In mapping syntax, an attribute without `type` is a `Property`. Set `type` explicitly for a relationship, geometry, language map, vocabulary, list, or JSON property.
 
 ### Source values
@@ -733,6 +735,8 @@ Start with one record and one or two attributes. Run the mapping before adding n
 Cassiopeia reads mappings as JSON5, so comments and trailing commas are allowed. The `format` command can reformat a mapping without changing its meaning. Use `.json5` for the recommended format or `.json` when another tool requires strict JSON.
 
 Cassiopeia compiles every template when it loads the mapping, so a broken template stops the run before any input is read. That covers a syntax error, an unclosed `{{`, `{%`, or `{#`, a block without its end tag such as `{% endif %}`, an unknown filter, function, or test, an unspaced hyphen between two names inside an expression (`{{ station-id }}`), and a non-ASCII name inside an expression (`{{ čas | upper }}`). The error names the mapping file and where the template is declared (`identity.entityName`, `scope`, `observedAt`, or the attribute) and says what to change, such as `upper` for a misspelt `uper`, or `this['station-id']` for `station-id`. Run with `-v` to add Tera's own report, with the column in your template. See [When a template fails](templates.md#when-a-template-fails).
+
+An attribute named after a member every entity carries, such as `id`, or after a term such as `observedAt`, stops the run when the mapping loads, naming the attribute. See [Map an attribute](#map-an-attribute).
 
 A key that has no effect, such as a misspelled `transformation` on an attribute, does not stop the run. It is reported when the mapping loads, before any input is read, naming the mapping file, the declaration, and the key. See [The document shape](#the-document-shape).
 

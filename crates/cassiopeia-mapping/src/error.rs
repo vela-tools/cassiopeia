@@ -1,5 +1,6 @@
 use crate::{
     conversion::{admitted_transformations::AdmittedTransformations, declaration_shape::DeclarationShape},
+    declaration_site::DeclaringEntity,
     template::compile_error::TemplateCompileError,
     template_location::TemplateLocation,
     transformation::Transformation,
@@ -7,7 +8,14 @@ use crate::{
 use cassiopeia_common::error::io::IoError;
 use cassiopeia_geometry::error::GeometryError;
 use cassiopeia_ngsi_ld::{
-    entity::{attribute::NgsiLdAttributeKind, attribute_path::AttributePath, error::NgsiLdError, name::NameBuf, value_type::ValueType},
+    entity::{
+        attribute::NgsiLdAttributeKind,
+        attribute_path::AttributePath,
+        error::NgsiLdError,
+        name::NameBuf,
+        reserved_member::ReservedName,
+        value_type::ValueType,
+    },
     value::types::TemporalValueType,
 };
 use cassiopeia_value_type_expansion::error::ExpansionError;
@@ -117,6 +125,22 @@ pub enum MappingError {
         kind: NgsiLdAttributeKind,
         /// What it is built from.
         shape: DeclarationShape,
+    },
+
+    /// An attribute of the entity, or of a `syntheticEntity`, takes a name NGSI-LD keeps from an
+    /// attribute (ETSI GS CIM 009 v1.9.1 clause 4.5.1).
+    ///
+    /// An attribute named after a member of the entity itself would be written as a second member of
+    /// that name, and a reader keeps one or the other (RFC 8259 section 4). The same clause keeps the
+    /// terms the core context defines as non-reified Properties from naming an attribute.
+    #[error("Attribute `{attribute}`{entity} takes a name NGSI-LD reserves: {reserved} (ETSI GS CIM 009 v1.9.1 clause 4.5.1), so rename the attribute")]
+    ReservedAttributeName {
+        /// The attribute's name.
+        attribute: NameBuf,
+        /// The entity the attribute belongs to.
+        entity: DeclaringEntity,
+        /// What keeps the name from an attribute.
+        reserved: ReservedName,
     },
 
     /// A sub-attribute, or a member of a structured value, declares `instances`.
