@@ -3,5 +3,56 @@ source: crates/cassiopeia-pipeline/src/end_to_end/golden/mod.rs
 input_file: crates/cassiopeia-pipeline/golden/keys-without-effect/unread-keys/manifest.json5
 ---
 {
-  "diagnostics": []
+  "diagnostics": [
+    {
+      "code": "mapping-v4-unknown-key",
+      "occurrences": 1,
+      "message": [
+        "! Attribute `count` in the mapping document at '[case]/mapping.json5' declares a key that has no effect",
+        "  ├─ caused by   `count.accuracy` declares `transfromation`, which it does not read: correct the key or remove it",
+        "  ├─ attribute   count",
+        "  ╰─ mapping     [case]/mapping.json5"
+      ]
+    },
+    {
+      "code": "mapping-v4-unknown-key",
+      "occurrences": 1,
+      "message": [
+        "! Attribute `count` in the mapping document at '[case]/mapping.json5' declares a key that has no effect",
+        "  ├─ caused by   `count` declares `transformaton`, which it does not read: correct the key or remove it",
+        "  ├─ attribute   count",
+        "  ╰─ mapping     [case]/mapping.json5"
+      ]
+    },
+    {
+      "code": "mapping-v4-unknown-key",
+      "occurrences": 1,
+      "message": [
+        "! Attribute `forecast` in the mapping document at '[case]/mapping.json5' declares a key that has no effect",
+        "  ├─ caused by   Instance 1 of `forecast` declares `unitCode`, which it does not read: correct the key or remove it",
+        "  ├─ attribute   forecast",
+        "  ╰─ mapping     [case]/mapping.json5"
+      ]
+    },
+    {
+      "code": "mapping-v4-key-without-effect",
+      "occurrences": 1,
+      "message": [
+        "! Attribute `building` in the mapping document at '[case]/mapping.json5' declares a key that has no effect",
+        "  ├─ caused by   The target of `building` declares `idPattern`, which nothing reads, since a relationship's object is the entity its `source` names: remove the key",
+        "  ├─ attribute   building",
+        "  ╰─ mapping     [case]/mapping.json5"
+      ]
+    },
+    {
+      "code": "mapping-v4-key-without-effect",
+      "occurrences": 1,
+      "message": [
+        "! Attribute `building` in the mapping document at '[case]/mapping.json5' declares a key that has no effect",
+        "  ├─ caused by   The target of `building` declares `sourceField`, which nothing reads, since a relationship's object is the entity its `source` names: remove the key",
+        "  ├─ attribute   building",
+        "  ╰─ mapping     [case]/mapping.json5"
+      ]
+    }
+  ]
 }

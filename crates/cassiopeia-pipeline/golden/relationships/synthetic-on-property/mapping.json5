@@ -1,4 +1,5 @@
-// A `syntheticEntity` declared on a Property, an attribute that links nothing.
+// A `syntheticEntity` declared on a Property, an attribute that links nothing, writes no entity:
+// loading the mapping warns that the key has no effect.
 {
     version: "v4",
     dataModel: "Asset",

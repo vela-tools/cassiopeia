@@ -1,4 +1,4 @@
-use crate::{attribute::Attributes, template::CompiledTemplate};
+use crate::{attribute::Attributes, template::CompiledTemplate, unread_keys::UnreadKeys};
 use cassiopeia_ngsi_ld::entity::value_type::ValueType;
 use getset::{Getters, MutGetters, Setters};
 use serde::{Deserialize, Serialize};
@@ -49,6 +49,13 @@ pub struct AttributeInstance {
     #[builder(default = Default::default())]
     #[getset(get = "pub", set = "pub")]
     compiled_source: Option<Vec<CompiledTemplate>>,
+
+    /// The keys this instance holds that it does not read, taken out when the mapping loads so each
+    /// can be warned about.
+    #[serde(flatten, skip_serializing)]
+    #[builder(default = Default::default(), setter(skip))]
+    #[getset(get_mut = "pub(crate)")]
+    unread_keys: UnreadKeys,
 }
 
 #[cfg(test)]

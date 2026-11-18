@@ -155,6 +155,18 @@ Cassiopeia checks every template in a mapping when it loads the mapping. A templ
 
 A geometry declaration that could never run is rejected at load time the same way, naming the attribute: a `GeoProperty` whose `transformation` produces no geometry, such as `string`, a `geometry` block on an attribute whose value is never converted to a geometry, and a `geometry` conversion that cannot produce the declared type. See [GeoProperty](mapping.md#geoproperty).
 
+A key a mapping declares that has no effect does not stop the run. Cassiopeia warns about each one when it loads the mapping, once per mapping file per run and before any record is read, and the mapping runs as if the key were absent. The first line names the mapping file and the top-level attribute, and the second names the declaration and the key:
+
+~~~text
+! Attribute `temperature` in the mapping document at 'sensors.json5' declares a key that has no effect
+  ╰─ `temperature` declares `transformaton`, which it does not read: correct the key or remove it
+~~~
+
+| Code | What happened |
+| --- | --- |
+| `mapping-v4-key-without-effect` | A mapping declares a key that has no effect where it is declared: a target's `sourceField` or `idPattern`, which nothing reads, since a relationship's object is the entity its `source` names, or a `syntheticEntity` anywhere but on a top-level `Relationship` or `ListRelationship`, which writes no entity. One warning per key names the attribute and the key. See [Emit a related entity](mapping.md#emit-a-related-entity). |
+| `mapping-v4-unknown-key` | An attribute, a sub-attribute, a member under `mappings`, a `languageMap` entry, an instance, or a target declares a key it does not read, such as a misspelled `transformaton`, so the key has no effect. One warning per key names the declaration, such as `temperature.observedAt`, `address[street]`, instance 2 of `forecast`, or the `en` entry of the `languageMap` of `label`, and the key. An unknown key at the top level of the mapping, in `identity`, or in a `syntheticEntity` body refuses the mapping instead. See [The document shape](mapping.md#the-document-shape). |
+
 Problems that depend on one record's data, on the rows and header of one CSV file, on one table of a GeoPackage, or on how far a SensorThings server was read and what it served, do not stop the run. Each is a warning, and the `Reasons` block counts it under one of these codes:
 
 | Code | What happened |

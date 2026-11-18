@@ -74,7 +74,9 @@ Every mapping has four required top-level parts:
 
 Input paths, output destinations, validation policy, and schedules do not belong in this document. Set them on the command line or in a manifest.
 
-Cassiopeia rejects a mapping with any other top-level key, so a misspelled or misplaced key fails when the mapping loads instead of being silently ignored. The same rule applies inside a [`syntheticEntity`](#emit-a-related-entity) body.
+Cassiopeia rejects a mapping with any other top-level key, so a misspelled or misplaced key fails when the mapping loads instead of being silently ignored. The same rule applies inside `identity` and inside a [`syntheticEntity`](#emit-a-related-entity) body.
+
+Below the top level, a key that has no effect warns instead of failing, so a mapping that ran before keeps running. When it loads the mapping, Cassiopeia reports each key that an attribute, a sub-attribute, a member under `mappings`, a `languageMap` entry, an instance, or a `target` does not read, such as a misspelled `transformaton`, under `mapping-v4-unknown-key`, and the key is ignored. A target's `sourceField` and `idPattern`, which nothing reads, and a `syntheticEntity` on an attribute that no entity is written from are reported under `mapping-v4-key-without-effect`. The names under `attributes`, `properties`, and `mappings`, and the language tags under `languageMap`, name what is declared rather than keys, so any valid name or tag is accepted there without a warning. Each key is reported once per mapping file per run, before any record is read. See [Mapping problems](running.md#mapping-problems).
 
 ## Choose the entity identity
 
@@ -642,7 +644,7 @@ Only a top-level attribute can declare `instances`, including a top-level attrib
 
 ## Emit a related entity
 
-Sometimes a record contains enough information to describe a related entity as well as the main one. Add `syntheticEntity` to the attribute that links the entities:
+Sometimes a record contains enough information to describe a related entity as well as the main one. Add `syntheticEntity` to the top-level `Relationship` or `ListRelationship` that links the entities:
 
 ~~~json5
 owner: {
@@ -662,6 +664,8 @@ owner: {
 ~~~
 
 The synthetic entity uses the same source record but has its own data model, identity, optional scope, and attributes. It does not inherit the main entity's scope. Cassiopeia emits it alongside the main entity and links it through the attribute that declares it. The nested mapping inherits the document version, so it does not need its own `version` field.
+
+Only a top-level `Relationship` or `ListRelationship` of the mapping links the main entity to a synthetic entity, so only there does `syntheticEntity` write one. Declared on any other attribute, such as a Property, on a sub-attribute, or on an attribute of another synthetic entity, it writes no entity, and the run reports a `mapping-v4-key-without-effect` warning naming the attribute when the mapping loads.
 
 A synthetic entity exists only when its `identity.entityName` resolves to an ID, by the rules in [Choose the entity identity](#choose-the-entity-identity). When it resolves to nothing, Cassiopeia emits neither the synthetic entity nor the link, and the main entity is still written. The example above does this for every record without an `owner_id`. The same holds when the attribute also declares a `source` and a `target` and that source names no target. When the synthetic identity or that `source` fails to render, the result is the same, and the run also reports an `expander-relationship-unresolvable` warning.
 
@@ -729,6 +733,8 @@ Start with one record and one or two attributes. Run the mapping before adding n
 Cassiopeia reads mappings as JSON5, so comments and trailing commas are allowed. The `format` command can reformat a mapping without changing its meaning. Use `.json5` for the recommended format or `.json` when another tool requires strict JSON.
 
 Cassiopeia compiles every template when it loads the mapping, so a broken template stops the run before any input is read. That covers a syntax error, an unclosed `{{`, `{%`, or `{#`, a block without its end tag such as `{% endif %}`, an unknown filter, function, or test, an unspaced hyphen between two names inside an expression (`{{ station-id }}`), and a non-ASCII name inside an expression (`{{ čas | upper }}`). The error names the mapping file and where the template is declared (`identity.entityName`, `scope`, `observedAt`, or the attribute) and says what to change, such as `upper` for a misspelt `uper`, or `this['station-id']` for `station-id`. Run with `-v` to add Tera's own report, with the column in your template. See [When a template fails](templates.md#when-a-template-fails).
+
+A key that has no effect, such as a misspelled `transformation` on an attribute, does not stop the run. It is reported when the mapping loads, before any input is read, naming the mapping file, the declaration, and the key. See [The document shape](#the-document-shape).
 
 A record or attribute that Cassiopeia leaves out while the run continues is counted under its reason in the run summary's `Reasons` block, such as `expander-id-absent` for an entity that is not written or `extractor-template-unresolvable` for a dropped attribute.
 

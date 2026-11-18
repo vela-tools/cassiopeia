@@ -7,6 +7,7 @@ use crate::code::{
     extractor_code::ExtractorCode,
     geometry_code::GeometryCode,
     ingest_code::IngestCode,
+    mapping_code::MappingCode,
     resolver_code::ResolverCode,
     run_code::RunCode,
     schema_code::SchemaCode,
@@ -47,6 +48,9 @@ pub enum DiagnosticCode {
     /// Bringing a source into the pipeline as records.
     #[display("ingest-{_0}")]
     Ingest(IngestCode),
+    /// Loading a mapping document.
+    #[display("mapping-{_0}")]
+    Mapping(MappingCode),
     /// Merging records into entities.
     #[display("resolver-{_0}")]
     Resolver(ResolverCode),
@@ -70,6 +74,7 @@ pub const DIAGNOSTIC_CODE_COUNT: usize = BrokerCode::COUNT
     + ExtractorCode::COUNT
     + GeometryCode::COUNT
     + IngestCode::COUNT
+    + MappingCode::COUNT
     + ResolverCode::COUNT
     + RunCode::COUNT
     + SchemaCode::COUNT
@@ -87,6 +92,7 @@ impl DiagnosticCode {
             .chain(ExtractorCode::iter().map(DiagnosticCode::Extractor))
             .chain(GeometryCode::iter().map(DiagnosticCode::Geometry))
             .chain(IngestCode::iter().map(DiagnosticCode::Ingest))
+            .chain(MappingCode::iter().map(DiagnosticCode::Mapping))
             .chain(ResolverCode::iter().map(DiagnosticCode::Resolver))
             .chain(RunCode::iter().map(DiagnosticCode::Run))
             .chain(SchemaCode::iter().map(DiagnosticCode::Schema))
@@ -110,11 +116,11 @@ mod tests {
         let tokens: HashSet<String> = DiagnosticCode::all().map(|code| code.to_string()).collect();
 
         assert_eq!(tokens.len(), DIAGNOSTIC_CODE_COUNT);
-        assert!(
-            tokens
-                .iter()
-                .all(|token| token.chars().all(|character| character.is_ascii_lowercase() || character == '-'))
-        );
+        assert!(tokens.iter().all(|token| {
+            token
+                .chars()
+                .all(|character| character.is_ascii_lowercase() || character.is_ascii_digit() || character == '-')
+        }));
     }
 
     #[test]
