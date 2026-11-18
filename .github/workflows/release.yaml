@@ -4,9 +4,9 @@ on:
   push:
     tags:
       - v[0-9]+.[0-9]+.[0-9]+
-      - v[0-9]+.[0-9]+.[0-9]+-alpha[0-9]+
-      - v[0-9]+.[0-9]+.[0-9]+-beta[0-9]+
-      - v[0-9]+.[0-9]+.[0-9]+-rc[0-9]+
+      - v[0-9]+.[0-9]+.[0-9]+-alpha.[0-9]+
+      - v[0-9]+.[0-9]+.[0-9]+-beta.[0-9]+
+      - v[0-9]+.[0-9]+.[0-9]+-rc.[0-9]+
 
 permissions:
   contents: read
@@ -144,12 +144,27 @@ jobs:
             dist/*.tar.xz
             dist/*.zip
 
+      - name: Resolve the release notes range
+        id: notes
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          range=""
+          if previous="$(git describe --tags --abbrev=0 --match 'v[0-9]*' --exclude '*-*' "${TAG}^" 2>/dev/null)"; then
+            range="${previous}..${TAG}"
+          fi
+          echo "range=${range}" >> "$GITHUB_OUTPUT"
+
       - name: Generate release notes
         id: changelog
         uses: orhun/git-cliff-action@v4
+        env:
+          GIT_CLIFF_TAG: ${{ github.ref_name }}
         with:
           config: cliff.toml
-          args: --current --strip all
+          version: v2.14.2
+          args: ${{ steps.notes.outputs.range }} --strip all
 
       - name: Determine release type
         id: release_type
