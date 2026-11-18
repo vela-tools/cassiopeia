@@ -8,17 +8,17 @@ input_file: crates/cassiopeia-pipeline/golden/ranking/timestamp-spellings/manife
     "type": "Sensor",
     "reading": {
       "type": "Property",
-      "value": 22.5,
-      "observedAt": "2026-03-01T10:00:00Z"
+      "value": 21.5,
+      "observedAt": "2026-03-01T11:00:00Z"
     },
     "status": {
       "type": "Property",
-      "value": "warm",
-      "observedAt": "2026-03-01T10:00:00Z"
+      "value": "ok",
+      "observedAt": "2026-03-01T11:00:00Z"
     },
     "name": {
       "type": "Property",
-      "value": "Ten UTC"
+      "value": "Eleven UTC"
     }
   }
 ]

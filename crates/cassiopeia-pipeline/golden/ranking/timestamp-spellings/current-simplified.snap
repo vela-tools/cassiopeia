@@ -6,8 +6,8 @@ input_file: crates/cassiopeia-pipeline/golden/ranking/timestamp-spellings/manife
   {
     "id": "urn:ngsi-ld:Sensor:S1",
     "type": "Sensor",
-    "reading": 22.5,
-    "status": "warm",
-    "name": "Ten UTC"
+    "reading": 21.5,
+    "status": "ok",
+    "name": "Eleven UTC"
   }
 ]

@@ -14,8 +14,8 @@ impl Occurrences {
 }
 
 impl Recurring for Occurrences {
-    fn count_another(&mut self) {
-        self.0 = self.0.saturating_add(1);
+    fn count_more(&mut self, occurrences: NonZeroU64) {
+        self.0 = self.0.saturating_add(occurrences.get());
     }
 
     fn occurrences(&self) -> NonZeroU64 {

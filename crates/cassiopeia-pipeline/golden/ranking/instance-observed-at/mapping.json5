@@ -1,0 +1,40 @@
+// Two instances of one attribute, each observed at a time of its own: each instance is kept from the
+// record where it was observed last (ETSI GS CIM 009 v1.9.1 clause 4.5.5.3).
+{
+    version: "v4",
+    dataModel: "Forecast",
+    identity: {
+        entityName: "{{ code }}",
+    },
+    attributes: {
+        temperature: {
+            transformation: "float",
+            instances: [
+                {
+                    source: "{{ ecmwf }}",
+                    properties: {
+                        datasetId: {
+                            source: "urn:ngsi-ld:dataset:model:ecmwf",
+                        },
+                        observedAt: {
+                            source: "{{ ecmwf_time }}",
+                            transformation: "datetime",
+                        },
+                    },
+                },
+                {
+                    source: "{{ gfs }}",
+                    properties: {
+                        datasetId: {
+                            source: "urn:ngsi-ld:dataset:model:gfs",
+                        },
+                        observedAt: {
+                            source: "{{ gfs_time }}",
+                            transformation: "datetime",
+                        },
+                    },
+                },
+            ],
+        },
+    },
+}

@@ -37,8 +37,8 @@ impl UnresolvedTemplate {
 }
 
 impl Recurring for UnresolvedTemplate {
-    fn count_another(&mut self) {
-        self.occurrences = self.occurrences.saturating_add(1);
+    fn count_more(&mut self, occurrences: NonZeroU64) {
+        self.occurrences = self.occurrences.saturating_add(occurrences.get());
     }
 
     fn occurrences(&self) -> NonZeroU64 {

@@ -107,7 +107,7 @@ Temporality is a property of attributes, not of the entity (ETSI GS CIM 009 v1.9
 
 | Setting | Meaning |
 | --- | --- |
-| absent | Current-state, the default: one entity per ID, holding, per mapping, the record with the latest `observedAt`, which is retained as a qualifier. Only the latest observation is written, and an attribute that only an older record carries is not written either. A Context Broker destination with `operation: "temporal"` instead sends each observation to the temporal endpoint on its own (see [Operations](#operations)). |
+| absent | Current-state, the default: one entity per ID, holding, per mapping, each attribute from the record with its latest `observedAt`, which is retained as a qualifier, and the attributes without one from the newest record. Only the latest observation of each attribute is written, and an attribute that only an older record carries is not written either. A Context Broker destination with `operation: "temporal"` instead sends each observation to the temporal endpoint on its own (see [Operations](#operations)). |
 | `representation: "series"` | Fold every observation of one ID into a single NGSI-LD EntityTemporal (clause 5.2.20): the entity appears once and each temporal attribute is a time-ordered array of instances. |
 
 ~~~json5

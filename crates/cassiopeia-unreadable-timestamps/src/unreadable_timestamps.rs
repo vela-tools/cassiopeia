@@ -5,6 +5,7 @@ use crate::{
 use cassiopeia_batch_sink::{batch_sink::BatchSink, counted_example::CountedExample};
 use cassiopeia_ngsi_ld::entity::name::NameBuf;
 use derive_more::{Deref, Into};
+use std::num::NonZeroU64;
 
 /// The attribute timestamps one batch could not read, one record per [`AttributeLoss`].
 #[derive(Default, Deref, Into)]
@@ -22,8 +23,26 @@ impl UnreadableTimestamps {
     /// The first text an attribute fails on is kept as its example; every later one is counted
     /// against that same record.
     pub fn record(&self, loss: TimestampLoss, attribute: &NameBuf, text: &str) {
+        self.record_occurrences(loss, attribute, text, NonZeroU64::MIN);
+    }
+
+    /// Records that `occurrences` records carried `text`, or some other text that is not a
+    /// timestamp either, as `attribute`'s `loss` timestamp.
+    ///
+    /// For losses counted before they reach the sink, such as the records a current-state store
+    /// discarded, which keep only their first text. `text` is kept as the example only when the
+    /// attribute has not failed on another one first.
+    pub fn record_occurrences(&self, loss: TimestampLoss, attribute: &NameBuf, text: &str, occurrences: NonZeroU64) {
         let key = AttributeLossRef { loss, attribute };
-        self.0.tally(&key, || (key.to_owned_key(), CountedExample::first(text)));
+        self.0.tally_occurrences(&key, occurrences, || {
+            (
+                key.to_owned_key(),
+                CountedExample {
+                    example: Box::from(text),
+                    occurrences,
+                },
+            )
+        });
     }
 }
 
@@ -33,6 +52,7 @@ mod tests {
     use cassiopeia_batch_sink::{batch_sink::BatchSink, counted_example::CountedExample, recurring::Recurring};
     use cassiopeia_ngsi_ld::entity::name::NameBuf;
     use pretty_assertions::assert_eq;
+    use std::num::NonZeroU64;
 
     fn name(value: &str) -> NameBuf {
         NameBuf::new(value).expect("valid name")
@@ -91,6 +111,21 @@ mod tests {
         assert_eq!(entries[0].1.example.as_ref(), "not a timestamp");
         assert_eq!(entries[1].0, loss(TimestampLoss::ExpiresAt, "temperature"));
         assert_eq!(entries[1].1.example.as_ref(), "tomorrow");
+    }
+
+    #[test]
+    fn losses_counted_before_they_arrive_join_the_record_of_their_attribute_keeping_its_first_text() {
+        let sink = UnreadableTimestamps::new();
+        sink.record_occurrences(TimestampLoss::ObservedAt, &name("temperature"), "soon", NonZeroU64::new(3).unwrap());
+        sink.record(TimestampLoss::ObservedAt, &name("temperature"), "later");
+        sink.record_occurrences(TimestampLoss::AttributeValue, &name("observedAt"), "never", NonZeroU64::new(2).unwrap());
+
+        let entries = entries(sink);
+        assert_eq!(entries.len(), 2);
+        assert_eq!(entries[0].0, loss(TimestampLoss::ObservedAt, "temperature"));
+        assert_eq!((entries[0].1.example.as_ref(), entries[0].1.occurrences().get()), ("soon", 4));
+        assert_eq!(entries[1].0, loss(TimestampLoss::AttributeValue, "observedAt"));
+        assert_eq!((entries[1].1.example.as_ref(), entries[1].1.occurrences().get()), ("never", 2));
     }
 
     #[test]

@@ -2,7 +2,7 @@ use crate::recurring::Recurring;
 use derive_where::derive_where;
 use indexmap::{Equivalent, IndexMap, map::IntoIter};
 use parking_lot::Mutex;
-use std::hash::Hash;
+use std::{hash::Hash, num::NonZeroU64};
 
 /// The failures one batch met, one record of type `R` per key of type `K`.
 ///
@@ -53,9 +53,21 @@ impl<K: Hash + Eq, R: Recurring> BatchSink<K, R> {
     where
         Q: ?Sized + Hash + Equivalent<K>,
     {
+        self.tally_occurrences(key, NonZeroU64::MIN, open);
+    }
+
+    /// Counts `occurrences` more failures against the record `key` finds, or files the key and
+    /// record `open` returns, which stands for all of them, when it finds none.
+    ///
+    /// For failures counted before they reach the sink, such as the records a store discarded for
+    /// one reason, which are tallied in one step rather than one at a time.
+    pub fn tally_occurrences<Q>(&self, key: &Q, occurrences: NonZeroU64, open: impl FnOnce() -> (K, R))
+    where
+        Q: ?Sized + Hash + Equivalent<K>,
+    {
         let mut entries = self.entries.lock();
         if let Some(record) = entries.get_mut(key) {
-            record.count_another();
+            record.count_more(occurrences);
             return;
         }
 
@@ -80,8 +92,9 @@ impl<K: Hash + Eq, R: Recurring> BatchSink<K, R> {
 
 #[cfg(test)]
 mod tests {
-    use crate::{batch_sink::BatchSink, occurrences::Occurrences, recurring::Recurring};
+    use crate::{batch_sink::BatchSink, counted_example::CountedExample, occurrences::Occurrences, recurring::Recurring};
     use pretty_assertions::assert_eq;
+    use std::num::NonZeroU64;
 
     fn counts(sink: BatchSink<&'static str, Occurrences>) -> Vec<(&'static str, u64)> {
         sink.into_entries().map(|(key, record)| (key, record.occurrences().get())).collect()
@@ -110,5 +123,25 @@ mod tests {
         sink.tally_owned("area", Occurrences::first);
 
         assert_eq!(counts(sink), [("area", 2), ("location", 1)]);
+    }
+
+    #[test]
+    fn failures_counted_before_they_arrive_open_a_record_standing_for_all_of_them_or_add_to_one() {
+        let sink = BatchSink::new();
+        let counted = |occurrences: u64| NonZeroU64::new(occurrences).unwrap();
+        let opened = |text: &str, occurrences: u64| CountedExample {
+            example: Box::from(text),
+            occurrences: counted(occurrences),
+        };
+        sink.tally_occurrences("location", counted(3), || ("location", opened("first", 3)));
+        sink.tally("location", || ("location", opened("second", 1)));
+        sink.tally_occurrences("area", counted(2), || ("area", opened("third", 2)));
+        sink.tally_occurrences("location", counted(5), || ("location", opened("fourth", 5)));
+
+        let entries: Vec<(&str, Box<str>, u64)> = sink
+            .into_entries()
+            .map(|(key, record)| (key, record.example, record.occurrences.get()))
+            .collect();
+        assert_eq!(entries, [("location", Box::from("first"), 9), ("area", Box::from("third"), 2)]);
     }
 }

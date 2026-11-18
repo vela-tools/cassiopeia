@@ -2,9 +2,10 @@ use crate::{
     entity_store::{
         mapping_expiry::MappingExpiry,
         merge::deep_merge,
-        record_timestamp::RecordTimestamp,
+        observations::RecordRanking,
+        ranked_records::{ObservedRecord, RankedRecords},
         stored_slot::StoredSlot,
-        supersession::{SlotRanking, Supersession},
+        supersession::RecordOrdinal,
         write_batch::WriteBatch,
     },
     field_path::FieldPath,
@@ -24,8 +25,8 @@ pub(crate) struct IncomingRecord {
     pub(crate) position: SourcePosition,
     /// The batch of resolver writes the record arrived in.
     pub(crate) batch: WriteBatch,
-    /// What the record-level `observedAt` template yielded, for ranking it against the retained record.
-    pub(crate) timestamp: RecordTimestamp,
+    /// What the record ranks by, when its mapping ranks its records.
+    pub(crate) ranking: RecordRanking,
     /// The entity `expiresAt` the record declares.
     pub(crate) expires_at: Option<DateTime<Utc>>,
 }
@@ -48,24 +49,10 @@ pub(crate) struct LatestSlot {
 /// What a slot keeps of its mapping's records, by the rule the mapping's kind sets.
 #[derive(Debug)]
 enum Kept {
-    /// A temporal mapping keeps the record with the latest `observedAt`.
-    Latest(LatestRecord),
+    /// A temporal mapping keeps, attribute by attribute, the records observed last.
+    Ranked(RankedRecords),
     /// A static mapping merges its records.
     Merged(MergedRecords),
-}
-
-/// A temporal mapping's retained record.
-///
-/// Records are ranked by their timestamp and then their position in the source, so the record
-/// retained is the same whichever order they arrive in.
-#[derive(Debug)]
-struct LatestRecord {
-    /// The retained record.
-    data: Value,
-    /// How the slot ranks the mapping's records.
-    ranking: SlotRanking,
-    /// The entity `expiresAt` of the retained record.
-    expires_at: MappingExpiry,
 }
 
 /// A static mapping's records, merged in the order of the source.
@@ -110,26 +97,25 @@ struct PendingRecord {
 }
 
 impl LatestSlot {
-    /// A slot holding the mapping's first record for the id, kept as a `temporal` mapping keeps its
-    /// records, or as a static one does.
-    pub(crate) fn new(incoming: IncomingRecord, temporal: bool) -> LatestSlot {
-        let kept = if temporal {
-            Kept::Latest(LatestRecord {
+    /// A slot holding the mapping's first record for the id, kept as a temporal mapping keeps its
+    /// records when the record is ranked, or as a static one does.
+    pub(crate) fn new(incoming: IncomingRecord) -> LatestSlot {
+        let records = NonZeroU64::MIN;
+        let kept = match incoming.ranking {
+            RecordRanking::Ranked(observations) => Kept::Ranked(RankedRecords::first(ObservedRecord {
                 data: incoming.data,
-                ranking: SlotRanking::first(incoming.timestamp, incoming.position),
-                expires_at: MappingExpiry::first(incoming.expires_at),
-            })
-        } else {
-            Kept::Merged(MergedRecords {
+                position: incoming.position,
+                record: RecordOrdinal::new(records),
+                observations,
+                expires_at: incoming.expires_at,
+            })),
+            RecordRanking::Unranked => Kept::Merged(MergedRecords {
                 merged: Merge::nothing(),
                 batch: incoming.batch,
                 pending: smallvec![PendingRecord::from(incoming)],
-            })
+            }),
         };
-        LatestSlot {
-            records: NonZeroU64::MIN,
-            kept,
-        }
+        LatestSlot { records, kept }
     }
 
     /// Folds a further record of the mapping into the slot and counts it. A static mapping's
@@ -137,14 +123,15 @@ impl LatestSlot {
     pub(crate) fn absorb(&mut self, incoming: IncomingRecord, reads: &SourceReads) {
         self.records = self.records.saturating_add(1);
         match &mut self.kept {
-            // A temporal mapping's records are observations of one id: keep the latest, expiry and all.
-            Kept::Latest(latest) => match latest.ranking.rank(incoming.timestamp, incoming.position) {
-                Supersession::Supersedes => {
-                    latest.data = incoming.data;
-                    latest.expires_at.supersede(incoming.expires_at);
-                }
-                Supersession::Stale => {}
-            },
+            // A temporal mapping's records are observations of one id: each attribute keeps the record
+            // observed last, expiry and all.
+            Kept::Ranked(ranked) => ranked.absorb(ObservedRecord {
+                data: incoming.data,
+                position: incoming.position,
+                record: RecordOrdinal::new(self.records),
+                observations: incoming.ranking.into_observations(),
+                expires_at: incoming.expires_at,
+            }),
             Kept::Merged(merged) => {
                 // The resolver writes every record of a batch before any of the next, so a record of a
                 // later batch means the held records are all there.
@@ -160,14 +147,9 @@ impl LatestSlot {
     /// The slot `stored` holds, in the batch `batch` reads it back for.
     pub(crate) fn from_stored(stored: StoredSlot, batch: WriteBatch) -> LatestSlot {
         match stored {
-            StoredSlot::Latest {
+            StoredSlot::Ranked { records, ranked } => LatestSlot {
                 records,
-                data,
-                ranking,
-                expires_at,
-            } => LatestSlot {
-                records,
-                kept: Kept::Latest(LatestRecord { data, ranking, expires_at }),
+                kept: Kept::Ranked(ranked),
             },
             StoredSlot::Merged {
                 records,
@@ -190,12 +172,7 @@ impl LatestSlot {
     pub(crate) fn into_stored(self, reads: &SourceReads) -> StoredSlot {
         let LatestSlot { records, kept } = self;
         match kept {
-            Kept::Latest(LatestRecord { data, ranking, expires_at }) => StoredSlot::Latest {
-                records,
-                data,
-                ranking,
-                expires_at,
-            },
+            Kept::Ranked(ranked) => StoredSlot::Ranked { records, ranked },
             Kept::Merged(mut merged) => {
                 merged.seal(reads);
                 let Merge { data, conflict, expires_at } = merged.merged;
@@ -265,13 +242,14 @@ mod tests {
         entity_store::{
             latest_slot::{IncomingRecord, LatestSlot},
             mapping_expiry::MappingExpiry,
-            record_timestamp::RecordTimestamp,
+            observations::RecordRanking,
+            store::tests::ranked,
             write_batch::{WriteBatch, WriteBatches},
         },
         mapping_id::MappingId,
     };
     use cassiopeia_ir::source_position::SourcePosition;
-    use cassiopeia_mapping::{observed_at::ObservedAt, source_reads::SourceReads};
+    use cassiopeia_mapping::source_reads::SourceReads;
     use chrono::{DateTime, TimeZone, Utc};
     use pretty_assertions::assert_eq;
     use serde_json::{Value, json};
@@ -289,7 +267,7 @@ mod tests {
             data,
             position,
             batch,
-            timestamp: RecordTimestamp::Absent,
+            ranking: RecordRanking::Unranked,
             expires_at: None,
         }
     }
@@ -297,7 +275,7 @@ mod tests {
     /// The fragment a static slot fed `records`, in order, assembles into.
     fn merged(records: Vec<IncomingRecord>) -> (Value, Option<String>, MappingExpiry) {
         let mut records = records.into_iter();
-        let mut slot = LatestSlot::new(records.next().unwrap(), false);
+        let mut slot = LatestSlot::new(records.next().unwrap());
         for record in records {
             slot.absorb(record, &SourceReads::Everything);
         }
@@ -367,7 +345,7 @@ mod tests {
     #[test]
     fn a_slot_read_back_from_the_store_takes_further_records_by_the_same_rules() {
         let batches = WriteBatches::new();
-        let mut slot = LatestSlot::new(incoming(json!({"capacity": 40, "name": "Main"}), at(0), batches.next()), false);
+        let mut slot = LatestSlot::new(incoming(json!({"capacity": 40, "name": "Main"}), at(0), batches.next()));
         slot.absorb(incoming(json!({"capacity": 41}), at(1), batches.next()), &SourceReads::Everything);
         let stored = slot.into_stored(&SourceReads::Everything);
 
@@ -387,10 +365,10 @@ mod tests {
     fn a_temporal_slot_keeps_the_latest_record_whichever_order_records_arrive_in() {
         let batch = WriteBatches::new().next();
         let observed = |data: Value, position, time: &str| IncomingRecord {
-            timestamp: RecordTimestamp::Declared(ObservedAt::new(time)),
+            ranking: ranked(time),
             ..incoming(data, position, batch)
         };
-        let mut slot = LatestSlot::new(observed(json!({"t": 3}), at(3), "2026-03-01T11:00:00Z"), true);
+        let mut slot = LatestSlot::new(observed(json!({"t": 3}), at(3), "2026-03-01T11:00:00Z"));
         slot.absorb(observed(json!({"t": 1}), at(1), "2026-03-01T11:00:00Z"), &SourceReads::Everything);
         slot.absorb(observed(json!({"t": 0}), at(0), "2026-03-01T10:00:00Z"), &SourceReads::Everything);
 

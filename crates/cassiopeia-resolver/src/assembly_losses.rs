@@ -1,9 +1,9 @@
-use crate::{discarded_observations::DiscardedObservations, merged_records::MergedRecords};
+use crate::{discarded_observations::DiscardedObservations, merged_records::MergedRecords, unreadable_observations::UnreadableObservations};
 
 /// The records an assembly scan found lost, one tally per reason.
 ///
 /// Each reason is a different problem with a different fix, so each keeps its own tally and is
-/// reported under its own code; they travel together because both are read off the same stored
+/// reported under its own code; they travel together because all are read off the same stored
 /// fragments, in the same scan, while the store hands them over for the one and only time.
 #[derive(Debug, Default)]
 pub struct AssemblyLosses {
@@ -11,6 +11,8 @@ pub struct AssemblyLosses {
     pub merged: MergedRecords,
     /// Records a current-state store discarded because their `observedAt` template failed.
     pub discarded: DiscardedObservations,
+    /// Records a current-state store discarded because their `observedAt` text reads as no instant.
+    pub unreadable: UnreadableObservations,
 }
 
 impl AssemblyLosses {
@@ -31,5 +33,6 @@ mod tests {
 
         assert!(losses.merged.is_empty());
         assert!(losses.discarded.is_empty());
+        assert!(losses.unreadable.is_empty());
     }
 }

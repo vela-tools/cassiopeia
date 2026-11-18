@@ -1,11 +1,13 @@
 use crate::{
     entity_store::{
+        discarded_timestamps::DiscardedTimestamps,
         error::{EntityStoreError, Result},
         mapping_expiry::{MappingExpiry, join_observations},
         mapping_reads::MappingReads,
         redb_database::RedbDatabase,
         redb_key::{distinct_id_count, for_each_id_chunk_in_source_order, ids_in_source_order, make_prefix, prefix_end},
         redb_scope::{PendingScopes, SCOPES_TABLE, read_scope},
+        retention::Retention,
         store::{AssembledFragment, AssembledFragments, EntityStore, FragmentWrite, StoredUnit},
         stored_observation::StoredObservation,
     },
@@ -59,6 +61,10 @@ impl RedbSeriesEntityStore {
 impl EntityStore for RedbSeriesEntityStore {
     fn write_strategy(&self) -> StoreWriteStrategy {
         StoreWriteStrategy::TransactionalBatch
+    }
+
+    fn retention(&self) -> Retention {
+        Retention::Series
     }
 
     fn store_fragment(&self, write: FragmentWrite<'_>) -> Result<()> {
@@ -160,11 +166,12 @@ impl EntityStore for RedbSeriesEntityStore {
             units.push(smallvec![AssembledFragment {
                 mapping_id: stored.mapping_id,
                 data: stored.data,
+                observed: None,
                 // Every observation is kept on its own, so each stands for exactly one record and
                 // has nothing to disagree with.
                 records: NonZeroU64::MIN,
                 conflict: None,
-                unresolvable_discards: 0,
+                discarded: DiscardedTimestamps::default(),
             }]);
         }
 
@@ -233,7 +240,6 @@ mod tests {
     use crate::{
         entity_store::{
             error::EntityStoreError,
-            record_timestamp::RecordTimestamp,
             redb_series_store::RedbSeriesEntityStore,
             store::{
                 EntityStore,
@@ -245,13 +251,13 @@ mod tests {
                     assert_merges_scopes_per_id,
                     assert_series_hands_observations_on_in_source_order,
                     assert_series_keeps_the_furthest_expiry_per_mapping,
+                    ranked,
                 },
             },
         },
         mapping_id::MappingId,
         test_order::{ReadsEverything, next_batch, next_position},
     };
-    use cassiopeia_mapping::observed_at::ObservedAt;
     use pretty_assertions::assert_eq;
     use serde_json::json;
     use urn_rs::Urn;
@@ -292,8 +298,7 @@ mod tests {
             position: next_position(),
             batch: next_batch(),
             mapping_id: MappingId::new(1),
-            temporal: true,
-            timestamp: RecordTimestamp::Declared(ObservedAt::new(observed_at)),
+            ranking: ranked(observed_at),
             scope: None,
             expires_at: None,
             reads: &READS_EVERYTHING,

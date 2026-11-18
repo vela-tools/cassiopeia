@@ -7,7 +7,11 @@ pub mod identity;
 pub mod instance_placement;
 pub mod mapping;
 pub mod mapping_role;
+pub mod observation_plan;
+pub mod observation_slot;
 pub mod observed_at;
+pub mod observed_declaration;
+pub mod observed_template;
 pub mod scope;
 pub mod source_reads;
 pub mod target;
@@ -23,7 +27,6 @@ pub mod version;
 mod tests {
     use crate::{
         mapping::Mapping,
-        observed_at::ObservedAt,
         template::{run_variables::RunVariables, runner::TemplateRunner, template_input::TemplateInput},
     };
     use pretty_assertions::assert_eq;
@@ -47,14 +50,11 @@ mod tests {
         let mapping = Mapping::from_json5(document, Path::new("test.json5"), &mut runner).unwrap();
 
         assert!(mapping.is_temporal());
-        assert_eq!(
-            mapping
-                .extract_observed_at(
-                    &runner.resolver(),
-                    TemplateInput::new(&json!({"timestamp": "2026-04-03T22:00:20Z"}), &RunVariables::none())
-                )
-                .unwrap(),
-            Some(ObservedAt::new("2026-04-03T22:00:20Z"))
+        let rendered = mapping.observation_plan().observe(
+            &runner.resolver(),
+            TemplateInput::new(&json!({"timestamp": "2026-04-03T22:00:20Z"}), &RunVariables::none()),
         );
+        assert_eq!(rendered.len(), 1);
+        assert_eq!(rendered[0].as_ref().ok(), Some(&json!("2026-04-03T22:00:20Z")));
     }
 }

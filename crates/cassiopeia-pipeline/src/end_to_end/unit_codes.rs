@@ -28,7 +28,7 @@ const STATIONS: &str = "id,pm10,unit\n1,10,ug/m3\n2,11,ppm\n3,12,bogus\n4,13,bog
 #[test]
 fn csv_units_are_translated_and_unknown_ones_reported() {
     for store in STORES {
-        let outcome = run_csv_end_to_end(store, STATIONS, &RunBinding::Mapping(STATION_UNITS), &["Sensor"]);
+        let outcome = run_csv_end_to_end(store, STATIONS, &RunBinding::Mapping(STATION_UNITS), &["Sensor"], "");
 
         assert_eq!(
             entity_ids(&outcome),

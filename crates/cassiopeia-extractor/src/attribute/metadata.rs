@@ -68,12 +68,17 @@ impl MetadataExtractor {
     /// array, and a relationship instance's objects were minted under the same
     /// [`InstanceIndex`](cassiopeia_ir::instance_index::InstanceIndex), so an instance that resolved
     /// to nothing cannot move another onto the wrong metadata (ETSI GS CIM 009 v1.9.1 clause 4.5.5).
+    /// An instance the context does not select is not read and holds no metadata.
     fn extract_instances(ctx: &ResolutionContext, attr_name: &NameBuf, config: &Attribute, instances: &[AttributeInstance]) -> Result<Option<MetadataStorage>> {
         let base = Self::base_path(ctx, attr_name);
         let shared = Self::resolve_property_map(ctx, &base, config.properties().as_ref())?;
 
         let mut per_item = Vec::with_capacity(instances.len());
-        for instance in instances {
+        for (index, instance) in instances.iter().enumerate() {
+            if !ctx.instances.selects(index) {
+                per_item.push(SubAttributes::default());
+                continue;
+            }
             // Each instance owns its merged metadata, so the shared base is cloned per instance.
             let mut metadata = shared.clone();
             let own = Self::resolve_property_map(ctx, &base, instance.properties().as_ref())?;

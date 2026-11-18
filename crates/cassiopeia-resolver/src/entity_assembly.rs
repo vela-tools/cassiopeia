@@ -14,7 +14,7 @@ use crate::{
     error::{ResolverError, Result},
     field_path::FieldPath,
     fragment_resolver::FragmentResolver,
-    id_assembly::{DiscardedRecords, IdAssembly},
+    id_assembly::{DiscardedRecords, IdAssembly, MappingDiscards},
     mapping_id::MappingId,
     mapping_registry::BoundMapping,
     record_merge::RecordMerge,
@@ -157,7 +157,7 @@ impl FragmentResolver {
     /// fragments name from `mappings`, which one scan takes once rather than locking the registry for
     /// every id.
     pub(crate) fn assemble_with(&self, base_id: &Urn, mappings: &RegisteredMappings) -> Result<IdAssembly> {
-        let StoredUnits { scope, expires_at, units } = self.entity_store.assemble_entity(base_id, mappings)?;
+        let StoredUnits { scope, expires_at, mut units } = self.entity_store.assemble_entity(base_id, mappings)?;
         if units.is_empty() {
             return Err(ResolverError::MissingConfigForEntity { entity: base_id.clone() });
         }
@@ -187,13 +187,22 @@ impl FragmentResolver {
             }),
         );
 
-        // Read before the fragments move into their emit-units: the store counted each discard on the
-        // slot of the mapping that discarded it.
-        let discarded: DiscardedRecords = units
-            .iter()
-            .flatten()
-            .filter_map(|stored| NonZeroU64::new(stored.unresolvable_discards).map(|records| (stored.mapping_id, records)))
-            .collect();
+        // Taken before the fragments move into their emit-units: the store counted each discard on
+        // the slot of the mapping that discarded it.
+        let mut discarded = DiscardedRecords::new();
+        for stored in units.iter_mut().flatten().filter(|stored| !stored.discarded.is_empty()) {
+            let (_, bound, _) = resolved
+                .iter()
+                .find(|(known, _, _)| *known == stored.mapping_id)
+                .ok_or_else(|| ResolverError::MissingConfigForEntity { entity: base_id.clone() })?;
+            discarded.push(MappingDiscards {
+                mapping_id: stored.mapping_id,
+                // The tally of a discard outlives the id's assembly; only a slot that discarded
+                // something pays for the handle.
+                mapping: Arc::clone(bound.mapping()),
+                discarded: mem::take(&mut stored.discarded),
+            });
+        }
 
         let unit_count = units.len();
         let mut entities = Vec::with_capacity(unit_count);
@@ -206,7 +215,12 @@ impl FragmentResolver {
                     .ok_or_else(|| ResolverError::MissingConfigForEntity { entity: base_id.clone() })?;
                 // Each fragment owns handles on its mapping and variables, which only bumps their
                 // reference counts.
-                fragments.push(AssembledFragment::new(stored.data, Arc::clone(bound.mapping()), bound.variables().clone()));
+                fragments.push(AssembledFragment::new(
+                    stored.data,
+                    stored.observed,
+                    Arc::clone(bound.mapping()),
+                    bound.variables().clone(),
+                ));
             }
 
             // Relationships, scope, and expiry render on every unit; a unit's mappings pick up only the
@@ -280,8 +294,18 @@ impl EntitySource for FragmentResolver {
                         if let Some(merge) = merge {
                             losses.merged.record(merge);
                         }
-                        for (mapping_id, records) in discarded {
-                            losses.discarded.record(mapping_id, base_id, records, &self.observed_at_failures);
+                        for MappingDiscards {
+                            mapping_id,
+                            mapping,
+                            discarded,
+                        } in discarded
+                        {
+                            if let Some(records) = NonZeroU64::new(discarded.unresolvable()) {
+                                losses.discarded.record(mapping_id, base_id, records, &self.observed_at_failures);
+                            }
+                            for unreadable in discarded.unreadable() {
+                                losses.unreadable.record(mapping_id, &mapping, unreadable);
+                            }
                         }
                         for entity in units {
                             if emit(Ok(entity)).is_break() {
@@ -318,7 +342,7 @@ mod tests {
         entity_store::{
             dashmap_latest_store::DashMapLatestEntityStore,
             dashmap_series_store::DashMapSeriesEntityStore,
-            record_timestamp::RecordTimestamp,
+            observations::RecordRanking,
             redb_latest_store::RedbLatestEntityStore,
             redb_series_store::RedbSeriesEntityStore,
             store::{EntityStore, FragmentWrite, tests::READS_EVERYTHING},
@@ -1008,8 +1032,7 @@ mod tests {
                 position: next_position(),
                 batch: next_batch(),
                 mapping_id: MappingId::new(9999),
-                temporal: false,
-                timestamp: RecordTimestamp::Absent,
+                ranking: RecordRanking::Unranked,
                 scope: None,
                 expires_at: None,
                 reads: &READS_EVERYTHING,
@@ -1466,6 +1489,35 @@ mod tests {
     }
 
     #[test]
+    fn a_record_whose_observed_at_reads_as_no_instant_is_tallied_whether_it_arrives_before_or_after_a_readable_one() {
+        let readable = json!({"id": "A", "t": 20, "ts": "2026-10-25T08:00:00Z"});
+        let unreadable = json!({"id": "A", "t": 21, "ts": "soon"});
+        for order in [[&readable, &unreadable], [&unreadable, &readable]] {
+            for store in current_state_stores() {
+                let arrivals = order.map(Clone::clone);
+                let (kept, losses) = discards_of(store, &arrivals);
+
+                assert_eq!(kept, slice::from_ref(&readable));
+                assert!(losses.discarded.is_empty());
+                let entries = losses.unreadable.into_entries();
+                assert_eq!(entries.len(), 1);
+                assert_eq!((entries[0].example.as_str(), entries[0].records), ("soon", records(1)));
+            }
+        }
+    }
+
+    #[test]
+    fn an_unreadable_record_that_keeps_the_slot_is_left_for_the_extractor_to_report() {
+        let unreadable = json!({"id": "A", "t": 21, "ts": "soon"});
+        for store in current_state_stores() {
+            let (kept, losses) = discards_of(store, slice::from_ref(&unreadable));
+
+            assert_eq!(kept, slice::from_ref(&unreadable));
+            assert!(losses.unreadable.is_empty());
+        }
+    }
+
+    #[test]
     fn records_without_a_failing_template_report_no_discards() {
         let earlier = json!({"id": "A", "t": 20, "ts": "2026-10-25T08:00:00Z"});
         let later = json!({"id": "A", "t": 21, "ts": "2026-10-25T09:00:00Z"});
@@ -1474,6 +1526,7 @@ mod tests {
 
             assert_eq!(kept, slice::from_ref(&later));
             assert!(losses.discarded.is_empty());
+            assert!(losses.unreadable.is_empty());
         }
     }
 }

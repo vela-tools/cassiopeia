@@ -7,6 +7,6 @@ input_file: crates/cassiopeia-pipeline/golden/ranking/distinct-observed-at/manif
     "id": "urn:ngsi-ld:Sensor:S1",
     "type": "Sensor",
     "reading": 22.5,
-    "status": "warm"
+    "status": "ok"
   }
 ]

@@ -5,7 +5,8 @@ use typed_builder::TypedBuilder;
 /// The temporal output shape (ETSI GS CIM 009 v1.9.1 clause 5.2.20).
 ///
 /// Absent from the output section means current-state: each id is written once, holding per mapping
-/// the record with the latest `observedAt`, kept as a qualifier, unless a Context Broker destination's
+/// each attribute from the record with its latest `observedAt`, kept as a qualifier, and the
+/// attributes without one from the newest record, unless a Context Broker destination's
 /// `temporal` operation sends each observation on its own. A present block selects a richer temporal
 /// shape. A key the block does not define is refused, so a misspelt one is an error
 /// rather than silently ignored.

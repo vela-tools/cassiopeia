@@ -1,86 +1,97 @@
-use crate::entity_store::record_timestamp::RecordTimestamp;
+use crate::entity_store::observation_instant::ObservationInstant;
 use cassiopeia_ir::source_position::SourcePosition;
 use serde::{Deserialize, Serialize};
-use std::mem;
+use std::num::NonZeroU64;
 
-/// Whether an incoming temporal record takes a current-state slot from the record it retains.
+/// Whether an incoming temporal record takes a ranking from the record holding it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Supersession {
-    /// The incoming record is later than the retained one and replaces it.
+    /// The incoming record is later than the one holding the ranking and replaces it.
     Supersedes,
-    /// The incoming record is earlier than the retained one and is discarded.
+    /// The incoming record is earlier than the one holding the ranking and does not take it.
     Stale,
 }
 
-/// How a current-state slot ranks a temporal mapping's records, and what that ranking discarded.
+/// Which of the records a mapping resolved to one id a ranking names: the count of the mapping's
+/// records for the id when it arrived.
 ///
-/// A current-state store keeps, per mapping, the record with the greatest record-level `observedAt`.
-/// An absent timestamp ranks below any present one (`None < Some`), and a tie keeps the record later
-/// in the source, by its [`SourcePosition`], whichever order the records reach the store in.
-/// Timestamps are compared as verbatim text, monotonic under string compare for a fixed format
-/// (RFC-3339, or fixed-width epoch); this is the record-level latest the store ranks by.
+/// A record's position cannot tell two records apart when one record expands into the same entity
+/// twice, so a ranking names the record it holds by when it arrived instead.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct RecordOrdinal(NonZeroU64);
+
+impl RecordOrdinal {
+    /// The record that arrived as the `count`-th of its mapping for an id.
+    #[must_use]
+    pub const fn new(count: NonZeroU64) -> RecordOrdinal {
+        RecordOrdinal(count)
+    }
+}
+
+/// One ranking of a temporal mapping's records in a current-state store, and the record holding it.
 ///
-/// A record whose `observedAt` template failed ranks as having no timestamp, so another record of
-/// the same id usually takes the slot from it. The record that keeps the slot reaches the extractor,
-/// which reports the failure itself; a record the slot discards never does, so the slot counts
-/// those, and each failure is reported exactly once whichever record wins.
+/// A ranking is held by the record whose `observedAt` names the latest instant (ETSI GS CIM 009
+/// v1.9.1 clause 4.5.5.3 keeps "the one with the most recent `observedAt` `DateTime`"). Instants are
+/// compared, not the text naming them, so two spellings of one instant rank as one. A record without
+/// an instant ranks below every record with one (`None < Some`), whether it carries no `observedAt`,
+/// text that reads as no instant, or a template that failed, and a tie keeps the record later in
+/// the source, by its [`SourcePosition`], whichever order the records reach the store in.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SlotRanking {
-    /// The timestamp of the record the slot retains.
-    timestamp: RecordTimestamp,
-    /// Where the record the slot retains stands in the source, which settles a tie between two
-    /// records naming one timestamp.
+    /// The instant of the record holding the ranking.
+    instant: Option<ObservationInstant>,
+    /// Where the record holding the ranking stands in the source, which settles a tie between two
+    /// records naming one instant.
     position: SourcePosition,
-    /// How many records whose `observedAt` template failed the slot discarded.
-    unresolvable_discards: u64,
+    /// The record holding the ranking.
+    record: RecordOrdinal,
 }
 
 impl SlotRanking {
-    /// The ranking of a slot that has just retained its first record, the one at `position`.
+    /// The ranking held by the first record, `record`, observed at `instant` and standing at
+    /// `position`.
     #[must_use]
-    pub const fn first(timestamp: RecordTimestamp, position: SourcePosition) -> SlotRanking {
-        SlotRanking {
-            timestamp,
-            position,
-            unresolvable_discards: 0,
-        }
+    pub const fn first(instant: Option<ObservationInstant>, position: SourcePosition, record: RecordOrdinal) -> SlotRanking {
+        SlotRanking { instant, position, record }
     }
 
-    /// Ranks an incoming record, the one at `position`, against the retained one, keeping the later
-    /// of the two and counting the other among the discards when its template failed.
-    pub fn rank(&mut self, incoming: RecordTimestamp, position: SourcePosition) -> Supersession {
-        let later = (incoming.ranking_text(), position) >= (self.timestamp.ranking_text(), self.position);
-        let (supersession, discarded) = if later {
-            self.position = position;
-            (Supersession::Supersedes, mem::replace(&mut self.timestamp, incoming))
+    /// Ranks an incoming record, `record`, observed at `instant` and standing at `position`, against
+    /// the one holding the ranking, which the later of the two then holds.
+    pub fn rank(&mut self, instant: Option<ObservationInstant>, position: SourcePosition, record: RecordOrdinal) -> Supersession {
+        if (instant, position) >= (self.instant, self.position) {
+            *self = SlotRanking { instant, position, record };
+            Supersession::Supersedes
         } else {
-            (Supersession::Stale, incoming)
-        };
-        if discarded == RecordTimestamp::Unresolvable {
-            self.unresolvable_discards = self.unresolvable_discards.saturating_add(1);
+            Supersession::Stale
         }
-        supersession
     }
 
-    /// How many records whose `observedAt` template failed the slot discarded.
+    /// The record holding the ranking.
     #[must_use]
-    pub const fn unresolvable_discards(&self) -> u64 {
-        self.unresolvable_discards
+    pub const fn record(&self) -> RecordOrdinal {
+        self.record
     }
 }
 
 #[cfg(test)]
 mod tests {
     use crate::entity_store::{
+        observation_instant::ObservationInstant,
         record_timestamp::RecordTimestamp,
-        supersession::{SlotRanking, Supersession},
+        supersession::{RecordOrdinal, SlotRanking, Supersession},
     };
     use cassiopeia_ir::source_position::SourcePosition;
-    use cassiopeia_mapping::observed_at::ObservedAt;
     use pretty_assertions::assert_eq;
+    use serde_json::{Value, json};
+    use std::num::NonZeroU64;
 
-    fn declared(text: &str) -> RecordTimestamp {
-        RecordTimestamp::Declared(ObservedAt::new(text))
+    /// The instant a record whose `observedAt` renders as `rendered` ranks by.
+    fn observed(rendered: Value) -> Option<ObservationInstant> {
+        RecordTimestamp::read(rendered).instant()
+    }
+
+    fn declared(text: &str) -> Option<ObservationInstant> {
+        observed(json!(text))
     }
 
     /// The position of record `record` of the first input.
@@ -88,73 +99,98 @@ mod tests {
         SourcePosition::first_of(0).advanced(record)
     }
 
+    fn ordinal(count: u64) -> RecordOrdinal {
+        RecordOrdinal::new(NonZeroU64::new(count).unwrap())
+    }
+
+    /// Which of two records a ranking keeps, the earlier one in the source observed at `first` and
+    /// the later at `second`, when they arrive in source order and when they arrive the other way
+    /// round.
+    fn kept_in_both_orders(first: Option<ObservationInstant>, second: Option<ObservationInstant>) -> [SourcePosition; 2] {
+        let mut in_order = SlotRanking::first(first, at(0), ordinal(1));
+        in_order.rank(second, at(1), ordinal(2));
+        let mut reversed = SlotRanking::first(second, at(1), ordinal(1));
+        reversed.rank(first, at(0), ordinal(2));
+        [in_order.position, reversed.position]
+    }
+
     #[test]
     fn a_later_timestamp_supersedes_an_earlier_one() {
-        let mut ranking = SlotRanking::first(declared("2026-04-03T22:00:20Z"), at(0));
-        assert_eq!(ranking.rank(declared("2026-04-03T22:05:20Z"), at(1)), Supersession::Supersedes);
-        assert_eq!(ranking.rank(declared("2026-04-03T22:00:20Z"), at(2)), Supersession::Stale);
+        let mut ranking = SlotRanking::first(declared("2026-04-03T22:00:20Z"), at(0), ordinal(1));
+        assert_eq!(ranking.rank(declared("2026-04-03T22:05:20Z"), at(1), ordinal(2)), Supersession::Supersedes);
+        assert_eq!(ranking.rank(declared("2026-04-03T22:00:20Z"), at(2), ordinal(3)), Supersession::Stale);
+        assert_eq!(ranking.record(), ordinal(2));
     }
 
     #[test]
-    fn a_present_timestamp_supersedes_an_absent_one_and_a_tie_keeps_the_record_later_in_the_source() {
-        let mut ranking = SlotRanking::first(RecordTimestamp::Absent, at(0));
-        assert_eq!(ranking.rank(declared("2026-04-03T22:00:20Z"), at(1)), Supersession::Supersedes);
-        assert_eq!(ranking.rank(RecordTimestamp::Absent, at(2)), Supersession::Stale);
-        assert_eq!(ranking.rank(declared("2026-04-03T22:00:20Z"), at(3)), Supersession::Supersedes);
-        assert_eq!(ranking.unresolvable_discards(), 0);
+    fn an_earlier_instant_spelled_with_an_offset_loses_to_a_later_one_in_utc_in_either_order() {
+        assert_eq!(
+            kept_in_both_orders(declared("2026-03-01T11:00:00Z"), declared("2026-03-01T12:00:00+02:00")),
+            [at(0), at(0)]
+        );
     }
 
     #[test]
-    fn a_failed_record_arriving_after_a_timestamped_one_is_counted_as_discarded() {
-        let mut ranking = SlotRanking::first(declared("2026-10-25T08:00:00Z"), at(0));
-
-        assert_eq!(ranking.rank(RecordTimestamp::Unresolvable, at(1)), Supersession::Stale);
-        assert_eq!(ranking.unresolvable_discards(), 1);
+    fn one_instant_in_two_spellings_keeps_the_record_later_in_the_source_in_either_order() {
+        assert_eq!(
+            kept_in_both_orders(declared("2026-03-01T11:00:00Z"), declared("2026-03-01T12:00:00+01:00")),
+            [at(1), at(1)]
+        );
     }
 
     #[test]
-    fn a_failed_record_displaced_by_a_timestamped_one_is_counted_as_discarded() {
-        let mut ranking = SlotRanking::first(RecordTimestamp::Unresolvable, at(0));
-
-        assert_eq!(ranking.rank(declared("2026-10-25T08:00:00Z"), at(1)), Supersession::Supersedes);
-        assert_eq!(ranking.unresolvable_discards(), 1);
+    fn epochs_rank_by_the_instant_they_name_not_by_their_text() {
+        assert_eq!(
+            kept_in_both_orders(observed(json!(999_999_999)), observed(json!(1_000_000_000))),
+            [at(1), at(1)]
+        );
+        assert_eq!(kept_in_both_orders(declared("999999999"), declared("1000000000")), [at(1), at(1)]);
     }
 
     #[test]
-    fn a_failed_record_that_keeps_the_slot_is_not_counted() {
-        // A tie keeps the record later in the source, so the second failed record displaces the first:
-        // one discard, and the retained one is left for the extractor to report.
-        let mut ranking = SlotRanking::first(RecordTimestamp::Absent, at(0));
+    fn a_readable_timestamp_beats_unreadable_text_in_either_order() {
+        assert_eq!(kept_in_both_orders(declared("2026-03-01T11:00:00Z"), declared("soon")), [at(0), at(0)]);
+        assert_eq!(kept_in_both_orders(declared("soon"), declared("2026-03-01T11:00:00Z")), [at(1), at(1)]);
+    }
 
-        assert_eq!(ranking.rank(RecordTimestamp::Unresolvable, at(1)), Supersession::Supersedes);
-        assert_eq!(ranking.unresolvable_discards(), 0);
-        assert_eq!(ranking.rank(RecordTimestamp::Unresolvable, at(2)), Supersession::Supersedes);
-        assert_eq!(ranking.unresolvable_discards(), 1);
+    #[test]
+    fn an_absent_timestamp_ranks_below_a_readable_one_in_either_order() {
+        assert_eq!(kept_in_both_orders(declared("2026-03-01T11:00:00Z"), None), [at(0), at(0)]);
+        assert_eq!(kept_in_both_orders(None, declared("2026-03-01T11:00:00Z")), [at(1), at(1)]);
+    }
+
+    #[test]
+    fn records_without_an_instant_keep_the_one_later_in_the_source_in_either_order() {
+        assert_eq!(kept_in_both_orders(declared("soon"), None), [at(1), at(1)]);
     }
 
     #[test]
     fn a_tie_keeps_the_record_later_in_the_source_whichever_arrives_first() {
-        let time = "2026-03-01T11:00:00Z";
-        let mut later_first = SlotRanking::first(declared(time), at(7));
-        assert_eq!(later_first.rank(declared(time), at(3)), Supersession::Stale);
-        assert_eq!(later_first.rank(declared(time), at(5)), Supersession::Stale);
+        let time = declared("2026-03-01T11:00:00Z");
+        let mut later_first = SlotRanking::first(time, at(7), ordinal(1));
+        assert_eq!(later_first.rank(time, at(3), ordinal(2)), Supersession::Stale);
+        assert_eq!(later_first.rank(time, at(5), ordinal(3)), Supersession::Stale);
 
-        let mut earlier_first = SlotRanking::first(declared(time), at(3));
-        assert_eq!(earlier_first.rank(declared(time), at(7)), Supersession::Supersedes);
-        assert_eq!(earlier_first.rank(declared(time), at(5)), Supersession::Stale);
+        let mut earlier_first = SlotRanking::first(time, at(3), ordinal(1));
+        assert_eq!(earlier_first.rank(time, at(7), ordinal(2)), Supersession::Supersedes);
+        assert_eq!(earlier_first.rank(time, at(5), ordinal(3)), Supersession::Stale);
     }
 
     #[test]
     fn a_later_timestamp_wins_even_from_a_record_earlier_in_the_source() {
-        let mut ranking = SlotRanking::first(declared("2026-03-01T11:00:00Z"), at(9));
-        assert_eq!(ranking.rank(declared("2026-03-01T12:00:00Z"), at(1)), Supersession::Supersedes);
-        assert_eq!(ranking.rank(declared("2026-03-01T11:30:00Z"), at(20)), Supersession::Stale);
+        let mut ranking = SlotRanking::first(declared("2026-03-01T11:00:00Z"), at(9), ordinal(1));
+        assert_eq!(ranking.rank(declared("2026-03-01T12:00:00Z"), at(1), ordinal(2)), Supersession::Supersedes);
+        assert_eq!(ranking.rank(declared("2026-03-01T11:30:00Z"), at(20), ordinal(3)), Supersession::Stale);
     }
 
     #[test]
     fn a_slot_ranking_survives_the_store_encoding() {
-        let ranking = SlotRanking::first(declared("2026-03-01T11:00:00Z"), at(4));
-        let encoded = rmp_serde::to_vec(&ranking).unwrap();
-        assert_eq!(rmp_serde::from_slice::<SlotRanking>(&encoded).unwrap(), ranking);
+        for ranking in [
+            SlotRanking::first(declared("2026-03-01T11:00:00Z"), at(4), ordinal(2)),
+            SlotRanking::first(None, at(4), ordinal(1)),
+        ] {
+            let encoded = rmp_serde::to_vec(&ranking).unwrap();
+            assert_eq!(rmp_serde::from_slice::<SlotRanking>(&encoded).unwrap(), ranking);
+        }
     }
 }

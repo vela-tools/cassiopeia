@@ -6,6 +6,7 @@ use crate::{
         latest_slot::{IncomingRecord, LatestSlot},
         mapping_expiry::join,
         mapping_reads::MappingReads,
+        retention::Retention,
         store::{AssembledFragments, EntityStore, FragmentWrite, StoredUnit},
     },
     mapping_id::MappingId,
@@ -39,9 +40,9 @@ struct EntitySlots {
 
 /// In-memory current-state entity store using [`DashMap`] for lock-free concurrent access.
 ///
-/// Each base [`Urn`] maps to one [`LatestSlot`] per mapping: a temporal mapping keeps the
-/// greatest-`observedAt` record, a static mapping merges its records in source order. This is
-/// O(mappings) per id, so a temporal id's many observations never grow the stored footprint. Each
+/// Each base [`Urn`] maps to one [`LatestSlot`] per mapping: a temporal mapping keeps, attribute by
+/// attribute, the record observed last, a static mapping merges its records in source order. This
+/// is O(mappings) per id, so a temporal id's many observations never grow the stored footprint. Each
 /// slot carries the expiry its records contribute, and the entity's own is joined from them at
 /// assembly. The ids are handed on in the order of their first records. Keys compare by `Urn`
 /// equivalence, RFC 8141 section 3, the scheme-based rung of the RFC 3986 section 6 comparison
@@ -70,6 +71,10 @@ impl EntityStore for DashMapLatestEntityStore {
         StoreWriteStrategy::Concurrent
     }
 
+    fn retention(&self) -> Retention {
+        Retention::CurrentState
+    }
+
     fn store_fragment(&self, write: FragmentWrite<'_>) -> Result<()> {
         let FragmentWrite {
             base_id,
@@ -77,8 +82,7 @@ impl EntityStore for DashMapLatestEntityStore {
             position,
             batch,
             mapping_id,
-            temporal,
-            timestamp,
+            ranking,
             scope,
             expires_at,
             reads,
@@ -91,7 +95,7 @@ impl EntityStore for DashMapLatestEntityStore {
             data: source_data,
             position,
             batch,
-            timestamp,
+            ranking,
             expires_at,
         };
         let unplaced = match self.data.get_mut(&base_id) {
@@ -108,7 +112,7 @@ impl EntityStore for DashMapLatestEntityStore {
             // A concurrent writer may have created the id between the miss and this insert, so the
             // slot is looked up again rather than assumed vacant.
             if let Some(incoming) = place(&mut entity, mapping_id, incoming, reads) {
-                entity.slots.push((mapping_id, LatestSlot::new(incoming, temporal)));
+                entity.slots.push((mapping_id, LatestSlot::new(incoming)));
             }
         }
 
@@ -194,7 +198,7 @@ mod tests {
     use crate::{
         entity_store::{
             dashmap_latest_store::DashMapLatestEntityStore,
-            record_timestamp::RecordTimestamp,
+            observations::RecordRanking,
             store::{
                 EntityStore,
                 FragmentWrite,
@@ -204,13 +208,15 @@ mod tests {
                     assert_hands_ids_on_in_order_of_their_first_records,
                     assert_joins_expiries_across_mappings,
                     assert_merges_scopes_per_id,
+                    assert_ranks_by_instant,
+                    assert_ranks_each_slot_on_its_own,
+                    ranked,
                 },
             },
         },
         mapping_id::MappingId,
         test_order::{ReadsEverything, next_batch, next_position},
     };
-    use cassiopeia_mapping::observed_at::ObservedAt;
     use pretty_assertions::assert_eq;
     use serde_json::json;
     use urn_rs::Urn;
@@ -235,19 +241,28 @@ mod tests {
     }
 
     #[test]
+    fn a_temporal_mapping_keeps_the_record_naming_the_latest_instant() {
+        assert_ranks_by_instant(&DashMapLatestEntityStore::new());
+    }
+
+    #[test]
+    fn each_slot_of_a_temporal_mapping_keeps_the_record_observed_last_in_it() {
+        assert_ranks_each_slot_on_its_own(&DashMapLatestEntityStore::new());
+    }
+
+    #[test]
     fn ids_are_handed_on_in_the_order_of_their_first_records() {
         assert_hands_ids_on_in_order_of_their_first_records(&DashMapLatestEntityStore::new());
     }
 
-    fn write(base_id: &Urn, data: serde_json::Value, mapping: u32, temporal: bool, observed_at: Option<&str>) -> FragmentWrite<'static> {
+    fn write(base_id: &Urn, data: serde_json::Value, mapping: u32, observed_at: Option<&str>) -> FragmentWrite<'static> {
         FragmentWrite {
             base_id: base_id.clone(),
             source_data: data,
             position: next_position(),
             batch: next_batch(),
             mapping_id: MappingId::new(mapping),
-            temporal,
-            timestamp: RecordTimestamp::from(observed_at.map(ObservedAt::new)),
+            ranking: observed_at.map_or(RecordRanking::Unranked, ranked),
             scope: None,
             expires_at: None,
             reads: &READS_EVERYTHING,
@@ -261,8 +276,8 @@ mod tests {
         let geometry = json!({"location": {"type": "Point"}});
         let state = json!({"on": true});
 
-        store.store_fragment(write(&id, geometry, 1, false, None)).unwrap();
-        store.store_fragment(write(&id, state, 2, false, None)).unwrap();
+        store.store_fragment(write(&id, geometry, 1, None)).unwrap();
+        store.store_fragment(write(&id, state, 2, None)).unwrap();
 
         let assembled = store.assemble_entity(&id, &ReadsEverything).unwrap();
         assert_eq!(assembled.units.len(), 1);
@@ -276,9 +291,9 @@ mod tests {
         let store = DashMapLatestEntityStore::new();
         let id = urn("urn:ngsi-ld:Camera:1");
 
-        store.store_fragment(write(&id, json!({"third": 3}), 3, false, None)).unwrap();
-        store.store_fragment(write(&id, json!({"first": 1}), 1, false, None)).unwrap();
-        store.store_fragment(write(&id, json!({"second": 2}), 2, false, None)).unwrap();
+        store.store_fragment(write(&id, json!({"third": 3}), 3, None)).unwrap();
+        store.store_fragment(write(&id, json!({"first": 1}), 1, None)).unwrap();
+        store.store_fragment(write(&id, json!({"second": 2}), 2, None)).unwrap();
 
         let assembled = store.assemble_entity(&id, &ReadsEverything).unwrap();
         assert_eq!(assembled.units.len(), 1);
@@ -302,9 +317,9 @@ mod tests {
         let middle = json!({"on": true, "ts": "2026-04-03T22:10:20Z"});
         let last = json!({"on": false, "ts": "2026-04-03T22:05:20Z"});
 
-        store.store_fragment(write(&id, first, 1, true, Some("2026-04-03T22:00:20Z"))).unwrap();
-        store.store_fragment(write(&id, middle.clone(), 1, true, Some("2026-04-03T22:10:20Z"))).unwrap();
-        store.store_fragment(write(&id, last, 1, true, Some("2026-04-03T22:05:20Z"))).unwrap();
+        store.store_fragment(write(&id, first, 1, Some("2026-04-03T22:00:20Z"))).unwrap();
+        store.store_fragment(write(&id, middle.clone(), 1, Some("2026-04-03T22:10:20Z"))).unwrap();
+        store.store_fragment(write(&id, last, 1, Some("2026-04-03T22:05:20Z"))).unwrap();
 
         let assembled = store.assemble_entity(&id, &ReadsEverything).unwrap();
         assert_eq!(assembled.units.len(), 1);
@@ -317,8 +332,8 @@ mod tests {
         let store = DashMapLatestEntityStore::new();
         let id = urn("urn:ngsi-ld:Camera:1");
 
-        store.store_fragment(write(&id, json!({"a": 1}), 1, false, None)).unwrap();
-        store.store_fragment(write(&id, json!({"b": 2}), 1, false, None)).unwrap();
+        store.store_fragment(write(&id, json!({"a": 1}), 1, None)).unwrap();
+        store.store_fragment(write(&id, json!({"b": 2}), 1, None)).unwrap();
 
         let assembled = store.assemble_entity(&id, &ReadsEverything).unwrap();
         assert_eq!(assembled.units[0][0].data, json!({"a": 1, "b": 2}));
@@ -329,15 +344,11 @@ mod tests {
         let store = DashMapLatestEntityStore::new();
         let id = urn("urn:ngsi-ld:Camera:1");
 
-        store.store_fragment(write(&id, json!({"a": 1}), 1, false, None)).unwrap();
-        store.store_fragment(write(&id, json!({"b": 2}), 1, false, None)).unwrap();
-        store
-            .store_fragment(write(&id, json!({"on": true}), 2, true, Some("2026-04-03T22:00:20Z")))
-            .unwrap();
-        store
-            .store_fragment(write(&id, json!({"on": false}), 2, true, Some("2026-04-03T21:00:20Z")))
-            .unwrap();
-        store.store_fragment(write(&id, json!({"c": 3}), 3, false, None)).unwrap();
+        store.store_fragment(write(&id, json!({"a": 1}), 1, None)).unwrap();
+        store.store_fragment(write(&id, json!({"b": 2}), 1, None)).unwrap();
+        store.store_fragment(write(&id, json!({"on": true}), 2, Some("2026-04-03T22:00:20Z"))).unwrap();
+        store.store_fragment(write(&id, json!({"on": false}), 2, Some("2026-04-03T21:00:20Z"))).unwrap();
+        store.store_fragment(write(&id, json!({"c": 3}), 3, None)).unwrap();
 
         let unit = &store.assemble_entity(&id, &ReadsEverything).unwrap().units[0];
         let counts: Vec<u64> = unit.iter().map(|fragment| fragment.records.get()).collect();
@@ -350,11 +361,11 @@ mod tests {
         let store = DashMapLatestEntityStore::new();
         let id = urn("urn:ngsi-ld:Camera:1");
 
-        store.store_fragment(write(&id, json!({"a": 1, "z": 1}), 1, false, None)).unwrap();
-        store.store_fragment(write(&id, json!({"z": 2, "b": 2}), 1, false, None)).unwrap();
-        store.store_fragment(write(&id, json!({"a": 3}), 1, false, None)).unwrap();
-        store.store_fragment(write(&id, json!({"c": 1}), 2, false, None)).unwrap();
-        store.store_fragment(write(&id, json!({"c": 1, "d": 4}), 2, false, None)).unwrap();
+        store.store_fragment(write(&id, json!({"a": 1, "z": 1}), 1, None)).unwrap();
+        store.store_fragment(write(&id, json!({"z": 2, "b": 2}), 1, None)).unwrap();
+        store.store_fragment(write(&id, json!({"a": 3}), 1, None)).unwrap();
+        store.store_fragment(write(&id, json!({"c": 1}), 2, None)).unwrap();
+        store.store_fragment(write(&id, json!({"c": 1, "d": 4}), 2, None)).unwrap();
 
         let unit = &store.assemble_entity(&id, &ReadsEverything).unwrap().units[0];
         let conflicts: Vec<Option<String>> = unit.iter().map(|fragment| fragment.conflict.as_ref().map(ToString::to_string)).collect();
@@ -366,7 +377,7 @@ mod tests {
     fn one_unit_per_id_and_a_missing_id_assembles_to_nothing() {
         let store = DashMapLatestEntityStore::new();
         let id = urn("urn:ngsi-ld:Camera:1");
-        store.store_fragment(write(&id, json!({"a": 1}), 1, false, None)).unwrap();
+        store.store_fragment(write(&id, json!({"a": 1}), 1, None)).unwrap();
 
         assert_eq!(store.count(), 1);
         assert_eq!(store.unit_count(), 1);
@@ -383,8 +394,8 @@ mod tests {
     fn assembly_drains_the_id_rather_than_copying_it_out() {
         let store = DashMapLatestEntityStore::new();
         let id = urn("urn:ngsi-ld:Camera:1");
-        store.store_fragment(write(&id, json!({"a": 1}), 1, false, None)).unwrap();
-        store.store_fragment(write(&id, json!({"b": 2}), 2, false, None)).unwrap();
+        store.store_fragment(write(&id, json!({"a": 1}), 1, None)).unwrap();
+        store.store_fragment(write(&id, json!({"b": 2}), 2, None)).unwrap();
 
         assert_eq!(store.assemble_entity(&id, &ReadsEverything).unwrap().units[0].len(), 2);
 

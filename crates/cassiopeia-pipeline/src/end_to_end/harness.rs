@@ -147,11 +147,12 @@ pub(crate) fn run_failing_end_to_end(store: StoreKind, inputs: &[RunInput], enti
     (error, outcome)
 }
 
-/// Runs a one-shot pipeline over one CSV document bound as `binding`, writing files, on `store`, and
-/// collects what it reported and wrote.
+/// Runs a one-shot pipeline over one CSV document bound as `binding`, writing files, on `store`, with
+/// `output_extra` spliced into the manifest's `output` object, and collects what it reported and
+/// wrote.
 ///
 /// The output attaches no `@context`.
-pub(crate) fn run_csv_end_to_end(store: StoreKind, csv: &str, binding: &RunBinding, entity_types: &[&str]) -> RunOutcome {
+pub(crate) fn run_csv_end_to_end(store: StoreKind, csv: &str, binding: &RunBinding, entity_types: &[&str], output_extra: &str) -> RunOutcome {
     let directory = TempDir::new().unwrap();
     let root = directory.path();
     let data = root.join("data-0.csv");
@@ -161,7 +162,7 @@ pub(crate) fn run_csv_end_to_end(store: StoreKind, csv: &str, binding: &RunBindi
         store,
         root,
         &[declare_input(root, 0, &data, binding)],
-        &RunSetup::files(&RunSchemas::Permissive(entity_types), ""),
+        &RunSetup::files(&RunSchemas::Permissive(entity_types), output_extra),
     );
     result.unwrap();
     outcome

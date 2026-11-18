@@ -1,7 +1,12 @@
 use crate::{
     error::PipelineError,
     pipeline_stage::PipelineStage,
-    stages::{discarded_observation_report::report_discarded_observations, merged_records_report::report_merged_records, stage_env::StageEnv},
+    stages::{
+        discarded_observation_report::report_discarded_observations,
+        merged_records_report::report_merged_records,
+        stage_env::StageEnv,
+        unreadable_observation_report::report_unreadable_observations,
+    },
 };
 use cassiopeia_common::{
     batch::Batch,
@@ -74,7 +79,9 @@ impl<'a> BatchEmitter<'a> {
 /// work is measured as its own stage. Each base id's units are emitted contiguously, and the stores
 /// are destroyed once the scan finishes. Records of one mapping the scan found merged into one id are
 /// reported once the scan ends, one warning per merged id, grouped by entity type, and so are the
-/// records a current-state store discarded for a failing `observedAt` template, grouped by mapping.
+/// records a current-state store discarded for a failing `observedAt` template, grouped by mapping,
+/// and those it discarded for unreadable `observedAt` text, named as the attribute losses a kept
+/// record with that text reports.
 pub(crate) fn spawn_assembler_thread(
     resolver: Box<dyn EntitySource>,
     entity_count: u64,
@@ -129,8 +136,9 @@ pub(crate) fn spawn_assembler_thread(
                 let _ = tx.send(Signal::Error(PipelineError::from(error)));
             }
         }
-        let AssemblyLosses { merged, discarded } = losses;
-        let warnings = report_merged_records(reporter, merged) + report_discarded_observations(reporter, discarded);
+        let AssemblyLosses { merged, discarded, unreadable } = losses;
+        let warnings =
+            report_merged_records(reporter, merged) + report_discarded_observations(reporter, discarded) + report_unreadable_observations(reporter, unreadable);
         if warnings > 0 {
             stage.warn_inc_by(warnings);
             run_telemetry.add_warnings(warnings);

@@ -100,7 +100,8 @@ fn assemble(ctx: &ResolutionContext, attr_name: &NameBuf, config: &Attribute) ->
 /// Each instance's `source` is read and converted with the attribute's shared conversion. An
 /// instance that resolved to nothing stays `None`, so the entry at index `i` stays aligned with the
 /// per-item metadata recorded for instance `i`: its `datasetId` and the shared attribute-level
-/// properties (ETSI GS CIM 009 v1.9.1 clause 4.5.5).
+/// properties (ETSI GS CIM 009 v1.9.1 clause 4.5.5). An instance the context does not select is not
+/// read at all and stays `None` too.
 fn resolve_instances(
     ctx: &mut ResolutionContext,
     attr_name: &NameBuf,
@@ -108,7 +109,11 @@ fn resolve_instances(
     instances: &[AttributeInstance],
 ) -> Result<Option<ResolvedAttribute>> {
     let mut contents = Vec::with_capacity(instances.len());
-    for instance in instances {
+    for (index, instance) in instances.iter().enumerate() {
+        if !ctx.instances.selects(index) {
+            contents.push(None);
+            continue;
+        }
         let parts = collect_source_parts(ctx, instance.source().as_ref(), instance.compiled_source().as_ref())?;
         contents.push(transform(ctx, attr_name, config, parts));
     }
