@@ -27,7 +27,7 @@ use iri_rs::IriBuf;
 ///
 /// A property draws its value from the value map, a relationship its objects from the relationship
 /// map; consuming them here (`swap_remove`) leaves any value with no declaration behind. An
-/// attribute whose value or objects are absent yields no attribute.
+/// attribute whose value or objects are absent, or whose `datasetId` is no URI, yields no attribute.
 pub(crate) fn build_attribute(
     name: &NameBuf,
     config: &Attribute,
@@ -61,29 +61,29 @@ pub(crate) fn build_attribute(
     match config.kind() {
         NgsiLdAttributeKind::Property => {
             let value = take_value(values, key)?;
-            Some(build_property(value, property_metadata(name, config, metadata, cache, losses)))
+            Some(build_property(value, property_metadata(name, config, metadata, cache, losses)?))
         }
         NgsiLdAttributeKind::GeoProperty => {
             // Extraction leaves a GeoProperty's value as the geometry it typed under the declaration's
             // own `geometry` policy, or no value at all, so there is nothing to parse here.
             let geometry = take_value(values, key)?.into_geometry()?;
-            Some(build_geo_property(geometry, property_metadata(name, config, metadata, cache, losses)))
+            Some(build_geo_property(geometry, property_metadata(name, config, metadata, cache, losses)?))
         }
         NgsiLdAttributeKind::VocabProperty => {
             let iri = take_vocab(values, key)?;
-            Some(build_vocab_property(iri, property_metadata(name, config, metadata, cache, losses)))
+            Some(build_vocab_property(iri, property_metadata(name, config, metadata, cache, losses)?))
         }
         NgsiLdAttributeKind::ListProperty => {
             let value = take_value(values, key)?;
-            Some(build_list_property(value, property_metadata(name, config, metadata, cache, losses)))
+            Some(build_list_property(value, property_metadata(name, config, metadata, cache, losses)?))
         }
         NgsiLdAttributeKind::JsonProperty => {
             let payload = take_json(values, key)?;
-            Some(build_json_property(payload, property_metadata(name, config, metadata, cache, losses)))
+            Some(build_json_property(payload, property_metadata(name, config, metadata, cache, losses)?))
         }
         NgsiLdAttributeKind::LanguageProperty => {
             let language_map = take_language_map(values, key)?;
-            Some(build_language_property(language_map, property_metadata(name, config, metadata, cache, losses)))
+            Some(build_language_property(language_map, property_metadata(name, config, metadata, cache, losses)?))
         }
         NgsiLdAttributeKind::Relationship => build_single_relationship(name, config, relationships, metadata, cache, losses),
         NgsiLdAttributeKind::ListRelationship => build_list_relationship_attribute(name, config, relationships, metadata, cache, losses),
@@ -91,17 +91,17 @@ pub(crate) fn build_attribute(
 }
 
 /// Resolves the metadata of a single-instance Property-family attribute, with the `valueType` its
-/// declaration names.
+/// declaration names, or `None` when its `datasetId` is no URI and the attribute is lost.
 fn property_metadata(
     name: &NameBuf,
     config: &Attribute,
     metadata: Option<&EntityMetadata>,
     cache: &mut QualifierCache<'_>,
     losses: &QualifierLosses,
-) -> MetadataSummary {
+) -> Option<MetadataSummary> {
     // The declaration answers for every entity it produces, so each attribute takes its own copy of
     // the datatype it names.
-    transform_metadata(metadata, name, None, cache, losses).with_value_type(config.value_type().clone())
+    transform_metadata(metadata, name, None, cache, losses).map(|summary| summary.with_value_type(config.value_type().clone()))
 }
 
 /// Takes the single content a single-instance declaration resolved to.

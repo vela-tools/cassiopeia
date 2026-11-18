@@ -154,6 +154,7 @@ mod tests {
                 property::NgsiLdProperty,
                 relationship::NgsiLdRelationship,
             },
+            dataset_id::DatasetId,
             name::NameBuf,
             scope::{NgsiLdScope, ScopeBuf},
             value_type::ValueType,
@@ -189,14 +190,14 @@ mod tests {
     }
 
     /// Every instance's `datasetId`, in order, for a `Multi` of relationships.
-    fn relationship_dataset_ids(instances: &[NgsiLdAttribute]) -> Vec<Option<Urn>> {
+    fn relationship_dataset_ids(instances: &[NgsiLdAttribute]) -> Vec<Option<&str>> {
         instances
             .iter()
             .map(|attr| {
                 let NgsiLdAttribute::Relationship(relationship) = attr else {
                     panic!("expected a relationship instance, got {attr:?}");
                 };
-                relationship.dataset_id.clone()
+                relationship.dataset_id.as_ref().map(DatasetId::as_str)
             })
             .collect()
     }
@@ -657,16 +658,16 @@ mod tests {
             panic!("expected a multi-instance attribute");
         };
         assert_eq!(instances.len(), 2);
-        let dataset_ids: Vec<&Urn> = instances
+        let dataset_ids: Vec<&str> = instances
             .iter()
             .map(|attr| {
                 let NgsiLdAttribute::Property(property) = attr else {
                     panic!("expected a property instance, got {attr:?}");
                 };
-                property.dataset_id.as_ref().expect("instance carries a datasetId")
+                property.dataset_id.as_ref().map(DatasetId::as_str).expect("instance carries a datasetId")
             })
             .collect();
-        assert_eq!(dataset_ids, vec![&urn("urn:ngsi-ld:dataset:model:a"), &urn("urn:ngsi-ld:dataset:model:c")]);
+        assert_eq!(dataset_ids, vec!["urn:ngsi-ld:dataset:model:a", "urn:ngsi-ld:dataset:model:c"]);
     }
 
     #[test]
@@ -718,7 +719,7 @@ mod tests {
         assert_eq!(*object_type, Some(name("Airport")));
         assert_eq!(
             relationship_dataset_ids(instances),
-            vec![Some(urn("urn:ngsi-ld:dataset:role:departure")), Some(urn("urn:ngsi-ld:dataset:role:arrival"))]
+            vec![Some("urn:ngsi-ld:dataset:role:departure"), Some("urn:ngsi-ld:dataset:role:arrival")]
         );
     }
 
@@ -769,7 +770,7 @@ mod tests {
         };
         assert_eq!(
             relationship_dataset_ids(instances),
-            vec![Some(urn("urn:ngsi-ld:dataset:role:departure")), Some(urn("urn:ngsi-ld:dataset:role:arrival"))]
+            vec![Some("urn:ngsi-ld:dataset:role:departure"), Some("urn:ngsi-ld:dataset:role:arrival")]
         );
     }
 
@@ -826,9 +827,9 @@ mod tests {
             .collect();
         assert_eq!(lists[0].object_list, vec![urn("urn:ngsi-ld:Airport:1"), urn("urn:ngsi-ld:Airport:2")]);
         assert_eq!(lists[0].object_type, Some(name("Airport")));
-        assert_eq!(lists[0].dataset_id, Some(urn("urn:ngsi-ld:dataset:role:departure")));
+        assert_eq!(lists[0].dataset_id.as_ref().map(DatasetId::as_str), Some("urn:ngsi-ld:dataset:role:departure"));
         assert_eq!(lists[1].object_list, vec![urn("urn:ngsi-ld:Airport:3")]);
-        assert_eq!(lists[1].dataset_id, Some(urn("urn:ngsi-ld:dataset:role:arrival")));
+        assert_eq!(lists[1].dataset_id.as_ref().map(DatasetId::as_str), Some("urn:ngsi-ld:dataset:role:arrival"));
     }
 
     #[test]
@@ -874,25 +875,269 @@ mod tests {
         let Some(NgsiLdAttributeWrapper::Multi(instances)) = result.attributes.get(&name("servesAirports")) else {
             panic!("expected a multi-instance list relationship");
         };
-        let lists: Vec<(&[Urn], Option<&Urn>)> = instances
+        let lists: Vec<(&[Urn], Option<&str>)> = instances
             .iter()
             .map(|attr| {
                 let NgsiLdAttribute::ListRelationship(list) = attr else {
                     panic!("expected a list relationship instance, got {attr:?}");
                 };
-                (list.object_list.as_slice(), list.dataset_id.as_ref())
+                (list.object_list.as_slice(), list.dataset_id.as_ref().map(DatasetId::as_str))
             })
             .collect();
         assert_eq!(
             lists,
             [
-                (&[urn("urn:ngsi-ld:Airport:1")][..], Some(&urn("urn:ngsi-ld:dataset:role:departure"))),
+                (&[urn("urn:ngsi-ld:Airport:1")][..], Some("urn:ngsi-ld:dataset:role:departure")),
                 (
                     &[urn("urn:ngsi-ld:Airport:3"), urn("urn:ngsi-ld:Airport:4")][..],
-                    Some(&urn("urn:ngsi-ld:dataset:role:arrival"))
+                    Some("urn:ngsi-ld:dataset:role:arrival")
                 ),
             ]
         );
+    }
+
+    /// Every unusable `datasetId` `losses` recorded, as its attribute, its first text, and how often
+    /// one was met.
+    fn unusable_dataset_ids(losses: QualifierLosses) -> Vec<(String, String, u64)> {
+        BatchSink::from(losses.dataset_ids)
+            .into_entries()
+            .map(|(attribute, record)| (attribute.to_string(), record.example.into_string(), record.occurrences.get()))
+            .collect()
+    }
+
+    /// One unusable `datasetId` record, as [`unusable_dataset_ids`] lists it.
+    fn dataset_id_loss(attribute: &str, text: &str, occurrences: u64) -> (String, String, u64) {
+        (attribute.to_owned(), text.to_owned(), occurrences)
+    }
+
+    /// A `WeatherForecast` whose two `temperature` instances read 21.5 and 22.0, under the
+    /// `datasetId`s `ecmwf` and `gfs`.
+    fn forecast(ecmwf: &str, gfs: &str) -> (Entity, Arc<Mapping>) {
+        let mapping = mapping(
+            r#"{
+                version: "v4",
+                dataModel: "WeatherForecast",
+                identity: { entityName: "{{ station }}" },
+                attributes: {
+                    temperature: {
+                        transformation: "float",
+                        instances: [
+                            { source: "{{ ecmwf }}", properties: { datasetId: { source: "{{ ecmwf_model }}" } } },
+                            { source: "{{ gfs }}", properties: { datasetId: { source: "{{ gfs_model }}" } } },
+                        ],
+                    },
+                },
+            }"#,
+        );
+        let value_map = values(vec![(
+            "temperature",
+            instances(vec![Some(Value::try_from(21.5).unwrap()), Some(Value::try_from(22.0).unwrap())]),
+        )]);
+        let metadata = IndexMap::from_iter([(name("temperature"), MetadataStorage::per_item(vec![dataset_entry(ecmwf), dataset_entry(gfs)]))]);
+        let mut entity = Entity::new(
+            urn("urn:ngsi-ld:WeatherForecast:S1"),
+            json!({}),
+            None,
+            None,
+            IndexMap::default(),
+            Some(value_map),
+        );
+        entity.set_metadata(Some(metadata));
+
+        (entity, mapping)
+    }
+
+    /// Every `temperature` instance, as its value and its `datasetId`.
+    fn temperature_instances(result: &NgsiLdEntity) -> Vec<(&Value, Option<&str>)> {
+        let Some(NgsiLdAttributeWrapper::Multi(instances)) = result.attributes.get(&name("temperature")) else {
+            panic!("expected a multi-instance temperature");
+        };
+        instances
+            .iter()
+            .map(|attr| {
+                let NgsiLdAttribute::Property(property) = attr else {
+                    panic!("expected a property instance, got {attr:?}");
+                };
+                (&property.value, property.dataset_id.as_ref().map(DatasetId::as_str))
+            })
+            .collect()
+    }
+
+    #[test]
+    fn a_property_instance_whose_dataset_id_is_no_uri_is_dropped_and_recorded() {
+        let (entity, mapping) = forecast("urn:ngsi-ld:Dataset:ecmwf", "gfs model");
+        let losses = QualifierLosses::new();
+
+        let result = NgsiLdTransformer::new().transform(Mapped::new(entity, mapping), &losses).unwrap();
+
+        assert_eq!(
+            temperature_instances(&result),
+            [(&Value::try_from(21.5).unwrap(), Some("urn:ngsi-ld:Dataset:ecmwf"))]
+        );
+        assert_eq!(unusable_dataset_ids(losses), [dataset_id_loss("temperature", "gfs model", 1)]);
+    }
+
+    #[test]
+    fn an_instance_whose_dataset_id_is_an_absolute_uri_that_is_no_urn_carries_it_as_written() {
+        let (entity, mapping) = forecast("urn:ngsi-ld:Dataset:ecmwf", "https://example.org/datasets/gfs");
+        let losses = QualifierLosses::new();
+
+        let result = NgsiLdTransformer::new().transform(Mapped::new(entity, mapping), &losses).unwrap();
+
+        assert_eq!(
+            temperature_instances(&result),
+            [
+                (&Value::try_from(21.5).unwrap(), Some("urn:ngsi-ld:Dataset:ecmwf")),
+                (&Value::try_from(22.0).unwrap(), Some("https://example.org/datasets/gfs")),
+            ]
+        );
+        assert!(losses.dataset_ids.is_empty());
+    }
+
+    #[test]
+    fn a_single_property_whose_dataset_id_is_no_uri_is_dropped_and_recorded() {
+        let mapping = mapping(
+            r#"{ version: "v4", dataModel: "Sensor", identity: { entityName: "S-{{ id }}" }, attributes: { temperature: { source: "{{ t }}", transformation: "float", properties: { datasetId: { source: "{{ model }}" } } } } }"#,
+        );
+        let value_map = values(vec![("temperature", single(Value::try_from(20.0).unwrap()))]);
+        let metadata = IndexMap::from_iter([(name("temperature"), MetadataStorage::shared(dataset_entry("gfs model")))]);
+        let mut entity = Entity::new(urn("urn:ngsi-ld:Sensor:1"), json!({}), None, None, IndexMap::default(), Some(value_map));
+        entity.set_metadata(Some(metadata));
+        let losses = QualifierLosses::new();
+
+        let result = NgsiLdTransformer::new().transform(Mapped::new(entity, mapping), &losses).unwrap();
+
+        assert!(result.attributes.get(&name("temperature")).is_none(), "{result:?}");
+        assert_eq!(unusable_dataset_ids(losses), [dataset_id_loss("temperature", "gfs model", 1)]);
+    }
+
+    #[test]
+    fn a_relationship_instance_whose_dataset_id_is_no_uri_is_dropped_and_the_other_kept() {
+        let mapping = mapping(
+            r#"{
+                version: "v4",
+                dataModel: "dataModel.Aeronautics/Flight",
+                identity: { entityName: "F-{{ id }}" },
+                attributes: {
+                    servesAirport: {
+                        type: "Relationship",
+                        target: { entity: "Airport" },
+                        instances: [
+                            { source: "{{ dep }}", properties: { datasetId: { source: "urn:ngsi-ld:dataset:role:departure" } } },
+                            { source: "{{ arr }}", properties: { datasetId: { source: "not a uri" } } },
+                        ],
+                    },
+                },
+            }"#,
+        );
+        let metadata = IndexMap::from_iter([(
+            name("servesAirport"),
+            MetadataStorage::per_item(vec![dataset_entry("urn:ngsi-ld:dataset:role:departure"), dataset_entry("not a uri")]),
+        )]);
+        let mut entity = Entity::new(urn("urn:ngsi-ld:Flight:1"), json!({}), None, None, IndexMap::default(), None);
+        entity.set_metadata(Some(metadata));
+        entity.set_instance_relationships(Some(instance_relationships(
+            "servesAirport",
+            &[(0, &["urn:ngsi-ld:Airport:535"]), (1, &["urn:ngsi-ld:Airport:340"])],
+        )));
+        let losses = QualifierLosses::new();
+
+        let result = NgsiLdTransformer::new().transform(Mapped::new(entity, mapping), &losses).unwrap();
+
+        let Some(NgsiLdAttributeWrapper::Multi(instances)) = result.attributes.get(&name("servesAirport")) else {
+            panic!("expected a multi-instance relationship");
+        };
+        assert_eq!(relationship_dataset_ids(instances), vec![Some("urn:ngsi-ld:dataset:role:departure")]);
+        assert_eq!(unusable_dataset_ids(losses), [dataset_id_loss("servesAirport", "not a uri", 1)]);
+    }
+
+    #[test]
+    fn a_single_relationship_whose_dataset_id_is_no_uri_is_dropped() {
+        let mapping = mapping(
+            r#"{ version: "v4", dataModel: "Device", identity: { entityName: "D-{{ id }}" }, attributes: { controlledAsset: { type: "Relationship", target: { entity: "Building" } } } }"#,
+        );
+        let relationships = IndexMap::from_iter([(name("controlledAsset"), vec![urn("urn:ngsi-ld:Building:9")])]);
+        let metadata = IndexMap::from_iter([(name("controlledAsset"), MetadataStorage::shared(dataset_entry("not a uri")))]);
+        let mut entity = Entity::new(urn("urn:ngsi-ld:Device:1"), json!({}), None, None, relationships, None);
+        entity.set_metadata(Some(metadata));
+        let losses = QualifierLosses::new();
+
+        let result = NgsiLdTransformer::new().transform(Mapped::new(entity, mapping), &losses).unwrap();
+
+        assert!(result.attributes.is_empty(), "{result:?}");
+        assert_eq!(unusable_dataset_ids(losses), [dataset_id_loss("controlledAsset", "not a uri", 1)]);
+    }
+
+    #[test]
+    fn a_plain_list_relationship_carries_its_dataset_id() {
+        let mapping = mapping(
+            r#"{ version: "v4", dataModel: "Device", identity: { entityName: "D-{{ id }}" }, attributes: { assets: { type: "ListRelationship", target: { entity: "Building" } } } }"#,
+        );
+        let relationships = IndexMap::from_iter([(name("assets"), vec![urn("urn:ngsi-ld:Building:1"), urn("urn:ngsi-ld:Building:2")])]);
+        let metadata = IndexMap::from_iter([(name("assets"), MetadataStorage::shared(dataset_entry("urn:ngsi-ld:Dataset:a")))]);
+        let mut entity = Entity::new(urn("urn:ngsi-ld:Device:1"), json!({}), None, None, relationships, None);
+        entity.set_metadata(Some(metadata));
+
+        let result = NgsiLdTransformer::new()
+            .transform(Mapped::new(entity, mapping), &QualifierLosses::new())
+            .unwrap();
+
+        let Some(NgsiLdAttributeWrapper::Single(attr)) = result.attributes.get(&name("assets")) else {
+            panic!("expected a single list relationship");
+        };
+        let NgsiLdAttribute::ListRelationship(relationship) = attr.as_ref() else {
+            panic!("expected a list relationship");
+        };
+        assert_eq!(relationship.dataset_id.as_ref().map(DatasetId::as_str), Some("urn:ngsi-ld:Dataset:a"));
+    }
+
+    #[test]
+    fn a_list_relationship_instance_whose_dataset_id_is_no_uri_is_dropped_and_the_other_kept() {
+        let mapping = mapping(
+            r#"{
+                version: "v4",
+                dataModel: "Route",
+                identity: { entityName: "R-{{ id }}" },
+                attributes: {
+                    servesAirports: {
+                        type: "ListRelationship",
+                        target: { entity: "Airport" },
+                        instances: [
+                            { source: "{{ a }}", properties: { datasetId: { source: "urn:ngsi-ld:dataset:role:departure" } } },
+                            { source: "{{ b }}", properties: { datasetId: { source: "not a uri" } } },
+                        ],
+                    },
+                },
+            }"#,
+        );
+        let metadata = IndexMap::from_iter([(
+            name("servesAirports"),
+            MetadataStorage::per_item(vec![dataset_entry("urn:ngsi-ld:dataset:role:departure"), dataset_entry("not a uri")]),
+        )]);
+        let mut entity = Entity::new(urn("urn:ngsi-ld:Route:1"), json!({}), None, None, IndexMap::default(), None);
+        entity.set_metadata(Some(metadata));
+        entity.set_instance_relationships(Some(instance_relationships(
+            "servesAirports",
+            &[(0, &["urn:ngsi-ld:Airport:1"]), (1, &["urn:ngsi-ld:Airport:2"])],
+        )));
+        let losses = QualifierLosses::new();
+
+        let result = NgsiLdTransformer::new().transform(Mapped::new(entity, mapping), &losses).unwrap();
+
+        let Some(NgsiLdAttributeWrapper::Multi(instances)) = result.attributes.get(&name("servesAirports")) else {
+            panic!("expected a multi-instance list relationship");
+        };
+        let lists: Vec<(&[Urn], Option<&str>)> = instances
+            .iter()
+            .map(|attr| {
+                let NgsiLdAttribute::ListRelationship(list) = attr else {
+                    panic!("expected a list relationship instance, got {attr:?}");
+                };
+                (list.object_list.as_slice(), list.dataset_id.as_ref().map(DatasetId::as_str))
+            })
+            .collect();
+        assert_eq!(lists, [(&[urn("urn:ngsi-ld:Airport:1")][..], Some("urn:ngsi-ld:dataset:role:departure"))]);
+        assert_eq!(unusable_dataset_ids(losses), [dataset_id_loss("servesAirports", "not a uri", 1)]);
     }
 
     #[test]
@@ -923,16 +1168,16 @@ mod tests {
             panic!("expected a multi-instance geo property");
         };
         assert_eq!(instances.len(), 2);
-        let dataset_ids: Vec<Option<&Urn>> = instances
+        let dataset_ids: Vec<Option<&str>> = instances
             .iter()
             .map(|attr| {
                 let NgsiLdAttribute::GeoProperty(geo) = attr else {
                     panic!("expected a geo property instance, got {attr:?}");
                 };
-                geo.dataset_id.as_ref()
+                geo.dataset_id.as_ref().map(DatasetId::as_str)
             })
             .collect();
-        assert_eq!(dataset_ids, vec![Some(&urn("urn:ngsi-ld:dataset:a")), Some(&urn("urn:ngsi-ld:dataset:b"))]);
+        assert_eq!(dataset_ids, vec![Some("urn:ngsi-ld:dataset:a"), Some("urn:ngsi-ld:dataset:b")]);
     }
 
     #[test]
@@ -967,16 +1212,16 @@ mod tests {
             panic!("expected a multi-instance vocab property");
         };
         assert_eq!(instances.len(), 2);
-        let dataset_ids: Vec<Option<&Urn>> = instances
+        let dataset_ids: Vec<Option<&str>> = instances
             .iter()
             .map(|attr| {
                 let NgsiLdAttribute::VocabProperty(vocab) = attr else {
                     panic!("expected a vocab property instance, got {attr:?}");
                 };
-                vocab.dataset_id.as_ref()
+                vocab.dataset_id.as_ref().map(DatasetId::as_str)
             })
             .collect();
-        assert_eq!(dataset_ids, vec![Some(&urn("urn:ngsi-ld:dataset:a")), Some(&urn("urn:ngsi-ld:dataset:c"))]);
+        assert_eq!(dataset_ids, vec![Some("urn:ngsi-ld:dataset:a"), Some("urn:ngsi-ld:dataset:c")]);
     }
 
     #[test]

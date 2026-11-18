@@ -1,4 +1,5 @@
 mod data_stream_extents;
+mod dataset_ids;
 mod entity_order;
 mod features_of_interest;
 mod geo_properties;

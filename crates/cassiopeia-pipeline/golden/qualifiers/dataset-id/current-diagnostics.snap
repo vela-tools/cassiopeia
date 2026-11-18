@@ -3,5 +3,14 @@ source: crates/cassiopeia-pipeline/src/end_to_end/golden/mod.rs
 input_file: crates/cassiopeia-pipeline/golden/qualifiers/dataset-id/manifest.json5
 ---
 {
-  "diagnostics": []
+  "diagnostics": [
+    {
+      "code": "extractor-dataset-id-not-a-uri",
+      "occurrences": 1,
+      "message": [
+        "! Attribute `forecast` dropped where its `datasetId` is `gfs model`, which is not an absolute URI",
+        "  ╰─ attribute   forecast"
+      ]
+    }
+  ]
 }

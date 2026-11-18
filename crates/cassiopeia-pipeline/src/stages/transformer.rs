@@ -8,6 +8,7 @@ use crate::{
         stage_env::StageEnv,
         unknown_unit_code_report::unknown_unit_code_diagnostic,
         unreadable_timestamp_report::unreadable_timestamp_diagnostic,
+        unusable_dataset_id_report::unusable_dataset_id_diagnostic,
     },
 };
 use cassiopeia_common::{
@@ -36,7 +37,9 @@ use std::{ops::ControlFlow, sync::Arc};
 /// UN/CEFACT code, is emitted without the qualifier rather than dropped, and the loss is named and
 /// counted as a warning: once per attribute and timestamp qualifier, and once per attribute and unit
 /// text. A value that publishes with nothing anchoring it in time, with no bound on how long it
-/// holds, or with no unit, is exactly what nothing downstream can notice.
+/// holds, or with no unit, is exactly what nothing downstream can notice. An instance, or an
+/// attribute, whose `datasetId` is no URI is dropped instead, since written without it, it would be
+/// the default instance, and the loss is named once per attribute.
 struct TransformerProcessor {
     /// The transformer that builds NGSI-LD entities, configured for the run's parallelism.
     transformer: NgsiLdTransformer,
@@ -69,10 +72,15 @@ impl PumpProcessor for TransformerProcessor {
         if !skipped.is_empty() {
             skipped.report(self.reporter, Severity::Warning);
         }
-        let QualifierLosses { timestamps, unit_codes } = losses;
+        let QualifierLosses {
+            timestamps,
+            unit_codes,
+            dataset_ids,
+        } = losses;
         let warnings = failed
             + report_sink(self.reporter, timestamps, unreadable_timestamp_diagnostic)
-            + report_sink(self.reporter, unit_codes, unknown_unit_code_diagnostic);
+            + report_sink(self.reporter, unit_codes, unknown_unit_code_diagnostic)
+            + report_sink(self.reporter, dataset_ids, unusable_dataset_id_diagnostic);
         if warnings > 0 {
             stage.warn_inc_by(warnings);
             self.telemetry.add_warnings(warnings);

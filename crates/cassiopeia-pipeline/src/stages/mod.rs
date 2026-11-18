@@ -53,6 +53,7 @@ pub(crate) mod unreadable_timestamp_report;
 pub(crate) mod unresolved_link_report;
 pub(crate) mod unresolved_template_report;
 pub(crate) mod unserved_features_of_interest_report;
+pub(crate) mod unusable_dataset_id_report;
 pub(crate) mod unusable_value_report;
 pub(crate) mod validation_abort;
 pub(crate) mod validation_decision;

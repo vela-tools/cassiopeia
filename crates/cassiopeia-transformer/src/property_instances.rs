@@ -15,9 +15,11 @@ use cassiopeia_ngsi_ld::entity::{
 ///
 /// The resolved attribute holds one entry per declared instance; each present entry becomes its own
 /// attribute instance carrying the per-instance metadata at the same index (its `datasetId` and the
-/// shared qualifiers) and the `valueType` its declaration, or else the attribute, names. An absent entry is a missing instance and contributes nothing, so a model that
-/// reports no value for this record simply has no instance (ETSI GS CIM 009 v1.9.1 clause 4.5.5).
-/// When no instance survives, the attribute is omitted.
+/// shared qualifiers) and the `valueType` its declaration, or else the attribute, names. An absent
+/// entry is a missing instance and contributes nothing, so a model that reports no value for this
+/// record simply has no instance (ETSI GS CIM 009 v1.9.1 clause 4.5.5). An entry whose `datasetId`
+/// is no URI is dropped too, since written without it, it would be the default instance (clause
+/// 4.5.5.1). When no instance survives, the attribute is omitted.
 pub(crate) fn build_multi_instance_attribute(
     name: &NameBuf,
     config: &Attribute,
@@ -37,14 +39,14 @@ pub(crate) fn build_multi_instance_attribute(
         .enumerate()
         .filter_map(|(index, item)| {
             let content = item?;
+            let meta = transform_metadata(metadata, name, Some(index), cache, losses)?;
             // Each instance takes its own copy of the datatype its declaration, or its attribute's,
             // names: the declaration answers for every entity it produces.
             let value_type = declared
                 .and_then(|instances| instances.get(index))
                 .and_then(|instance| config.instance_value_type(instance))
                 .cloned();
-            let meta = transform_metadata(metadata, name, Some(index), cache, losses).with_value_type(value_type);
-            build_property_instance(*config.kind(), content, meta)
+            build_property_instance(*config.kind(), content, meta.with_value_type(value_type))
         })
         .collect::<Vec<NgsiLdAttribute>>();
 

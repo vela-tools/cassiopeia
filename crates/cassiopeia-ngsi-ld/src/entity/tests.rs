@@ -15,6 +15,7 @@ use crate::{
             vocab_property::NgsiLdVocabProperty,
         },
         context::{NgsiLdContext, NgsiLdContextEntry},
+        dataset_id::DatasetId,
         name::NameBuf,
         representation::{JsonLayout, NgsiLdSerializable},
         scope::{NgsiLdScope, ScopeBuf},
@@ -106,7 +107,7 @@ mod property_tests {
             observed_at: Some(dt),
             expires_at: None,
             unit_code: Some(UnitCode::Cel),
-            dataset_id: Some("urn:dataset:temp".parse().unwrap()),
+            dataset_id: Some(DatasetId::new("urn:dataset:temp").unwrap()),
             instance_id: Some("urn:instance:123".parse().unwrap()),
             attributes: IndexMap::default(),
         });
@@ -499,7 +500,7 @@ mod relationship_tests {
             object_type: None,
             observed_at: Some(dt),
             expires_at: None,
-            dataset_id: Some("urn:ngsi-ld:Relationship:Beatles".parse().unwrap()),
+            dataset_id: Some(DatasetId::new("urn:ngsi-ld:Relationship:Beatles").unwrap()),
             instance_id: None,
             attributes: rel_props,
         });
@@ -576,7 +577,7 @@ mod geoproperty_tests {
             value: geo_value,
             observed_at: Some(dt),
             expires_at: None,
-            dataset_id: Some("urn:dataset:geo".parse().unwrap()),
+            dataset_id: Some(DatasetId::new("urn:dataset:geo").unwrap()),
             instance_id: None,
         });
         let entity = create_test_entity("001", "Place", "area", geo);
@@ -791,7 +792,7 @@ mod list_relationship_tests {
         },
         Qualifier {
             member: "datasetId",
-            set: |list| list.dataset_id = Some("urn:ngsi-ld:dataset:timetable".parse().unwrap()),
+            set: |list| list.dataset_id = Some(DatasetId::new("urn:ngsi-ld:dataset:timetable").unwrap()),
             written: "urn:ngsi-ld:dataset:timetable",
         },
         Qualifier {
@@ -906,7 +907,7 @@ mod multi_attribute_tests {
             observed_at: None,
             expires_at: None,
             unit_code: None,
-            dataset_id: Some("urn:dataset:1".parse().unwrap()),
+            dataset_id: Some(DatasetId::new("urn:dataset:1").unwrap()),
             instance_id: None,
             attributes: IndexMap::default(),
         });
@@ -916,7 +917,7 @@ mod multi_attribute_tests {
             observed_at: None,
             expires_at: None,
             unit_code: None,
-            dataset_id: Some("urn:dataset:2".parse().unwrap()),
+            dataset_id: Some(DatasetId::new("urn:dataset:2").unwrap()),
             instance_id: None,
             attributes: IndexMap::default(),
         });
@@ -1006,7 +1007,7 @@ mod multi_attribute_tests {
             object_type: Some(NameBuf::new("Airport").unwrap()),
             observed_at: None,
             expires_at: None,
-            dataset_id: Some("urn:ngsi-ld:dataset:role:departure".parse().unwrap()),
+            dataset_id: Some(DatasetId::new("urn:ngsi-ld:dataset:role:departure").unwrap()),
             instance_id: None,
             attributes: IndexMap::default(),
         });
@@ -1015,7 +1016,7 @@ mod multi_attribute_tests {
             object_type: Some(NameBuf::new("Airport").unwrap()),
             observed_at: None,
             expires_at: None,
-            dataset_id: Some("urn:ngsi-ld:dataset:role:arrival".parse().unwrap()),
+            dataset_id: Some(DatasetId::new("urn:ngsi-ld:dataset:role:arrival").unwrap()),
             instance_id: None,
             attributes: IndexMap::default(),
         });
@@ -1057,7 +1058,7 @@ mod multi_attribute_tests {
             object_type: Some(NameBuf::new("Airport").unwrap()),
             observed_at: None,
             expires_at: None,
-            dataset_id: Some("urn:ngsi-ld:dataset:role:departure".parse().unwrap()),
+            dataset_id: Some(DatasetId::new("urn:ngsi-ld:dataset:role:departure").unwrap()),
             attributes: IndexMap::default(),
         });
         let arrival = NgsiLdAttribute::ListRelationship(NgsiLdListRelationship {
@@ -1065,7 +1066,7 @@ mod multi_attribute_tests {
             object_type: Some(NameBuf::new("Airport").unwrap()),
             observed_at: None,
             expires_at: None,
-            dataset_id: Some("urn:ngsi-ld:dataset:role:arrival".parse().unwrap()),
+            dataset_id: Some(DatasetId::new("urn:ngsi-ld:dataset:role:arrival").unwrap()),
             attributes: IndexMap::default(),
         });
 
@@ -1432,7 +1433,7 @@ mod edge_case_tests {
             value: multi_polygon,
             observed_at: Some("2023-01-01T00:00:00Z".parse().unwrap()),
             expires_at: None,
-            dataset_id: Some("urn:dataset:geo".parse().unwrap()),
+            dataset_id: Some(DatasetId::new("urn:dataset:geo").unwrap()),
             instance_id: None,
         });
 
@@ -1532,7 +1533,7 @@ mod edge_case_tests {
             observed_at: None,
             expires_at: None,
             unit_code: None,
-            dataset_id: Some("urn:dataset:1".parse().unwrap()),
+            dataset_id: Some(DatasetId::new("urn:dataset:1").unwrap()),
             instance_id: None,
             attributes: IndexMap::default(),
         });
@@ -1799,7 +1800,7 @@ mod edge_case_tests {
                 has_vocab: IriBuf::new("urn:ngsi-ld:vocab:electricMicrobus").unwrap(),
                 observed_at: Some(dt),
                 expires_at: None,
-                dataset_id: Some("urn:dataset:vocab".parse().unwrap()),
+                dataset_id: Some(DatasetId::new("urn:dataset:vocab").unwrap()),
                 attributes: IndexMap::default(),
             });
             let entity = create_test_entity("001", "Vehicle", "vehicleType", vocab);

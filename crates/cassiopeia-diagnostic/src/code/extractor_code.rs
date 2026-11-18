@@ -45,6 +45,9 @@ pub enum ExtractorCode {
     /// NGSI-LD admits nowhere in a Property's value, so nothing was left to write and the attribute
     /// was dropped.
     ValueOnlyNull,
+    /// An attribute's `datasetId` was neither an absolute URI nor `@none`, so the instance carrying
+    /// it, or the attribute, was dropped.
+    DatasetIdNotAUri,
 }
 
 #[cfg(test)]
@@ -67,5 +70,6 @@ mod tests {
         assert_eq!(ExtractorCode::BooleanUnreadable.to_string(), "boolean-unreadable");
         assert_eq!(ExtractorCode::NumberUnreadable.to_string(), "number-unreadable");
         assert_eq!(ExtractorCode::ValueOnlyNull.to_string(), "value-only-null");
+        assert_eq!(ExtractorCode::DatasetIdNotAUri.to_string(), "dataset-id-not-a-uri");
     }
 }

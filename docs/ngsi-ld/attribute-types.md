@@ -301,6 +301,8 @@ Within one mapping, the member follows the record Cassiopeia keeps for the entit
 
 `datasetId` identifies one instance when an attribute name carries several values (ETSI GS CIM 009 v1.9.1 clause 4.5.5). A _multi-attribute_ is serialized as a JSON array of attribute objects, with each instance identified by its own `datasetId`. At most one instance may omit `datasetId`; that is the default instance. The rule applies to Property and Relationship attributes, including specialized types such as `ListProperty` and `ListRelationship`.
 
+Clause 4.5.5.1 types `datasetId` as a URI, or the JSON-LD keyword `@none`, which names the default instance. Cassiopeia writes any absolute URI as it is, a URN or not, so `https://example.org/datasets/gfs` is as valid as `urn:ngsi-ld:Dataset:gfs`; a URN is written in its normal form, with the `urn:` prefix and namespace identifier lowercased. A `datasetId` of `@none`, or one that resolves to nothing, gives the default instance, written without `datasetId`. Any other value, such as `gfs model` or the relative reference `datasets/gfs`, is no URI. Written without it, the instance would silently become the default one, so Cassiopeia drops the instance, or the attribute when it has only one, and warns under `extractor-dataset-id-not-a-uri`.
+
 From the `WeatherForecast` of [example 21](https://github.com/vela-tools/cassiopeia-examples/blob/main/examples/21-json-dataset-id/example.md), one forecast variable carrying one instance per numerical model:
 
 ```json

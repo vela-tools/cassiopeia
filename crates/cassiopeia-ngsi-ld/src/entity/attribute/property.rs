@@ -1,6 +1,7 @@
 use crate::{
     entity::{
         attribute::NestedAttributes,
+        dataset_id::DatasetId,
         representation::{SerializeRepr, concise, normalized, simplified},
         value_type::ValueType,
     },
@@ -32,9 +33,9 @@ pub struct NgsiLdProperty {
     /// The UN/CEFACT unit code the value is expressed in.
     #[serde(rename = "unitCode", skip_serializing_if = "Option::is_none")]
     pub unit_code: Option<UnitCode>,
-    /// The dataset this instance belongs to (NGSI-LD 4.5.5: a URI).
+    /// The dataset this instance belongs to (ETSI GS CIM 009 v1.9.1 clause 4.5.5.1).
     #[serde(rename = "datasetId", skip_serializing_if = "Option::is_none")]
-    pub dataset_id: Option<Urn>,
+    pub dataset_id: Option<DatasetId>,
     /// The broker-assigned instance identifier (NGSI-LD 5.2.5: a URI).
     #[serde(rename = "instanceId", skip_serializing_if = "Option::is_none")]
     pub instance_id: Option<Urn>,
@@ -44,8 +45,10 @@ pub struct NgsiLdProperty {
 }
 
 impl NgsiLdProperty {
-    pub fn new(value: impl Into<Value>) -> Self {
-        Self {
+    /// Builds a property holding `value`, with no qualifiers.
+    #[must_use]
+    pub fn new(value: impl Into<Value>) -> NgsiLdProperty {
+        NgsiLdProperty {
             value: value.into(),
             value_type: None,
             observed_at: None,
