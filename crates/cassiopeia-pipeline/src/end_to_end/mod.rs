@@ -17,6 +17,7 @@ mod observation_ranking;
 mod reason_codes;
 mod record_merges;
 mod relationships;
+mod scratch_folders;
 mod sensors;
 mod sensorthings;
 mod series_validation;

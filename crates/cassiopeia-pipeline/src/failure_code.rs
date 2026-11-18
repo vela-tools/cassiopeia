@@ -44,6 +44,8 @@ impl From<&PipelineError> for DiagnosticCode {
             // A mapping whose `valueType` declarations cannot be checked cannot be used either.
             PipelineError::Mapping(_) | PipelineError::ValueTypeExpander(_) => RunCode::MappingUnusable.into(),
             PipelineError::StagePanic { .. } => RunCode::StagePanic.into(),
+            // No source of the cycle can be collected without the folder its downloads go into.
+            PipelineError::ScratchFolder { .. } => IngestCode::SourceUnavailable.into(),
         }
     }
 }

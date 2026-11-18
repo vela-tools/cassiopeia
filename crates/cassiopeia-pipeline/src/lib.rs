@@ -8,6 +8,7 @@
 //! decides how often the chain repeats, and a [`RunController`](controller::RunController) lets an
 //! external signal cancel it mid-run.
 
+mod attempt_scratch;
 mod completion;
 mod context_resolution;
 pub mod controller;

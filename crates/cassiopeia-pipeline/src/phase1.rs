@@ -16,6 +16,7 @@ use crate::{
 };
 use cassiopeia_collector::{
     downloader::Downloader,
+    scratch_files::ScratchFiles,
     sensorthings::{cursor_cycle::CursorCycle, unread_check::UnreadCheck},
 };
 use cassiopeia_common::{
@@ -40,6 +41,8 @@ pub(crate) struct CycleLane<'a> {
     pub(crate) cursor: Option<CursorCycle>,
     /// Whether a SensorThings lane checks its server for `MultiDatastreams` it reads none of.
     pub(crate) unread_check: UnreadCheck,
+    /// The files in the attempt's scratch folder the lane's collector writes what it downloads to.
+    pub(crate) scratch: ScratchFiles,
 }
 
 impl Pipeline {
@@ -95,6 +98,7 @@ impl Pipeline {
                 router,
                 cursor,
                 unread_check,
+                scratch,
             },
         ) in (0_u32..).zip(lanes)
         {
@@ -122,7 +126,7 @@ impl Pipeline {
                 downloader,
                 self.context.shutdown,
             );
-            let collector_rx = spawn_collector_thread(collector, channel_policy, self.context.reporter, Arc::clone(&env.telemetry));
+            let collector_rx = spawn_collector_thread(collector, scratch, channel_policy, self.context.reporter, Arc::clone(&env.telemetry));
 
             let profiler = create_profiler(
                 input.format_override,

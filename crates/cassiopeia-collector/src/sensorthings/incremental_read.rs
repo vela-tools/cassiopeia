@@ -303,7 +303,7 @@ mod tests {
     /// positions its update moves `committed` to.
     fn read(server: &ServerGuard, settings: &str, committed: Positions) -> (Result<Vec<Value>, CollectorError>, Positions, ReadKind) {
         let slot = CursorUpdateSlot::default();
-        let (result, payloads) = collect(resuming_collector(server, settings, CursorCycle::new(committed.clone(), slot.clone())));
+        let (result, payloads, _scratch) = collect(resuming_collector(server, settings, CursorCycle::new(committed.clone(), slot.clone())));
         match result {
             Ok(_) => {
                 let lines = snapshot_lines(payloads);
@@ -361,7 +361,7 @@ mod tests {
             .create();
         serve_observations(&mut server, 5, &[(1, "09:00")], &answered);
 
-        let (result, payloads) = collect(resuming_collector(
+        let (result, payloads, _scratch) = collect(resuming_collector(
             &server,
             &incremental(""),
             CursorCycle::new(Positions::default(), CursorUpdateSlot::default()),
@@ -405,7 +405,7 @@ mod tests {
             .with_body(json!({ "value": observations }).to_string())
             .expect(1)
             .create();
-        let (result, payloads) = collect(resuming_collector(
+        let (result, payloads, _scratch) = collect(resuming_collector(
             server,
             settings,
             CursorCycle::new(Positions::default(), CursorUpdateSlot::default()),
@@ -552,7 +552,7 @@ mod tests {
         let held = positions(&[(1, &[(11, "09:00")]), (2, &[(4, "07:30"), (5, "08:00")])]);
         let slot = CursorUpdateSlot::default();
 
-        let (result, payloads) = collect(resuming_collector(&server, &incremental(""), CursorCycle::new(held.clone(), slot.clone())));
+        let (result, payloads, _scratch) = collect(resuming_collector(&server, &incremental(""), CursorCycle::new(held.clone(), slot.clone())));
 
         untouched.assert();
         snapshot_lines(payloads);
@@ -618,7 +618,7 @@ mod tests {
         serve_observations(&mut server, 5, &[(1, "09:00"), (2, "09:10"), (3, "09:20")], &answered);
         let slot = CursorUpdateSlot::default();
 
-        let (result, payloads) = collect(resuming_collector(
+        let (result, payloads, _scratch) = collect(resuming_collector(
             &server,
             &incremental(r#", "limits": {"observations": 2}"#),
             CursorCycle::new(Positions::default(), slot.clone()),
@@ -670,7 +670,7 @@ mod tests {
         let held = positions(&[(1, &[(11, "09:00")]), (2, &[(21, "08:00")])]);
         let slot = CursorUpdateSlot::default();
 
-        let (result, payloads) = collect(resuming_collector(
+        let (result, payloads, _scratch) = collect(resuming_collector(
             &server,
             &incremental(r#", "limits": {"pages": 1}"#),
             CursorCycle::new(held.clone(), slot.clone()),
@@ -706,7 +706,7 @@ mod tests {
         let mut server = mockito::Server::new();
         let untouched = server.mock("GET", Matcher::Any).expect(0).create();
 
-        let (result, payloads) = collect(collector(&server, &incremental(""), RequestHeaders::default(), &RUNNING));
+        let (result, payloads, _scratch) = collect(collector(&server, &incremental(""), RequestHeaders::default(), &RUNNING));
 
         untouched.assert();
         assert!(payloads.is_empty());
@@ -768,7 +768,7 @@ mod tests {
         update.record(ReadStream::Data(StreamId::MultiDatastream(id(4))), seen(&[(41, "08:10")]));
         let held = update.apply(Positions::default());
 
-        let (result, payloads) = collect(resuming_collector(
+        let (result, payloads, _scratch) = collect(resuming_collector(
             &server,
             &incremental(r#", "multiDatastreams": true"#),
             CursorCycle::new(held, CursorUpdateSlot::default()),
@@ -844,7 +844,7 @@ mod tests {
         ];
         let slot = CursorUpdateSlot::default();
 
-        let (result, payloads) = collect(resuming_collector(
+        let (result, payloads, _scratch) = collect(resuming_collector(
             &server,
             &incremental(r#", "historicalLocations": true"#),
             CursorCycle::new(committed.clone(), slot.clone()),

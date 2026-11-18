@@ -653,7 +653,6 @@ dependencies = [
  "reqwest",
  "secrecy",
  "serde_json",
- "temp-dir",
  "tempfile",
  "thiserror 2.0.21",
  "tracing",
