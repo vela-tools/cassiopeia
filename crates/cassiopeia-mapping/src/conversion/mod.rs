@@ -59,8 +59,9 @@ impl Conversion {
     /// Naming no transformation picks the type's default: text for a `Property` read from a
     /// `source` and the object as assembled for one built from nested `mappings`, the geometry as
     /// read for a `GeoProperty` (clause 4.7.1), the source gathered into a list for a
-    /// `ListProperty` (clause 4.5.21.2), the value as read for a `JsonProperty` (clause
-    /// 4.5.24.2), an object of tagged text for a `LanguageProperty`, and an IRI for a
+    /// `ListProperty` (clause 4.5.21.2), text read as the JSON it is written as for a
+    /// `JsonProperty`, whose `json` member is a JSON object or an array of objects and never text
+    /// (clause 4.5.24.2), an object of tagged text for a `LanguageProperty`, and an IRI for a
     /// `VocabProperty`. A `languageMap` entry converts text, and the `LanguageProperty` holding the
     /// map takes no transformation of its own.
     ///
@@ -116,8 +117,7 @@ impl Conversion {
                 None => Err(refused),
             },
             NgsiLdAttributeKind::JsonProperty => match transformation {
-                None => Ok(Conversion::JsonProperty(JsonConversion::Verbatim)),
-                Some(Transformation::Json) => Ok(Conversion::JsonProperty(JsonConversion::Json)),
+                None | Some(Transformation::Json) => Ok(Conversion::JsonProperty(JsonConversion::Json)),
                 Some(Transformation::Object) => Ok(Conversion::JsonProperty(JsonConversion::Object)),
                 Some(Transformation::Array) => Ok(Conversion::JsonProperty(JsonConversion::Array)),
                 Some(_) => Err(refused),
@@ -355,7 +355,7 @@ mod tests {
             (NgsiLdAttributeKind::Property, Conversion::Property(PropertyConversion::One(ValueReading::Text))),
             (NgsiLdAttributeKind::GeoProperty, Conversion::GeoProperty(GeometryTarget::Preserve)),
             (NgsiLdAttributeKind::ListProperty, Conversion::ListProperty(ListConversion::AsRead)),
-            (NgsiLdAttributeKind::JsonProperty, Conversion::JsonProperty(JsonConversion::Verbatim)),
+            (NgsiLdAttributeKind::JsonProperty, Conversion::JsonProperty(JsonConversion::Json)),
             (NgsiLdAttributeKind::LanguageProperty, Conversion::LanguageProperty),
             (NgsiLdAttributeKind::VocabProperty, Conversion::VocabProperty(IdentifierReading::Iri)),
             (NgsiLdAttributeKind::Relationship, Conversion::Relationship),
@@ -374,7 +374,7 @@ mod tests {
             ),
             (NgsiLdAttributeKind::GeoProperty, Ok(Conversion::GeoProperty(GeometryTarget::Preserve))),
             (NgsiLdAttributeKind::ListProperty, Ok(Conversion::ListProperty(ListConversion::AsRead))),
-            (NgsiLdAttributeKind::JsonProperty, Ok(Conversion::JsonProperty(JsonConversion::Verbatim))),
+            (NgsiLdAttributeKind::JsonProperty, Ok(Conversion::JsonProperty(JsonConversion::Json))),
             (NgsiLdAttributeKind::LanguageProperty, Ok(Conversion::LanguageProperty)),
             (NgsiLdAttributeKind::VocabProperty, Err(ConversionRefusal::Shape)),
             (NgsiLdAttributeKind::Relationship, Err(ConversionRefusal::Shape)),
@@ -551,7 +551,7 @@ mod tests {
             Conversion::Property(PropertyConversion::Array),
             Conversion::ListProperty(ListConversion::AsRead),
             Conversion::ListProperty(ListConversion::Each(ValueReading::Integer)),
-            Conversion::JsonProperty(JsonConversion::Verbatim),
+            Conversion::JsonProperty(JsonConversion::Json),
             Conversion::LanguageProperty,
             Conversion::LanguageText,
             Conversion::VocabProperty(IdentifierReading::Iri),

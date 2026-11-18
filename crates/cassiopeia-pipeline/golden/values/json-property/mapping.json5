@@ -1,6 +1,6 @@
 // A JsonProperty keeps an object or an array of objects as the source holds it, nulls included.
-// `json` decodes text, `object` keeps an object, and `array` gathers objects; anything else is
-// refused with a warning.
+// With no transformation, as under `json`, it decodes text; `object` keeps an object, and `array`
+// gathers objects; anything else is refused with a warning.
 {
     version: "v4",
     dataModel: "Sample",
@@ -12,7 +12,7 @@
             type: "JsonProperty",
             source: "{{ payload }}",
         },
-        textAsIs: {
+        textByDefault: {
             type: "JsonProperty",
             source: "{{ text }}",
         },

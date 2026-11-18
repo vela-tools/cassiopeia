@@ -18,19 +18,19 @@ use serde_json::Value as JsonValue;
 /// A `JsonProperty`'s `json` member, raw JSON that NGSI-LD never interprets (ETSI GS CIM 009 v1.9.1
 /// clause 4.5.24.2), so every null nested in it is kept as the source has it.
 ///
-/// Naming no transformation keeps the parts as the source held them (see [`part_merge::keep_as_read`]);
-/// `json` does so after reading each text part as the JSON it is written as; `object` keeps an
-/// object, or reads one from its text, and keeps it even when empty; and `array` gathers every part
-/// into one list. Reading refuses text that is not the JSON the conversion asks for, or, under
-/// `object`, a value that is no object; admitting refuses what is not "a raw JSON object (or array of
-/// objects)" (clause 4.5.24.2), such as an array holding a null item.
+/// Naming no transformation, or `json`, reads each text part as the JSON it is written as and keeps
+/// any other part as the source held it (see [`part_merge::keep_as_read`]), since the `json` member
+/// is never text; `object` keeps an object, or reads one from its text, and keeps it even when empty;
+/// and `array` gathers every part into one list. Reading refuses text that is not the JSON the
+/// conversion asks for, or, under `object`, a value that is no object; admitting refuses what is not
+/// "a raw JSON object (or array of objects)" (clause 4.5.24.2), such as a number or an array holding
+/// a null item.
 impl AttributeConversion for JsonConversion {
     type Content = JsonPayload;
     type Reading = JsonValue;
 
     fn read(self, parts: SourceParts, _ctx: &mut ReadContext<'_>) -> Result<Option<JsonValue>, AttributeRefusal> {
         match self {
-            JsonConversion::Verbatim => Ok(part_merge::keep_as_read(parts)),
             JsonConversion::Json => Ok(part_merge::keep_as_read(json_text::decode_parts(parts)?)),
             JsonConversion::Object => Ok(PartMerge::Text
                 .merge(parts)
@@ -131,11 +131,60 @@ mod tests {
     }
 
     #[test]
-    fn text_under_the_json_property_default_is_not_decoded() {
+    fn object_text_under_the_json_property_default_is_read_as_the_object_it_encodes() {
+        let payload = payload(smallvec![json!(r#"{"source":"aodb","rev":3}"#)], default_of(NgsiLdAttributeKind::JsonProperty));
+
+        assert_eq!(payload, Some(json!({"source": "aodb", "rev": 3})));
+    }
+
+    #[test]
+    fn text_of_an_array_of_objects_under_the_json_property_default_is_read_as_that_array() {
+        let payload = payload(smallvec![json!(r#"[{"a":1},{"b":2}]"#)], default_of(NgsiLdAttributeKind::JsonProperty));
+
+        assert_eq!(payload, Some(json!([{"a": 1}, {"b": 2}])));
+    }
+
+    #[test]
+    fn a_null_member_under_the_json_property_default_is_kept_whether_the_object_is_text_or_structured() {
         assert_eq!(
-            apply(smallvec![json!(r#"{"k":1}"#)], default_of(NgsiLdAttributeKind::JsonProperty), None),
-            Err(AttributeRefusal::JsonPayload(JsonPayloadError::NotAnObject { found: JsonShape::String }))
+            payload(smallvec![json!(r#"{"a":null}"#)], default_of(NgsiLdAttributeKind::JsonProperty)),
+            Some(json!({"a": null}))
         );
+        assert_eq!(
+            payload(smallvec![json!({"a": null})], default_of(NgsiLdAttributeKind::JsonProperty)),
+            Some(json!({"a": null}))
+        );
+    }
+
+    #[test]
+    fn number_text_under_the_json_property_default_is_no_json_property_payload() {
+        assert_eq!(
+            apply(smallvec![json!("12.5")], default_of(NgsiLdAttributeKind::JsonProperty), None),
+            Err(AttributeRefusal::JsonPayload(JsonPayloadError::NotAnObject { found: JsonShape::Number }))
+        );
+    }
+
+    #[test]
+    fn text_that_is_not_json_under_the_json_property_default_is_refused_quoting_it() {
+        assert_eq!(
+            apply(smallvec![json!("{oops")], default_of(NgsiLdAttributeKind::JsonProperty), None),
+            Err(AttributeRefusal::unusable(RequiredValue::Json, "{oops"))
+        );
+    }
+
+    #[test]
+    fn blank_text_under_the_json_property_default_is_no_value() {
+        assert_eq!(payload(smallvec![json!("  ")], default_of(NgsiLdAttributeKind::JsonProperty)), None);
+    }
+
+    #[test]
+    fn several_text_parts_under_the_json_property_default_become_an_array_of_the_present_decoded_parts() {
+        let payload = payload(
+            smallvec![json!(r#"{"a":1}"#), json!(""), json!({"b": 2})],
+            default_of(NgsiLdAttributeKind::JsonProperty),
+        );
+
+        assert_eq!(payload, Some(json!([{"a": 1}, {"b": 2}])));
     }
 
     #[test]

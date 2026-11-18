@@ -1,4 +1,4 @@
-use crate::end_to_end::harness::{RunBinding, RunInput, RunOutcome, STORES, entity_ids, run_end_to_end};
+use crate::end_to_end::harness::{RunBinding, RunInput, RunOutcome, STORES, entity_ids, run_csv_end_to_end, run_end_to_end};
 use cassiopeia_diagnostic::code::{diagnostic_code::DiagnosticCode, extractor_code::ExtractorCode};
 use pretty_assertions::assert_eq;
 use serde_json::{Value, json};
@@ -173,6 +173,57 @@ fn a_json_property_built_from_mappings_keeps_a_member_s_null() {
             assert_eq!(outcome.warnings, 0, "{store}: {:?}", outcome.diagnostics);
         },
     );
+}
+
+/// An event whose payload is a `JsonProperty` read with no transformation from a field that, as
+/// every CSV field does, carries its JSON as text.
+const EVENT: &str = r#"{
+    version: "v4",
+    dataModel: "Event",
+    identity: { entityName: "{{ id }}" },
+    attributes: {
+        payload: { type: "JsonProperty", source: "{{ raw }}" },
+    },
+}"#;
+
+#[test]
+fn a_json_property_with_no_transformation_reads_csv_text_as_the_object_it_encodes() {
+    let events = r#"id,raw
+E1,"{""source"":""aodb"",""rev"":3}"
+"#;
+    for store in STORES {
+        let outcome = run_csv_end_to_end(store, events, &RunBinding::Mapping(EVENT), &["Event"], "");
+
+        assert_eq!(entity_ids(&outcome), ["urn:ngsi-ld:Event:E1"], "{store:?}");
+        let event = entity(&outcome.entities, "urn:ngsi-ld:Event:E1");
+        assert_eq!(
+            event["payload"],
+            json!({ "type": "JsonProperty", "json": { "source": "aodb", "rev": 3 } }),
+            "{store:?}"
+        );
+        assert_eq!(outcome.warnings, 0, "{store:?}: {:?}", outcome.diagnostics);
+    }
+}
+
+#[test]
+fn a_json_property_with_no_transformation_drops_csv_text_that_is_no_payload_under_its_code() {
+    let events = "id,raw\nE1,12.5\nE2,{oops\n";
+    for store in STORES {
+        let outcome = run_csv_end_to_end(store, events, &RunBinding::Mapping(EVENT), &["Event"], "");
+
+        assert_eq!(entity_ids(&outcome), ["urn:ngsi-ld:Event:E1", "urn:ngsi-ld:Event:E2"], "{store:?}");
+        for id in ["urn:ngsi-ld:Event:E1", "urn:ngsi-ld:Event:E2"] {
+            let event = entity(&outcome.entities, id);
+            assert!(event.get("payload").is_none(), "{store:?}: {event:?}");
+        }
+        let misshapen = outcome.coded(DiagnosticCode::Extractor(ExtractorCode::JsonPayloadMisshapen));
+        assert_eq!(misshapen.len(), 1, "{store:?}: {:?}", outcome.diagnostics);
+        assert_eq!(misshapen[0].occurrences, 1, "{store:?}");
+        let unreadable = outcome.coded(DiagnosticCode::Extractor(ExtractorCode::JsonTextUnreadable));
+        assert_eq!(unreadable.len(), 1, "{store:?}: {:?}", outcome.diagnostics);
+        assert_eq!(unreadable[0].occurrences, 1, "{store:?}");
+        assert_eq!(outcome.warnings, 2, "{store:?}: {:?}", outcome.diagnostics);
+    }
 }
 
 /// A route whose stop codes are a list read item by item as integers.

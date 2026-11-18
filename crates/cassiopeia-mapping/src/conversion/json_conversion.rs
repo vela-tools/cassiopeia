@@ -2,10 +2,9 @@
 /// CIM 009 v1.9.1 clause 4.5.24.2).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum JsonConversion {
-    /// The value as the source holds it, or as nested `mappings` assemble it: what a `JsonProperty`
-    /// naming no transformation takes.
-    Verbatim,
-    /// Text read as the JSON it is written as, the `json` transformation.
+    /// Text read as the JSON it is written as, and any other value, such as the object nested
+    /// `mappings` assemble, as it is: the `json` transformation, and what a `JsonProperty` naming no
+    /// transformation takes, since its `json` member never holds text.
     Json,
     /// A JSON object, or one read from its JSON text, the `object` transformation.
     Object,
