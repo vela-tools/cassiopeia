@@ -1,37 +1,60 @@
 use crate::{
     relationship_store::{
         error::Result,
-        store::{RelationshipStore, StoredRelationships},
+        relationship_edge::FragmentEdges,
+        store::{RelationshipStore, StoredRelationships, join},
     },
     store_write_strategy::StoreWriteStrategy,
 };
 use ahash::RandomState;
+use cassiopeia_ir::source_position::SourcePosition;
 use dashmap::DashMap;
 use smallvec::SmallVec;
 use std::sync::Arc;
 use tracing::info;
 use urn_rs::Urn;
 
-/// Per-parent relationship bucket. Most entities carry one or two distinct
-/// relationship properties, so an inline `SmallVec` of 4 avoids a heap
-/// allocation in the common case.
-type ParentEntries = SmallVec<[(Arc<str>, Urn); 4]>;
+/// One target a parent was given, beside the key it was given under and the place in the source of
+/// the fragment that gave it.
+///
+/// The key is interned behind a thin pointer, an `Arc<String>` rather than the twice as wide
+/// `Arc<str>`, so a target with its position takes 64 bytes, 8 more than one without: a parent's
+/// targets grow by half the size of their positions, and the spare capacity of a bucket grows no
+/// more than that.
+#[derive(Debug, Clone)]
+struct StoredTarget {
+    /// Where the fragment that gave the target stands in the run's sources.
+    position: SourcePosition,
+    /// The relationship key the target was given under, interned.
+    property: Arc<String>,
+    /// The target.
+    child: Urn,
+}
+
+/// Per-parent relationship bucket. Most entities carry one to three targets, so an inline `SmallVec`
+/// avoids a heap allocation in the common case. Three targets beside their positions take less room
+/// than four took without them, so the bucket, and every slot of the map holding it, is smaller than
+/// before positions were kept.
+type ParentEntries = SmallVec<[StoredTarget; 3]>;
 
 /// In-memory relationship store using [`DashMap`] for lock-free concurrent access.
 ///
-/// One outer map keyed directly by the base parent [`Urn`] maps to a `SmallVec` of
-/// `(property, child_urn)` pairs. Every observation of one id shares the base id, so a temporal
-/// mapping's repeated static relationship accumulates under the one key; the resolver deduplicates
-/// those repeats before they reach the store. Every other repeated edge is kept as written and
-/// collapses onto its first position when the parent's relationships are read.
+/// One outer map keyed directly by the base parent [`Urn`] maps to a `SmallVec` of the targets the
+/// parent was given, each beside its key and its fragment's position. The fragments of one batch are
+/// written concurrently, so the targets are kept in the order the writes landed and put in the order
+/// of the source when the parent's relationships are read. Every observation of one id shares the
+/// base id, so a temporal mapping's repeated static relationship accumulates under the one key; the
+/// resolver keeps the earliest of those repeats before they reach the store. Every other repeated
+/// edge is kept as written and collapses onto its earliest place when the parent's relationships are
+/// read.
 ///
-/// Property names are interned through a separate `DashMap<String, Arc<str>>`:
+/// Property names are interned through a separate `DashMap<String, Arc<String>>`:
 /// typical datasets have a handful of distinct relationship property names, so
-/// every `(_, property, _)` reuses the same heap allocation.
+/// every stored target reuses the same heap allocation for its key.
 #[derive(Debug, Clone)]
 pub struct DashMapRelationshipStore {
     relationships: Arc<DashMap<Urn, ParentEntries, RandomState>>,
-    property_interner: Arc<DashMap<String, Arc<str>, RandomState>>,
+    property_interner: Arc<DashMap<String, Arc<String>, RandomState>>,
 }
 
 impl DashMapRelationshipStore {
@@ -44,13 +67,28 @@ impl DashMapRelationshipStore {
         }
     }
 
-    fn intern_property(&self, property: &str) -> Arc<str> {
+    fn intern_property(&self, property: &str) -> Arc<String> {
         if let Some(existing) = self.property_interner.get(property) {
-            return existing.clone();
+            return Arc::clone(&existing);
         }
-        let arc: Arc<str> = Arc::from(property);
-        self.property_interner.entry(property.to_string()).or_insert_with(|| arc.clone()).clone()
+        let interned = self
+            .property_interner
+            .entry(property.to_owned())
+            .or_insert_with(|| Arc::new(property.to_owned()));
+        Arc::clone(&interned)
     }
+}
+
+/// Joins `entries` into one parent's relationships in the order of the source: by position, and one
+/// fragment's targets, which share its position, in the order they were written, since the sort is
+/// stable.
+fn joined_in_source_order(mut entries: ParentEntries) -> StoredRelationships {
+    entries.sort_by_key(|stored| stored.position);
+    let mut relationships = StoredRelationships::default();
+    for stored in entries {
+        join(&mut relationships, &stored.property, stored.child);
+    }
+    relationships
 }
 
 impl RelationshipStore for DashMapRelationshipStore {
@@ -58,30 +96,52 @@ impl RelationshipStore for DashMapRelationshipStore {
         StoreWriteStrategy::Concurrent
     }
 
-    fn add_child(&self, parent_urn: &Urn, property: &str, child_urn: &Urn) -> Result<()> {
-        let property = self.intern_property(property);
-        self.relationships.entry(parent_urn.clone()).or_default().push((property, child_urn.clone()));
+    fn add_edges(&self, edges: FragmentEdges<'_>) -> Result<()> {
+        // A fragment's edges all name one parent in practice, so each run of edges sharing a parent
+        // takes its bucket once.
+        for run in edges.edges.chunk_by(|left, right| left.parent == right.parent) {
+            let Some(first) = run.first() else {
+                continue;
+            };
+            // The targets are built before the bucket is locked, so interning never runs under the
+            // lock of a shard.
+            let stored: ParentEntries = run
+                .iter()
+                .map(|edge| StoredTarget {
+                    position: edges.position,
+                    property: self.intern_property(&edge.property),
+                    child: edge.child.clone(),
+                })
+                .collect();
+            match self.relationships.get_mut(&first.parent) {
+                Some(mut entries) => entries.extend(stored),
+                None => self.relationships.entry(first.parent.clone()).or_default().extend(stored),
+            }
+        }
         Ok(())
     }
 
     fn take_all_relationships(&self, parent_urn: &Urn) -> Result<StoredRelationships> {
         let entries = self.relationships.remove(parent_urn).map(|(_, entries)| entries).unwrap_or_default();
-
-        let mut grouped = StoredRelationships::default();
-        for (property, child) in entries {
-            grouped.entry(property.as_ref().to_string()).or_default().insert(child);
-        }
-        Ok(grouped)
+        Ok(joined_in_source_order(entries))
     }
 
     fn get_all_relationships(&self, parent_urn: &Urn) -> Result<StoredRelationships> {
-        let mut grouped = StoredRelationships::default();
-        if let Some(entries) = self.relationships.get(parent_urn) {
-            for (property, child) in entries.iter() {
-                grouped.entry(property.as_ref().to_string()).or_default().insert(child.clone());
-            }
+        let Some(entries) = self.relationships.get(parent_urn) else {
+            return Ok(StoredRelationships::default());
+        };
+        // The writes of one parent mostly land in the order of the source, so only a parent whose
+        // targets did not is copied to be put in order.
+        if !entries.is_sorted_by_key(|stored| stored.position) {
+            let unordered = entries.clone();
+            drop(entries);
+            return Ok(joined_in_source_order(unordered));
         }
-        Ok(grouped)
+        let mut relationships = StoredRelationships::default();
+        for stored in entries.iter() {
+            join(&mut relationships, &stored.property, stored.child.clone());
+        }
+        Ok(relationships)
     }
 
     fn destroy(&self) -> Result<()> {
@@ -104,53 +164,83 @@ impl Default for DashMapRelationshipStore {
 #[cfg(test)]
 mod tests {
     use crate::relationship_store::{
-        dashmap_store::DashMapRelationshipStore,
+        dashmap_store::{DashMapRelationshipStore, ParentEntries, StoredTarget},
+        relationship_edge::{FragmentEdges, RelationshipEdge},
         store::{
             RelationshipStore,
-            tests::{assert_keeps_first_insertion_order_without_repeats, in_order},
+            tests::{assert_honours_the_contract, edges, in_order, record},
         },
     };
+    use cassiopeia_ir::source_position::SourcePosition;
     use pretty_assertions::assert_eq;
+    use smallvec::SmallVec;
+    use std::{mem, sync::Arc};
     use urn_rs::Urn;
 
     #[test]
-    fn honours_cross_backend_order_and_repeat_contract() {
-        let store = DashMapRelationshipStore::new();
-        assert_keeps_first_insertion_order_without_repeats(&store);
+    fn honours_the_cross_backend_contract() {
+        assert_honours_the_contract(|| Box::new(DashMapRelationshipStore::new()));
     }
 
     #[test]
-    fn the_grouped_properties_come_back_in_first_write_order() {
-        // The grouping is an `IndexMap`, so its key order is the order the properties were first
-        // written and is independent of the hasher backing it. Reverse-lexicographic writes make a
-        // hash- or sort-ordered map return the opposite sequence.
-        let store = DashMapRelationshipStore::new();
-        let parent: Urn = "urn:ngsi-ld:Parent:1".parse().unwrap();
-        let child: Urn = "urn:ngsi-ld:Child:A".parse().unwrap();
-
-        for property in ["zone", "hasPart", "operatedBy"] {
-            store.add_child(&parent, property, &child).unwrap();
-        }
-
-        let grouped = store.get_all_relationships(&parent).unwrap();
-        assert_eq!(grouped.keys().map(String::as_str).collect::<Vec<&str>>(), ["zone", "hasPart", "operatedBy"]);
+    fn a_target_grows_by_half_its_position_and_a_parent_s_bucket_does_not_grow() {
+        assert_eq!(
+            mem::size_of::<StoredTarget>(),
+            mem::size_of::<(Arc<str>, Urn)>() + mem::size_of::<SourcePosition>() / 2
+        );
+        assert!(mem::size_of::<ParentEntries>() < mem::size_of::<SmallVec<[(Arc<str>, Urn); 4]>>());
     }
 
     #[test]
     fn get_all_is_non_destructive_while_take_drains() {
         let store = DashMapRelationshipStore::new();
         let parent: Urn = "urn:ngsi-ld:Parent:1".parse().unwrap();
-        let child: Urn = "urn:ngsi-ld:Child:A".parse().unwrap();
+        let written: Vec<RelationshipEdge> = edges(parent.as_str(), "hasPart", &["urn:ngsi-ld:Child:A"]);
 
-        store.add_child(&parent, "hasPart", &child).unwrap();
+        store
+            .add_edges(FragmentEdges {
+                position: record(0),
+                edges: &written,
+            })
+            .unwrap();
 
         let read = store.get_all_relationships(&parent).unwrap();
-        assert_eq!(in_order(&read, "hasPart"), [&child]);
+        assert_eq!(in_order(&read, "hasPart"), ["urn:ngsi-ld:Child:A"]);
 
         let taken = store.take_all_relationships(&parent).unwrap();
-        assert_eq!(in_order(&taken, "hasPart"), [&child]);
+        assert_eq!(in_order(&taken, "hasPart"), ["urn:ngsi-ld:Child:A"]);
 
         let after = store.take_all_relationships(&parent).unwrap();
         assert!(after.is_empty());
+    }
+
+    #[test]
+    fn reading_a_parent_whose_targets_landed_out_of_order_leaves_them_stored_as_written() {
+        let store = DashMapRelationshipStore::new();
+        let parent: Urn = "urn:ngsi-ld:Parent:1".parse().unwrap();
+        let second = edges(parent.as_str(), "hasPart", &["urn:ngsi-ld:Child:B"]);
+        let first = edges(parent.as_str(), "hasPart", &["urn:ngsi-ld:Child:A"]);
+        store
+            .add_edges(FragmentEdges {
+                position: record(1),
+                edges: &second,
+            })
+            .unwrap();
+        store
+            .add_edges(FragmentEdges {
+                position: record(0),
+                edges: &first,
+            })
+            .unwrap();
+
+        for _ in 0..2 {
+            let read = store.get_all_relationships(&parent).unwrap();
+            assert_eq!(in_order(&read, "hasPart"), ["urn:ngsi-ld:Child:A", "urn:ngsi-ld:Child:B"]);
+        }
+        let stored = store.relationships.get(&parent).unwrap();
+        assert_eq!(
+            stored.iter().map(|stored| stored.child.as_str()).collect::<Vec<&str>>(),
+            ["urn:ngsi-ld:Child:B", "urn:ngsi-ld:Child:A"]
+        );
     }
 }

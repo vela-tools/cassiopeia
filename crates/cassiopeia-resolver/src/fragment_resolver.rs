@@ -11,7 +11,7 @@ use crate::{
     mapping_id::MappingId,
     mapping_registry::MappingRegistry,
     observed_at_failures::ObservedAtFailures,
-    relationship_store::store::RelationshipStore,
+    relationship_store::{relationship_edge::RelationshipEdge, store::RelationshipStore},
     store_batch_failure::StoreBatchFailure,
     store_write_strategy::StoreWriteStrategy,
 };
@@ -21,13 +21,14 @@ use cassiopeia_ir::{
     fragment::Fragment,
     mapped::Mapped,
     parent_context::{ParentContext, ParentContextType},
+    source_position::SourcePosition,
 };
 use cassiopeia_mapping::{
     mapping::Mapping,
     observation_plan::{ObservationPlan, RenderedObservations},
     template::{resolver::TemplateResolver, run_variables::RunVariables},
 };
-use dashmap::DashMap;
+use dashmap::{DashMap, mapref::entry::Entry};
 use std::{sync::Arc, time::Duration};
 use urn_rs::Urn;
 
@@ -63,10 +64,11 @@ pub struct FragmentResolver {
     /// Which records the entity store keeps, which decides whether a record's observation times are
     /// read.
     pub(crate) retention: Retention,
-    /// Deduplicates a temporal mapping's identical `(parent, property, child)` edges so a static
-    /// relationship declared on every observation does not accumulate one duplicate per observation
-    /// under the base-id key.
-    temporal_edge_dedup: Arc<DashMap<(Urn, String, Urn), (), RandomState>>,
+    /// Deduplicates a temporal mapping's identical edges so a static relationship declared on every
+    /// observation does not accumulate one duplicate per observation under the base-id key. Each edge
+    /// is kept with the earliest position it was given at so far, since the fragments of a batch
+    /// arrive in whatever order their threads finish them.
+    temporal_edge_dedup: Arc<DashMap<RelationshipEdge, SourcePosition, RandomState>>,
     /// The first failure of each mapping's `observedAt` template, for reporting the records a
     /// current-state store discards because of it.
     pub(crate) observed_at_failures: Arc<ObservedAtFailures>,
@@ -134,13 +136,22 @@ impl FragmentResolver {
         self
     }
 
-    /// Builds the parent-child edges a fragment records, keyed on base URNs.
+    /// Builds the parent-child edges the fragment at `position` records, keyed on base URNs, in the
+    /// order its record names their targets.
     ///
     /// A temporal mapping re-declares its static relationships on every observation, so an identical
-    /// `(parent, property, child)` edge from a temporal mapping is emitted once and later duplicates
-    /// are dropped before they reach the store. A non-temporal mapping writes every edge, and the store
-    /// reads each target back once.
-    pub(crate) fn build_edges(&self, base_urn: &Urn, parent_contexts: Option<&Vec<ParentContext>>, temporal: bool) -> Vec<(Urn, String, Urn)> {
+    /// edge from a temporal mapping is written only when no fragment earlier in the source has given
+    /// it yet, and every later repeat is dropped before it reaches the store. A fragment that comes
+    /// earlier in the source than the repeat written before it writes the edge again, so the store
+    /// reads the target back at its earliest place. A non-temporal mapping writes every edge, and the
+    /// store reads each target back once.
+    pub(crate) fn build_edges(
+        &self,
+        base_urn: &Urn,
+        parent_contexts: Option<&Vec<ParentContext>>,
+        temporal: bool,
+        position: SourcePosition,
+    ) -> Vec<RelationshipEdge> {
         let Some(parent_contexts) = parent_contexts else {
             return Vec::new();
         };
@@ -151,22 +162,45 @@ impl FragmentResolver {
             // relationship, dotted segments for a nested one, and `name#index` for one instance of a
             // multi-attribute relationship, so the store groups each instance's objects apart.
             let property = parent_context.key().to_string();
-            let (parent_urn, child_urn) = match parent_context.urn() {
+            let (parent, child) = match parent_context.urn() {
                 ParentContextType::Parent(parent) => (parent.clone(), base_urn.clone()),
                 ParentContextType::Child(child) => (base_urn.clone(), child.clone()),
             };
+            let edge = RelationshipEdge { parent, property, child };
 
-            if temporal
-                && self
-                    .temporal_edge_dedup
-                    .insert((parent_urn.clone(), property.clone(), child_urn.clone()), ())
-                    .is_some()
-            {
+            if temporal && !self.is_earliest_repeat(&edge, position) {
                 continue;
             }
-            edges.push((parent_urn, property, child_urn));
+            edges.push(edge);
         }
         edges
+    }
+
+    /// Whether `edge`, which a temporal mapping gives at `position`, comes earlier in the source than
+    /// every repeat of it given so far, keeping `position` as the earliest when it does.
+    fn is_earliest_repeat(&self, edge: &RelationshipEdge, position: SourcePosition) -> bool {
+        // A repeat, which every observation after the first is, is looked up without copying the
+        // edge into a key.
+        if let Some(mut earliest) = self.temporal_edge_dedup.get_mut(edge) {
+            return Self::keep_if_earlier(&mut earliest, position);
+        }
+        // The map owns its key, while the fragment keeps the edge to write.
+        match self.temporal_edge_dedup.entry(edge.clone()) {
+            Entry::Occupied(mut earliest) => Self::keep_if_earlier(earliest.get_mut(), position),
+            Entry::Vacant(first) => {
+                first.insert(position);
+                true
+            }
+        }
+    }
+
+    /// Whether `position` comes before `earliest`, which it then replaces.
+    fn keep_if_earlier(earliest: &mut SourcePosition, position: SourcePosition) -> bool {
+        let earlier = position < *earliest;
+        if earlier {
+            *earliest = position;
+        }
+        earlier
     }
 }
 
@@ -291,20 +325,25 @@ mod tests {
             dashmap_latest_store::DashMapLatestEntityStore,
             observations::{Observations, RecordRanking},
             record_timestamp::RecordTimestamp,
+            redb_latest_store::RedbLatestEntityStore,
+            store::EntityStore,
         },
         fragment_resolver::FragmentResolver,
         fragment_sink::FragmentSink,
         mapping_id::MappingId,
         observed_at_failures::tests::failure,
-        relationship_store::dashmap_store::DashMapRelationshipStore,
+        relationship_store::{dashmap_store::DashMapRelationshipStore, redb_store::RedbRelationshipStore, store::RelationshipStore},
         test_order::next_position,
     };
     use cassiopeia_ir::{
         fragment::Fragment,
+        instance_index::InstanceIndex,
         mapped::Mapped,
         parent_context::{ParentContext, ParentContextType},
         relationship_key::RelationshipKey,
         relationship_path::RelationshipPath,
+        relationships::InstanceObjects,
+        source_position::SourcePosition,
     };
     use cassiopeia_mapping::{
         mapping::Mapping,
@@ -397,6 +436,169 @@ mod tests {
             units.remove(0).relationships().top_level().get(&name("hasSite")).map(Vec::as_slice),
             Some(&[site][..])
         );
+    }
+
+    /// How many times each pair of stores resolves the same batch, so an order that changed between
+    /// runs would show.
+    const RUNS: usize = 20;
+
+    /// How many records an interleaved batch holds: enough to spread one batch over many threads.
+    const RECORDS: usize = 400;
+
+    /// The stores a run pairs on each entity store.
+    fn store_pairs() -> [(Box<dyn EntityStore>, Box<dyn RelationshipStore>); 2] {
+        [
+            (Box::new(DashMapLatestEntityStore::new()), Box::new(DashMapRelationshipStore::new())),
+            (Box::new(RedbLatestEntityStore::new().unwrap()), Box::new(RedbRelationshipStore::new().unwrap())),
+        ]
+    }
+
+    /// The station every third record of an interleaved batch describes.
+    fn station() -> Urn {
+        urn("urn:ngsi-ld:Station:S1")
+    }
+
+    /// Resolves [`RECORDS`] records, in the order of the source, as one batch through `document` over
+    /// `stores`: every third record describes [`station`], numbered among its records as the
+    /// argument `links` is given, and the others describe stations of their own.
+    fn resolve_interleaved(
+        stores: (Box<dyn EntityStore>, Box<dyn RelationshipStore>),
+        document: &str,
+        links: impl Fn(usize) -> Vec<ParentContext>,
+    ) -> FragmentResolver {
+        let mut runner = TemplateRunner::new();
+        let mapping = Arc::new(Mapping::from_json5(document, Path::new("test.json5"), &mut runner).unwrap());
+        let (entity_store, relationship_store) = stores;
+        let resolver = FragmentResolver::new(entity_store, relationship_store, runner.resolver());
+        let first = SourcePosition::first_of(0);
+        let batch = (0..RECORDS)
+            .map(|record| {
+                let target = if record % 3 == 0 {
+                    station()
+                } else {
+                    urn(&format!("urn:ngsi-ld:Station:other-{record}"))
+                };
+                let fragment = Fragment::builder()
+                    .source_data(json!({"temperature": record, "timestamp": "2026-04-03T22:00:20Z"}))
+                    .target_urn(target)
+                    .position(first.advanced(record))
+                    .parent_context(Some(links(record / 3)))
+                    .build();
+                Mapped::new(fragment, Arc::clone(&mapping))
+            })
+            .collect();
+        assert!(resolver.resolve_batch(batch).iter().all(Result::is_ok));
+        resolver
+    }
+
+    /// The child links `targets` under `key`, in the order given.
+    fn links_to(key: &RelationshipKey, targets: impl IntoIterator<Item = String>) -> Vec<ParentContext> {
+        targets
+            .into_iter()
+            .map(|target| ParentContext::new(ParentContextType::Child(urn(&target)), key.clone()))
+            .collect()
+    }
+
+    /// Every target `targets` gives the records of [`station`], in the order of the source, each once
+    /// at its first place.
+    fn in_source_order(targets: impl Fn(usize) -> Vec<String>) -> Vec<Urn> {
+        let mut ordered: Vec<Urn> = Vec::new();
+        for target in (0..RECORDS.div_ceil(3)).flat_map(targets) {
+            let target = urn(&target);
+            if !ordered.contains(&target) {
+                ordered.push(target);
+            }
+        }
+        ordered
+    }
+
+    #[test]
+    fn the_targets_several_records_give_one_entity_follow_the_source_in_every_run_and_store() {
+        let served_by = RelationshipKey::Path(RelationshipPath::flat(name("servedBy")));
+        let building = RelationshipKey::Path(RelationshipPath::flat(name("building")));
+        let airports = RelationshipKey::Instance {
+            attribute: name("servesAirports"),
+            index: InstanceIndex::from(1),
+        };
+        let character = RelationshipPath::flat(name("hasLeadActor")).push(name("playsCharacter"));
+        // Each record names targets some earlier record named too, in another order.
+        let served_lines = |record: usize| {
+            vec![
+                format!("urn:ngsi-ld:Line:L{}", record * 7 % 11),
+                format!("urn:ngsi-ld:Line:L{}", record * 3 % 11),
+            ]
+        };
+        let buildings = |record: usize| vec![format!("urn:ngsi-ld:Building:B{}", record % 4)];
+        let airport = |record: usize| vec![format!("urn:ngsi-ld:Airport:A{}", record * 5 % 7)];
+        let characters = |record: usize| vec![format!("urn:ngsi-ld:Character:C{}", record * 2 % 9)];
+        let record_links = |record: usize| {
+            let mut given = links_to(&served_by, served_lines(record));
+            given.extend(links_to(&building, buildings(record)));
+            given.extend(links_to(&airports, airport(record)));
+            given.extend(links_to(&RelationshipKey::Path(character.clone()), characters(record)));
+            given
+        };
+
+        for _ in 0..RUNS {
+            for stores in store_pairs() {
+                let resolver = resolve_interleaved(stores, SIMPLE, record_links);
+
+                let units = resolver.assemble(&station()).unwrap().units;
+                assert_eq!(units.len(), 1);
+                let relationships = units[0].relationships();
+                assert_eq!(relationships.top_level().get(&name("servedBy")), Some(&in_source_order(served_lines)));
+                assert_eq!(relationships.top_level().get(&name("building")), Some(&in_source_order(buildings)));
+                assert_eq!(
+                    relationships.instances().as_ref().and_then(|instances| instances.get(&name("servesAirports"))),
+                    Some(&InstanceObjects::from([(InstanceIndex::from(1), in_source_order(airport))]))
+                );
+                assert_eq!(
+                    relationships.nested().as_ref().and_then(|nested| nested.get(&character)),
+                    Some(&in_source_order(characters))
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn a_temporal_mapping_s_repeated_target_stands_at_its_earliest_record_in_every_run_and_store() {
+        let site = RelationshipKey::Path(RelationshipPath::flat(name("hasSite")));
+        // The records alternate between two sites, so the first site stands first only when the
+        // repeat kept is the earliest, not the first to reach the resolver.
+        let sites = |record: usize| vec![format!("urn:ngsi-ld:Site:T{}", record % 2)];
+
+        for _ in 0..RUNS {
+            for stores in store_pairs() {
+                let resolver = resolve_interleaved(stores, TEMPORAL, |record| links_to(&site, sites(record)));
+
+                let mut units = resolver.assemble(&station()).unwrap().units;
+                assert_eq!(units.len(), 1);
+                assert_eq!(
+                    units.remove(0).relationships().top_level().get(&name("hasSite")),
+                    Some(&vec![urn("urn:ngsi-ld:Site:T0"), urn("urn:ngsi-ld:Site:T1")])
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn a_temporal_repeat_earlier_in_the_source_than_the_one_written_is_written_again_and_a_later_one_is_not() {
+        let (resolver, _) = latest_resolver(&[TEMPORAL]);
+        let site = vec![ParentContext::new(
+            ParentContextType::Child(urn("urn:ngsi-ld:Site:9")),
+            RelationshipKey::Path(RelationshipPath::flat(name("hasSite"))),
+        )];
+        let station = station();
+        let first = SourcePosition::first_of(0);
+
+        let edges_at = |record: usize| resolver.build_edges(&station, Some(&site), true, first.advanced(record)).len();
+
+        assert_eq!(
+            [edges_at(5), edges_at(7), edges_at(2), edges_at(3), edges_at(0), edges_at(2)],
+            [1, 0, 1, 0, 1, 0]
+        );
+        // A mapping without `observedAt` writes every repeat, and the store collapses them.
+        assert_eq!(resolver.build_edges(&station, Some(&site), false, first.advanced(9)).len(), 1);
     }
 
     #[test]

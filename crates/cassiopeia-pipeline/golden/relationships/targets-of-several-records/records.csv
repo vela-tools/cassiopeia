@@ -1,0 +1,5 @@
+code,operator,lines,status,reporters,primary,backup
+R1,O2,U3 U1,active,D2,A3 A1,A9
+R2,O5,U5,active,D5,A5,A6
+R1,O1,U1 U2,active,D1 D2,A2 A3,A8 A9
+R1,O3,U4 U3,active,D3,A1,A7

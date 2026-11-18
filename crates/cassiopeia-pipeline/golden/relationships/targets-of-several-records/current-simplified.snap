@@ -1,0 +1,47 @@
+---
+source: crates/cassiopeia-pipeline/src/end_to_end/golden/mod.rs
+input_file: crates/cassiopeia-pipeline/golden/relationships/targets-of-several-records/manifest.json5
+---
+[
+  {
+    "id": "urn:ngsi-ld:Route:R1",
+    "type": "Route",
+    "operator": "urn:ngsi-ld:Organization:O2",
+    "servedBy": [
+      "urn:ngsi-ld:Line:U3",
+      "urn:ngsi-ld:Line:U1",
+      "urn:ngsi-ld:Line:U2",
+      "urn:ngsi-ld:Line:U4"
+    ],
+    "status": "active",
+    "servesAirports": [
+      [
+        "urn:ngsi-ld:Airport:A3",
+        "urn:ngsi-ld:Airport:A1",
+        "urn:ngsi-ld:Airport:A2"
+      ],
+      [
+        "urn:ngsi-ld:Airport:A9",
+        "urn:ngsi-ld:Airport:A8",
+        "urn:ngsi-ld:Airport:A7"
+      ]
+    ]
+  },
+  {
+    "id": "urn:ngsi-ld:Route:R2",
+    "type": "Route",
+    "operator": "urn:ngsi-ld:Organization:O5",
+    "servedBy": [
+      "urn:ngsi-ld:Line:U5"
+    ],
+    "status": "active",
+    "servesAirports": [
+      [
+        "urn:ngsi-ld:Airport:A5"
+      ],
+      [
+        "urn:ngsi-ld:Airport:A6"
+      ]
+    ]
+  }
+]

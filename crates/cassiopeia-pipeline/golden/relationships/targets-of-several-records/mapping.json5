@@ -1,0 +1,63 @@
+// Several records of one route each give its relationships targets, in an order other than that of
+// their identifiers and repeating some. A `Relationship` keeps the first record's target, and a
+// `ListRelationship`, each instance of one, and a nested one list each target once, at the place of
+// the earliest record that names it.
+{
+    version: "v4",
+    dataModel: "Route",
+    identity: {
+        entityName: "{{ code }}",
+    },
+    attributes: {
+        operator: {
+            type: "Relationship",
+            source: "{{ operator }}",
+            target: {
+                entity: "Organization",
+            },
+        },
+        servedBy: {
+            type: "ListRelationship",
+            source: "{{ lines }}",
+            target: {
+                entity: "Line",
+            },
+        },
+        status: {
+            source: "{{ status }}",
+            properties: {
+                reportedBy: {
+                    type: "ListRelationship",
+                    source: "{{ reporters }}",
+                    target: {
+                        entity: "Device",
+                    },
+                },
+            },
+        },
+        servesAirports: {
+            type: "ListRelationship",
+            target: {
+                entity: "Airport",
+            },
+            instances: [
+                {
+                    source: "{{ primary }}",
+                    properties: {
+                        datasetId: {
+                            source: "urn:ngsi-ld:dataset:primary",
+                        },
+                    },
+                },
+                {
+                    source: "{{ backup }}",
+                    properties: {
+                        datasetId: {
+                            source: "urn:ngsi-ld:dataset:backup",
+                        },
+                    },
+                },
+            ],
+        },
+    },
+}

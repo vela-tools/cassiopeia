@@ -7,7 +7,7 @@ use crate::{
     fragment_resolver::FragmentResolver,
     mapping_id::MappingId,
     prepared_fragment::PreparedFragment,
-    relationship_store::error::RelationshipStoreError,
+    relationship_store::{error::RelationshipStoreError, relationship_edge::FragmentEdges},
 };
 use cassiopeia_common::parallelism::Parallelism;
 use cassiopeia_ir::{fragment::Fragment, mapped::Mapped, source_position::SourcePosition};
@@ -52,23 +52,22 @@ impl FragmentResolver {
         (prepared, prepare_started.elapsed())
     }
 
-    /// Writes every prepared relationship edge in one batch, returning any failure message and the
-    /// time the write took.
+    /// Writes every prepared relationship edge in one batch, each beside its fragment's position,
+    /// returning any failure message and the time the write took.
     pub(crate) fn write_relationship_edges(&self, prepared: &[PreparedFragment]) -> (Option<RelationshipStoreError>, Duration) {
-        let edge_refs: Vec<(Urn, &str, Urn)> = prepared
+        let batch: Vec<FragmentEdges<'_>> = prepared
             .iter()
-            .flat_map(|prepared| {
-                prepared
-                    .edges
-                    .iter()
-                    .map(|(parent, property, child)| (parent.clone(), property.as_str(), child.clone()))
+            .filter(|prepared| !prepared.edges.is_empty())
+            .map(|prepared| FragmentEdges {
+                position: prepared.position,
+                edges: &prepared.edges,
             })
             .collect();
         let relationship_started = Instant::now();
-        let failure = if edge_refs.is_empty() {
+        let failure = if batch.is_empty() {
             None
         } else {
-            self.relationship_store.add_child_batch(&edge_refs).err()
+            self.relationship_store.add_edge_batch(&batch).err()
         };
         (failure, relationship_started.elapsed())
     }

@@ -16,6 +16,7 @@ mod multi_datastreams;
 mod observation_ranking;
 mod reason_codes;
 mod record_merges;
+mod relationship_targets;
 mod relationships;
 mod scratch_folders;
 mod sensors;

@@ -353,7 +353,10 @@ mod tests {
         fragment_sink::FragmentSink,
         mapping_id::MappingId,
         record_merge::RecordMerge,
-        relationship_store::dashmap_store::DashMapRelationshipStore,
+        relationship_store::{
+            dashmap_store::DashMapRelationshipStore,
+            relationship_edge::{FragmentEdges, RelationshipEdge},
+        },
         test_order::{next_batch, next_position},
     };
     use cassiopeia_ir::{
@@ -779,9 +782,17 @@ mod tests {
                 Arc::clone(&mappings[0]),
             ))
             .unwrap();
+        let corrupt = [RelationshipEdge {
+            parent: station.clone(),
+            property: "servesAirports#first".to_owned(),
+            child: urn("urn:ngsi-ld:Airport:1"),
+        }];
         resolver
             .relationship_store
-            .add_child(&station, "servesAirports#first", &urn("urn:ngsi-ld:Airport:1"))
+            .add_edges(FragmentEdges {
+                position: next_position(),
+                edges: &corrupt,
+            })
             .unwrap();
 
         let error = resolver.assemble(&station).unwrap_err();

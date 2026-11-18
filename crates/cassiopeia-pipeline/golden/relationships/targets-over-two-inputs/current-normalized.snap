@@ -1,0 +1,33 @@
+---
+source: crates/cassiopeia-pipeline/src/end_to_end/golden/mod.rs
+input_file: crates/cassiopeia-pipeline/golden/relationships/targets-over-two-inputs/manifest.json5
+---
+[
+  {
+    "id": "urn:ngsi-ld:Stop:S1",
+    "type": "Stop",
+    "operator": {
+      "type": "Relationship",
+      "object": "urn:ngsi-ld:Organization:O2",
+      "objectType": "Organization"
+    },
+    "servedBy": {
+      "type": "ListRelationship",
+      "objectList": [
+        {
+          "object": "urn:ngsi-ld:Line:U2"
+        },
+        {
+          "object": "urn:ngsi-ld:Line:U1"
+        },
+        {
+          "object": "urn:ngsi-ld:Line:U4"
+        },
+        {
+          "object": "urn:ngsi-ld:Line:U3"
+        }
+      ],
+      "objectType": "Line"
+    }
+  }
+]
