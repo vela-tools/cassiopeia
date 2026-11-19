@@ -28,6 +28,7 @@ mod series_folds;
 mod series_validation;
 mod station_mappings;
 mod stopped_cycles;
+mod synthetic_entities;
 mod things;
 mod unit_codes;
 mod unreadable_geometries;

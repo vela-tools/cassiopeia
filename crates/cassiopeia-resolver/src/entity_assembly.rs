@@ -1308,7 +1308,7 @@ mod tests {
                 .attributes()
                 .values()
                 .find_map(|attribute| attribute.synthetic_entity().as_ref())
-                .map(|synthetic| Arc::new(synthetic.clone()))
+                .map(Arc::clone)
                 .unwrap();
             let nepal = urn("urn:ngsi-ld:Country:Nepal");
 

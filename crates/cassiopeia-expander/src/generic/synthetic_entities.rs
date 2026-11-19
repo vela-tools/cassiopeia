@@ -52,7 +52,7 @@ impl GenericExpander {
         &self,
         attribute_name: &NameBuf,
         attribute: &Attribute,
-        synthetic: &Mapping,
+        synthetic: &Arc<Mapping>,
         expansion: &Expansion<'_>,
         entities: &mut Vec<Result<Mapped<Fragment>, ExpanderError>>,
     ) -> Vec<ParentContext> {
@@ -87,7 +87,7 @@ impl GenericExpander {
     fn expand_synthetic_target(
         &self,
         attribute_name: &NameBuf,
-        synthetic: &Mapping,
+        synthetic: &Arc<Mapping>,
         token: String,
         expansion: &Expansion<'_>,
         ordinal: usize,
@@ -101,9 +101,7 @@ impl GenericExpander {
         let head = self.head(synthetic, synthetic_urn, token_input, expansion.losses)?;
 
         let fragment = self.fragment(token_data, head, expansion.position.nth_fragment(ordinal), None);
-        // The fragment owns its mapping behind an `Arc`, and the synthetic mapping is only borrowed
-        // from the parent attribute here.
-        Ok(Some(Mapped::new(fragment, Arc::new(synthetic.clone()))))
+        Ok(Some(Mapped::new(fragment, Arc::clone(synthetic))))
     }
 
     /// Expands the one synthetic entity a non-list attribute materialises, linked back to the main
@@ -119,7 +117,7 @@ impl GenericExpander {
         &self,
         attribute_name: &NameBuf,
         attribute: &Attribute,
-        synthetic: &Mapping,
+        synthetic: &Arc<Mapping>,
         expansion: &Expansion<'_>,
         ordinal: usize,
     ) -> Result<Option<Mapped<Fragment>>, ExpanderError> {
@@ -147,8 +145,6 @@ impl GenericExpander {
         // Each synthetic fragment carries its own copy of the source data; the main fragment consumes
         // the record once every attribute has been expanded.
         let fragment = self.fragment(expansion.input.record().clone(), head, expansion.position.nth_fragment(ordinal), parent);
-        // The fragment owns its mapping behind an `Arc`, and the synthetic mapping is only borrowed
-        // from the parent attribute here.
-        Ok(Some(Mapped::new(fragment, Arc::new(synthetic.clone()))))
+        Ok(Some(Mapped::new(fragment, Arc::clone(synthetic))))
     }
 }

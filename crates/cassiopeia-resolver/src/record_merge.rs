@@ -187,7 +187,7 @@ mod tests {
         let country = mountain
             .attributes()
             .values()
-            .find_map(|attribute| attribute.synthetic_entity().as_ref())
+            .find_map(|attribute| attribute.synthetic_entity().as_deref())
             .unwrap();
         let nepal: Urn = "urn:ngsi-ld:Country:Nepal".parse().unwrap();
 
