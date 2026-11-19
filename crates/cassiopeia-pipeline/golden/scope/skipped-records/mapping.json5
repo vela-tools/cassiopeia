@@ -1,0 +1,31 @@
+// A record is skipped for a zone that is no legal scope level or for a missing site name, each
+// counted under its own code. An `observedAt` that does not read is counted apart, and dropped.
+{
+    version: "v4",
+    dataModel: "Site",
+    identity: {
+        entityName: "{{ site }}",
+    },
+    scope: "/{{ zone }}",
+    attributes: {
+        a: {
+            source: "{{ a }}",
+            transformation: "integer",
+            properties: {
+                observedAt: {
+                    source: "{{ time }}",
+                    transformation: "datetime",
+                },
+            },
+        },
+        b: {
+            source: "{{ b }}",
+            transformation: "integer",
+            properties: {
+                observedAt: {
+                    source: "{{ time }}",
+                },
+            },
+        },
+    },
+}

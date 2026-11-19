@@ -1,0 +1,3 @@
+{"sensorthingsSnapshot":1,"serviceRoot":"https://h.example/v1.1","version":"v1.1","read":"latest","collectedAt":"2026-11-12T10:30:00Z"}
+{"datastream":{"@iot.id":10,"name":"station-1 pm10","unitOfMeasurement":{"symbol":"ug/m3"},"Thing":{"@iot.id":1,"name":"Station 1"},"ObservedProperty":{"@iot.id":1,"name":"pm10"},"Observations":[{"@iot.id":100,"phenomenonTime":"2026-11-12T10:00:00Z","result":21.4}],"phenomenonTime":"2026-11-01T00:00:00Z/2026-11-12T10:00:00Z"}}
+{"datastream":{"@iot.id":20,"name":"station-2 pm10","unitOfMeasurement":{"symbol":"ug/m3"},"Thing":{"@iot.id":2,"name":"Station 2"},"ObservedProperty":{"@iot.id":1,"name":"pm10"},"Observations":[{"@iot.id":200,"phenomenonTime":"2026-11-12T10:00:00Z","result":21.4}]}}

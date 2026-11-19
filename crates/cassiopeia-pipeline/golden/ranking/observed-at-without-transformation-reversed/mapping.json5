@@ -1,0 +1,31 @@
+// The two records of S2 of the case `observed-at-without-transformation`, in the reverse order: the
+// attribute without `observedAt` still comes from the record observed last.
+{
+    version: "v4",
+    dataModel: "Sensor",
+    identity: {
+        entityName: "{{ code }}",
+    },
+    attributes: {
+        reading: {
+            source: "{{ reading }}",
+            transformation: "float",
+            properties: {
+                observedAt: {
+                    source: "{{ read_time }}",
+                },
+            },
+        },
+        status: {
+            source: "{{ status }}",
+            properties: {
+                observedAt: {
+                    source: "{{ status_time }}",
+                },
+            },
+        },
+        name: {
+            source: "{{ name }}",
+        },
+    },
+}

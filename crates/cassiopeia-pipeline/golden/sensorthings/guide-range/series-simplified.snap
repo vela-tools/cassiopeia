@@ -1,0 +1,31 @@
+---
+source: crates/cassiopeia-pipeline/src/end_to_end/golden/mod.rs
+input_file: crates/cassiopeia-pipeline/golden/sensorthings/guide-range/manifest.json5
+---
+[
+  {
+    "id": "urn:ngsi-ld:AirQualityObserved:bus-12",
+    "type": "AirQualityObserved",
+    "dateObserved": "2026-11-16T08:00:00Z",
+    "pm10": [
+      18.2,
+      21.5
+    ],
+    "location": [
+      {
+        "type": "Point",
+        "coordinates": [
+          5.4797,
+          51.4433
+        ]
+      },
+      {
+        "type": "Point",
+        "coordinates": [
+          5.4812,
+          51.4402
+        ]
+      }
+    ]
+  }
+]

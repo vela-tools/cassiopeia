@@ -1,0 +1,33 @@
+---
+source: crates/cassiopeia-pipeline/src/end_to_end/golden/mod.rs
+input_file: crates/cassiopeia-pipeline/golden/merging/records-adding-readings/manifest.json5
+---
+{
+  "diagnostics": [
+    {
+      "code": "geometry-collection-inadmissible",
+      "occurrences": 1,
+      "message": [
+        "! Attribute `location` dropped: a GeometryCollection is not an admissible GeoProperty value (ETSI GS CIM 009 v1.9.1 clause 4.7); declare `geometry: { convert: \"flatten\" }` to fold it into one geometry",
+        "  ╰─ attribute   location"
+      ]
+    },
+    {
+      "code": "geometry-coordinates-out-of-range",
+      "occurrences": 2,
+      "message": [
+        "! Attribute `location` dropped: the position `[2600.5, 341870.2]` at `coordinates` has a longitude outside WGS 84; GeoJSON coordinates are WGS 84 longitude and latitude in decimal degrees (RFC 7946 section 4), so the source may be in a coordinate reference system it does not declare, have longitude and latitude swapped, or need another conversion or scale",
+        "  ╰─ attribute   location"
+      ]
+    },
+    {
+      "code": "resolver-records-merged",
+      "occurrences": 1,
+      "message": [
+        "! 2 records resolved to `urn:ngsi-ld:Station:shop` and disagreed on `geometry.coordinates`; one value of each disagreeing field was kept and the others were discarded",
+        "  ├─ entity type Station",
+        "  ╰─ entities    urn:ngsi-ld:Station:shop"
+      ]
+    }
+  ]
+}

@@ -1,0 +1,9 @@
+{
+    version: "v1",
+    inputs: [
+        {
+            source: "pm10.jsonl",
+            mapping: "../../../tests/fixtures/sensorthings/wind-air-quality-observed.json5",
+        },
+    ],
+}

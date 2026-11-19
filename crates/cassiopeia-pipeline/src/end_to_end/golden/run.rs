@@ -25,14 +25,11 @@ use temp_dir::TempDir;
 pub(crate) fn run_view(case: &GoldenCase, view: View) -> ViewRecord {
     let in_memory = run_on_store(case, view, StoreKind::DashMap);
     let on_disk = run_on_store(case, view, StoreKind::Redb);
-    let directory = case.directory().display();
-    assert_eq!(
-        in_memory.entities, on_disk.entities,
-        "{directory} in {view:?}: the stores wrote different entities"
-    );
+    let name = case.name().display();
+    assert_eq!(in_memory.entities, on_disk.entities, "{name} in {view:?}: the stores wrote different entities");
     assert_eq!(
         in_memory.report, on_disk.report,
-        "{directory} in {view:?}: the stores reported different diagnostics"
+        "{name} in {view:?}: the stores reported different diagnostics"
     );
     on_disk
 }

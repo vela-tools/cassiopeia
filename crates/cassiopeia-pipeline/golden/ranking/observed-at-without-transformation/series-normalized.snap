@@ -1,0 +1,80 @@
+---
+source: crates/cassiopeia-pipeline/src/end_to_end/golden/mod.rs
+input_file: crates/cassiopeia-pipeline/golden/ranking/observed-at-without-transformation/manifest.json5
+---
+[
+  {
+    "id": "urn:ngsi-ld:Sensor:S1",
+    "type": "Sensor",
+    "reading": [
+      {
+        "type": "Property",
+        "value": 20.5,
+        "observedAt": "2026-03-01T08:00:00Z"
+      },
+      {
+        "type": "Property",
+        "value": 21.5,
+        "observedAt": "2026-03-01T10:00:00Z"
+      },
+      {
+        "type": "Property",
+        "value": 22.5,
+        "observedAt": "2026-03-01T11:00:00Z"
+      }
+    ],
+    "status": [
+      {
+        "type": "Property",
+        "value": "cold",
+        "observedAt": "2026-03-01T08:00:00Z"
+      },
+      {
+        "type": "Property",
+        "value": "warm",
+        "observedAt": "2026-03-01T09:00:00Z"
+      },
+      {
+        "type": "Property",
+        "value": "ok",
+        "observedAt": "2026-03-01T12:00:00Z"
+      }
+    ],
+    "name": {
+      "type": "Property",
+      "value": "First"
+    }
+  },
+  {
+    "id": "urn:ngsi-ld:Sensor:S2",
+    "type": "Sensor",
+    "reading": [
+      {
+        "type": "Property",
+        "value": 21.5,
+        "observedAt": "2026-03-01T10:00:00Z"
+      },
+      {
+        "type": "Property",
+        "value": 22.5,
+        "observedAt": "2026-03-01T13:00:00Z"
+      }
+    ],
+    "status": [
+      {
+        "type": "Property",
+        "value": "warm",
+        "observedAt": "2026-03-01T09:00:00Z"
+      },
+      {
+        "type": "Property",
+        "value": "ok",
+        "observedAt": "2026-03-01T12:00:00Z"
+      }
+    ],
+    "name": {
+      "type": "Property",
+      "value": "First"
+    }
+  }
+]

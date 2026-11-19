@@ -1,0 +1,30 @@
+// A JsonProperty assembled from nested `mappings` keeps a `null` its members hold, beside one
+// object read whole: kept as it is by a JsonProperty under `object`, and without its `null` members
+// by a Property under `object`, which drops an object holding nothing but `null` with a warning.
+{
+    version: "v4",
+    dataModel: "Device",
+    identity: {
+        entityName: "{{ id }}",
+    },
+    attributes: {
+        raw: {
+            type: "JsonProperty",
+            source: "{{ params }}",
+            transformation: "object",
+        },
+        params: {
+            source: "{{ params }}",
+            transformation: "object",
+        },
+        payload: {
+            type: "JsonProperty",
+            mappings: {
+                info: {
+                    source: "{{ info }}",
+                    transformation: "object",
+                },
+            },
+        },
+    },
+}

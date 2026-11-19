@@ -1,0 +1,52 @@
+{
+    "data": {
+        "monitors": [
+            {
+                "locationStop": {
+                    "properties": {
+                        "title": "Schwedenplatz",
+                        "attributes": {
+                            "rbl": 4116
+                        }
+                    }
+                },
+                "lines": [
+                    {
+                        "name": "U1",
+                        "towards": "Oberlaa",
+                        "departures": {
+                            "departure": [
+                                {
+                                    "departureTime": {
+                                        "countdown": 5
+                                    }
+                                },
+                                {
+                                    "departureTime": {
+                                        "countdown": 9
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    {
+                        "name": "U4",
+                        "towards": "Hütteldorf",
+                        "departures": {
+                            "departure": [
+                                {
+                                    "departureTime": {
+                                        "countdown": 2
+                                    }
+                                }
+                            ]
+                        }
+                    }
+                ]
+            }
+        ]
+    },
+    "message": {
+        "value": "OK"
+    }
+}

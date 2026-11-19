@@ -1,0 +1,14 @@
+// A literal `entityName` resolves every record to one entity, so two records that disagree on an
+// attribute merge into it with one warning.
+{
+    version: "v4",
+    dataModel: "WeatherStation",
+    identity: {
+        entityName: "WeatherStation",
+    },
+    attributes: {
+        temperature: {
+            source: "{{ temperature }}",
+        },
+    },
+}

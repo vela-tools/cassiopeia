@@ -1,0 +1,18 @@
+---
+source: crates/cassiopeia-pipeline/src/end_to_end/golden/mod.rs
+input_file: crates/cassiopeia-pipeline/golden/sensorthings/station-inventory-latest-datastream-only/manifest.json5
+---
+[
+  {
+    "id": "urn:ngsi-ld:Device:sta-127001-1",
+    "type": "Device",
+    "name": {
+      "type": "Property",
+      "value": "Stationsplein"
+    },
+    "description": {
+      "type": "Property",
+      "value": "Air quality station Stationsplein"
+    }
+  }
+]

@@ -1,0 +1,27 @@
+// A temporal mapping whose records repeat a relationship target: each target is listed once, at the
+// place of the earliest record that names it, while the observed attribute follows the newest record.
+{
+    version: "v4",
+    dataModel: "Stop",
+    identity: {
+        entityName: "{{ code }}",
+    },
+    attributes: {
+        occupancy: {
+            source: "{{ occupancy }}",
+            transformation: "integer",
+            properties: {
+                observedAt: {
+                    source: "{{ time }}",
+                },
+            },
+        },
+        servedBy: {
+            type: "ListRelationship",
+            source: "{{ lines }}",
+            target: {
+                entity: "Line",
+            },
+        },
+    },
+}

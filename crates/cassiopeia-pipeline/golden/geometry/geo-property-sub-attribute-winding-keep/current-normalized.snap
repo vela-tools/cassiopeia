@@ -1,0 +1,44 @@
+---
+source: crates/cassiopeia-pipeline/src/end_to_end/golden/mod.rs
+input_file: crates/cassiopeia-pipeline/golden/geometry/geo-property-sub-attribute-winding-keep/manifest.json5
+---
+[
+  {
+    "id": "urn:ngsi-ld:Zone:square-wound",
+    "type": "Zone",
+    "name": {
+      "type": "Property",
+      "value": "square-wound",
+      "footprint": {
+        "type": "GeoProperty",
+        "value": {
+          "type": "Polygon",
+          "coordinates": [
+            [
+              [
+                0.0,
+                0.0
+              ],
+              [
+                0.0,
+                2.0
+              ],
+              [
+                2.0,
+                2.0
+              ],
+              [
+                2.0,
+                0.0
+              ],
+              [
+                0.0,
+                0.0
+              ]
+            ]
+          ]
+        }
+      }
+    }
+  }
+]

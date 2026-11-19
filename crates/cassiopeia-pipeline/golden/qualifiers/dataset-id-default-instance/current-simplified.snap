@@ -1,0 +1,35 @@
+---
+source: crates/cassiopeia-pipeline/src/end_to_end/golden/mod.rs
+input_file: crates/cassiopeia-pipeline/golden/qualifiers/dataset-id-default-instance/manifest.json5
+---
+[
+  {
+    "id": "urn:ngsi-ld:WeatherForecast:S1",
+    "type": "WeatherForecast",
+    "forecast": 21.5,
+    "humidity": 40.0
+  },
+  {
+    "id": "urn:ngsi-ld:WeatherForecast:S2",
+    "type": "WeatherForecast",
+    "humidity": 41.0
+  },
+  {
+    "id": "urn:ngsi-ld:WeatherForecast:S3",
+    "type": "WeatherForecast",
+    "forecast": 23.5,
+    "humidity": 42.0
+  },
+  {
+    "id": "urn:ngsi-ld:WeatherForecast:S4",
+    "type": "WeatherForecast",
+    "forecast": 24.5,
+    "humidity": 43.0
+  },
+  {
+    "id": "urn:ngsi-ld:WeatherForecast:S5",
+    "type": "WeatherForecast",
+    "forecast": 25.5,
+    "humidity": 44.0
+  }
+]

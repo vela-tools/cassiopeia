@@ -1,0 +1,6 @@
+{"sensorthingsSnapshot":1,"serviceRoot":"https://h.example/v1.1","version":"v1.1","read":"range","collectedAt":"2026-11-16T09:00:00Z"}
+{"datastream":{"@iot.id":7,"name":"bus-12 pm10","unitOfMeasurement":{"symbol":"ug/m3"},"Thing":{"@iot.id":12,"name":"Bus 12","Locations":[{"@iot.id":103,"encodingType":"application/geo+json","location":{"type":"Point","coordinates":[5.487,51.4381]}}]},"ObservedProperty":{"@iot.id":1,"name":"pm10"}}}
+{"observation":{"@iot.id":701,"phenomenonTime":"2026-11-16T08:00:00Z","result":18.2},"datastream":7}
+{"observation":{"@iot.id":702,"phenomenonTime":"2026-11-16T08:10:00Z","result":21.5},"datastream":7}
+{"historicalLocation":{"@iot.id":31,"time":"2026-11-16T07:58:00Z","Locations":[{"@iot.id":101,"encodingType":"application/geo+json","location":{"type":"Point","coordinates":[5.4797,51.4433]}}]},"thing":12}
+{"historicalLocation":{"@iot.id":32,"time":"2026-11-16T08:08:00Z","Locations":[{"@iot.id":102,"encodingType":"application/geo+json","location":{"type":"Point","coordinates":[5.4812,51.4402]}}]},"thing":12}

@@ -1,0 +1,9 @@
+{
+    version: "v1",
+    inputs: [
+        {
+            source: "../../../tests/fixtures/sensorthings/locations-v1.1-latest.jsonl",
+            mapping: "../../../tests/fixtures/sensorthings/addressed-air-quality-observed.json5",
+        },
+    ],
+}

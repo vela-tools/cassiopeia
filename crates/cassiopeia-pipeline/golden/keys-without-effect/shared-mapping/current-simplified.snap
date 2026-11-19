@@ -1,0 +1,20 @@
+---
+source: crates/cassiopeia-pipeline/src/end_to_end/golden/mod.rs
+input_file: crates/cassiopeia-pipeline/golden/keys-without-effect/shared-mapping/manifest.json5
+---
+[
+  {
+    "id": "urn:ngsi-ld:Device:T1",
+    "type": "Device",
+    "temperature": "21.5",
+    "refBuilding": "urn:ngsi-ld:Building:B-12",
+    "manufacturer": "Acme"
+  },
+  {
+    "id": "urn:ngsi-ld:Device:T2",
+    "type": "Device",
+    "temperature": "19",
+    "refBuilding": "urn:ngsi-ld:Building:B-14",
+    "manufacturer": "Acme"
+  }
+]

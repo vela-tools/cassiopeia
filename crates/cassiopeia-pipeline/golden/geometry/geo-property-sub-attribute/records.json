@@ -1,0 +1,65 @@
+[
+    {
+        "id": "square-rewound",
+        "geometry": {
+            "type": "Polygon",
+            "coordinates": [
+                [
+                    [0.0, 0.0],
+                    [0.0, 2.0],
+                    [2.0, 2.0],
+                    [2.0, 0.0],
+                    [0.0, 0.0]
+                ]
+            ]
+        }
+    },
+    {
+        "id": "square-collection",
+        "geometry": {
+            "type": "GeometryCollection",
+            "geometries": [
+                {
+                    "type": "Point",
+                    "coordinates": [1.0, 2.0]
+                }
+            ]
+        }
+    },
+    {
+        "id": "square-blank",
+        "geometry": ""
+    },
+    {
+        "id": "square-null",
+        "geometry": null
+    },
+    {
+        "id": "square-text",
+        "geometry": "somewhere near the river"
+    },
+    {
+        "id": "square-incomplete-point",
+        "geometry": {
+            "type": "Point"
+        }
+    },
+    {
+        "id": "square-number",
+        "geometry": 42
+    },
+    {
+        "id": "square-out-of-range",
+        "geometry": {
+            "type": "Polygon",
+            "coordinates": [
+                [
+                    [0.0, 0.0],
+                    [2.0, 0.0],
+                    [2.0, -95.0],
+                    [0.0, 0.0]
+                ]
+            ]
+        }
+    }
+]

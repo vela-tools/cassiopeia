@@ -1,0 +1,155 @@
+---
+source: crates/cassiopeia-pipeline/src/end_to_end/golden/mod.rs
+input_file: crates/cassiopeia-pipeline/golden/sensorthings/device-air-quality-observed-latest/manifest.json5
+---
+[
+  {
+    "id": "urn:ngsi-ld:AirQualityObserved:sta-hexample-1",
+    "type": "AirQualityObserved",
+    "name": {
+      "type": "Property",
+      "value": "Stationsplein"
+    },
+    "location": {
+      "type": "GeoProperty",
+      "value": {
+        "type": "Point",
+        "coordinates": [
+          5.4797,
+          51.4433
+        ]
+      }
+    },
+    "dateObserved": {
+      "type": "Property",
+      "value": "2026-11-13T07:00:00Z",
+      "valueType": "DateTime"
+    },
+    "pm10": {
+      "type": "Property",
+      "value": 18.2,
+      "observedAt": "2026-11-13T07:00:00Z"
+    },
+    "no2": {
+      "type": "Property",
+      "value": 24.5,
+      "observedAt": "2026-11-13T07:00:00Z"
+    },
+    "refDevice": {
+      "type": "Relationship",
+      "object": "urn:ngsi-ld:Device:sta-hexample-sensor-7"
+    }
+  },
+  {
+    "id": "urn:ngsi-ld:AirQualityObserved:sta-hexample-2",
+    "type": "AirQualityObserved",
+    "name": {
+      "type": "Property",
+      "value": "Kanaaldijk"
+    },
+    "location": {
+      "type": "GeoProperty",
+      "value": {
+        "type": "Point",
+        "coordinates": [
+          5.64,
+          51.475
+        ]
+      }
+    },
+    "dateObserved": {
+      "type": "Property",
+      "value": "2026-11-13T07:00:00Z",
+      "valueType": "DateTime"
+    },
+    "pm10": {
+      "type": "Property",
+      "value": 14.1,
+      "observedAt": "2026-11-13T07:00:00Z"
+    },
+    "refDevice": {
+      "type": "Relationship",
+      "object": "urn:ngsi-ld:Device:sta-hexample-sensor-8"
+    }
+  },
+  {
+    "id": "urn:ngsi-ld:AirQualityObserved:sta-hexample-3",
+    "type": "AirQualityObserved",
+    "name": {
+      "type": "Property",
+      "value": "Markt"
+    },
+    "location": {
+      "type": "GeoProperty",
+      "value": {
+        "type": "Point",
+        "coordinates": [
+          5.4776,
+          51.4381
+        ]
+      }
+    },
+    "dateObserved": {
+      "type": "Property",
+      "value": "2026-11-13T07:00:00Z",
+      "valueType": "DateTime"
+    },
+    "no2": {
+      "type": "Property",
+      "value": 31.0,
+      "observedAt": "2026-11-13T07:00:00Z"
+    }
+  },
+  {
+    "id": "urn:ngsi-ld:AirQualityObserved:sta-hexample-4",
+    "type": "AirQualityObserved",
+    "name": {
+      "type": "Property",
+      "value": "Haven"
+    },
+    "location": {
+      "type": "GeoProperty",
+      "value": {
+        "type": "Point",
+        "coordinates": [
+          5.4655,
+          51.4512
+        ]
+      }
+    },
+    "dateObserved": {
+      "type": "Property",
+      "value": "2026-11-13T07:00:00Z",
+      "valueType": "DateTime"
+    },
+    "pm10": {
+      "type": "Property",
+      "value": 12.7,
+      "observedAt": "2026-11-13T07:00:00Z"
+    }
+  },
+  {
+    "id": "urn:ngsi-ld:Device:sta-hexample-sensor-7",
+    "type": "Device",
+    "name": {
+      "type": "Property",
+      "value": "PM-200"
+    },
+    "description": {
+      "type": "Property",
+      "value": "Optical particulate matter sensor"
+    }
+  },
+  {
+    "id": "urn:ngsi-ld:Device:sta-hexample-sensor-8",
+    "type": "Device",
+    "name": {
+      "type": "Property",
+      "value": "AQ-Multi"
+    },
+    "description": {
+      "type": "Property",
+      "value": "Multi-pollutant air quality monitor"
+    }
+  }
+]

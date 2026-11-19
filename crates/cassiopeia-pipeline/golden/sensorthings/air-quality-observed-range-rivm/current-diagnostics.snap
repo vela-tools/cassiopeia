@@ -1,0 +1,10 @@
+---
+source: crates/cassiopeia-pipeline/src/end_to_end/golden/mod.rs
+input_file: crates/cassiopeia-pipeline/golden/sensorthings/air-quality-observed-range-rivm/manifest.json5
+---
+{
+  "failure": [
+    "The SensorThings snapshot `[case]/../../../tests/fixtures/sensorthings/rivm-v1.0-range.jsonl` holds a `range` read, one record per Observation, so it is read only into series output, set by output.temporal.representation: \"series\" or --temporal-representation series: current-state output would keep one reading of each Thing"
+  ],
+  "diagnostics": []
+}

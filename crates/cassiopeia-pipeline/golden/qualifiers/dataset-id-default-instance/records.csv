@@ -1,0 +1,6 @@
+code,forecast,dataset,humidity
+S1,21.5,https://example.org/datasets/gfs,40
+S2,22.5,datasets/gfs,41
+S3,23.5,@none,42
+S4,24.5,,43
+S5,25.5,urn:ngsi-ld:Dataset:gfs,44

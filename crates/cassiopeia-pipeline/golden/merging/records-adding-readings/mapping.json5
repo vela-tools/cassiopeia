@@ -1,0 +1,24 @@
+// Readings read through `{% if %}` templates, so a record that lacks a reading leaves it out and
+// two records of one entity that each carry their own reading merge without a warning, as do
+// records that disagree only on a field the mapping never reads. Records that place one entity at
+// two positions warn naming the coordinates. A GeometryCollection, and a position outside WGS 84,
+// are dropped with a warning and the entity is still written.
+{
+    version: "v4",
+    dataModel: "Station",
+    identity: {
+        entityName: "{{ id }}",
+    },
+    attributes: {
+        temperature: {
+            source: "{% if temperature is defined %}{{ temperature }}{% endif %}",
+        },
+        windSpeed: {
+            source: "{% if wind is defined %}{{ wind }}{% endif %}",
+        },
+        location: {
+            source: "{{ geometry }}",
+            type: "GeoProperty",
+        },
+    },
+}

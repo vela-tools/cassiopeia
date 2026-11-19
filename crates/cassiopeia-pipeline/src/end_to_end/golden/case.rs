@@ -17,6 +17,8 @@ const CURRENT_AND_SERIES: &[History] = &[History::Current, History::Series];
 /// One case of the golden corpus: a directory holding a manifest that declares no `output`, the
 /// mappings and inputs it names by relative path, and the snapshots of what it writes and reports.
 pub(crate) struct GoldenCase {
+    /// The case's directory relative to the corpus, such as `values/json-property`, which names it.
+    name: PathBuf,
     /// The case's directory, which its relative paths resolve against and its snapshots live in.
     directory: PathBuf,
     /// Its manifest file, named when the manifest fails to parse.
@@ -36,8 +38,8 @@ struct RunDocument<'a> {
 }
 
 impl GoldenCase {
-    /// Reads the case whose manifest is at `manifest`.
-    pub(crate) fn read(manifest: &Path) -> GoldenCase {
+    /// Reads the case whose manifest is at `manifest`, in the corpus at `corpus`.
+    pub(crate) fn read(corpus: &Path, manifest: &Path) -> GoldenCase {
         let content = fs::read_to_string(manifest).unwrap();
         let Value::Object(document) = serde_json5::from_str(&content).unwrap() else {
             panic!("{} must hold a JSON5 object", manifest.display());
@@ -48,6 +50,7 @@ impl GoldenCase {
             manifest.display()
         );
         let directory = manifest.parent().unwrap().to_path_buf();
+        let name = directory.strip_prefix(corpus).unwrap().to_path_buf();
         let histories = if mappings_declare_observed_at(manifest) {
             CURRENT_AND_SERIES
         } else {
@@ -55,11 +58,17 @@ impl GoldenCase {
         };
 
         GoldenCase {
+            name,
             directory,
             origin: manifest.to_path_buf(),
             document,
             histories,
         }
+    }
+
+    /// The case's directory relative to the corpus, which names it in every message.
+    pub(crate) fn name(&self) -> &Path {
+        &self.name
     }
 
     /// The case's directory.

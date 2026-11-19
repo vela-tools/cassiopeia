@@ -1,0 +1,19 @@
+// A GeoProperty read as a polygon with `winding: "keep"` publishes the exterior ring as the source
+// wound it, here clockwise, instead of rewinding it to the right-hand rule.
+{
+    version: "v4",
+    dataModel: "Zone",
+    identity: {
+        entityName: "{{ id }}",
+    },
+    attributes: {
+        location: {
+            type: "GeoProperty",
+            transformation: "polygon",
+            source: "{{ geometry }}",
+            geometry: {
+                winding: "keep",
+            },
+        },
+    },
+}

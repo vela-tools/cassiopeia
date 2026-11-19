@@ -1,0 +1,13 @@
+---
+source: crates/cassiopeia-pipeline/src/end_to_end/golden/mod.rs
+input_file: crates/cassiopeia-pipeline/golden/merging/level-read-per-slice/manifest.json5
+---
+[
+  {
+    "id": "urn:ngsi-ld:Station:cell",
+    "type": "Station",
+    "temperature": "280.1",
+    "windSpeed": "3.5",
+    "height": "2"
+  }
+]

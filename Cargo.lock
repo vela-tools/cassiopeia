@@ -1071,6 +1071,7 @@ dependencies = [
  "execution-time",
  "indexmap 2.14.2",
  "insta",
+ "jsonptr",
  "jsonschema",
  "memory-stats",
  "mockito",
@@ -4372,6 +4373,12 @@ dependencies = [
  "smol_str",
  "thiserror 2.0.21",
 ]
+
+[[package]]
+name = "jsonptr"
+version = "0.8.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "72c22d99362c7aac7d77efab6b49c2181674b165d7e6e7c755b3432ded64bf51"
 
 [[package]]
 name = "jsonschema"

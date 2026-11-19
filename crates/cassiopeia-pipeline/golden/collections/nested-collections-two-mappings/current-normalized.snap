@@ -1,0 +1,58 @@
+---
+source: crates/cassiopeia-pipeline/src/end_to_end/golden/mod.rs
+input_file: crates/cassiopeia-pipeline/golden/collections/nested-collections-two-mappings/manifest.json5
+---
+[
+  {
+    "id": "urn:ngsi-ld:Departure:4116-U1-5",
+    "type": "Departure",
+    "line": {
+      "type": "Property",
+      "value": "U1"
+    },
+    "countdown": {
+      "type": "Property",
+      "value": "5"
+    }
+  },
+  {
+    "id": "urn:ngsi-ld:Departure:4116-U1-9",
+    "type": "Departure",
+    "line": {
+      "type": "Property",
+      "value": "U1"
+    },
+    "countdown": {
+      "type": "Property",
+      "value": "9"
+    }
+  },
+  {
+    "id": "urn:ngsi-ld:Departure:4116-U4-2",
+    "type": "Departure",
+    "line": {
+      "type": "Property",
+      "value": "U4"
+    },
+    "countdown": {
+      "type": "Property",
+      "value": "2"
+    }
+  },
+  {
+    "id": "urn:ngsi-ld:Line:U1",
+    "type": "Line",
+    "towards": {
+      "type": "Property",
+      "value": "Oberlaa"
+    }
+  },
+  {
+    "id": "urn:ngsi-ld:Line:U4",
+    "type": "Line",
+    "towards": {
+      "type": "Property",
+      "value": "Hütteldorf"
+    }
+  }
+]

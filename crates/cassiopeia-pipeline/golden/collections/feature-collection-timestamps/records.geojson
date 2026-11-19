@@ -1,0 +1,52 @@
+{
+    "type": "FeatureCollection",
+    "timestamps": [
+        "2026-10-25T07:50+00:00"
+    ],
+    "features": [
+        {
+            "type": "Feature",
+            "geometry": {
+                "type": "Point",
+                "coordinates": [
+                    16.37,
+                    48.2
+                ]
+            },
+            "properties": {
+                "station": "11034",
+                "parameters": {
+                    "TL": {
+                        "name": "Lufttemperatur",
+                        "unit": "°C",
+                        "data": [
+                            6.9
+                        ]
+                    }
+                }
+            }
+        },
+        {
+            "type": "Feature",
+            "geometry": {
+                "type": "Point",
+                "coordinates": [
+                    16.36,
+                    48.25
+                ]
+            },
+            "properties": {
+                "station": "11035",
+                "parameters": {
+                    "TL": {
+                        "name": "Lufttemperatur",
+                        "unit": "°C",
+                        "data": [
+                            7.4
+                        ]
+                    }
+                }
+            }
+        }
+    ]
+}

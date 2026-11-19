@@ -1,0 +1,9 @@
+{
+    version: "v1",
+    inputs: [
+        {
+            source: "records.json",
+            mapping: "mapping.json5",
+        },
+    ],
+}

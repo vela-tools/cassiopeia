@@ -1,0 +1,25 @@
+[
+    {
+        "code": "P1",
+        "names": {
+            "en": "Castle",
+            "sl": "Grad"
+        }
+    },
+    {
+        "code": "P2",
+        "names": "{\"en\":\"Bridge\",\"fr\":\"Pont\"}"
+    },
+    {
+        "code": "P3",
+        "names": {
+            "en": "Tower",
+            "not a tag": "x",
+            "de": 3
+        }
+    },
+    {
+        "code": "P4",
+        "names": "Just text"
+    }
+]

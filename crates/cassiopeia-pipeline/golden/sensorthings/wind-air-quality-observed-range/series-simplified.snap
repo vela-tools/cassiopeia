@@ -1,0 +1,29 @@
+---
+source: crates/cassiopeia-pipeline/src/end_to_end/golden/mod.rs
+input_file: crates/cassiopeia-pipeline/golden/sensorthings/wind-air-quality-observed-range/manifest.json5
+---
+[
+  {
+    "id": "urn:ngsi-ld:AirQualityObserved:sta-hexample-1",
+    "type": "AirQualityObserved",
+    "name": "Stationsplein",
+    "location": {
+      "type": "Point",
+      "coordinates": [
+        5.4797,
+        51.4433
+      ]
+    },
+    "dateObserved": "2026-11-13T05:00:00Z",
+    "windSpeed": [
+      3.9,
+      4.2,
+      5.1
+    ],
+    "windDirection": [
+      120.0,
+      135.0,
+      150.0
+    ]
+  }
+]

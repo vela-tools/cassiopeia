@@ -1,0 +1,9 @@
+{
+    version: "v1",
+    inputs: [
+        {
+            source: "records.geojson",
+            mapping: "mapping.json5",
+        },
+    ],
+}

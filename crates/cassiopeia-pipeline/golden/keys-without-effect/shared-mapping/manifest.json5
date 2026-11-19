@@ -1,0 +1,13 @@
+{
+    version: "v1",
+    inputs: [
+        {
+            source: "sensors-0.csv",
+            mapping: "mapping.json5",
+        },
+        {
+            source: "sensors-1.csv",
+            mapping: "mapping.json5",
+        },
+    ],
+}

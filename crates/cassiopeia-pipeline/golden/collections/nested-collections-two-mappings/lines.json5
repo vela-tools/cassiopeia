@@ -1,0 +1,13 @@
+// The mapping bound to the lines collection that holds the departures: one entity per line.
+{
+    version: "v4",
+    dataModel: "Line",
+    identity: {
+        entityName: "{{ name }}",
+    },
+    attributes: {
+        towards: {
+            source: "{{ towards }}",
+        },
+    },
+}

@@ -1,0 +1,42 @@
+---
+source: crates/cassiopeia-pipeline/src/end_to_end/golden/mod.rs
+input_file: crates/cassiopeia-pipeline/golden/sensorthings/untransformed-high/manifest.json5
+---
+[
+  {
+    "id": "urn:ngsi-ld:AirQualityObserved:bus-12",
+    "type": "AirQualityObserved",
+    "dateObserved": {
+      "value": "2026-11-16T08:00:00Z",
+      "valueType": "DateTime"
+    },
+    "pm10": [
+      {
+        "value": "high",
+        "observedAt": "2026-11-16T08:00:00Z"
+      }
+    ],
+    "location": [
+      {
+        "value": {
+          "type": "Point",
+          "coordinates": [
+            5.4797,
+            51.4433
+          ]
+        },
+        "observedAt": "2026-11-16T07:58:00Z"
+      },
+      {
+        "value": {
+          "type": "Point",
+          "coordinates": [
+            5.4812,
+            51.4402
+          ]
+        },
+        "observedAt": "2026-11-16T08:08:00Z"
+      }
+    ]
+  }
+]

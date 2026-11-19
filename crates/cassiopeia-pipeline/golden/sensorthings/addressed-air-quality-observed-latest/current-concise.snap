@@ -1,0 +1,52 @@
+---
+source: crates/cassiopeia-pipeline/src/end_to_end/golden/mod.rs
+input_file: crates/cassiopeia-pipeline/golden/sensorthings/addressed-air-quality-observed-latest/manifest.json5
+---
+[
+  {
+    "id": "urn:ngsi-ld:AirQualityObserved:sta-hexample-1",
+    "type": "AirQualityObserved",
+    "name": "Stationsplein",
+    "location": {
+      "type": "Point",
+      "coordinates": [
+        5.4797,
+        51.4433
+      ]
+    },
+    "address": {
+      "streetAddress": "Stationsplein 1, Eindhoven"
+    },
+    "dateObserved": {
+      "value": "2026-11-16T07:00:00Z",
+      "valueType": "DateTime"
+    },
+    "pm10": {
+      "value": 18.2,
+      "observedAt": "2026-11-16T07:00:00Z"
+    }
+  },
+  {
+    "id": "urn:ngsi-ld:AirQualityObserved:sta-hexample-2",
+    "type": "AirQualityObserved",
+    "name": "Kanaaldijk",
+    "location": {
+      "type": "Point",
+      "coordinates": [
+        5.64,
+        51.475
+      ]
+    },
+    "address": {
+      "streetAddress": "Kanaaldijk 5, Helmond"
+    },
+    "dateObserved": {
+      "value": "2026-11-16T07:00:00Z",
+      "valueType": "DateTime"
+    },
+    "pm10": {
+      "value": 14.1,
+      "observedAt": "2026-11-16T07:00:00Z"
+    }
+  }
+]

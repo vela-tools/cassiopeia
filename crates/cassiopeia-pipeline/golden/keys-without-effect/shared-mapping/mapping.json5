@@ -1,0 +1,38 @@
+// One mapping shared by two inputs, holding keys that loading ignores: the warnings are reported
+// once, not once per input.
+{
+    version: "v4",
+    dataModel: "Device",
+    identity: {
+        entityName: "{{ sensor }}",
+    },
+    attributes: {
+        temperature: {
+            source: "{{ t }}",
+            transformaton: "float",
+        },
+        refBuilding: {
+            type: "Relationship",
+            source: "{{ building }}",
+            target: {
+                entity: "Building",
+                sourceField: "building_uri",
+                idPattern: "B-\\d+",
+            },
+        },
+        manufacturer: {
+            source: "{{ maker }}",
+            syntheticEntity: {
+                dataModel: "Organization",
+                identity: {
+                    entityName: "{{ maker }}",
+                },
+                attributes: {
+                    name: {
+                        source: "{{ maker }}",
+                    },
+                },
+            },
+        },
+    },
+}

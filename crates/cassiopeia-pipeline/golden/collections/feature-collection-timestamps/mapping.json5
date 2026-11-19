@@ -1,0 +1,21 @@
+// A feature reads, beside its own properties, the observation time its feature collection states
+// once for all of its features, through `featureCollection.timestamps`.
+{
+    version: "v4",
+    dataModel: "WeatherObserved",
+    identity: {
+        entityName: "{{ properties.station }}",
+    },
+    attributes: {
+        temperature: {
+            source: "{{ properties.parameters.TL.data | first }}",
+            transformation: "float",
+            properties: {
+                observedAt: {
+                    source: "{{ featureCollection.timestamps | first }}",
+                    transformation: "datetime",
+                },
+            },
+        },
+    },
+}

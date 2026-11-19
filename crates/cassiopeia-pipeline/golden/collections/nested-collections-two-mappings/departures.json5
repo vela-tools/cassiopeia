@@ -1,0 +1,17 @@
+// The mapping bound to the departures collection: each departure reads the stop and the line that
+// enclose it. The collections of one document that no mapping binds are not warned about.
+{
+    version: "v4",
+    dataModel: "Departure",
+    identity: {
+        entityName: "{{ monitors.locationStop.properties.attributes.rbl }}-{{ lines.name }}-{{ departureTime.countdown }}",
+    },
+    attributes: {
+        line: {
+            source: "{{ lines.name }}",
+        },
+        countdown: {
+            source: "{{ departureTime.countdown }}",
+        },
+    },
+}

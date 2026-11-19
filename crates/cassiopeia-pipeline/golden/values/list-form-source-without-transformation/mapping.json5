@@ -1,0 +1,32 @@
+// A source written as a list joins its parts: fields and literal text are concatenated, so a
+// partial join keeps the literals around the fields that are present. When every field is absent
+// the attribute is left out, while a list of literals only is always written.
+{
+    version: "v4",
+    dataModel: "Thing",
+    identity: {
+        entityName: "{{ id }}",
+    },
+    attributes: {
+        address: {
+            source: [
+                "{{ street }}",
+                ", ",
+                "{{ no }}",
+            ],
+        },
+        code: {
+            source: [
+                "Station-",
+                "{{ code }}",
+            ],
+        },
+        kind: {
+            source: [
+                "fixed",
+                " ",
+                "site",
+            ],
+        },
+    },
+}

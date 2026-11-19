@@ -1,0 +1,33 @@
+// A GeoProperty over a value that is no GeoJSON geometry, at the top level or as a sub-attribute,
+// is dropped with a warning naming the attribute and the value. A missing, null or blank value
+// leaves the attribute out without a warning. The entity and its other attributes are written.
+{
+    version: "v4",
+    dataModel: "Thing",
+    identity: {
+        entityName: "{{ id }}",
+    },
+    attributes: {
+        locText: {
+            type: "GeoProperty",
+            source: "{{ gt }}",
+        },
+        locObj: {
+            type: "GeoProperty",
+            source: "{{ go }}",
+        },
+        locNum: {
+            type: "GeoProperty",
+            source: "{{ gn }}",
+        },
+        temperature: {
+            source: "{{ t }}",
+            properties: {
+                where: {
+                    type: "GeoProperty",
+                    source: "{{ go }}",
+                },
+            },
+        },
+    },
+}

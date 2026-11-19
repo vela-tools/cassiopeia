@@ -1,0 +1,21 @@
+// Two per-level slices of one grid cell, the way a GRIB source pivots its parameters: each carries
+// its own reading, read through an `{% if %}` template, and its own level. Once the mapping reads
+// the level, the slices disagree on it and the merge warns naming it.
+{
+    version: "v4",
+    dataModel: "Station",
+    identity: {
+        entityName: "{{ id }}",
+    },
+    attributes: {
+        temperature: {
+            source: "{% if temperature is defined %}{{ temperature }}{% endif %}",
+        },
+        windSpeed: {
+            source: "{% if wind is defined %}{{ wind }}{% endif %}",
+        },
+        height: {
+            source: "{{ level }}",
+        },
+    },
+}

@@ -1,0 +1,9 @@
+{
+    version: "v1",
+    inputs: [
+        {
+            source: "../../../tests/fixtures/sensorthings/rivm-v1.0-range.jsonl",
+            mapping: "../../../tests/fixtures/sensorthings/air-quality-observed.json5",
+        },
+    ],
+}

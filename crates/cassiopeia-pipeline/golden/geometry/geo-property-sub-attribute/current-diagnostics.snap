@@ -1,0 +1,32 @@
+---
+source: crates/cassiopeia-pipeline/src/end_to_end/golden/mod.rs
+input_file: crates/cassiopeia-pipeline/golden/geometry/geo-property-sub-attribute/manifest.json5
+---
+{
+  "diagnostics": [
+    {
+      "code": "extractor-geometry-unreadable",
+      "occurrences": 3,
+      "message": [
+        "! Attribute `name.footprint` dropped: `somewhere near the river` is not a GeoJSON geometry",
+        "  ╰─ attribute   name.footprint"
+      ]
+    },
+    {
+      "code": "geometry-collection-inadmissible",
+      "occurrences": 1,
+      "message": [
+        "! Attribute `name.footprint` dropped: a GeometryCollection is not an admissible GeoProperty value (ETSI GS CIM 009 v1.9.1 clause 4.7); declare `geometry: { convert: \"flatten\" }` to fold it into one geometry",
+        "  ╰─ attribute   name.footprint"
+      ]
+    },
+    {
+      "code": "geometry-coordinates-out-of-range",
+      "occurrences": 1,
+      "message": [
+        "! Attribute `name.footprint` dropped: the position `[2, -95]` at `coordinates[0][2]` has a latitude outside WGS 84; GeoJSON coordinates are WGS 84 longitude and latitude in decimal degrees (RFC 7946 section 4), so the source may be in a coordinate reference system it does not declare, have longitude and latitude swapped, or need another conversion or scale",
+        "  ╰─ attribute   name.footprint"
+      ]
+    }
+  ]
+}

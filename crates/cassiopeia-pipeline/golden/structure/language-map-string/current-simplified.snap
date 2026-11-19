@@ -1,0 +1,34 @@
+---
+source: crates/cassiopeia-pipeline/src/end_to_end/golden/mod.rs
+input_file: crates/cassiopeia-pipeline/golden/structure/language-map-string/manifest.json5
+---
+[
+  {
+    "id": "urn:ngsi-ld:Place:P1",
+    "type": "Place",
+    "description": {
+      "languageMap": {
+        "en": "Castle",
+        "sl": "Grad"
+      }
+    }
+  },
+  {
+    "id": "urn:ngsi-ld:Place:P2",
+    "type": "Place",
+    "description": {
+      "languageMap": {
+        "en": "12"
+      }
+    }
+  },
+  {
+    "id": "urn:ngsi-ld:Place:P3",
+    "type": "Place",
+    "description": {
+      "languageMap": {
+        "sl": "   "
+      }
+    }
+  }
+]

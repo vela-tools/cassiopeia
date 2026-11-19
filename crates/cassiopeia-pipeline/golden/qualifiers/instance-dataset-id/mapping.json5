@@ -1,0 +1,32 @@
+// Two instances of one forecast, the second tagged with a `datasetId` its row gives as text that is
+// no URI: that instance is dropped with one warning and the first is written.
+{
+    version: "v4",
+    dataModel: "WeatherForecast",
+    identity: {
+        entityName: "{{ station }}",
+    },
+    attributes: {
+        temperature: {
+            transformation: "float",
+            instances: [
+                {
+                    source: "{{ ecmwf }}",
+                    properties: {
+                        datasetId: {
+                            source: "urn:ngsi-ld:Dataset:ecmwf",
+                        },
+                    },
+                },
+                {
+                    source: "{{ gfs }}",
+                    properties: {
+                        datasetId: {
+                            source: "{{ model }}",
+                        },
+                    },
+                },
+            ],
+        },
+    },
+}

@@ -1,0 +1,14 @@
+[
+    {
+        "id": "cell",
+        "level_type": "height_above_ground",
+        "level": 2,
+        "temperature": 280.1
+    },
+    {
+        "id": "cell",
+        "level_type": "height_above_ground",
+        "level": 10,
+        "wind": 3.5
+    }
+]

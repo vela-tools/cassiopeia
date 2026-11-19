@@ -1,0 +1,9 @@
+{
+    version: "v1",
+    inputs: [
+        {
+            source: "moving.jsonl",
+            mapping: "../../../tests/fixtures/sensorthings/moving-air-quality-observed.json5",
+        },
+    ],
+}

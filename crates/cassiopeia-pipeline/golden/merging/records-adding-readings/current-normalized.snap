@@ -1,0 +1,97 @@
+---
+source: crates/cassiopeia-pipeline/src/end_to_end/golden/mod.rs
+input_file: crates/cassiopeia-pipeline/golden/merging/records-adding-readings/manifest.json5
+---
+[
+  {
+    "id": "urn:ngsi-ld:Station:cell",
+    "type": "Station",
+    "temperature": {
+      "type": "Property",
+      "value": "20.5"
+    },
+    "windSpeed": {
+      "type": "Property",
+      "value": "3.5"
+    },
+    "location": {
+      "type": "GeoProperty",
+      "value": {
+        "type": "Point",
+        "coordinates": [
+          14.5,
+          46.05
+        ]
+      }
+    }
+  },
+  {
+    "id": "urn:ngsi-ld:Station:slice",
+    "type": "Station",
+    "temperature": {
+      "type": "Property",
+      "value": "280.1"
+    },
+    "windSpeed": {
+      "type": "Property",
+      "value": "3.5"
+    }
+  },
+  {
+    "id": "urn:ngsi-ld:Station:shop",
+    "type": "Station",
+    "location": {
+      "type": "GeoProperty",
+      "value": {
+        "type": "Point",
+        "coordinates": [
+          -73.98,
+          40.78
+        ]
+      }
+    }
+  },
+  {
+    "id": "urn:ngsi-ld:Station:collection",
+    "type": "Station",
+    "temperature": {
+      "type": "Property",
+      "value": "20.5"
+    }
+  },
+  {
+    "id": "urn:ngsi-ld:Station:projected",
+    "type": "Station",
+    "temperature": {
+      "type": "Property",
+      "value": "20.5"
+    }
+  },
+  {
+    "id": "urn:ngsi-ld:Station:swapped",
+    "type": "Station",
+    "temperature": {
+      "type": "Property",
+      "value": "21"
+    }
+  },
+  {
+    "id": "urn:ngsi-ld:Station:here",
+    "type": "Station",
+    "temperature": {
+      "type": "Property",
+      "value": "19"
+    },
+    "location": {
+      "type": "GeoProperty",
+      "value": {
+        "type": "Point",
+        "coordinates": [
+          16.37,
+          48.2,
+          9000.0
+        ]
+      }
+    }
+  }
+]

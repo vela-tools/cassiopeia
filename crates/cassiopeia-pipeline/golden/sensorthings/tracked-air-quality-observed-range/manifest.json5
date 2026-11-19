@@ -1,0 +1,9 @@
+{
+    version: "v1",
+    inputs: [
+        {
+            source: "../../../tests/fixtures/sensorthings/track-v1.1-range.jsonl",
+            mapping: "../../../tests/fixtures/sensorthings/tracked-air-quality-observed.json5",
+        },
+    ],
+}

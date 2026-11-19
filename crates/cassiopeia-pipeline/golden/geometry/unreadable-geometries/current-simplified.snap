@@ -1,0 +1,26 @@
+---
+source: crates/cassiopeia-pipeline/src/end_to_end/golden/mod.rs
+input_file: crates/cassiopeia-pipeline/golden/geometry/unreadable-geometries/manifest.json5
+---
+[
+  {
+    "id": "urn:ngsi-ld:Thing:unreadable",
+    "type": "Thing",
+    "temperature": "20"
+  },
+  {
+    "id": "urn:ngsi-ld:Thing:missing",
+    "type": "Thing",
+    "temperature": "20"
+  },
+  {
+    "id": "urn:ngsi-ld:Thing:null",
+    "type": "Thing",
+    "temperature": "20"
+  },
+  {
+    "id": "urn:ngsi-ld:Thing:blank",
+    "type": "Thing",
+    "temperature": "20"
+  }
+]

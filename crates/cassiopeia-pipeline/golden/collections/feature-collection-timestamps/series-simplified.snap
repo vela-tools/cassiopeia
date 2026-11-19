@@ -1,0 +1,20 @@
+---
+source: crates/cassiopeia-pipeline/src/end_to_end/golden/mod.rs
+input_file: crates/cassiopeia-pipeline/golden/collections/feature-collection-timestamps/manifest.json5
+---
+[
+  {
+    "id": "urn:ngsi-ld:WeatherObserved:11034",
+    "type": "WeatherObserved",
+    "temperature": [
+      6.9
+    ]
+  },
+  {
+    "id": "urn:ngsi-ld:WeatherObserved:11035",
+    "type": "WeatherObserved",
+    "temperature": [
+      7.4
+    ]
+  }
+]

@@ -1,0 +1,26 @@
+---
+source: crates/cassiopeia-pipeline/src/end_to_end/golden/mod.rs
+input_file: crates/cassiopeia-pipeline/golden/values/identifiers-normalized/manifest.json5
+---
+[
+  {
+    "id": "urn:ngsi-ld:Building:vocab",
+    "type": "Building",
+    "level": {
+      "type": "VocabProperty",
+      "vocab": "https://example.org/x"
+    }
+  },
+  {
+    "id": "urn:ngsi-ld:Building:urn",
+    "type": "Building",
+    "reference": {
+      "type": "Property",
+      "value": "urn:ngsi-ld:Building:B-12"
+    }
+  },
+  {
+    "id": "urn:ngsi-ld:Building:unparseable",
+    "type": "Building"
+  }
+]

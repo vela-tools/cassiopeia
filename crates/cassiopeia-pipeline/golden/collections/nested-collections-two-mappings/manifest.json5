@@ -1,0 +1,18 @@
+{
+    version: "v1",
+    inputs: [
+        {
+            source: "records.json",
+            mappings: [
+                {
+                    collection: "data.monitors.lines",
+                    mapping: "lines.json5",
+                },
+                {
+                    collection: "data.monitors.lines.departures.departure",
+                    mapping: "departures.json5",
+                },
+            ],
+        },
+    ],
+}

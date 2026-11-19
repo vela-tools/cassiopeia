@@ -1,0 +1,14 @@
+// An attribute named `id` collides with the entity's own `id`, so the mapping is refused when it
+// loads.
+{
+    version: "v4",
+    dataModel: "Station",
+    identity: {
+        entityName: "{{ id }}",
+    },
+    attributes: {
+        id: {
+            source: "{{ id }}",
+        },
+    },
+}
