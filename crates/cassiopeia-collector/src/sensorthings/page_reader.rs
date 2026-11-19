@@ -67,8 +67,9 @@ impl PageReader {
     /// The failure of a read the run's stop ended.
     fn interrupted(&self) -> CollectorError {
         CollectorError::Interrupted {
-            // The error names the root, while the reader keeps its own.
-            root: Box::new(self.root.clone()),
+            // The error names the root, while the reader keeps its own. A service root reads no
+            // secret from the environment.
+            url: Box::new(MaskedUrl::plain(self.root.url().clone())),
         }
     }
 }

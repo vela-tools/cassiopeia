@@ -47,21 +47,32 @@ impl Collector for GenericCollector {
             mut downloader,
         } = *self;
 
-        match &source {
-            CollectorSource::Single { input, extension } => {
-                let payload = resolve_input(input, format_hint, || scratch.only(extension), &mut downloader)?;
-                send_payload(payload, &sender)?;
-            }
-            CollectorSource::Multiple { inputs, extension } => {
-                for (index, input) in inputs.iter().enumerate() {
-                    let payload = resolve_input(input, format_hint, || scratch.numbered(index, extension), &mut downloader)?;
-                    send_payload(payload, &sender)?;
-                }
-            }
+        match collect_source(&source, format_hint, &scratch, &mut downloader, &sender) {
+            // Files are read as they are found, so collecting them meets nothing to warn about.
+            Ok(()) => Ok(CollectionEnd::Collected(CollectionWarnings::default())),
+            Err(error) => CollectionEnd::unwound_by(error),
         }
+    }
+}
 
-        // Files are read as they are found, so collecting them meets nothing to warn about.
-        Ok(CollectionEnd::Collected(CollectionWarnings::default()))
+/// Resolves every input of `source` and hands each on through `sender` in the order the source lists
+/// them, downloading a remote one into the scratch file `scratch` names for it.
+fn collect_source(
+    source: &CollectorSource,
+    format_hint: Option<DataFormat>,
+    scratch: &ScratchFiles,
+    downloader: &mut Downloader,
+    sender: &ChannelSender<Signal<CollectedPayload, CollectorError>>,
+) -> Result<(), CollectorError> {
+    match source {
+        CollectorSource::Single { input, extension } => {
+            let payload = resolve_input(input, format_hint, || scratch.only(extension), downloader)?;
+            send_payload(payload, sender)
+        }
+        CollectorSource::Multiple { inputs, extension } => inputs.iter().enumerate().try_for_each(|(index, input)| {
+            let payload = resolve_input(input, format_hint, || scratch.numbered(index, extension), downloader)?;
+            send_payload(payload, sender)
+        }),
     }
 }
 

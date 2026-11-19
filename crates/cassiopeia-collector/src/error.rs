@@ -63,18 +63,20 @@ pub enum CollectorError {
     #[error("downstream channel closed")]
     ChannelClosed,
 
-    /// The run was being stopped, so collection from a SensorThings server ended before its next
-    /// request.
+    /// The run was being stopped, so collection from `url` ended before its next request: before the
+    /// next page of a SensorThings server, or before a download asked again after a `429` or a
+    /// `5xx`.
     ///
     /// A read unwinds through this error once the run is being stopped. A
     /// [`Collector`](crate::collector::Collector) ends such a read with
     /// [`CollectionEnd::Stopped`](crate::collection_end::CollectionEnd::Stopped) rather than with
     /// this error, so only a command that reads a server outside a run fails with it.
-    #[error("Collection from '{root}' stopped because the run is being stopped")]
+    #[error("Collection from '{url}' stopped because the run is being stopped")]
     Interrupted {
-        /// The service root collection read from. Boxed so a root does not enlarge every `Result`
-        /// in the collector and every pipeline error that wraps one.
-        root: Box<ServiceRoot>,
+        /// The URL collection read from: the service root of a SensorThings server, or the URL a
+        /// download asked for, masked. Boxed so a URL does not enlarge every `Result` in the
+        /// collector and every pipeline error that wraps one.
+        url: Box<MaskedUrl>,
     },
 
     /// An incremental read was started without the positions its cursor committed, so it could not

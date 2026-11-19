@@ -105,21 +105,7 @@ impl Collector for SensorThingsCollector {
 
         let warnings = match write_snapshot(&service, cursor, unread_check, cycle_start, downloader, shutdown, &path) {
             Ok(warnings) => warnings,
-            // A read unwinds through its error path once the run is being stopped, and a stop is no
-            // failure of the read.
-            Err(CollectorError::Interrupted { .. }) => return Ok(CollectionEnd::Stopped),
-            Err(
-                failure @ (CollectorError::ClientInit { .. }
-                | CollectorError::Http { .. }
-                | CollectorError::HttpStatus { .. }
-                | CollectorError::Io { .. }
-                | CollectorError::ChannelClosed
-                | CollectorError::CursorWithheld { .. }
-                | CollectorError::LinkLoop { .. }
-                | CollectorError::NextLink { .. }
-                | CollectorError::PageUnreadable { .. }
-                | CollectorError::InvalidFileExtension { .. }),
-            ) => return Err(failure),
+            Err(error) => return CollectionEnd::unwound_by(error),
         };
 
         let source = MaskedUrl::plain(service.into_root().into());

@@ -199,7 +199,6 @@ pub fn on_retryable(
         .backoff_ns
         .fetch_add(u64::try_from(delay.as_nanos()).unwrap_or(u64::MAX), Ordering::Relaxed);
     if sleep_or_shutdown(delay, ctx.runtime.shutdown) == BackoffSleep::ShutdownRequested {
-        ctx.counters.failed.fetch_add(entity_count, Ordering::Relaxed);
         return RetryStep::Settled(SendOutcome::Done);
     }
     RetryStep::Again
@@ -210,7 +209,6 @@ pub fn on_retryable(
 /// Splitting on exhaustion lets the caller retry smaller batches when the failure was caused by
 /// request size or broker capacity rather than by the network.
 pub fn on_transport_error(ctx: &SenderContext, delivery: &DeliveryContext<'_>, source: reqwest::Error, attempt: &mut u32) -> RetryStep {
-    let entity_count = delivery.entities.len();
     ctx.counters.metrics.record_failure();
     *attempt += 1;
     ctx.counters.metrics.retries.fetch_add(1, Ordering::Relaxed);
@@ -234,7 +232,6 @@ pub fn on_transport_error(ctx: &SenderContext, delivery: &DeliveryContext<'_>, s
     }
 
     if sleep_or_shutdown(backoff_delay(*attempt), ctx.runtime.shutdown) == BackoffSleep::ShutdownRequested {
-        ctx.counters.failed.fetch_add(entity_count, Ordering::Relaxed);
         return RetryStep::Settled(SendOutcome::Done);
     }
     RetryStep::Again

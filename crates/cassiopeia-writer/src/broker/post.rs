@@ -48,7 +48,6 @@ pub fn post_batch(ctx: &SenderContext, payload: &Bytes, entities: &[NgsiLdEntity
 
     loop {
         if ctx.runtime.shutdown.load(Ordering::Acquire) {
-            ctx.counters.failed.fetch_add(entity_count, Ordering::Relaxed);
             return SendOutcome::Done;
         }
 
