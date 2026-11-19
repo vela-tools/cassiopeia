@@ -18,12 +18,12 @@ use cassiopeia_collector::{
     sensorthings::{collector::SensorThingsCollector, cursor_cycle::CursorCycle, unread_check::UnreadCheck},
 };
 use cassiopeia_common::{
-    channel::{ChannelPolicy, ChannelReceiver, channel_with_telemetry},
+    channel::{ChannelPolicy, ChannelReceiver, channel},
     cycle_start::CycleStart,
     format::DataFormat,
     signal::Signal,
     stage::Stage,
-    telemetry::{channel_boundary::ChannelBoundary, run::RunTelemetry},
+    telemetry::run::RunTelemetry,
 };
 use cassiopeia_ir::payload::CollectedPayload;
 use cassiopeia_reporter::reporter::DiagnosticSink;
@@ -79,11 +79,9 @@ pub(crate) fn spawn_collector_thread(
     sink: &'static dyn DiagnosticSink,
     telemetry: Arc<RunTelemetry>,
 ) -> ChannelReceiver<Signal<CollectedPayload, CollectorError>> {
-    let (tx, rx) = channel_with_telemetry(
-        channel_policy,
-        Some(Arc::clone(&telemetry)),
-        Some(ChannelBoundary::between(Stage::Collector, Stage::Profiler)),
-    );
+    // The hop to the splitter stays inside the collector stage: the splitter's own channel is the
+    // boundary to the profiler, and it alone is reported as one.
+    let (tx, rx) = channel(channel_policy);
 
     spawn(move || {
         let stage = telemetry.start_stage(Stage::Collector);
@@ -113,4 +111,56 @@ pub(crate) fn spawn_collector_thread(
     });
 
     rx
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::stages::collector::spawn_collector_thread;
+    use cassiopeia_collector::{
+        collection_end::CollectionEnd,
+        collection_warnings::CollectionWarnings,
+        collector::Collector,
+        error::CollectorError,
+        scratch_files::ScratchFiles,
+    };
+    use cassiopeia_common::{
+        channel::{ChannelPolicy, ChannelSender},
+        signal::Signal,
+        telemetry::{channel_metrics::ChannelSnapshot, run::RunTelemetry},
+    };
+    use cassiopeia_ir::payload::CollectedPayload;
+    use cassiopeia_reporter::backend::noop::NoopReporter;
+    use pretty_assertions::assert_eq;
+    use std::{path::Path, sync::Arc};
+
+    /// A collector with no input, which ends at once having collected nothing.
+    struct EmptyCollector;
+
+    impl Collector for EmptyCollector {
+        fn collect(
+            self: Box<Self>,
+            _scratch: ScratchFiles,
+            _sender: ChannelSender<Signal<CollectedPayload, CollectorError>>,
+        ) -> Result<CollectionEnd, CollectorError> {
+            Ok(CollectionEnd::Collected(CollectionWarnings::default()))
+        }
+    }
+
+    static SINK: NoopReporter = NoopReporter::new();
+
+    #[test]
+    fn the_hop_from_the_collector_to_its_splitter_is_not_reported_as_a_channel() {
+        let telemetry = Arc::new(RunTelemetry::new());
+
+        let receiver = spawn_collector_thread(
+            Box::new(EmptyCollector),
+            ScratchFiles::new(Arc::from(Path::new("scratch")), 0),
+            ChannelPolicy::Unbounded,
+            &SINK,
+            Arc::clone(&telemetry),
+        );
+        drop(receiver);
+
+        assert_eq!(telemetry.snapshot().channels, Vec::<ChannelSnapshot>::new());
+    }
 }
