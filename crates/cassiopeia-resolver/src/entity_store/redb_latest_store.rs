@@ -5,9 +5,10 @@ use crate::{
         mapping_expiry::join,
         mapping_reads::MappingReads,
         redb_database::RedbDatabase,
-        redb_key::{distinct_id_count, for_each_id_chunk_in_source_order, ids_in_source_order, make_prefix, prefix_end},
+        redb_key::{distinct_id_count, make_prefix, prefix_end},
         redb_scope::{PendingScopes, SCOPES_TABLE, read_scope},
         redb_slot_value::{EncodedInputs, decode_slot, decoded, encode_slot, joined, slot_first, undecoded},
+        redb_source_order::{for_each_id_chunk_in_source_order, ids_in_source_order},
         retention::Retention,
         store::{AssembledFragments, EntityStore, FragmentWrite, StoredUnit},
     },
@@ -191,8 +192,8 @@ impl EntityStore for RedbLatestEntityStore {
     fn for_each_entity_id_chunk(&self, chunk_size: usize, callback: &mut dyn FnMut(Vec<Urn>) -> Result<()>) -> Result<()> {
         // Every slot leads with the position of its first record, so one scan over the slots gathers
         // every id with the earliest of its slots' positions, and a sort puts them in that order.
-        // Listing the ids takes this scan whatever their order, so ordering them costs the sort alone,
-        // where an index kept in source order would cost a write for every entity.
+        // Listing the ids takes this scan whatever their order, so storing a slot costs nothing more,
+        // where an index kept in source order would cost a write for every entity as it is stored.
         for_each_id_chunk_in_source_order(&self.db, DATA_TABLE, |_key, value| slot_first(value), chunk_size, callback)
     }
 

@@ -15,6 +15,7 @@ use pretty_assertions::assert_eq;
 use serde_json::{Value, json};
 use std::{
     fs,
+    iter,
     sync::{Arc, Mutex},
 };
 use temp_dir::TempDir;
@@ -106,11 +107,18 @@ fn a_run_of_two_inputs_writes_the_first_input_s_entities_before_the_second_s() {
 }
 
 #[test]
-fn a_broker_receives_the_entities_in_the_order_the_file_lists_them() {
+fn a_broker_receives_the_entities_in_requests_that_each_hold_the_next_entities_of_the_file_once() {
+    // Enough stations for several requests, their codes in an order other than that of their text.
+    let codes: Vec<String> = (0..1000_usize).map(|record| format!("S{}", record * 389 % 1000)).collect();
+    let stations = iter::once("code,name".to_owned())
+        .chain(codes.iter().map(|code| format!("{code},Station {code}")))
+        .collect::<Vec<_>>()
+        .join("\n");
+    let in_file_order: Vec<String> = codes.iter().map(|code| format!("urn:ngsi-ld:Station:{code}")).collect();
     let directory = TempDir::new().unwrap();
     let data = directory.path().join("stations.csv");
     let mapping = directory.path().join("station.json5");
-    fs::write(&data, STATIONS).unwrap();
+    fs::write(&data, stations).unwrap();
     fs::write(&mapping, STATION_BY_CODE).unwrap();
     let declared = format!(r#"{{ source: "{}", mapping: "{}" }}"#, data.display(), mapping.display());
 
@@ -125,6 +133,7 @@ fn a_broker_receives_the_entities_in_the_order_the_file_lists_them() {
                 kept.lock().unwrap().push(serde_json::from_slice(request.body().unwrap()).unwrap());
                 Vec::new()
             })
+            .expect_at_least(2)
             .create();
         let output = format!(r#"{{ target: "context-broker", url: "{}/" }}"#, broker.url());
         let setup = RunSetup {
@@ -136,12 +145,15 @@ fn a_broker_receives_the_entities_in_the_order_the_file_lists_them() {
         result.unwrap();
 
         upsert.assert();
-        let sent: Vec<Value> = bodies
+        // Several requests can be in flight at once, so they are put back in the order of their first
+        // entities in the file: each must then continue where the one before ended.
+        let mut requests: Vec<Vec<String>> = bodies
             .lock()
             .unwrap()
             .iter()
-            .flat_map(|body| body.as_array().cloned().unwrap_or_default())
+            .map(|body| listed_ids(body.as_array().unwrap()).into_iter().map(str::to_owned).collect())
             .collect();
-        assert_eq!(listed_ids(&sent), STATIONS_IN_SOURCE_ORDER, "{store:?}");
+        requests.sort_by_key(|request| in_file_order.iter().position(|id| Some(id) == request.first()));
+        assert_eq!(requests.concat(), in_file_order, "{store:?}");
     }
 }
