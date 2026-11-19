@@ -67,7 +67,7 @@ A member the schema requires at the entity's top level is the exception, because
 
 `warn` writes the entity and counts it once under `schema-nonconformant`, and the report lists the member once, against that entity.
 
-Every other rule applies to the entity of each record, so a value of the wrong type is reported for the record that carries it, and `warn` counts each such record. To tell the members a record lacks from its other violations, a series run reads every violation of a record that fails its schema, in every mode. A run that fails or is cancelled does not write the entity it was still folding, since records of that entity may not have arrived.
+Every other rule applies to the entity of each record, so a value of the wrong type is reported for the record that carries it, and the validation report lists each such record. `warn` counts the entity once under its reason code, however many of its records fail, so `schema-nonconformant`, `schema-absent` and `schema-unusable` count the entities the run writes, as in a current-state run. To tell the members a record lacks from its other violations, a series run reads every violation of a record that fails its schema, in every mode. A run that fails or is cancelled does not write the entity it was still folding, since records of that entity may not have arrived.
 
 In a current-state run, the entity of a record is the entity written, so every rule is checked on it.
 

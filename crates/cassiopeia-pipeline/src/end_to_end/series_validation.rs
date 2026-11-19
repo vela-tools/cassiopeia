@@ -269,6 +269,36 @@ fn a_record_s_wrong_value_is_one_warning_for_the_record_when_relaxed() {
     }
 }
 
+/// The bus snapshot with both Observations' results the text `high`.
+fn both_high_snapshot() -> String {
+    BUS_SNAPSHOT
+        .replace(r#""result":18.2"#, r#""result":"high""#)
+        .replace(r#""result":21.5"#, r#""result":"high""#)
+}
+
+#[test]
+fn the_wrong_values_of_several_records_of_one_entity_are_one_warning_for_the_entity_when_relaxed() {
+    let snapshot = both_high_snapshot();
+    let mapping = untransformed_mapping();
+    for store in STORES {
+        let folder = TempDir::new().unwrap();
+
+        let (result, outcome) = run(store, folder.path(), &snapshot, &mapping, r#", validation: { mode: "warn" }"#);
+        result.unwrap();
+
+        assert_eq!(entity_ids(&outcome), [BUS], "{store:?}");
+        assert_eq!(values(&entity(&outcome, BUS)["pm10"]), [&json!("high"), &json!("high")], "{store:?}");
+        let warned = outcome.coded(DiagnosticCode::Schema(SchemaCode::Nonconformant));
+        assert_eq!(warned.len(), 1, "{store:?}: {:?}", outcome.diagnostics);
+        assert_eq!(
+            warned[0].headline, "1 'AirQualityObserved' entities do not conform to their schema (first: urn:ngsi-ld:AirQualityObserved:bus-12)",
+            "{store:?}"
+        );
+        assert_eq!(warned[0].occurrences, 1, "{store:?}");
+        assert_eq!(outcome.warnings, 1, "{store:?}");
+    }
+}
+
 /// A latest snapshot of one station whose only Location is a text, so its record has no `location`.
 const TEXT_LOCATED_SNAPSHOT: &str = r#"{"sensorthingsSnapshot":1,"serviceRoot":"https://h.example/v1.1","version":"v1.1","read":"latest","collectedAt":"2026-11-16T09:00:00Z"}
 {"datastream":{"@iot.id":11,"name":"station-1 pm10","unitOfMeasurement":{"symbol":"ug/m3"},"Thing":{"@iot.id":1,"name":"Stationsplein","Locations":[{"@iot.id":101,"encodingType":"text/plain","location":"Stationsplein 1, 3rd floor, room 3.12"}]},"ObservedProperty":{"@iot.id":1,"name":"pm10"},"Observations":[{"@iot.id":1101,"phenomenonTime":"2026-11-16T08:00:00Z","result":18.2}]}}
