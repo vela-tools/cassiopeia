@@ -1,16 +1,17 @@
-use crate::{build_info::default_user_agent, cli::sensorthings::ReadingsArgs, error::Result, shutdown};
+use crate::{build_info::default_user_agent, cli::sensorthings::ReadingsArgs, error::Result};
 use cassiopeia_cli::sensorthings_readings::{ReadingsListing, list_readings};
 use cassiopeia_collector::downloader::Downloader;
 use cassiopeia_sensorthings::{
     service::SensorThingsService,
     settings::{multi_datastreams::MultiDatastreams, sensorthings_settings::SensorThingsSettings},
 };
+use std::sync::atomic::AtomicBool;
 
 /// Runs `sensorthings readings`: lists the readings the server `args` names offers, reading only the
 /// Datastreams and the `MultiDatastreams` `args` selects, every `MultiDatastream` when it selects
 /// none, with the run's `User-Agent` and the `--input-header` values on every request, and every
-/// other setting at a run's default.
-pub fn list_server_readings(args: &ReadingsArgs) -> Result<ReadingsListing> {
+/// other setting at a run's default. The read ends before its next request once `shutdown` is raised.
+pub fn list_server_readings(args: &ReadingsArgs, shutdown: &'static AtomicBool) -> Result<ReadingsListing> {
     // The service owns its root and its filters, while the parsed command line keeps its own.
     let multi_datastreams = args.multi_datastreams.clone().map_or(MultiDatastreams::Every, MultiDatastreams::Filtered);
     let settings = SensorThingsSettings::builder()
@@ -18,8 +19,8 @@ pub fn list_server_readings(args: &ReadingsArgs) -> Result<ReadingsListing> {
         .multi_datastreams(multi_datastreams)
         .build();
     let service = SensorThingsService::new(args.root.clone(), settings);
-    let downloader = Downloader::new(default_user_agent(), args.headers.request_headers(), shutdown::flag());
-    Ok(list_readings(&service, downloader, shutdown::flag())?)
+    let downloader = Downloader::new(default_user_agent(), args.headers.request_headers(), shutdown);
+    Ok(list_readings(&service, downloader, shutdown)?)
 }
 
 #[cfg(test)]
@@ -37,6 +38,10 @@ mod tests {
     use mockito::{Matcher, Mock, ServerGuard};
     use pretty_assertions::assert_eq;
     use serde_json::{Value, json};
+    use std::sync::atomic::AtomicBool;
+
+    /// A shutdown flag that is never raised, so every read runs to its end.
+    static RUNNING: AtomicBool = AtomicBool::new(false);
 
     /// The path and query of the metadata discovery request of a `sensorthings readings` without
     /// `--datastreams`.
@@ -105,7 +110,7 @@ mod tests {
         let root = serve_root(&mut server, &["Datastreams"]);
         let untouched = untouched_multi_datastreams(&mut server);
 
-        let listing = list_server_readings(&readings_args(&server, &[])).unwrap();
+        let listing = list_server_readings(&readings_args(&server, &[]), &RUNNING).unwrap();
 
         discovery.assert();
         root.assert();
@@ -139,7 +144,7 @@ mod tests {
         ];
         serve_root(&mut server, &["Datastreams"]);
 
-        let listing = list_server_readings(&readings_args(&server, &["--input-header", "Authorization: Bearer t"])).unwrap();
+        let listing = list_server_readings(&readings_args(&server, &["--input-header", "Authorization: Bearer t"]), &RUNNING).unwrap();
 
         pages.iter().for_each(mockito::Mock::assert);
         assert_eq!(listing.readings()[0].things_with_repeats(), 1);
@@ -158,7 +163,7 @@ mod tests {
             .create();
         serve_root(&mut server, &["Datastreams"]);
 
-        let listing = list_server_readings(&readings_args(&server, &["--datastreams", "startswith(name,'ILM_I68-')"])).unwrap();
+        let listing = list_server_readings(&readings_args(&server, &["--datastreams", "startswith(name,'ILM_I68-')"]), &RUNNING).unwrap();
 
         discovery.assert();
         assert_eq!(listing.readings().as_slice(), []);
@@ -192,7 +197,7 @@ mod tests {
                 .create(),
         ];
 
-        let listing = list_server_readings(&readings_args(&server, &["--multi-datastreams", "startswith(name,'ws-')"])).unwrap();
+        let listing = list_server_readings(&readings_args(&server, &["--multi-datastreams", "startswith(name,'ws-')"]), &RUNNING).unwrap();
 
         mocks.iter().for_each(Mock::assert);
         assert_eq!(
