@@ -1,4 +1,5 @@
-use crate::{error::GeometryError, geometry::NgsiLdGeometry, measure::signed_ring_area};
+use crate::{error::GeometryError, geometry::NgsiLdGeometry, planar::to_planar_line};
+use geo::{Winding, winding_order::WindingOrder};
 use geojson::{LineStringType, PolygonType, Position};
 
 /// Which role a linear ring plays inside a polygon.
@@ -78,15 +79,26 @@ pub fn close_rings(geometry: &mut NgsiLdGeometry) {
     }
 }
 
-/// Rewinds one ring to the direction its role requires, reversing it in place.
+/// The direction a ring winds in the longitude/latitude plane, or `None` for a ring that has none:
+/// one that is open, too short, carries a position too short to read, or encloses no area.
+///
+/// RFC 7946 clause 3.1.1 draws the line between two positions straight in longitude/latitude, so
+/// the area a ring bounds, and with it the direction clause 3.1.6's right-hand rule asks of it, is
+/// the one in that plane. A geodesic reading draws each edge along the ellipsoid instead, and for a
+/// ring spanning more than half the longitudes it bounds another area and reverses the direction.
+fn winding_order(ring: &[Position]) -> Option<WindingOrder> {
+    to_planar_line(ring).and_then(|line| line.winding_order())
+}
+
+/// Rewinds one ring to the direction its role requires, reversing it in place. A ring with no
+/// direction is left as it is.
 ///
 /// Reversing the positions rather than rebuilding the ring from a planar model is what keeps an
 /// altitude (RFC 7946 clause 3.1.1) attached to the position that carried it.
 pub fn rewind(ring: &mut LineStringType, role: RingRole) {
-    let area = signed_ring_area(ring);
-    let reversed = match role {
-        RingRole::Exterior => area < 0.0,
-        RingRole::Interior => area > 0.0,
+    let reversed = match (role, winding_order(ring)) {
+        (RingRole::Exterior, Some(WindingOrder::Clockwise)) | (RingRole::Interior, Some(WindingOrder::CounterClockwise)) => true,
+        (RingRole::Exterior, Some(WindingOrder::CounterClockwise) | None) | (RingRole::Interior, Some(WindingOrder::Clockwise) | None) => false,
     };
 
     if reversed {
@@ -196,6 +208,64 @@ mod tests {
         let mut expected = ring;
         expected.reverse();
         assert_eq!(geometry, NgsiLdGeometry::Polygon { coordinates: vec![expected] });
+    }
+
+    /// A band from 60 to 70 degrees north spanning 326 degrees of longitude, from 163°W eastwards to
+    /// 163°E, wound counterclockwise in the longitude/latitude plane.
+    fn wide_counterclockwise_ring() -> Vec<Position> {
+        vec![
+            Position::from([-163.0, 60.0]),
+            Position::from([163.0, 60.0]),
+            Position::from([163.0, 70.0]),
+            Position::from([-163.0, 70.0]),
+            Position::from([-163.0, 60.0]),
+        ]
+    }
+
+    #[test]
+    fn a_counterclockwise_exterior_ring_spanning_most_longitudes_keeps_its_winding() {
+        let mut geometry = NgsiLdGeometry::Polygon {
+            coordinates: vec![wide_counterclockwise_ring()],
+        };
+        normalise_winding(&mut geometry);
+
+        assert_eq!(
+            geometry,
+            NgsiLdGeometry::Polygon {
+                coordinates: vec![wide_counterclockwise_ring()],
+            }
+        );
+    }
+
+    #[test]
+    fn a_clockwise_exterior_ring_spanning_most_longitudes_is_rewound_counterclockwise() {
+        let mut clockwise = wide_counterclockwise_ring();
+        clockwise.reverse();
+        let mut geometry = NgsiLdGeometry::Polygon { coordinates: vec![clockwise] };
+        normalise_winding(&mut geometry);
+
+        assert_eq!(
+            geometry,
+            NgsiLdGeometry::Polygon {
+                coordinates: vec![wide_counterclockwise_ring()],
+            }
+        );
+    }
+
+    #[test]
+    fn a_ring_that_encloses_no_area_is_left_as_it_is() {
+        let flat = vec![
+            Position::from([0.0, 0.0]),
+            Position::from([1.0, 0.0]),
+            Position::from([2.0, 0.0]),
+            Position::from([0.0, 0.0]),
+        ];
+        let mut geometry = NgsiLdGeometry::Polygon {
+            coordinates: vec![flat.clone()],
+        };
+        normalise_winding(&mut geometry);
+
+        assert_eq!(geometry, NgsiLdGeometry::Polygon { coordinates: vec![flat] });
     }
 
     #[test]
