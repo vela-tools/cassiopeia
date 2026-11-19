@@ -234,8 +234,9 @@ impl FragmentResolver {
     /// (the private `prepare_fragments`, in [`coalesced_batch`](crate::coalesced_batch)), then flushes the relationship and
     /// entity stores once each. This turns an O(N) disk-backed run into O(batches) round-trips without
     /// changing single-fragment semantics. Stores that take concurrent writes take the concurrent
-    /// path instead ([`concurrent_batch`](crate::concurrent_batch)), which writes the fragments of
-    /// different entities in parallel and each entity's in the order of the batch.
+    /// path instead ([`concurrent_batch`](crate::concurrent_batch)), which writes every fragment of
+    /// the batch in parallel, in whatever order the threads finish them: a store whose outcome
+    /// depends on the order of an entity's records restores it from the positions the writes carry.
     ///
     /// The results hold one entry per fragment.
     #[must_use]
