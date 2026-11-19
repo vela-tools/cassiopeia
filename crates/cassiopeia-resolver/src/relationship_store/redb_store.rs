@@ -37,8 +37,7 @@ const RELATIONSHIPS_TABLE: TableDefinition<&[u8], &[u8]> = TableDefinition::new(
 /// a key. [`add_edges`](RelationshipStore::add_edges) and
 /// [`add_edge_batch`](RelationshipStore::add_edge_batch) commit a single
 /// `WriteTransaction`; [`take_all_relationships`](RelationshipStore::take_all_relationships)
-/// prefix-scans and removes in one write transaction (collecting keys first,
-/// since the range iterator borrows the table and rules out in-iter removal).
+/// extracts the parent's prefix range in one write transaction, removing each target as it is read.
 #[derive(Debug, Clone)]
 pub struct RedbRelationshipStore {
     db: Arc<Database>,
@@ -204,7 +203,6 @@ impl RelationshipStore for RedbRelationshipStore {
         let end = Self::prefix_end(&prefix);
 
         let mut result = StoredRelationships::default();
-        let mut keys_to_remove: Vec<Vec<u8>> = Vec::new();
 
         let mut write_txn = self.db.begin_write().map_err(|e| self.redb_err(e.into(), StoreAction::BeginTransaction))?;
         write_txn
@@ -214,22 +212,16 @@ impl RelationshipStore for RedbRelationshipStore {
             let mut table = write_txn
                 .open_table(RELATIONSHIPS_TABLE)
                 .map_err(|e| self.redb_err(e.into(), StoreAction::OpenTable))?;
-
-            {
-                let range = table
-                    .range(prefix.as_slice()..end.as_slice())
-                    .map_err(|e| self.redb_err(e.into(), StoreAction::Iterate))?;
-                for entry in range {
-                    let (key, value) = entry.map_err(|e| self.redb_err(e.into(), StoreAction::Iterate))?;
-                    let (property, child_urn) = Self::parse_value(value.value())?;
-                    join(&mut result, property, child_urn);
-                    keys_to_remove.push(key.value().to_vec());
-                }
+            let mut extracted = table
+                .extract_if(prefix.as_slice()..end.as_slice(), |_, _| true)
+                .map_err(|e| self.redb_err(e.into(), StoreAction::Remove))?;
+            for entry in &mut extracted {
+                let (_, value) = entry.map_err(|e| self.redb_err(e.into(), StoreAction::Remove))?;
+                let (property, child_urn) = Self::parse_value(value.value())?;
+                join(&mut result, property, child_urn);
             }
-
-            for key in &keys_to_remove {
-                table.remove(key.as_slice()).map_err(|e| self.redb_err(e.into(), StoreAction::Remove))?;
-            }
+            // Dropping the iterator would discard a failure to finalize the removals it yielded.
+            extracted.close().map_err(|e| self.redb_err(e.into(), StoreAction::Remove))?;
         }
         write_txn.commit().map_err(|e| self.redb_err(e.into(), StoreAction::CommitTransaction))?;
 

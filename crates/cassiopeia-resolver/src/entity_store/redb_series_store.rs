@@ -16,7 +16,7 @@ use crate::{
     store_write_strategy::StoreWriteStrategy,
 };
 use cassiopeia_ir::source_position::{SOURCE_POSITION_BYTES, SourcePosition};
-use redb::{Durability, ReadableDatabase, ReadableTableMetadata, TableDefinition};
+use redb::{Durability, ReadableDatabase, ReadableTable, ReadableTableMetadata, TableDefinition};
 use smallvec::smallvec;
 use std::num::NonZeroU64;
 use urn_rs::Urn;

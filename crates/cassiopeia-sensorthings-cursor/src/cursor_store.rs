@@ -237,7 +237,7 @@ mod tests {
     use cassiopeia_sensorthings::{cursor_name::CursorName, entity_id::EntityId, read_stream::ReadStream, service_root::ServiceRoot, stream_id::StreamId};
     use chrono::{DateTime, Utc};
     use pretty_assertions::assert_eq;
-    use redb::{Database, ReadableDatabase, TableDefinition};
+    use redb::{Database, ReadableDatabase, ReadableTable, TableDefinition};
     use std::{collections::BTreeMap, time::Duration};
     use tempfile::TempDir;
 

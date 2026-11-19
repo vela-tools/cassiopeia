@@ -34,7 +34,7 @@ cassiopeia-terminal-style.workspace = true
 bugreport = { version = "0.6.0", default-features = false, features = ["collector_operating_system", "format_markdown"] }
 clap = { version = "4.6.8", features = ["derive", "wrap_help"] }
 cron = "0.17.0"
-ctrlc = { version = "3.5.2", features = ["termination"] }
+ctrlc = { version = "3.5.3", features = ["termination"] }
 eccodes-sys = { version = "2.50.0", default-features = false, features = ["memfs"], optional = true }
 gdt-cpus = { version = "0.2606.1", default-features = false }
 human-panic = "2.0.8"

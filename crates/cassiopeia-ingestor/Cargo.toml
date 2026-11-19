@@ -45,7 +45,7 @@ strum = { version = "0.28.0", features = ["derive"] }
 temp-dir = "0.2.0"
 thiserror = "2.0.21"
 tracing = "0.1.44"
-zip = { version = "9.6.1", default-features = false, features = ["deflate"] }
+zip = { version = "9.7.3", default-features = false, features = ["deflate"] }
 zmij = "1.0.23"
 
 [features]
@@ -67,7 +67,7 @@ mediatype = "0.23.0"
 netcdf-writer = "0.13.0"
 pretty_assertions = "1.4.1"
 temp-dir = "0.2.0"
-zip = { version = "9.6.1", default-features = false, features = ["deflate"] }
+zip = { version = "9.7.3", default-features = false, features = ["deflate"] }
 
 [lints]
 workspace = true
