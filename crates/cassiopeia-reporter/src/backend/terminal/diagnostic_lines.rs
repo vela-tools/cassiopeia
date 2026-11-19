@@ -6,7 +6,7 @@
 
 use anstyle::Style;
 use cassiopeia_common::captured_body::{BodyCapture, CapturedBody};
-use cassiopeia_diagnostic::{context_field::ContextField, diagnostic::Diagnostic, severity::Severity, verbosity::Verbosity};
+use cassiopeia_diagnostic::{cause::Cause, context_field::ContextField, diagnostic::Diagnostic, severity::Severity, verbosity::Verbosity};
 use cassiopeia_terminal_style::{
     byte_size::human_size,
     connector::{DETAIL_INDENT, connector},
@@ -128,19 +128,21 @@ const fn explanation(field: &ContextField) -> Option<&str> {
     }
 }
 
-/// The concise form's detail lines: the root cause and the peer's explanation, capped so the default
-/// view can never grow past a headline plus two lines however much context a diagnostic carries.
+/// The concise form's detail lines: the outermost cause, the root cause beneath it, and the peer's
+/// explanation, capped so the default view can never grow past a headline plus two lines however much
+/// context a diagnostic carries.
+///
+/// The outermost cause usually names what failed, such as the URL a request went to, and only the
+/// root says why, such as a refused connection, so a chain deeper than one shows both ends.
 fn concise_details(diagnostic: &Diagnostic) -> Vec<String> {
+    let causes = diagnostic.causes();
+    let explanation = diagnostic.defining().iter().find_map(explanation);
     let mut details: Vec<String> = Vec::with_capacity(CONCISE_DETAIL_LINES);
-    if let Some(cause) = diagnostic.causes().first() {
-        details.push(cause.as_str().to_owned());
+    for line in causes.first().into_iter().chain(causes.last()).map(Cause::as_str).chain(explanation) {
+        if details.len() < CONCISE_DETAIL_LINES && !details.iter().any(|existing| existing == line) {
+            details.push(line.to_owned());
+        }
     }
-    if let Some(detail) = diagnostic.defining().iter().find_map(explanation)
-        && !details.iter().any(|existing| existing == detail)
-    {
-        details.push(detail.to_owned());
-    }
-    details.truncate(CONCISE_DETAIL_LINES);
     details
 }
 
@@ -221,6 +223,7 @@ mod tests {
             diagnostic_code::DiagnosticCode,
             ingest_code::IngestCode,
             mapping_code::MappingCode,
+            run_code::RunCode,
             schema_code::SchemaCode,
             transform_code::TransformCode,
         },
@@ -409,6 +412,49 @@ mod tests {
 
         assert!(headline.contains(ESCAPE));
         assert!(headline.ends_with("Broker rejected 100 entities"));
+    }
+
+    #[test]
+    fn the_concise_form_shows_the_outermost_and_the_root_cause_of_a_deeper_chain() {
+        let diagnostic = DiagnosticBuilder::new(
+            Severity::Warning,
+            DiagnosticCode::Run(RunCode::CycleRetrying),
+            "Attempt 1/3 failed; retrying in 5.0s",
+        )
+        .with_cause("HTTP request to 'https://example.org/v1.1/Things' failed")
+        .with_cause("error sending request")
+        .with_cause("connection reset by peer")
+        .build();
+
+        assert_eq!(
+            diagnostic_lines(&diagnostic, Verbosity::Concise, Rendering::Plain),
+            vec![
+                "! Attempt 1/3 failed; retrying in 5.0s".to_owned(),
+                "  \u{251c}\u{2500} HTTP request to 'https://example.org/v1.1/Things' failed".to_owned(),
+                "  \u{2570}\u{2500} connection reset by peer".to_owned(),
+            ]
+        );
+    }
+
+    #[test]
+    fn the_concise_form_shows_a_single_cause_once_beside_the_explanation() {
+        let diagnostic = DiagnosticBuilder::new(
+            Severity::Error,
+            DiagnosticCode::Broker(BrokerCode::BatchRejected),
+            "Broker rejected 100 entities",
+        )
+        .with_cause("the broker refused the batch")
+        .with_context(ContextField::Detail(Detail::new("bad date")))
+        .build();
+
+        assert_eq!(
+            diagnostic_lines(&diagnostic, Verbosity::Concise, Rendering::Plain),
+            vec![
+                "\u{d7} Broker rejected 100 entities".to_owned(),
+                "  \u{251c}\u{2500} the broker refused the batch".to_owned(),
+                "  \u{2570}\u{2500} bad date".to_owned(),
+            ]
+        );
     }
 
     #[test]
