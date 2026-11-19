@@ -1,0 +1,3 @@
+code,reading,read_time,status,status_time,name
+S2,21.5,2026-03-01T10:00:00Z,ok,2026-03-01T12:00:00Z,Second
+S2,22.5,2026-03-01T13:00:00Z,warm,2026-03-01T09:00:00Z,First

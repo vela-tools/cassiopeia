@@ -1,0 +1,17 @@
+// A mapping bound to a collection nested three arrays below the root writes one entity per
+// departure, and reads the stop and the line that enclose it as `monitors` and `lines`.
+{
+    version: "v4",
+    dataModel: "Departure",
+    identity: {
+        entityName: "{{ monitors.locationStop.properties.attributes.rbl }}-{{ lines.name }}-{{ departureTime.countdown }}",
+    },
+    attributes: {
+        line: {
+            source: "{{ lines.name }}",
+        },
+        countdown: {
+            source: "{{ departureTime.countdown }}",
+        },
+    },
+}

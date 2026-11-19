@@ -1,0 +1,19 @@
+[
+    {
+        "id": "A",
+        "street": "Main St",
+        "no": 7,
+        "code": "17"
+    },
+    {
+        "id": "B",
+        "street": "",
+        "no": 7,
+        "code": null
+    },
+    {
+        "id": "C",
+        "street": "",
+        "no": null
+    }
+]

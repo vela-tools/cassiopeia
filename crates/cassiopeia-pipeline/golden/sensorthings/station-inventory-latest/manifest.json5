@@ -1,0 +1,9 @@
+{
+    version: "v1",
+    inputs: [
+        {
+            source: "inventory.jsonl",
+            mapping: "../../../tests/fixtures/sensorthings/station-inventory.json5",
+        },
+    ],
+}

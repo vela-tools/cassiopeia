@@ -1,0 +1,38 @@
+// Two instances of one forecast, each observed at a time of its own: each instance comes from the
+// record where it was observed last.
+{
+    version: "v4",
+    dataModel: "WeatherForecast",
+    identity: {
+        entityName: "{{ code }}",
+    },
+    attributes: {
+        temperature: {
+            transformation: "float",
+            instances: [
+                {
+                    source: "{{ ecmwf }}",
+                    properties: {
+                        datasetId: {
+                            source: "urn:ngsi-ld:Dataset:ecmwf",
+                        },
+                        observedAt: {
+                            source: "{{ ecmwf_time }}",
+                        },
+                    },
+                },
+                {
+                    source: "{{ gfs }}",
+                    properties: {
+                        datasetId: {
+                            source: "urn:ngsi-ld:Dataset:gfs",
+                        },
+                        observedAt: {
+                            source: "{{ gfs_time }}",
+                        },
+                    },
+                },
+            ],
+        },
+    },
+}

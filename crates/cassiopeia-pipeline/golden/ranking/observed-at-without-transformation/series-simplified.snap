@@ -1,0 +1,34 @@
+---
+source: crates/cassiopeia-pipeline/src/end_to_end/golden/mod.rs
+input_file: crates/cassiopeia-pipeline/golden/ranking/observed-at-without-transformation/manifest.json5
+---
+[
+  {
+    "id": "urn:ngsi-ld:Sensor:S1",
+    "type": "Sensor",
+    "reading": [
+      20.5,
+      21.5,
+      22.5
+    ],
+    "status": [
+      "cold",
+      "warm",
+      "ok"
+    ],
+    "name": "First"
+  },
+  {
+    "id": "urn:ngsi-ld:Sensor:S2",
+    "type": "Sensor",
+    "reading": [
+      21.5,
+      22.5
+    ],
+    "status": [
+      "warm",
+      "ok"
+    ],
+    "name": "First"
+  }
+]

@@ -1,0 +1,29 @@
+---
+source: crates/cassiopeia-pipeline/src/end_to_end/golden/mod.rs
+input_file: crates/cassiopeia-pipeline/golden/sensorthings/station-last-reported-latest/manifest.json5
+---
+[
+  {
+    "id": "urn:ngsi-ld:Device:sta-localhost-eindhoven-centrum",
+    "type": "Device",
+    "name": "Eindhoven Centrum",
+    "dateLastValueReported": "2026-11-13T07:00:00Z"
+  },
+  {
+    "id": "urn:ngsi-ld:Device:sta-localhost-helmond-west",
+    "type": "Device",
+    "name": "Helmond West",
+    "dateLastValueReported": "2026-11-13T07:00:00Z"
+  },
+  {
+    "id": "urn:ngsi-ld:Device:sta-hexample-1",
+    "type": "Device",
+    "name": "Station 1",
+    "dateLastValueReported": "2026-11-12T10:00:00Z"
+  },
+  {
+    "id": "urn:ngsi-ld:Device:sta-hexample-2",
+    "type": "Device",
+    "name": "Station 2"
+  }
+]

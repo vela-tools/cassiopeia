@@ -1,0 +1,32 @@
+---
+source: crates/cassiopeia-pipeline/src/end_to_end/golden/mod.rs
+input_file: crates/cassiopeia-pipeline/golden/qualifiers/unit-code-filter/manifest.json5
+---
+[
+  {
+    "id": "urn:ngsi-ld:Sensor:Station-1",
+    "type": "Sensor",
+    "pm10": {
+      "value": 10.0,
+      "unitCode": "GQ"
+    }
+  },
+  {
+    "id": "urn:ngsi-ld:Sensor:Station-2",
+    "type": "Sensor",
+    "pm10": {
+      "value": 11.0,
+      "unitCode": "59"
+    }
+  },
+  {
+    "id": "urn:ngsi-ld:Sensor:Station-3",
+    "type": "Sensor",
+    "pm10": 12.0
+  },
+  {
+    "id": "urn:ngsi-ld:Sensor:Station-4",
+    "type": "Sensor",
+    "pm10": 13.0
+  }
+]

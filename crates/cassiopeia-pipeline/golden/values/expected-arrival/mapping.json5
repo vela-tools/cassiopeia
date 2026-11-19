@@ -1,0 +1,15 @@
+// An alert whose `expectedArrival` is read as a date and time, written with the `DateTime` value
+// type that reading implies.
+{
+    version: "v4",
+    dataModel: "Alert",
+    identity: {
+        entityName: "{{ id }}",
+    },
+    attributes: {
+        expectedArrival: {
+            source: "{{ due }}",
+            transformation: "datetime",
+        },
+    },
+}

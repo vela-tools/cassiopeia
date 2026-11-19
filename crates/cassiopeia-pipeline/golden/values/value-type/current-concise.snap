@@ -1,0 +1,26 @@
+---
+source: crates/cassiopeia-pipeline/src/end_to_end/golden/mod.rs
+input_file: crates/cassiopeia-pipeline/golden/values/value-type/manifest.json5
+---
+[
+  {
+    "id": "urn:ngsi-ld:Place:P1",
+    "type": "Place",
+    "address": {
+      "value": "Pariser Platz",
+      "valueType": "PostalAddress",
+      "formatted": {
+        "value": "Pariser Platz",
+        "valueType": "xsd:string"
+      }
+    },
+    "openedAt": {
+      "value": "2026-10-24T08:00:00Z",
+      "valueType": "ngsi-ld:DateTime"
+    },
+    "closedAt": {
+      "value": "2026-10-24T20:00:00Z",
+      "valueType": "DateTime"
+    }
+  }
+]

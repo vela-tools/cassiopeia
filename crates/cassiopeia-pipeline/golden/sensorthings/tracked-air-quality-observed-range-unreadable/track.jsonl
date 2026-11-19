@@ -1,0 +1,10 @@
+{"sensorthingsSnapshot":1,"serviceRoot":"https://h.example/v1.1","version":"v1.1","read":"range","collectedAt":"2026-11-16T09:00:00Z"}
+{"datastream":{"@iot.id":7,"name":"bus-12 pm10","description":"pm10 mass concentration on bus line 12","observationType":"http://www.opengis.net/def/observationType/OGC-OM/2.0/OM_Measurement","unitOfMeasurement":{"name":"microgram per cubic metre","symbol":"µg/m³","definition":"http://unitsofmeasure.org/ucum.html#para-30"},"Thing":{"@iot.id":12,"name":"Bus 12","description":"Air quality sensor on a bus of line 12","Locations":[{"@iot.id":103,"name":"Fellenoord","encodingType":"application/geo+json","location":{"type":"Point","coordinates":[5.487,51.4381]}}]},"ObservedProperty":{"@iot.id":1,"name":"pm10","definition":"https://www.eea.europa.eu/help/glossary/eea-glossary/pm10","description":"Particulate matter up to 10 micrometres"}}}
+{"observation":{"@iot.id":701,"phenomenonTime":"2026-11-16T08:00:00Z","result":18.2},"datastream":7}
+{"observation":{"@iot.id":702,"phenomenonTime":"2026-11-16T08:10:00Z","result":21.5},"datastream":7}
+{"observation":{"@iot.id":703,"phenomenonTime":"2026-11-16T08:20:00Z","result":24.9},"datastream":7}
+{"historicalLocation":{"@iot.id":31,"time":"2026-11-16T07:58:00Z","Locations":[{"@iot.id":101,"name":"Stationsplein","encodingType":"application/geo+json","location":{"type":"Point","coordinates":[5.4797,51.4433]}}]},"thing":12}
+{"historicalLocation":{"@iot.id":32,"time":"2026-11-16T08:08:00Z","Locations":[{"@iot.id":102,"name":"Kennedylaan","encodingType":"application/geo+json","location":{"type":"Point","coordinates":[5.4812,51.4402]}}]},"thing":12}
+{"historicalLocation":{"@iot.id":33,"time":"2026-11-16T08:18:00Z","Locations":[{"@iot.id":103,"name":"Fellenoord","encodingType":"application/geo+json","location":{"type":"Point","coordinates":[5.487,51.4381]}}]},"thing":12}
+{"historicalLocation":{"@iot.id":34,"time":"2026-11-16","Locations":[]},"thing":12}
+{"historicalLocation":{"@iot.id":35,"time":"2026-11-16T08:28:00Z","Locations":[{"@iot.id":104,"encodingType":"text/plain","location":"Depot"}]},"thing":12}

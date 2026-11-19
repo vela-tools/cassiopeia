@@ -1,0 +1,24 @@
+---
+source: crates/cassiopeia-pipeline/src/end_to_end/golden/mod.rs
+input_file: crates/cassiopeia-pipeline/golden/merging/constant-identity-observed-at/manifest.json5
+---
+[
+  {
+    "id": "urn:ngsi-ld:GoldPriceObserved:gold",
+    "type": "GoldPriceObserved",
+    "price": [
+      {
+        "value": "1900.5",
+        "observedAt": "2026-01-01T00:00:00Z"
+      },
+      {
+        "value": "1950.25",
+        "observedAt": "2026-02-01T00:00:00Z"
+      },
+      {
+        "value": "2010",
+        "observedAt": "2026-03-01T00:00:00Z"
+      }
+    ]
+  }
+]

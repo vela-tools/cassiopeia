@@ -1,0 +1,2 @@
+{"sensorthingsSnapshot":1,"serviceRoot":"https://h.example/v1.1","version":"v1.1","read":"latest","collectedAt":"2026-11-16T09:00:00Z"}
+{"datastream":{"@iot.id":11,"name":"station-1 pm10","unitOfMeasurement":{"symbol":"ug/m3"},"Thing":{"@iot.id":1,"name":"Stationsplein","Locations":[{"@iot.id":101,"encodingType":"text/plain","location":"Stationsplein 1, 3rd floor, room 3.12"}]},"ObservedProperty":{"@iot.id":1,"name":"pm10"},"Observations":[{"@iot.id":1101,"phenomenonTime":"2026-11-16T08:00:00Z","result":18.2}]}}

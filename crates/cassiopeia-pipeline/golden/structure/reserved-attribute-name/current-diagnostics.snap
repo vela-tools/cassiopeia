@@ -1,0 +1,10 @@
+---
+source: crates/cassiopeia-pipeline/src/end_to_end/golden/mod.rs
+input_file: crates/cassiopeia-pipeline/golden/structure/reserved-attribute-name/manifest.json5
+---
+{
+  "failure": [
+    "Attribute `id` takes a name NGSI-LD reserves: every entity carries a member named `id` (ETSI GS CIM 009 v1.9.1 clause 4.5.1), so rename the attribute"
+  ],
+  "diagnostics": []
+}

@@ -1,0 +1,18 @@
+[
+    {
+        "id": "square",
+        "surveyed": {
+            "type": "Point",
+            "coordinates": [1.0, 1.0]
+        },
+        "estimated": {
+            "type": "GeometryCollection",
+            "geometries": [
+                {
+                    "type": "Point",
+                    "coordinates": [1.0, 2.0]
+                }
+            ]
+        }
+    }
+]

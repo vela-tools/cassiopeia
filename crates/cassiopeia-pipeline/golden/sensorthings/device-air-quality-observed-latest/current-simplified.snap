@@ -1,0 +1,77 @@
+---
+source: crates/cassiopeia-pipeline/src/end_to_end/golden/mod.rs
+input_file: crates/cassiopeia-pipeline/golden/sensorthings/device-air-quality-observed-latest/manifest.json5
+---
+[
+  {
+    "id": "urn:ngsi-ld:AirQualityObserved:sta-hexample-1",
+    "type": "AirQualityObserved",
+    "name": "Stationsplein",
+    "location": {
+      "type": "Point",
+      "coordinates": [
+        5.4797,
+        51.4433
+      ]
+    },
+    "dateObserved": "2026-11-13T07:00:00Z",
+    "pm10": 18.2,
+    "no2": 24.5,
+    "refDevice": "urn:ngsi-ld:Device:sta-hexample-sensor-7"
+  },
+  {
+    "id": "urn:ngsi-ld:AirQualityObserved:sta-hexample-2",
+    "type": "AirQualityObserved",
+    "name": "Kanaaldijk",
+    "location": {
+      "type": "Point",
+      "coordinates": [
+        5.64,
+        51.475
+      ]
+    },
+    "dateObserved": "2026-11-13T07:00:00Z",
+    "pm10": 14.1,
+    "refDevice": "urn:ngsi-ld:Device:sta-hexample-sensor-8"
+  },
+  {
+    "id": "urn:ngsi-ld:AirQualityObserved:sta-hexample-3",
+    "type": "AirQualityObserved",
+    "name": "Markt",
+    "location": {
+      "type": "Point",
+      "coordinates": [
+        5.4776,
+        51.4381
+      ]
+    },
+    "dateObserved": "2026-11-13T07:00:00Z",
+    "no2": 31.0
+  },
+  {
+    "id": "urn:ngsi-ld:AirQualityObserved:sta-hexample-4",
+    "type": "AirQualityObserved",
+    "name": "Haven",
+    "location": {
+      "type": "Point",
+      "coordinates": [
+        5.4655,
+        51.4512
+      ]
+    },
+    "dateObserved": "2026-11-13T07:00:00Z",
+    "pm10": 12.7
+  },
+  {
+    "id": "urn:ngsi-ld:Device:sta-hexample-sensor-7",
+    "type": "Device",
+    "name": "PM-200",
+    "description": "Optical particulate matter sensor"
+  },
+  {
+    "id": "urn:ngsi-ld:Device:sta-hexample-sensor-8",
+    "type": "Device",
+    "name": "AQ-Multi",
+    "description": "Multi-pollutant air quality monitor"
+  }
+]

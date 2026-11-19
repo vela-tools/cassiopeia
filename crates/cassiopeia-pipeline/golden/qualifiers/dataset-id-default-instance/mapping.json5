@@ -1,0 +1,29 @@
+// A `datasetId` read from each row: an absolute URI is kept, a relative reference drops the value
+// with a warning, and `@none` or an empty field is the default instance. A literal `@none` too.
+{
+    version: "v4",
+    dataModel: "WeatherForecast",
+    identity: {
+        entityName: "{{ code }}",
+    },
+    attributes: {
+        forecast: {
+            source: "{{ forecast }}",
+            transformation: "float",
+            properties: {
+                datasetId: {
+                    source: "{{ dataset }}",
+                },
+            },
+        },
+        humidity: {
+            source: "{{ humidity }}",
+            transformation: "float",
+            properties: {
+                datasetId: {
+                    source: "@none",
+                },
+            },
+        },
+    },
+}

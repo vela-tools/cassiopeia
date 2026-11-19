@@ -1,0 +1,20 @@
+// A literal `entityName` beside an `observedAt` read without a transformation: every record is one
+// observation of the same entity, so they merge without a warning; the current state keeps the
+// latest and the series keeps each.
+{
+    version: "v4",
+    dataModel: "GoldPriceObserved",
+    identity: {
+        entityName: "gold",
+    },
+    attributes: {
+        price: {
+            source: "{{ price }}",
+            properties: {
+                observedAt: {
+                    source: "{{ date }}",
+                },
+            },
+        },
+    },
+}

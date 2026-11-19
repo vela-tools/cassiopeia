@@ -1,0 +1,20 @@
+// A VocabProperty writes its IRI normalized, and a Property read with the `urn` transformation
+// writes a normalized URN. A value that is not an IRI, or not a URN, drops its attribute with a
+// warning and the entity is still written.
+{
+    version: "v4",
+    dataModel: "Building",
+    identity: {
+        entityName: "{{ id }}",
+    },
+    attributes: {
+        level: {
+            type: "VocabProperty",
+            source: "{{ level }}",
+        },
+        reference: {
+            source: "{{ reference }}",
+            transformation: "urn",
+        },
+    },
+}

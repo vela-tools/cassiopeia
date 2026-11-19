@@ -1,0 +1,9 @@
+{
+    version: "v1",
+    inputs: [
+        {
+            source: "bus.jsonl",
+            mapping: "mapping.json5",
+        },
+    ],
+}

@@ -1,0 +1,15 @@
+[
+    {
+        "id": "vocab",
+        "level": "HTTPS://Example.org/x"
+    },
+    {
+        "id": "urn",
+        "reference": "URN:NGSI-LD:Building:B-12"
+    },
+    {
+        "id": "unparseable",
+        "level": "not an iri",
+        "reference": "B-12"
+    }
+]

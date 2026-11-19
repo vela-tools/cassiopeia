@@ -1,0 +1,9 @@
+{
+    version: "v1",
+    inputs: [
+        {
+            source: "../../../tests/fixtures/sensorthings/wind-v1.1-range.jsonl",
+            mapping: "../../../tests/fixtures/sensorthings/wind-air-quality-observed.json5",
+        },
+    ],
+}

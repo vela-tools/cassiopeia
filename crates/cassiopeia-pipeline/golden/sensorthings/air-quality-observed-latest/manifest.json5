@@ -1,0 +1,17 @@
+{
+    version: "v1",
+    inputs: [
+        {
+            source: "../../../tests/fixtures/sensorthings/rivm-v1.0-latest.jsonl",
+            mapping: "../../../tests/fixtures/sensorthings/air-quality-observed.json5",
+        },
+        {
+            source: "../../../tests/fixtures/sensorthings/frost-v1.1-latest.jsonl",
+            mapping: "../../../tests/fixtures/sensorthings/air-quality-observed.json5",
+        },
+        {
+            source: "text-located.jsonl",
+            mapping: "../../../tests/fixtures/sensorthings/air-quality-observed.json5",
+        },
+    ],
+}

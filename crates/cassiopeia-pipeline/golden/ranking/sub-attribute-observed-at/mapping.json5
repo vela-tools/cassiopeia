@@ -1,0 +1,25 @@
+// A reading whose only `observedAt` qualifies its accuracy, a sub-attribute: it still ranks the
+// records of one sensor by the time they were observed.
+{
+    version: "v4",
+    dataModel: "Sensor",
+    identity: {
+        entityName: "{{ code }}",
+    },
+    attributes: {
+        reading: {
+            source: "{{ reading }}",
+            transformation: "float",
+            properties: {
+                accuracy: {
+                    source: "{{ accuracy }}",
+                    properties: {
+                        observedAt: {
+                            source: "{{ time }}",
+                        },
+                    },
+                },
+            },
+        },
+    },
+}

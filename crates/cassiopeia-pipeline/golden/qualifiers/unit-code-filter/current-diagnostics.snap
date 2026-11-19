@@ -1,0 +1,18 @@
+---
+source: crates/cassiopeia-pipeline/src/end_to_end/golden/mod.rs
+input_file: crates/cassiopeia-pipeline/golden/qualifiers/unit-code-filter/manifest.json5
+---
+{
+  "diagnostics": [
+    {
+      "code": "transform-unit-code-unknown",
+      "occurrences": 2,
+      "message": [
+        "! Attribute `pm10` is emitted without `unitCode`: `bogus` is not a UN/CEFACT Recommendation 20 code",
+        "  ├─ caused by   translate a unit symbol, name, UCUM code or QUDT unit IRI into its code with `| cefact_unit`",
+        "  ├─ attribute   pm10",
+        "  ╰─ unit code   bogus"
+      ]
+    }
+  ]
+}

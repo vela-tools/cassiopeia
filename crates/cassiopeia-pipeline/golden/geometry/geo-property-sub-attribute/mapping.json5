@@ -1,0 +1,21 @@
+// A GeoProperty sub-attribute publishes its ring rewound to the right-hand rule when no winding
+// policy is set. A null or blank value leaves it out silently; a geometry collection, a value that
+// is no geometry, or a position outside WGS 84 drops it with a warning and the parent stays.
+{
+    version: "v4",
+    dataModel: "Zone",
+    identity: {
+        entityName: "{{ id }}",
+    },
+    attributes: {
+        name: {
+            source: "{{ id }}",
+            properties: {
+                footprint: {
+                    type: "GeoProperty",
+                    source: "{{ geometry }}",
+                },
+            },
+        },
+    },
+}

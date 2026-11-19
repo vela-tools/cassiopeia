@@ -1,0 +1,112 @@
+[
+    {
+        "id": "cell",
+        "geometry": {
+            "type": "Point",
+            "coordinates": [
+                14.5,
+                46.05
+            ]
+        },
+        "temperature": 20.5
+    },
+    {
+        "id": "cell",
+        "geometry": {
+            "type": "Point",
+            "coordinates": [
+                14.5,
+                46.05
+            ]
+        },
+        "wind": 3.5
+    },
+    {
+        "id": "slice",
+        "level_type": "height_above_ground",
+        "level": 2,
+        "temperature": 280.1
+    },
+    {
+        "id": "slice",
+        "level_type": "height_above_ground",
+        "level": 10,
+        "wind": 3.5
+    },
+    {
+        "id": "shop",
+        "geometry": {
+            "type": "Point",
+            "coordinates": [
+                -73.98,
+                40.78
+            ]
+        }
+    },
+    {
+        "id": "shop",
+        "geometry": {
+            "type": "Point",
+            "coordinates": [
+                -74.0,
+                40.71
+            ]
+        }
+    },
+    {
+        "id": "collection",
+        "geometry": {
+            "type": "GeometryCollection",
+            "geometries": [
+                {
+                    "type": "Point",
+                    "coordinates": [
+                        1.0,
+                        2.0
+                    ]
+                }
+            ]
+        },
+        "temperature": 20.5
+    },
+    {
+        "id": "projected",
+        "geometry": {
+            "type": "Point",
+            "coordinates": [
+                2600.5,
+                341870.2
+            ]
+        },
+        "temperature": 20.5
+    },
+    {
+        "id": "swapped",
+        "geometry": {
+            "type": "LineString",
+            "coordinates": [
+                [
+                    16.37,
+                    48.2
+                ],
+                [
+                    16.37,
+                    91.0
+                ]
+            ]
+        },
+        "temperature": 21.0
+    },
+    {
+        "id": "here",
+        "geometry": {
+            "type": "Point",
+            "coordinates": [
+                16.37,
+                48.2,
+                9000.0
+            ]
+        },
+        "temperature": 19.0
+    }
+]

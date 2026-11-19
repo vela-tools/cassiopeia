@@ -1,0 +1,24 @@
+---
+source: crates/cassiopeia-pipeline/src/end_to_end/golden/mod.rs
+input_file: crates/cassiopeia-pipeline/golden/values/json-property-from-mappings/manifest.json5
+---
+{
+  "diagnostics": [
+    {
+      "code": "extractor-null-dropped",
+      "occurrences": 1,
+      "message": [
+        "! Attribute `params` was written without its null object members, which NGSI-LD does not allow",
+        "  ╰─ attribute   params"
+      ]
+    },
+    {
+      "code": "extractor-value-only-null",
+      "occurrences": 1,
+      "message": [
+        "! Attribute `params` dropped: `{\"maybe\":null}` is not a value holding something other than null",
+        "  ╰─ attribute   params"
+      ]
+    }
+  ]
+}

@@ -1,0 +1,32 @@
+// A GeoProperty with several instances publishes one instance per `datasetId`. An instance whose
+// geometry is refused, here a GeometryCollection, is dropped with a warning and the others stay.
+{
+    version: "v4",
+    dataModel: "Zone",
+    identity: {
+        entityName: "{{ id }}",
+    },
+    attributes: {
+        location: {
+            type: "GeoProperty",
+            instances: [
+                {
+                    source: "{{ surveyed }}",
+                    properties: {
+                        datasetId: {
+                            source: "urn:ngsi-ld:Dataset:surveyed",
+                        },
+                    },
+                },
+                {
+                    source: "{{ estimated }}",
+                    properties: {
+                        datasetId: {
+                            source: "urn:ngsi-ld:Dataset:estimated",
+                        },
+                    },
+                },
+            ],
+        },
+    },
+}

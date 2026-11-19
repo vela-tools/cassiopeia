@@ -1,0 +1,51 @@
+---
+source: crates/cassiopeia-pipeline/src/end_to_end/golden/mod.rs
+input_file: crates/cassiopeia-pipeline/golden/sensorthings/guide-range/manifest.json5
+---
+[
+  {
+    "id": "urn:ngsi-ld:AirQualityObserved:bus-12",
+    "type": "AirQualityObserved",
+    "dateObserved": {
+      "type": "Property",
+      "value": "2026-11-16T08:00:00Z",
+      "valueType": "DateTime"
+    },
+    "pm10": [
+      {
+        "type": "Property",
+        "value": 18.2,
+        "observedAt": "2026-11-16T08:00:00Z"
+      },
+      {
+        "type": "Property",
+        "value": 21.5,
+        "observedAt": "2026-11-16T08:10:00Z"
+      }
+    ],
+    "location": [
+      {
+        "type": "GeoProperty",
+        "value": {
+          "type": "Point",
+          "coordinates": [
+            5.4797,
+            51.4433
+          ]
+        },
+        "observedAt": "2026-11-16T07:58:00Z"
+      },
+      {
+        "type": "GeoProperty",
+        "value": {
+          "type": "Point",
+          "coordinates": [
+            5.4812,
+            51.4402
+          ]
+        },
+        "observedAt": "2026-11-16T08:08:00Z"
+      }
+    ]
+  }
+]

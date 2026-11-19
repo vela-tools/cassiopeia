@@ -1,0 +1,34 @@
+// Reads a reading without a transformation, so its value stays the text the server served and not
+// a number.
+{
+    version: "v4",
+    dataModel: "dataModel.Environment/AirQualityObserved",
+    identity: {
+        entityName: "bus-{{ thing.id }}",
+    },
+    attributes: {
+        location: {
+            type: "GeoProperty",
+            source: "{{ historicalLocation.location }}",
+            properties: {
+                observedAt: {
+                    source: "{{ historicalLocation.time }}",
+                    transformation: "datetime",
+                },
+            },
+        },
+        dateObserved: {
+            source: "{{ readings.pm10.time }}",
+            transformation: "datetime",
+        },
+        pm10: {
+            source: "{{ readings.pm10.result }}",
+            properties: {
+                observedAt: {
+                    source: "{{ readings.pm10.time }}",
+                    transformation: "datetime",
+                },
+            },
+        },
+    },
+}

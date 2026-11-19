@@ -1,0 +1,24 @@
+---
+source: crates/cassiopeia-pipeline/src/end_to_end/golden/mod.rs
+input_file: crates/cassiopeia-pipeline/golden/collections/nested-collection/manifest.json5
+---
+[
+  {
+    "id": "urn:ngsi-ld:Departure:4116-U1-5",
+    "type": "Departure",
+    "line": "U1",
+    "countdown": "5"
+  },
+  {
+    "id": "urn:ngsi-ld:Departure:4116-U1-9",
+    "type": "Departure",
+    "line": "U1",
+    "countdown": "9"
+  },
+  {
+    "id": "urn:ngsi-ld:Departure:4116-U4-2",
+    "type": "Departure",
+    "line": "U4",
+    "countdown": "2"
+  }
+]

@@ -1,0 +1,74 @@
+---
+source: crates/cassiopeia-pipeline/src/end_to_end/golden/mod.rs
+input_file: crates/cassiopeia-pipeline/golden/sensorthings/addressed-air-quality-observed-latest/manifest.json5
+---
+[
+  {
+    "id": "urn:ngsi-ld:AirQualityObserved:sta-hexample-1",
+    "type": "AirQualityObserved",
+    "name": {
+      "type": "Property",
+      "value": "Stationsplein"
+    },
+    "location": {
+      "type": "GeoProperty",
+      "value": {
+        "type": "Point",
+        "coordinates": [
+          5.4797,
+          51.4433
+        ]
+      }
+    },
+    "address": {
+      "type": "Property",
+      "value": {
+        "streetAddress": "Stationsplein 1, Eindhoven"
+      }
+    },
+    "dateObserved": {
+      "type": "Property",
+      "value": "2026-11-16T07:00:00Z",
+      "valueType": "DateTime"
+    },
+    "pm10": {
+      "type": "Property",
+      "value": 18.2,
+      "observedAt": "2026-11-16T07:00:00Z"
+    }
+  },
+  {
+    "id": "urn:ngsi-ld:AirQualityObserved:sta-hexample-2",
+    "type": "AirQualityObserved",
+    "name": {
+      "type": "Property",
+      "value": "Kanaaldijk"
+    },
+    "location": {
+      "type": "GeoProperty",
+      "value": {
+        "type": "Point",
+        "coordinates": [
+          5.64,
+          51.475
+        ]
+      }
+    },
+    "address": {
+      "type": "Property",
+      "value": {
+        "streetAddress": "Kanaaldijk 5, Helmond"
+      }
+    },
+    "dateObserved": {
+      "type": "Property",
+      "value": "2026-11-16T07:00:00Z",
+      "valueType": "DateTime"
+    },
+    "pm10": {
+      "type": "Property",
+      "value": 14.1,
+      "observedAt": "2026-11-16T07:00:00Z"
+    }
+  }
+]

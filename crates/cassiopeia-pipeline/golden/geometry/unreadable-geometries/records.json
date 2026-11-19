@@ -1,0 +1,29 @@
+[
+    {
+        "id": "unreadable",
+        "t": 20,
+        "gt": "not geojson",
+        "go": {
+            "type": "Point"
+        },
+        "gn": 42
+    },
+    {
+        "id": "missing",
+        "t": 20
+    },
+    {
+        "id": "null",
+        "t": 20,
+        "gt": null,
+        "go": null,
+        "gn": null
+    },
+    {
+        "id": "blank",
+        "t": 20,
+        "gt": "",
+        "go": "  ",
+        "gn": ""
+    }
+]

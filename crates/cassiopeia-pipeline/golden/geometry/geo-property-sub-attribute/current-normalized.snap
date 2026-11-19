@@ -1,0 +1,100 @@
+---
+source: crates/cassiopeia-pipeline/src/end_to_end/golden/mod.rs
+input_file: crates/cassiopeia-pipeline/golden/geometry/geo-property-sub-attribute/manifest.json5
+---
+[
+  {
+    "id": "urn:ngsi-ld:Zone:square-rewound",
+    "type": "Zone",
+    "name": {
+      "type": "Property",
+      "value": "square-rewound",
+      "footprint": {
+        "type": "GeoProperty",
+        "value": {
+          "type": "Polygon",
+          "coordinates": [
+            [
+              [
+                0.0,
+                0.0
+              ],
+              [
+                2.0,
+                0.0
+              ],
+              [
+                2.0,
+                2.0
+              ],
+              [
+                0.0,
+                2.0
+              ],
+              [
+                0.0,
+                0.0
+              ]
+            ]
+          ]
+        }
+      }
+    }
+  },
+  {
+    "id": "urn:ngsi-ld:Zone:square-collection",
+    "type": "Zone",
+    "name": {
+      "type": "Property",
+      "value": "square-collection"
+    }
+  },
+  {
+    "id": "urn:ngsi-ld:Zone:square-blank",
+    "type": "Zone",
+    "name": {
+      "type": "Property",
+      "value": "square-blank"
+    }
+  },
+  {
+    "id": "urn:ngsi-ld:Zone:square-null",
+    "type": "Zone",
+    "name": {
+      "type": "Property",
+      "value": "square-null"
+    }
+  },
+  {
+    "id": "urn:ngsi-ld:Zone:square-text",
+    "type": "Zone",
+    "name": {
+      "type": "Property",
+      "value": "square-text"
+    }
+  },
+  {
+    "id": "urn:ngsi-ld:Zone:square-incomplete-point",
+    "type": "Zone",
+    "name": {
+      "type": "Property",
+      "value": "square-incomplete-point"
+    }
+  },
+  {
+    "id": "urn:ngsi-ld:Zone:square-number",
+    "type": "Zone",
+    "name": {
+      "type": "Property",
+      "value": "square-number"
+    }
+  },
+  {
+    "id": "urn:ngsi-ld:Zone:square-out-of-range",
+    "type": "Zone",
+    "name": {
+      "type": "Property",
+      "value": "square-out-of-range"
+    }
+  }
+]

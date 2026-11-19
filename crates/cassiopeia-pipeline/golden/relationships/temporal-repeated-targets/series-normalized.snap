@@ -1,0 +1,47 @@
+---
+source: crates/cassiopeia-pipeline/src/end_to_end/golden/mod.rs
+input_file: crates/cassiopeia-pipeline/golden/relationships/temporal-repeated-targets/manifest.json5
+---
+[
+  {
+    "id": "urn:ngsi-ld:Stop:S1",
+    "type": "Stop",
+    "occupancy": [
+      {
+        "type": "Property",
+        "value": 4,
+        "observedAt": "2026-03-01T10:00:00Z"
+      },
+      {
+        "type": "Property",
+        "value": 5,
+        "observedAt": "2026-03-01T11:00:00Z"
+      },
+      {
+        "type": "Property",
+        "value": 6,
+        "observedAt": "2026-03-01T12:00:00Z"
+      },
+      {
+        "type": "Property",
+        "value": 7,
+        "observedAt": "2026-03-01T13:00:00Z"
+      }
+    ],
+    "servedBy": {
+      "type": "ListRelationship",
+      "objectList": [
+        {
+          "object": "urn:ngsi-ld:Line:U2"
+        },
+        {
+          "object": "urn:ngsi-ld:Line:U1"
+        },
+        {
+          "object": "urn:ngsi-ld:Line:U3"
+        }
+      ],
+      "objectType": "Line"
+    }
+  }
+]

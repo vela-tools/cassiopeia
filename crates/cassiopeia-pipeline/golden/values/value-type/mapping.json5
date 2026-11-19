@@ -1,0 +1,31 @@
+// A declared `valueType` reaches the written attribute as declared, on an attribute and on its
+// sub-attribute, and replaces the `DateTime` a `datetime` transformation implies; an attribute read
+// as a date and time without one carries that `DateTime`.
+{
+    version: "v4",
+    dataModel: "Place",
+    identity: {
+        entityName: "{{ id }}",
+    },
+    attributes: {
+        address: {
+            source: "{{ address }}",
+            valueType: "PostalAddress",
+            properties: {
+                formatted: {
+                    source: "{{ address }}",
+                    valueType: "xsd:string",
+                },
+            },
+        },
+        openedAt: {
+            source: "{{ opened }}",
+            transformation: "datetime",
+            valueType: "ngsi-ld:DateTime",
+        },
+        closedAt: {
+            source: "{{ closed }}",
+            transformation: "datetime",
+        },
+    },
+}

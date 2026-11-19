@@ -1,0 +1,50 @@
+---
+source: crates/cassiopeia-pipeline/src/end_to_end/golden/mod.rs
+input_file: crates/cassiopeia-pipeline/golden/sensorthings/station-inventory-latest-things-only/manifest.json5
+---
+[
+  {
+    "id": "urn:ngsi-ld:Device:sta-127001-1",
+    "type": "Device",
+    "name": {
+      "type": "Property",
+      "value": "Stationsplein"
+    },
+    "description": {
+      "type": "Property",
+      "value": "Air quality station Stationsplein"
+    },
+    "location": {
+      "type": "GeoProperty",
+      "value": {
+        "type": "Point",
+        "coordinates": [
+          5.4797,
+          51.4433
+        ]
+      }
+    }
+  },
+  {
+    "id": "urn:ngsi-ld:Device:sta-127001-2",
+    "type": "Device",
+    "name": {
+      "type": "Property",
+      "value": "Kennedylaan"
+    },
+    "description": {
+      "type": "Property",
+      "value": "Air quality station Kennedylaan"
+    },
+    "location": {
+      "type": "GeoProperty",
+      "value": {
+        "type": "Point",
+        "coordinates": [
+          5.4812,
+          51.4402
+        ]
+      }
+    }
+  }
+]

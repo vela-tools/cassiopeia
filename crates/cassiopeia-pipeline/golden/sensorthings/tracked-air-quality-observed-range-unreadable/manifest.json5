@@ -1,0 +1,9 @@
+{
+    version: "v1",
+    inputs: [
+        {
+            source: "track.jsonl",
+            mapping: "../../../tests/fixtures/sensorthings/tracked-air-quality-observed.json5",
+        },
+    ],
+}

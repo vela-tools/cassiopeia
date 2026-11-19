@@ -1,0 +1,35 @@
+// Writes a moving Thing's track as `location` instances read from its HistoricalLocations, beside
+// its `pm10` readings, each reading and each place with its own `observedAt`.
+{
+    version: "v4",
+    dataModel: "dataModel.Environment/AirQualityObserved",
+    identity: {
+        entityName: "bus-{{ thing.id }}",
+    },
+    attributes: {
+        location: {
+            type: "GeoProperty",
+            source: "{{ historicalLocation.location }}",
+            properties: {
+                observedAt: {
+                    source: "{{ historicalLocation.time }}",
+                    transformation: "datetime",
+                },
+            },
+        },
+        dateObserved: {
+            source: "{{ readings.pm10.time }}",
+            transformation: "datetime",
+        },
+        pm10: {
+            source: "{{ readings.pm10.result }}",
+            transformation: "float",
+            properties: {
+                observedAt: {
+                    source: "{{ readings.pm10.time }}",
+                    transformation: "datetime",
+                },
+            },
+        },
+    },
+}

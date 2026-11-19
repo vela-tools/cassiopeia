@@ -1,0 +1,38 @@
+// Keys that loading ignores: a misspelled `transformation`, a target's `sourceField` and
+// `idPattern`, and a `syntheticEntity` on a Property. Each warns and the mapping still runs.
+{
+    version: "v4",
+    dataModel: "Device",
+    identity: {
+        entityName: "{{ sensor }}",
+    },
+    attributes: {
+        temperature: {
+            source: "{{ t }}",
+            transformaton: "float",
+        },
+        refBuilding: {
+            type: "Relationship",
+            source: "{{ building }}",
+            target: {
+                entity: "Building",
+                sourceField: "building_uri",
+                idPattern: "B-\\d+",
+            },
+        },
+        manufacturer: {
+            source: "{{ maker }}",
+            syntheticEntity: {
+                dataModel: "Organization",
+                identity: {
+                    entityName: "{{ maker }}",
+                },
+                attributes: {
+                    name: {
+                        source: "{{ maker }}",
+                    },
+                },
+            },
+        },
+    },
+}

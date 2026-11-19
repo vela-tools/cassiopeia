@@ -1,0 +1,45 @@
+---
+source: crates/cassiopeia-pipeline/src/end_to_end/golden/mod.rs
+input_file: crates/cassiopeia-pipeline/golden/values/json-property-from-mappings/manifest.json5
+---
+[
+  {
+    "id": "urn:ngsi-ld:Device:a",
+    "type": "Device",
+    "raw": {
+      "type": "JsonProperty",
+      "json": {
+        "maybe": null,
+        "k": 1
+      }
+    },
+    "params": {
+      "type": "Property",
+      "value": {
+        "k": 1
+      }
+    }
+  },
+  {
+    "id": "urn:ngsi-ld:Device:b",
+    "type": "Device",
+    "raw": {
+      "type": "JsonProperty",
+      "json": {
+        "maybe": null
+      }
+    }
+  },
+  {
+    "id": "urn:ngsi-ld:Device:c",
+    "type": "Device",
+    "payload": {
+      "type": "JsonProperty",
+      "json": {
+        "info": {
+          "x": null
+        }
+      }
+    }
+  }
+]

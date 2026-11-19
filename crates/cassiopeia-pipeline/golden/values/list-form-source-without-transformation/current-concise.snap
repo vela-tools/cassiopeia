@@ -1,0 +1,24 @@
+---
+source: crates/cassiopeia-pipeline/src/end_to_end/golden/mod.rs
+input_file: crates/cassiopeia-pipeline/golden/values/list-form-source-without-transformation/manifest.json5
+---
+[
+  {
+    "id": "urn:ngsi-ld:Thing:A",
+    "type": "Thing",
+    "address": "Main St, 7",
+    "code": "Station-17",
+    "kind": "fixed site"
+  },
+  {
+    "id": "urn:ngsi-ld:Thing:B",
+    "type": "Thing",
+    "address": ", 7",
+    "kind": "fixed site"
+  },
+  {
+    "id": "urn:ngsi-ld:Thing:C",
+    "type": "Thing",
+    "kind": "fixed site"
+  }
+]

@@ -1,0 +1,13 @@
+{
+    version: "v1",
+    inputs: [
+        {
+            source: "../../../tests/fixtures/sensorthings/frost-v1.1-latest.jsonl",
+            mapping: "../../../tests/fixtures/sensorthings/station-last-reported.json5",
+        },
+        {
+            source: "stations.jsonl",
+            mapping: "../../../tests/fixtures/sensorthings/station-last-reported.json5",
+        },
+    ],
+}

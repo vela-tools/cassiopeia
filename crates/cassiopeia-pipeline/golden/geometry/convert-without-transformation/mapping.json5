@@ -1,0 +1,18 @@
+// A GeoProperty with no transformation publishes the geometry its `geometry` block derives from
+// the source geometry, here the centroid of a polygon as a Point.
+{
+    version: "v4",
+    dataModel: "Zone",
+    identity: {
+        entityName: "{{ id }}",
+    },
+    attributes: {
+        location: {
+            type: "GeoProperty",
+            source: "{{ geometry }}",
+            geometry: {
+                convert: "centroid",
+            },
+        },
+    },
+}

@@ -1,0 +1,32 @@
+// Records of one sensor, each attribute observed at a time of its own and read without a
+// transformation: every attribute comes from the record that observed it last, and `name`, which
+// has no `observedAt`, from the record observed last overall. S1 holds three records, S2 two.
+{
+    version: "v4",
+    dataModel: "Sensor",
+    identity: {
+        entityName: "{{ code }}",
+    },
+    attributes: {
+        reading: {
+            source: "{{ reading }}",
+            transformation: "float",
+            properties: {
+                observedAt: {
+                    source: "{{ read_time }}",
+                },
+            },
+        },
+        status: {
+            source: "{{ status }}",
+            properties: {
+                observedAt: {
+                    source: "{{ status_time }}",
+                },
+            },
+        },
+        name: {
+            source: "{{ name }}",
+        },
+    },
+}

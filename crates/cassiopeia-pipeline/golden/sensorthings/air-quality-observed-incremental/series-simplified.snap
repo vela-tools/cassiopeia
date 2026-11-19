@@ -1,0 +1,29 @@
+---
+source: crates/cassiopeia-pipeline/src/end_to_end/golden/mod.rs
+input_file: crates/cassiopeia-pipeline/golden/sensorthings/air-quality-observed-incremental/manifest.json5
+---
+[
+  {
+    "id": "urn:ngsi-ld:AirQualityObserved:sta-api-samenmetenrivmnl-12512",
+    "type": "AirQualityObserved",
+    "name": "ILM_I68",
+    "location": {
+      "type": "Point",
+      "coordinates": [
+        5.608,
+        51.313
+      ]
+    },
+    "dateObserved": "2026-11-12T03:00:00Z",
+    "pm25": [
+      39.32,
+      36.25,
+      38.49
+    ],
+    "pm10": [
+      35.09,
+      38.04,
+      36.41
+    ]
+  }
+]

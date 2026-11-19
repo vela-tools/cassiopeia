@@ -1,0 +1,22 @@
+// A scope made of two templates, the second through a filter. A record whose template fails to
+// render, or reads a value that is not text, is skipped; an unreadable attribute value is dropped.
+{
+    version: "v4",
+    dataModel: "Site",
+    identity: {
+        entityName: "{{ site }}",
+    },
+    scope: [
+        "{{ indoor }}",
+        "/{{ area | upper }}",
+    ],
+    attributes: {
+        area: {
+            source: "{{ area }}",
+        },
+        when: {
+            source: "{{ when }}",
+            transformation: "datetime",
+        },
+    },
+}

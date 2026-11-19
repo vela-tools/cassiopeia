@@ -1,0 +1,17 @@
+[
+    {
+        "site": "A",
+        "when": "2026-03-01T11:00:00Z"
+    },
+    {
+        "site": "B",
+        "indoor": true,
+        "area": "north",
+        "when": "2026-03-01T11:00:00Z"
+    },
+    {
+        "site": "C",
+        "area": "north",
+        "when": "soon"
+    }
+]

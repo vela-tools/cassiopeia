@@ -1,0 +1,48 @@
+---
+source: crates/cassiopeia-pipeline/src/end_to_end/golden/mod.rs
+input_file: crates/cassiopeia-pipeline/golden/keys-without-effect/shared-mapping/manifest.json5
+---
+{
+  "diagnostics": [
+    {
+      "code": "mapping-v4-unknown-key",
+      "occurrences": 1,
+      "message": [
+        "! Attribute `temperature` in the mapping document at '[case]/mapping.json5' declares a key that has no effect",
+        "  ├─ caused by   `temperature` declares `transformaton`, which it does not read: correct the key or remove it",
+        "  ├─ attribute   temperature",
+        "  ╰─ mapping     [case]/mapping.json5"
+      ]
+    },
+    {
+      "code": "mapping-v4-key-without-effect",
+      "occurrences": 1,
+      "message": [
+        "! Attribute `manufacturer` in the mapping document at '[case]/mapping.json5' declares a key that has no effect",
+        "  ├─ caused by   `manufacturer` declares a `syntheticEntity`, which is written only from a top-level Relationship or ListRelationship of the mapping, so no entity is written for it: declare it there or remove it",
+        "  ├─ attribute   manufacturer",
+        "  ╰─ mapping     [case]/mapping.json5"
+      ]
+    },
+    {
+      "code": "mapping-v4-key-without-effect",
+      "occurrences": 1,
+      "message": [
+        "! Attribute `refBuilding` in the mapping document at '[case]/mapping.json5' declares a key that has no effect",
+        "  ├─ caused by   The target of `refBuilding` declares `idPattern`, which nothing reads, since a relationship's object is the entity its `source` names: remove the key",
+        "  ├─ attribute   refBuilding",
+        "  ╰─ mapping     [case]/mapping.json5"
+      ]
+    },
+    {
+      "code": "mapping-v4-key-without-effect",
+      "occurrences": 1,
+      "message": [
+        "! Attribute `refBuilding` in the mapping document at '[case]/mapping.json5' declares a key that has no effect",
+        "  ├─ caused by   The target of `refBuilding` declares `sourceField`, which nothing reads, since a relationship's object is the entity its `source` names: remove the key",
+        "  ├─ attribute   refBuilding",
+        "  ╰─ mapping     [case]/mapping.json5"
+      ]
+    }
+  ]
+}

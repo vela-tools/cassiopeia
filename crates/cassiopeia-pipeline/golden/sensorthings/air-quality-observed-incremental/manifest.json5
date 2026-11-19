@@ -1,0 +1,9 @@
+{
+    version: "v1",
+    inputs: [
+        {
+            source: "rivm-incremental.jsonl",
+            mapping: "../../../tests/fixtures/sensorthings/air-quality-observed.json5",
+        },
+    ],
+}

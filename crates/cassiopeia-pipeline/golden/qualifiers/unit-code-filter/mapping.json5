@@ -1,0 +1,20 @@
+// A `unitCode` read through the `cefact_unit` filter, which translates the unit notation of each
+// row; a unit the filter does not know leaves the value without a `unitCode` and warns once.
+{
+    version: "v4",
+    dataModel: "Sensor",
+    identity: {
+        entityName: "Station-{{ id }}",
+    },
+    attributes: {
+        pm10: {
+            source: "{{ pm10 }}",
+            transformation: "float",
+            properties: {
+                unitCode: {
+                    source: "{{ unit | cefact_unit }}",
+                },
+            },
+        },
+    },
+}

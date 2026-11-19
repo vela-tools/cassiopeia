@@ -1,0 +1,19 @@
+// Text split on a space gives a ListProperty or an `array` Property whose pieces leave out the
+// empty ones. Empty or blank text gives no attribute, and the entity is still written.
+{
+    version: "v4",
+    dataModel: "Thing",
+    identity: {
+        entityName: "{{ id }}",
+    },
+    attributes: {
+        codes: {
+            type: "ListProperty",
+            source: "{{ codes | split(pat=' ') }}",
+        },
+        tags: {
+            source: "{{ codes | split(pat=' ') }}",
+            transformation: "array",
+        },
+    },
+}

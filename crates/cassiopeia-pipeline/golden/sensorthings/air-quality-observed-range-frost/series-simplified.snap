@@ -1,0 +1,52 @@
+---
+source: crates/cassiopeia-pipeline/src/end_to_end/golden/mod.rs
+input_file: crates/cassiopeia-pipeline/golden/sensorthings/air-quality-observed-range-frost/manifest.json5
+---
+[
+  {
+    "id": "urn:ngsi-ld:AirQualityObserved:sta-localhost-eindhoven-centrum",
+    "type": "AirQualityObserved",
+    "name": "Eindhoven Centrum",
+    "location": {
+      "type": "Point",
+      "coordinates": [
+        5.4797,
+        51.4392
+      ]
+    },
+    "dateObserved": "2026-11-16T11:00:00Z",
+    "pm10": [
+      18.2,
+      19.5,
+      21.7
+    ],
+    "pm25": [
+      9.1,
+      10.4,
+      11.3
+    ]
+  },
+  {
+    "id": "urn:ngsi-ld:AirQualityObserved:sta-localhost-helmond-west",
+    "type": "AirQualityObserved",
+    "name": "Helmond West",
+    "location": {
+      "type": "Point",
+      "coordinates": [
+        5.64,
+        51.475
+      ]
+    },
+    "dateObserved": "2026-11-16T11:00:00Z",
+    "pm10": [
+      12.0,
+      13.2,
+      14.1
+    ],
+    "pm25": [
+      6.1,
+      6.9,
+      7.6
+    ]
+  }
+]

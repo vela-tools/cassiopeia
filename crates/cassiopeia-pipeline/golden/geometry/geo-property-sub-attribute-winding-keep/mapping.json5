@@ -1,0 +1,23 @@
+// A GeoProperty sub-attribute with `winding: "keep"` publishes its exterior ring as the source
+// wound it, here clockwise, instead of rewinding it to the right-hand rule.
+{
+    version: "v4",
+    dataModel: "Zone",
+    identity: {
+        entityName: "{{ id }}",
+    },
+    attributes: {
+        name: {
+            source: "{{ id }}",
+            properties: {
+                footprint: {
+                    type: "GeoProperty",
+                    source: "{{ geometry }}",
+                    geometry: {
+                        winding: "keep",
+                    },
+                },
+            },
+        },
+    },
+}

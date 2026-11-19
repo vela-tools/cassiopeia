@@ -1,0 +1,183 @@
+---
+source: crates/cassiopeia-pipeline/src/end_to_end/golden/mod.rs
+input_file: crates/cassiopeia-pipeline/golden/sensorthings/air-quality-observed-latest/manifest.json5
+---
+[
+  {
+    "id": "urn:ngsi-ld:AirQualityObserved:sta-api-samenmetenrivmnl-12511",
+    "type": "AirQualityObserved",
+    "name": {
+      "type": "Property",
+      "value": "ILM_I67"
+    },
+    "location": {
+      "type": "GeoProperty",
+      "value": {
+        "type": "Point",
+        "coordinates": [
+          5.558,
+          51.411
+        ]
+      }
+    },
+    "dateObserved": {
+      "type": "Property",
+      "value": "2026-11-13T07:00:00Z",
+      "valueType": "DateTime"
+    },
+    "pm10": [
+      {
+        "type": "Property",
+        "value": 10.51,
+        "observedAt": "2026-11-13T07:00:00Z",
+        "unitCode": "GQ"
+      }
+    ],
+    "pm25": [
+      {
+        "type": "Property",
+        "value": 7.2,
+        "observedAt": "2026-11-13T07:00:00Z",
+        "unitCode": "GQ"
+      }
+    ]
+  },
+  {
+    "id": "urn:ngsi-ld:AirQualityObserved:sta-api-samenmetenrivmnl-12512",
+    "type": "AirQualityObserved",
+    "name": {
+      "type": "Property",
+      "value": "ILM_I68"
+    },
+    "location": {
+      "type": "GeoProperty",
+      "value": {
+        "type": "Point",
+        "coordinates": [
+          5.608,
+          51.313
+        ]
+      }
+    },
+    "dateObserved": {
+      "type": "Property",
+      "value": "2026-11-13T07:00:00Z",
+      "valueType": "DateTime"
+    },
+    "pm10": [
+      {
+        "type": "Property",
+        "value": 9.46,
+        "observedAt": "2026-11-13T07:00:00Z",
+        "unitCode": "GQ"
+      }
+    ],
+    "pm25": [
+      {
+        "type": "Property",
+        "value": 6.77,
+        "observedAt": "2026-11-13T07:00:00Z",
+        "unitCode": "GQ"
+      }
+    ]
+  },
+  {
+    "id": "urn:ngsi-ld:AirQualityObserved:sta-localhost-eindhoven-centrum",
+    "type": "AirQualityObserved",
+    "name": {
+      "type": "Property",
+      "value": "Eindhoven Centrum"
+    },
+    "location": {
+      "type": "GeoProperty",
+      "value": {
+        "type": "Point",
+        "coordinates": [
+          5.4797,
+          51.4392
+        ]
+      }
+    },
+    "dateObserved": {
+      "type": "Property",
+      "value": "2026-11-13T07:00:00Z",
+      "valueType": "DateTime"
+    },
+    "pm10": [
+      {
+        "type": "Property",
+        "value": 21.7,
+        "observedAt": "2026-11-13T07:00:00Z",
+        "unitCode": "GQ"
+      }
+    ],
+    "pm25": [
+      {
+        "type": "Property",
+        "value": 11.3,
+        "observedAt": "2026-11-13T07:00:00Z",
+        "unitCode": "GQ"
+      }
+    ]
+  },
+  {
+    "id": "urn:ngsi-ld:AirQualityObserved:sta-localhost-helmond-west",
+    "type": "AirQualityObserved",
+    "name": {
+      "type": "Property",
+      "value": "Helmond West"
+    },
+    "location": {
+      "type": "GeoProperty",
+      "value": {
+        "type": "Point",
+        "coordinates": [
+          5.64,
+          51.475
+        ]
+      }
+    },
+    "dateObserved": {
+      "type": "Property",
+      "value": "2026-11-13T07:00:00Z",
+      "valueType": "DateTime"
+    },
+    "pm10": [
+      {
+        "type": "Property",
+        "value": 14.1,
+        "observedAt": "2026-11-13T07:00:00Z",
+        "unitCode": "GQ"
+      }
+    ],
+    "pm25": [
+      {
+        "type": "Property",
+        "value": 7.6,
+        "observedAt": "2026-11-13T07:00:00Z",
+        "unitCode": "GQ"
+      }
+    ]
+  },
+  {
+    "id": "urn:ngsi-ld:AirQualityObserved:sta-hexample-1",
+    "type": "AirQualityObserved",
+    "name": {
+      "type": "Property",
+      "value": "Stationsplein"
+    },
+    "dateObserved": {
+      "type": "Property",
+      "value": "2026-11-16T08:00:00Z",
+      "valueType": "DateTime"
+    },
+    "pm10": [
+      {
+        "type": "Property",
+        "value": 18.2,
+        "observedAt": "2026-11-16T08:00:00Z",
+        "unitCode": "GQ"
+      }
+    ]
+  }
+]

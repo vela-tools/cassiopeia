@@ -1,0 +1,64 @@
+---
+source: crates/cassiopeia-pipeline/src/end_to_end/golden/mod.rs
+input_file: crates/cassiopeia-pipeline/golden/merging/records-adding-readings/manifest.json5
+---
+[
+  {
+    "id": "urn:ngsi-ld:Station:cell",
+    "type": "Station",
+    "temperature": "20.5",
+    "windSpeed": "3.5",
+    "location": {
+      "type": "Point",
+      "coordinates": [
+        14.5,
+        46.05
+      ]
+    }
+  },
+  {
+    "id": "urn:ngsi-ld:Station:slice",
+    "type": "Station",
+    "temperature": "280.1",
+    "windSpeed": "3.5"
+  },
+  {
+    "id": "urn:ngsi-ld:Station:shop",
+    "type": "Station",
+    "location": {
+      "type": "Point",
+      "coordinates": [
+        -73.98,
+        40.78
+      ]
+    }
+  },
+  {
+    "id": "urn:ngsi-ld:Station:collection",
+    "type": "Station",
+    "temperature": "20.5"
+  },
+  {
+    "id": "urn:ngsi-ld:Station:projected",
+    "type": "Station",
+    "temperature": "20.5"
+  },
+  {
+    "id": "urn:ngsi-ld:Station:swapped",
+    "type": "Station",
+    "temperature": "21"
+  },
+  {
+    "id": "urn:ngsi-ld:Station:here",
+    "type": "Station",
+    "temperature": "19",
+    "location": {
+      "type": "Point",
+      "coordinates": [
+        16.37,
+        48.2,
+        9000.0
+      ]
+    }
+  }
+]

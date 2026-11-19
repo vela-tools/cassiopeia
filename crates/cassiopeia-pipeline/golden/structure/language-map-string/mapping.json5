@@ -1,0 +1,25 @@
+// A `languageMap` entry that declares `transformation: "string"` reads as one that declares none:
+// its value as text, so a number becomes its text. An entry that resolves to nothing or to blank
+// text is left out, and a map with no entry left gives no attribute.
+{
+    version: "v4",
+    dataModel: "Place",
+    identity: {
+        entityName: "{{ code }}",
+    },
+    attributes: {
+        description: {
+            type: "LanguageProperty",
+            languageMap: {
+                en: {
+                    source: "{{ en }}",
+                    transformation: "string",
+                },
+                sl: {
+                    source: "{{ sl }}",
+                    transformation: "string",
+                },
+            },
+        },
+    },
+}

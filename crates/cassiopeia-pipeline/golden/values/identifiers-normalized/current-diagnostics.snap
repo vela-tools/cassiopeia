@@ -1,0 +1,24 @@
+---
+source: crates/cassiopeia-pipeline/src/end_to_end/golden/mod.rs
+input_file: crates/cassiopeia-pipeline/golden/values/identifiers-normalized/manifest.json5
+---
+{
+  "diagnostics": [
+    {
+      "code": "extractor-iri-unreadable",
+      "occurrences": 1,
+      "message": [
+        "! Attribute `level` dropped: `not an iri` is not an IRI",
+        "  ╰─ attribute   level"
+      ]
+    },
+    {
+      "code": "extractor-urn-unreadable",
+      "occurrences": 1,
+      "message": [
+        "! Attribute `reference` dropped: `B-12` is not a URN",
+        "  ╰─ attribute   reference"
+      ]
+    }
+  ]
+}

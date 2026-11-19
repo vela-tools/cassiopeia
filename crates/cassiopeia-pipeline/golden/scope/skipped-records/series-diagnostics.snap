@@ -1,0 +1,39 @@
+---
+source: crates/cassiopeia-pipeline/src/end_to_end/golden/mod.rs
+input_file: crates/cassiopeia-pipeline/golden/scope/skipped-records/manifest.json5
+---
+{
+  "diagnostics": [
+    {
+      "code": "expander-id-absent",
+      "occurrences": 1,
+      "message": [
+        "! The identifier resolved for a 'Site' entity is empty, so no URN can be minted"
+      ]
+    },
+    {
+      "code": "expander-scope-unreadable",
+      "occurrences": 1,
+      "message": [
+        "! The resolved scope '/Novo mesto' cannot be the entity's scope",
+        "  ╰─ caused by   '/Novo mesto' is not a legal NGSI-LD scope: a scope is one or more '/'-separated levels, each starting with a Unicode letter and continuing with Unicode letters, numbers or underscores (ETSI GS CIM 009 v1.9.1 clause 4.18)"
+      ]
+    },
+    {
+      "code": "transform-observed-at-unreadable",
+      "occurrences": 1,
+      "message": [
+        "! Attribute `a` emitted without `observedAt`: `soon` is not a date-time in any spelling Cassiopeia reads",
+        "  ╰─ attribute   a"
+      ]
+    },
+    {
+      "code": "transform-observed-at-unreadable",
+      "occurrences": 1,
+      "message": [
+        "! Attribute `b` emitted without `observedAt`: `soon` is not a date-time in any spelling Cassiopeia reads",
+        "  ╰─ attribute   b"
+      ]
+    }
+  ]
+}

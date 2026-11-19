@@ -1,0 +1,3 @@
+{"sensorthingsSnapshot":1,"serviceRoot":"http://127.0.0.1/v1.1","version":"v1.1","read":"latest","collectedAt":"2026-11-16T12:30:00Z"}
+{"thing":{"@iot.id":1,"name":"Stationsplein","description":"Air quality station Stationsplein","Locations":[{"@iot.id":101,"encodingType":"application/geo+json","location":{"type":"Point","coordinates":[5.4797,51.4433]}}]}}
+{"thing":{"@iot.id":2,"name":"Kennedylaan","description":"Air quality station Kennedylaan","Locations":[{"@iot.id":201,"encodingType":"application/geo+json","location":{"type":"Point","coordinates":[5.4812,51.4402]}}]}}
