@@ -3,27 +3,7 @@ use crate::{
     planar::{to_planar_line, to_planar_polygon},
 };
 use geo::{Geodesic, GeodesicArea, Length};
-use geo_types::Polygon;
 use geojson::{LineStringType, Position};
-
-/// The signed area a linear ring encloses, in square metres.
-///
-/// RFC 7946 clause 4 fixes the coordinate reference system to WGS84 longitude/latitude, so a planar
-/// shoelace area would be measured in square degrees and would be meaningless. The measurement is
-/// therefore geodesic, on the ellipsoid, by the method of Karney (2013); its sign follows the
-/// winding, positive for a counterclockwise ring, which is what clause 3.1.6's right-hand rule asks
-/// of an exterior ring.
-///
-/// A ring carrying a position too short to read measures zero: an unreadable ring has no winding to
-/// preserve, and [`validate_structure`](crate::geometry::NgsiLdGeometry::validate_structure) rejects
-/// it separately.
-#[must_use]
-pub fn signed_ring_area(ring: &[Position]) -> f64 {
-    match to_planar_line(ring) {
-        Some(line) => Polygon::new(line, Vec::new()).geodesic_area_signed(),
-        None => 0.0,
-    }
-}
 
 /// The area a geometry encloses, in square metres, measured geodesically.
 ///
@@ -83,7 +63,7 @@ fn polygon_perimeter(rings: &[LineStringType]) -> f64 {
 mod tests {
     use crate::{
         geometry::NgsiLdGeometry,
-        measure::{area, length, signed_ring_area},
+        measure::{area, length},
     };
     use geojson::Position;
 
@@ -96,16 +76,6 @@ mod tests {
             Position::from([0.0, 1.0]),
             Position::from([0.0, 0.0]),
         ]
-    }
-
-    #[test]
-    fn a_counterclockwise_ring_measures_a_positive_area_and_its_reverse_a_negative_one() {
-        let ring = counterclockwise_ring();
-        let mut reversed = ring.clone();
-        reversed.reverse();
-
-        assert!(signed_ring_area(&ring) > 0.0);
-        assert!(signed_ring_area(&reversed) < 0.0);
     }
 
     #[test]
