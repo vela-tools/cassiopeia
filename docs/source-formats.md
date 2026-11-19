@@ -395,7 +395,7 @@ It selects every Datastream with its Thing, the Thing's Locations, its ObservedP
 - when a link names another scheme, host, or port than the service root, because the input's `headers`, and so its credentials, go with every request;
 - when a link leads back to a page already read.
 
-A body that is not a page of a collection, a JSON object with a `value` array, fails the input, and the error names the URL and what the body is not. Pages are retried as any remote source is (see [Retried requests](manifest.md#retried-requests)). `delay` spaces the requests of one cycle. Stopping the run with CTRL+C ends collection before its next request.
+A body that is not a page of a collection, a JSON object with a `value` array, fails the input, and the error names the URL and what the body is not. Pages are retried as any remote source is (see [Retried requests](manifest.md#retried-requests)). `delay` spaces the requests of one cycle. Stopping the run with Ctrl+C, SIGTERM or SIGHUP ends collection before its next request (see [Stop a run](running.md#stop-a-run)).
 
 **Limits.** A read follows each request it sends for at most `limits.pages` pages. At the limit, it keeps what it read and the cycle carries on. One `collect-limit-reached` warning per server and limit names the server, the limit, and the next link the read did not follow. Raise the limit, or select fewer data streams with `datastreams`. A range or incremental read also stops at `limits.observations` (see [Reading a time range](#reading-a-time-range)).
 
