@@ -16,9 +16,6 @@ pub enum StoreAction {
     /// Committing a transaction.
     #[strum(serialize = "commit a transaction")]
     CommitTransaction,
-    /// Abandoning a transaction without committing it.
-    #[strum(serialize = "abort a transaction")]
-    AbortTransaction,
     /// Creating a table.
     #[strum(serialize = "create a table")]
     CreateTable,

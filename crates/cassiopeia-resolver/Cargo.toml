@@ -16,6 +16,7 @@ cassiopeia-ngsi-ld.workspace = true
 chrono = { version = "0.4.45", features = ["serde"] }
 dashmap = { version = "6.2.1", features = ["rayon"] }
 derive_more = { version = "2.1.1", features = ["display"] }
+extsort = "0.5.0"
 foldhash = "0.2.0"
 indexmap = "2.14.2"
 rayon = "1.12.0"

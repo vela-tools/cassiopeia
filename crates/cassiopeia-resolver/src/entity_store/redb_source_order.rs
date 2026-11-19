@@ -7,30 +7,28 @@ use crate::{
     store_action::StoreAction,
 };
 use cassiopeia_ir::source_position::{SOURCE_POSITION_BYTES, SourcePosition};
-use rayon::slice::ParallelSliceMut;
-use redb::{Durability, ReadableDatabase, ReadableTable, Table, TableDefinition};
-use std::{mem, ops::Range};
+use extsort::{ExternalSorter, Sortable};
+use redb::{ReadableDatabase, ReadableTable, TableDefinition};
+use std::{
+    io::{self, Read, Write},
+    mem,
+};
 use urn_rs::Urn;
 
-/// The table the ids of a store too large to sort in one run are sorted through, in the store's own
-/// database. Each key is the big-endian position of an id's first record followed by the id's text,
-/// and holds nothing, so the table lists the ids in source order, those sharing a first record in the
-/// bytewise order of their text.
-const ORDER_TABLE: TableDefinition<&[u8], ()> = TableDefinition::new("order");
-
 /// How many ids are sorted in memory at a time. A store with no more entities sorts them in memory
-/// alone and writes nothing. A larger one writes each run of this many to [`ORDER_TABLE`] sorted, so
-/// each insertion lands beside the one before it, and holds one run at a time, about a megabyte,
-/// however many entities the run has.
-const RUN_IDS: usize = 1 << 14;
+/// alone and writes nothing. A larger one writes each run of this many to a temporary file sorted,
+/// one file after the other, and merges the files as it hands the ids on, so it holds one run at a
+/// time, a few megabytes, however many entities the run has.
+const RUN_IDS: usize = 1 << 16;
 
 /// Streams the distinct base ids in `table` chunk by chunk in the order of their first records: the
 /// earliest of the positions `position_of` reads from each id's keys and their values.
 ///
 /// # Errors
 ///
-/// Returns [`EntityStoreError`] when a table cannot be read or written or a base id read back is not
-/// a URN, or propagates any error `position_of` or the callback returns.
+/// Returns [`EntityStoreError`] when the table cannot be read, the ids cannot be sorted through
+/// their temporary files or a base id read back is not a URN, or propagates any error `position_of`
+/// or the callback returns.
 pub(crate) fn for_each_id_chunk_in_source_order(
     db: &RedbDatabase,
     table: TableDefinition<'static, &'static [u8], &'static [u8]>,
@@ -46,8 +44,9 @@ pub(crate) fn for_each_id_chunk_in_source_order(
 ///
 /// # Errors
 ///
-/// Returns [`EntityStoreError`] when a table cannot be read or written or a base id read back is not
-/// a URN, or propagates any error `position_of` returns.
+/// Returns [`EntityStoreError`] when the table cannot be read, the ids cannot be sorted through
+/// their temporary files or a base id read back is not a URN, or propagates any error `position_of`
+/// returns.
 pub(crate) fn ids_in_source_order(
     db: &RedbDatabase,
     table: TableDefinition<'static, &'static [u8], &'static [u8]>,
@@ -65,8 +64,7 @@ pub(crate) fn ids_in_source_order(
 /// them `run_ids` at a time.
 ///
 /// Keys sort with the separator ahead of any URN character, so every key of one base id is contiguous
-/// and one scan meets each id's keys together: an id is complete once the next one begins, so a run
-/// never splits an id.
+/// and one scan meets each id's keys together: an id's first record is known once the next id begins.
 fn hand_on_in_source_order(
     db: &RedbDatabase,
     table: TableDefinition<'static, &'static [u8], &'static [u8]>,
@@ -76,124 +74,68 @@ fn hand_on_in_source_order(
 ) -> Result<()> {
     let data_txn = db.database().begin_read().map_err(|e| db.err(e.into(), StoreAction::BeginTransaction))?;
     let data = data_txn.open_table(table).map_err(|e| db.err(e.into(), StoreAction::OpenTable))?;
-    let mut write_txn = db.database().begin_write().map_err(|e| db.err(e.into(), StoreAction::BeginTransaction))?;
-    // The table lives only as long as the run's temporary database, so fsync would be pure waste.
-    write_txn
-        .set_durability(Durability::None)
-        .map_err(|e| db.err(e.into(), StoreAction::SetDurability))?;
-    // The ids an earlier hand-off sorted would interleave with this one's.
-    write_txn.delete_table(ORDER_TABLE).map_err(|e| db.err(e.into(), StoreAction::DeleteTable))?;
-
-    let mut run = SortRun::default();
-    let mut spilled = Spilled::Nothing;
-    {
-        let mut order = write_txn.open_table(ORDER_TABLE).map_err(|e| db.err(e.into(), StoreAction::OpenTable))?;
-        for entry in data.iter().map_err(|e| db.err(e.into(), StoreAction::Iterate))? {
-            let (key, value) = entry.map_err(|e| db.err(e.into(), StoreAction::Iterate))?;
-            let key = key.value();
-            let position = position_of(key, value.value())?;
-            let base = base_id_bytes(key);
-            if let Some(first) = run.first_of_last(base) {
-                *first = (*first).min(position);
-                continue;
+    let mut sorter = ExternalSorter::new().with_segment_size(run_ids).with_parallel_sort().pushed();
+    let mut scanned: Option<FirstRecord> = None;
+    for entry in data.iter().map_err(|e| db.err(e.into(), StoreAction::Iterate))? {
+        let (key, value) = entry.map_err(|e| db.err(e.into(), StoreAction::Iterate))?;
+        let key = key.value();
+        let position = position_of(key, value.value())?;
+        let base = base_id_bytes(key);
+        match &mut scanned {
+            Some(first) if first.id == base => first.position = first.position.min(position),
+            Some(_) | None => {
+                let complete = scanned.replace(FirstRecord { position, id: base.to_vec() });
+                sorter.push_iter(complete).map_err(sort_failure)?;
             }
-            if run.len() == run_ids {
-                run.spill(&mut order, db)?;
-                spilled = Spilled::Runs;
-            }
-            run.push(position, base);
-        }
-        if spilled == Spilled::Runs {
-            run.spill(&mut order, db)?;
         }
     }
+    sorter.push_iter(scanned).map_err(sort_failure)?;
 
-    match spilled {
-        Spilled::Nothing => {
-            // Every id fit one run, so the ids are handed on from memory and nothing is written.
-            write_txn.abort().map_err(|e| db.err(e.into(), StoreAction::AbortTransaction))?;
-            run.sorted().try_for_each(|(_first, id)| chunks.push(id))?;
-        }
-        Spilled::Runs => {
-            write_txn.commit().map_err(|e| db.err(e.into(), StoreAction::CommitTransaction))?;
-            let order_txn = db.database().begin_read().map_err(|e| db.err(e.into(), StoreAction::BeginTransaction))?;
-            let order = order_txn.open_table(ORDER_TABLE).map_err(|e| db.err(e.into(), StoreAction::OpenTable))?;
-            for entry in order.iter().map_err(|e| db.err(e.into(), StoreAction::Iterate))? {
-                let (key, _nothing) = entry.map_err(|e| db.err(e.into(), StoreAction::Iterate))?;
-                let key = key.value();
-                let (_first, id) = key
-                    .split_at_checked(SOURCE_POSITION_BYTES)
-                    .ok_or(EntityStoreError::TruncatedPosition { length: key.len() })?;
-                chunks.push(id)?;
-            }
-        }
+    for first in sorter.done().map_err(sort_failure)? {
+        chunks.push(&first.map_err(sort_failure)?.id)?;
     }
     chunks.finish()
 }
 
-/// Whether a hand-off wrote any run of its ids to [`ORDER_TABLE`].
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum Spilled {
-    /// Every id fit one run, held in memory.
-    Nothing,
-    /// At least one run was written, so every run is.
-    Runs,
+/// Wraps an I/O failure of the sort's temporary files.
+const fn sort_failure(source: io::Error) -> EntityStoreError {
+    EntityStoreError::SortIds { source }
 }
 
-/// The ids of one run, each with the position of its first record, their text kept in one buffer
-/// rather than in an allocation each.
-#[derive(Default)]
-struct SortRun {
-    /// Each id's first position, with the place of its text in `text`, in the order the scan met them.
-    firsts: Vec<(SourcePosition, Range<usize>)>,
-    /// The text of every id of the run, one after the other.
-    text: Vec<u8>,
+/// One base id with the position of its first record. Ids order by that position, those sharing one
+/// in the bytewise order of their text, so the order is the same on every run.
+#[derive(Debug, PartialEq, Eq, PartialOrd, Ord)]
+struct FirstRecord {
+    /// The position of the id's first record.
+    position: SourcePosition,
+    /// The id's text.
+    id: Vec<u8>,
 }
 
-impl SortRun {
-    /// How many ids the run holds.
-    const fn len(&self) -> usize {
-        self.firsts.len()
+/// A run file holds each id as the big-endian bytes of its first position, the length of its text
+/// as a big-endian `u32`, then the text. `extsort` defines no encoding of its own, so one is written
+/// here.
+impl Sortable for FirstRecord {
+    fn encode<W: Write>(&self, writer: &mut W) -> io::Result<()> {
+        let length = u32::try_from(self.id.len()).map_err(io::Error::other)?;
+        writer.write_all(&self.position.to_be_bytes())?;
+        writer.write_all(&length.to_be_bytes())?;
+        writer.write_all(&self.id)
     }
 
-    /// The first position of the id the run took last, when that id is `id`.
-    fn first_of_last(&mut self, id: &[u8]) -> Option<&mut SourcePosition> {
-        let text = &self.text;
-        self.firsts
-            .last_mut()
-            .filter(|(_first, range)| text.get(range.clone()) == Some(id))
-            .map(|(first, _range)| first)
-    }
-
-    /// Takes `id`, whose first record so far is at `first`.
-    fn push(&mut self, first: SourcePosition, id: &[u8]) {
-        let start = self.text.len();
-        self.text.extend_from_slice(id);
-        self.firsts.push((first, start..self.text.len()));
-    }
-
-    /// The run's ids, each with its first position, sorted by that position, those sharing one in the
-    /// bytewise order of their text.
-    fn sorted(&mut self) -> impl Iterator<Item = (SourcePosition, &[u8])> {
-        let text = &self.text;
-        self.firsts.par_sort_unstable_by(|(left_first, left), (right_first, right)| {
-            left_first.cmp(right_first).then_with(|| text.get(left.clone()).cmp(&text.get(right.clone())))
-        });
-        self.firsts.iter().filter_map(|(first, range)| text.get(range.clone()).map(|id| (*first, id)))
-    }
-
-    /// Writes the run's ids into `order` sorted and empties the run for the next one.
-    fn spill(&mut self, order: &mut Table<'_, &'static [u8], ()>, db: &RedbDatabase) -> Result<()> {
-        let mut key = Vec::new();
-        for (first, id) in self.sorted() {
-            key.clear();
-            key.extend_from_slice(&first.to_be_bytes());
-            key.extend_from_slice(id);
-            order.insert(key.as_slice(), ()).map_err(|e| db.err(e.into(), StoreAction::Insert))?;
-        }
-        self.firsts.clear();
-        self.text.clear();
-        Ok(())
+    fn decode<R: Read>(reader: &mut R) -> io::Result<FirstRecord> {
+        // The end of a run file surfaces as `UnexpectedEof` on the position, which `extsort` reads as
+        // the run being spent.
+        let mut position = [0; SOURCE_POSITION_BYTES];
+        reader.read_exact(&mut position)?;
+        let mut length = [0; 4];
+        reader.read_exact(&mut length)?;
+        let mut id = vec![0; usize::try_from(u32::from_be_bytes(length)).map_err(io::Error::other)?];
+        reader.read_exact(&mut id)?;
+        Ok(FirstRecord {
+            position: SourcePosition::from_be_bytes(position),
+            id,
+        })
     }
 }
 
@@ -327,7 +269,7 @@ mod tests {
         ]);
         let expected = ["B", "E", "C", "A", "D"].map(|name| urn(&format!("urn:ngsi-ld:Station:{name}")));
 
-        // Runs of two write every run to disk; a second hand-off finds the first one's ids gone.
+        // Runs of two write every run to disk, and a second hand-off sorts afresh.
         assert_eq!(handed_on(&db, 2), expected);
         assert_eq!(handed_on(&db, 2), expected);
         // A run of every id writes nothing and hands on the same.
