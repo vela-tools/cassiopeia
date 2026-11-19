@@ -1,4 +1,15 @@
-use crate::end_to_end::harness::{RunBinding, RunInput, RunOutput, RunSchemas, RunSetup, STORES, attempt_setup_end_to_end, run_csv_end_to_end, run_end_to_end};
+use crate::end_to_end::harness::{
+    RunBinding,
+    RunInput,
+    RunOutput,
+    RunSchemas,
+    RunSetup,
+    STORES,
+    attempt_setup_end_to_end,
+    listed_ids,
+    run_csv_end_to_end,
+    run_end_to_end,
+};
 use mockito::{Matcher, Request};
 use pretty_assertions::assert_eq;
 use serde_json::{Value, json};
@@ -28,18 +39,13 @@ const STATION_BY_CODE: &str = r#"{
     attributes: { name: { source: "{{ name }}" } },
 }"#;
 
-/// The ids of the entities a list holds, in its order.
-fn ids(entities: &[Value]) -> Vec<&str> {
-    entities.iter().filter_map(|entity| entity["id"].as_str()).collect()
-}
-
 #[test]
 fn a_current_state_file_lists_its_entities_in_the_order_of_their_first_records_on_every_run_and_store() {
     let mut runs = Vec::new();
     for store in STORES {
         for _ in 0..20 {
             let outcome = run_csv_end_to_end(store, STATIONS, &RunBinding::Mapping(STATION_BY_CODE), &["Station"], "");
-            assert_eq!(ids(&outcome.entities), STATIONS_IN_SOURCE_ORDER, "{store:?}");
+            assert_eq!(listed_ids(&outcome.entities), STATIONS_IN_SOURCE_ORDER, "{store:?}");
             runs.push(outcome.files);
         }
     }
@@ -52,7 +58,7 @@ fn an_entity_whose_records_are_spread_through_the_source_is_written_at_the_place
     for store in STORES {
         let outcome = run_csv_end_to_end(store, stations, &RunBinding::Mapping(STATION_BY_CODE), &["Station"], "");
         assert_eq!(
-            ids(&outcome.entities),
+            listed_ids(&outcome.entities),
             [
                 "urn:ngsi-ld:Station:S2",
                 "urn:ngsi-ld:Station:S1",
@@ -86,7 +92,7 @@ fn a_run_of_two_inputs_writes_the_first_input_s_entities_before_the_second_s() {
             // `S2` has a record in both inputs, so it is written where its record in the first one
             // places it.
             assert_eq!(
-                ids(&outcome.entities),
+                listed_ids(&outcome.entities),
                 [
                     "urn:ngsi-ld:Station:S4",
                     "urn:ngsi-ld:Station:S2",
@@ -136,6 +142,6 @@ fn a_broker_receives_the_entities_in_the_order_the_file_lists_them() {
             .iter()
             .flat_map(|body| body.as_array().cloned().unwrap_or_default())
             .collect();
-        assert_eq!(ids(&sent), STATIONS_IN_SOURCE_ORDER, "{store:?}");
+        assert_eq!(listed_ids(&sent), STATIONS_IN_SOURCE_ORDER, "{store:?}");
     }
 }

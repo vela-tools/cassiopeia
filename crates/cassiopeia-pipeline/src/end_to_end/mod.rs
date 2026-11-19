@@ -24,6 +24,7 @@ mod repeated_runs;
 mod scratch_folders;
 mod sensors;
 mod sensorthings;
+mod series_folds;
 mod series_validation;
 mod station_mappings;
 mod stopped_cycles;
