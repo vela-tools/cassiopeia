@@ -168,7 +168,8 @@ impl Pipeline {
     }
 
     /// Runs one cycle, retrying it up to the retry policy's attempt count with an interruptible
-    /// backoff between tries. A stopped cycle is not retried.
+    /// backoff between tries. A stopped cycle is not retried, and a stop during the backoff stops
+    /// the cycle: the failed attempt is already reported as retrying, and a stop is no failure.
     fn run_with_retry(&self, run: &ScheduledRun) -> Result<CycleOutcome> {
         let max_attempts = self.schedule.retry.as_ref().map_or(1, |retry| retry.max_attempts().get());
         let backoff = self.schedule.retry.as_ref().map_or(Duration::ZERO, |retry| *retry.backoff());
@@ -191,7 +192,7 @@ impl Pipeline {
                         .build(),
                     );
                     if interruptible_sleep(Wait::new(backoff), self.context.shutdown) == SleepOutcome::Interrupted {
-                        return Err(error);
+                        return Ok(CycleOutcome::Stopped);
                     }
                     attempt += 1;
                 }
