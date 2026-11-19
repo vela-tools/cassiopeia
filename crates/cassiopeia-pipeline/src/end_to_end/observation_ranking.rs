@@ -260,6 +260,43 @@ F1,23.5,2026-03-01T10:00:00Z,24.0,2026-03-01T12:00:00Z
     }
 }
 
+/// Two attributes sharing one `observedAt` template.
+const TEMPERATURE_AND_STATUS: &str = r#"{
+    version: "v4",
+    dataModel: "Sensor",
+    identity: { entityName: "{{ code }}" },
+    attributes: {
+        temperature: { source: "{{ t }}", transformation: "float", properties: { observedAt: { source: "{{ time }}", transformation: "datetime" } } },
+        status: { source: "{{ status }}", properties: { observedAt: { source: "{{ time }}", transformation: "datetime" } } },
+    },
+}"#;
+
+/// Of each sensor's records, the one observed last holds no temperature: `S1` lists it last and
+/// `S2` first.
+const NEWEST_WITHOUT_TEMPERATURE: &str = "code,t,status,time
+S1,20,ok,2026-03-01T10:00:00Z
+S1,,warm,2026-03-01T11:00:00Z
+S2,,warm,2026-03-01T11:00:00Z
+S2,20,ok,2026-03-01T10:00:00Z
+";
+
+#[test]
+fn a_shared_observed_at_keeps_the_record_observed_last_whole_leaving_out_a_value_it_lacks_in_every_store() {
+    for store in STORES {
+        let outcome = run(store, NEWEST_WITHOUT_TEMPERATURE, TEMPERATURE_AND_STATUS, "Sensor", "");
+
+        for code in ["S1", "S2"] {
+            let id = format!("urn:ngsi-ld:Sensor:{code}");
+            assert_eq!(observed(&outcome, &id, "temperature"), None, "{store:?} {code}");
+            assert_eq!(
+                observed(&outcome, &id, "status"),
+                Some((json!("warm"), json!("2026-03-01T11:00:00Z"))),
+                "{store:?} {code}"
+            );
+        }
+    }
+}
+
 #[test]
 fn an_observed_at_on_a_sub_attribute_alone_ranks_the_records_in_every_store() {
     let csv = "code,reading,accuracy,time

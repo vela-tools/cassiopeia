@@ -205,6 +205,7 @@ mod tests {
             supersession::RecordOrdinal,
         },
         mapping_id::MappingId,
+        test_order::EVERY_ORDER_OF_THREE,
     };
     use cassiopeia_ir::{
         observed_records::{ObservedRecords, RecordChoice},
@@ -261,9 +262,6 @@ mod tests {
     /// One slot per template of a mapping declaring two.
     const TWO_SLOTS: [ObservedTemplateIndex; 2] = [ObservedTemplateIndex::new(0), ObservedTemplateIndex::new(1)];
 
-    /// Every order three records can arrive in.
-    const ORDERS: [[usize; 3]; 6] = [[0, 1, 2], [0, 2, 1], [1, 0, 2], [1, 2, 0], [2, 0, 1], [2, 1, 0]];
-
     fn r1() -> Record {
         record(json!({"record": 1}), 0, &[json!("2026-03-01T11:00:00Z"), json!("2026-03-01T09:00:00Z")])
     }
@@ -318,7 +316,7 @@ mod tests {
     fn a_record_losing_every_ranking_is_released_whatever_the_order() {
         let r3 = record(json!({"record": 3}), 2, &[json!("2026-03-01T08:00:00Z"), json!("2026-03-01T08:00:00Z")]);
         let records = [r1(), r2(), r3];
-        for order in ORDERS {
+        for order in EVERY_ORDER_OF_THREE {
             let (fragment, _) = folded(&records, &order, &TWO_SLOTS);
 
             assert_eq!(fragment.data, json!({"record": 2}), "{order:?}");
@@ -377,7 +375,7 @@ mod tests {
     fn a_record_losing_every_ranking_is_counted_once_for_its_losses() {
         let losing = record(json!({"record": 0}), 2, &[json!("soon"), json!("soon")]);
         let records = [r1(), r2(), losing];
-        for order in ORDERS {
+        for order in EVERY_ORDER_OF_THREE {
             let (fragment, _) = folded(&records, &order, &TWO_SLOTS);
 
             assert_eq!(

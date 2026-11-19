@@ -9,6 +9,9 @@ use cassiopeia_ir::source_position::SourcePosition;
 use cassiopeia_mapping::source_reads::SourceReads;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
+/// Every order three records can arrive in, each record named by its index.
+pub(crate) const EVERY_ORDER_OF_THREE: [[usize; 3]; 6] = [[0, 1, 2], [0, 2, 1], [1, 0, 2], [1, 2, 0], [2, 0, 1], [2, 1, 0]];
+
 /// Hands out a position later than every one handed out before it, so the records a test builds one
 /// after another stand in the source in the order the test builds them.
 pub(crate) fn next_position() -> SourcePosition {
