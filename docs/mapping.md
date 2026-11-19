@@ -598,7 +598,7 @@ Other declarations are checked when the run starts, because two spellings name t
 - a `LanguageProperty`'s `valueType` does not expand to `rdf:langString`;
 - the `@context` cannot be loaded or a `valueType` expands to no absolute IRI, because then it cannot be checked.
 
-The core `@context` is bundled with Cassiopeia. Any other `@context` is fetched once per run, and only for a mapping that declares a `valueType`. A context is read as JSON whatever media type it is served as, because Smart Data Models serves its contexts as `text/plain`.
+The core `@context` is bundled with Cassiopeia, and so is the W3C Data Integrity v2 `@context` it imports for its `ngsildproof` term, because expanding against the core `@context` loads it whether or not an entity uses that term. Any other `@context` is fetched once per run, and only for a mapping that declares a `valueType`. A context is read as JSON whatever media type it is served as, because Smart Data Models serves its contexts as `text/plain`.
 
 ## Carry several instances under one name
 
