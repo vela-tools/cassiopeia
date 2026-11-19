@@ -509,7 +509,7 @@ cassiopeia sensorthings cursor reset bus --thing 12512
 - `reset --to` takes an RFC 3339 instant, or a span before now such as `6h`. It sets the high-water marks there and forgets the Observations the data streams have seen, so the next cycle reads each from the target minus the lookback, and writes those readings again. Use it after fixing a mapping, or when the server reloads its history. A target after now is refused, because the data streams would then skip every reading made before it.
 - `--datastream` limits a reset to one Datastream, `--multi-datastream` to one MultiDatastream, and `--thing` to the position of one Thing's HistoricalLocations, its id written as `show` prints it. A Datastream, a MultiDatastream and a Thing that share an id are reset apart, and no two of the options can be given together. An id the cursor holds no position for is refused, and the error names it.
 
-A running job holds its cursors, so a cursor command against one of them fails with `cursor 'rivm-air' is in use by a running job` and changes nothing: stop the job first. A cursor command that cannot use a cursor fails with `run-cursor-unusable`, as a run does.
+A running job holds its cursors, so a cursor command against one of them fails with `cursor 'rivm-air' is in use by a running job` and changes nothing: stop the job first. `cursor list` reads every cursor in the folder, so it fails this way while any job runs. A cursor command that cannot use a cursor fails with `run-cursor-unusable`, as a run does.
 
 ### The snapshot file
 
