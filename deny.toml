@@ -55,6 +55,8 @@ ignore = [
     # via static-automata -> static-automata-macros. Not a vulnerability.
     { id = "RUSTSEC-2024-0370", reason = "unmaintained, build-time only, no upgrade path upstream" },
     { id = "RUSTSEC-2026-0459", reason = "geopackage still requires rusqlite 0.40, so no patched libsqlite3-sys is reachable; the GeoPackage ingestor refuses a file with a -wal beside it" },
+    { id = "RUSTSEC-2026-0542", reason = "humantime unmaintained because it wraps chrono, no maintained release exists; jiff's friendly duration format replaces it" },
+    { id = "RUSTSEC-2026-0543", reason = "chrono unmaintained, no maintained release exists; Cassiopeia's time handling moves to jiff" },
 ]
 
 [bans]
