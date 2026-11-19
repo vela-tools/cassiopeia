@@ -3,6 +3,10 @@ FROM rust:1.100.0-trixie AS chef
 RUN apt-get update \
     && apt-get install -y --no-install-recommends cmake g++ git libclang-dev libopenjp2-7-dev \
     && rm -rf /var/lib/apt/lists/*
+# eccodes-sys clones libaec v1.1.4 from gitlab.dkrz.de, which DKRZ took offline on 2026-11-19 over
+# the Ruby advisory GHSA-34m4-m9fh-gqp5. The libaec author's GitHub mirror serves the same tag at
+# commit 7204505. Remove this line once gitlab.dkrz.de is back.
+RUN git config --system url.https://github.com/MathisRosenhauer/libaec.git.insteadOf https://gitlab.dkrz.de/k202009/libaec.git
 RUN cargo install --locked cargo-audit@0.23.0 cargo-auditable@0.7.7 cargo-chef@0.1.78
 WORKDIR /cassiopeia
 
