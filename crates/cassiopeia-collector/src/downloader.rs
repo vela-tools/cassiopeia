@@ -96,9 +96,11 @@ impl Downloader {
     ///
     /// A server that answers `429` or a `5xx` is asked again with backoff, waiting at least the
     /// `Retry-After` it sent, up to [`DEFAULT_MAX_ATTEMPTS`] attempts in all; its last answer is the
-    /// failure once they are spent. A stop that cuts a wait short ends the fetch as interrupted,
-    /// since a stop is no failure of the source. Any other non-success status fails at once, since
-    /// sending the same request again cannot change it.
+    /// failure once they are spent. A request that fails in transport, such as a connection refused
+    /// or reset, or a success whose body is cut short, is asked again with the same backoff, and its
+    /// last failure is the failure once the attempts are spent. A stop that cuts a wait short ends
+    /// the fetch as interrupted, since a stop is no failure of the source. Any other non-success
+    /// status fails at once, since sending the same request again cannot change it.
     ///
     /// Every URL a failure names is masked as `url` is, and a transport failure is stripped of the
     /// URL reqwest would quote, which is the request URL secrets and all.
@@ -106,29 +108,44 @@ impl Downloader {
     /// # Errors
     ///
     /// Returns [`CollectorError::ClientInit`] when the HTTP client cannot be built,
-    /// [`CollectorError::Http`] when the request never completes, [`CollectorError::HttpStatus`]
-    /// when the server answers with a non-success status, and [`CollectorError::Interrupted`] when
-    /// the run is stopped during a wait to ask again.
+    /// [`CollectorError::Http`] when the request does not complete on any attempt,
+    /// [`CollectorError::HttpStatus`] when the server answers with a non-success status, and
+    /// [`CollectorError::Interrupted`] when the run is stopped during a wait to ask again.
     pub fn fetch(&mut self, url: &MaskedUrl) -> Result<FetchedBody, CollectorError> {
+        let shutdown = self.shutdown;
+        let client = self.client()?;
         let mut attempt: u32 = 1;
         let answer = loop {
-            let answer = self.ask(url)?;
-            if !is_transient(answer.status) || attempt >= DEFAULT_MAX_ATTEMPTS {
-                break answer;
+            let asked = Self::ask(client, url);
+            let retry_after = match &asked {
+                Ok(answer) if is_transient(answer.status) => {
+                    debug!("{url} answered {} (attempt {attempt} of {DEFAULT_MAX_ATTEMPTS})", answer.status);
+                    answer.retry_after
+                }
+                Ok(_) => break asked,
+                Err(source) => {
+                    debug!("{url} failed: {source} (attempt {attempt} of {DEFAULT_MAX_ATTEMPTS})");
+                    None
+                }
+            };
+            if attempt >= DEFAULT_MAX_ATTEMPTS {
+                break asked;
             }
-            let delay = retry_delay(attempt, answer.retry_after);
-            debug!(
-                "{url} answered {}; retrying in {delay:?} (attempt {attempt} of {DEFAULT_MAX_ATTEMPTS})",
-                answer.status
-            );
-            if sleep_or_shutdown(delay, self.shutdown) == BackoffSleep::ShutdownRequested {
+            let delay = retry_delay(attempt, retry_after);
+            debug!("Asking {url} again in {delay:?}");
+            if sleep_or_shutdown(delay, shutdown) == BackoffSleep::ShutdownRequested {
                 return Err(CollectorError::Interrupted {
                     // The error owns the URL, while the caller keeps the one it asked for.
                     url: Box::new(url.clone()),
                 });
             }
             attempt += 1;
-        };
+        }
+        .map_err(|source| CollectorError::Http {
+            source,
+            // The error owns the URL, while the caller keeps the one it asked for.
+            url: Box::new(url.clone()),
+        })?;
 
         // A 4xx/5xx answers with an error page, not the resource; treating that body as the resource
         // would silently hand on garbage in its place, so a non-success status is a failure.
@@ -143,16 +160,14 @@ impl Downloader {
         Ok(FetchedBody::new(answer.body, answer.served_from, answer.content_type))
     }
 
-    /// Sends one request for `url` and reads the whole answer, whatever its status.
+    /// Sends one request for `url` with `client` and reads the whole answer, whatever its status.
     ///
     /// The status is checked by the caller rather than through `error_for_status`, which consumes the
     /// response and throws the body away, and that body is the server's only explanation of a refusal.
-    fn ask(&mut self, url: &MaskedUrl) -> Result<Answer, CollectorError> {
-        let response = self.client()?.get(url.url().as_str()).send().map_err(|source| CollectorError::Http {
-            source: source.without_url(),
-            // The error owns the URL after the borrowed request is dropped.
-            url: Box::new(url.clone()),
-        })?;
+    /// A transport failure is stripped of the URL reqwest would quote, so it can be logged and
+    /// reported as it is.
+    fn ask(client: &Client, url: &MaskedUrl) -> Result<Answer, reqwest::Error> {
+        let response = client.get(url.url().as_str()).send().map_err(reqwest::Error::without_url)?;
 
         let status = response.status();
         // The body consumes the response, while the download keeps naming where it was served from.
@@ -167,14 +182,11 @@ impl Downloader {
         let body = match response.bytes() {
             Ok(bytes) => CapturedBody::capped(bytes.to_vec(), ERROR_BODY_CAP.max(bytes.len())),
             Err(source) => {
+                let source = source.without_url();
                 if status.is_success() {
-                    return Err(CollectorError::Http {
-                        source: source.without_url(),
-                        // The error owns the URL, while the caller keeps the one it asked for.
-                        url: Box::new(url.clone()),
-                    });
+                    return Err(source);
                 }
-                CapturedBody::unreadable(&source.without_url())
+                CapturedBody::unreadable(&source)
             }
         };
         Ok(Answer {
@@ -267,6 +279,41 @@ mod tests {
         (
             MaskedUrl::plain(Url::parse(&format!("http://127.0.0.1:{port}/Sensor.json")).expect("a valid URL")),
             request_rx,
+        )
+    }
+
+    /// A whole `200` answer with the body `abc`.
+    const WHOLE: &str = "HTTP/1.1 200 OK\r\nContent-Length: 3\r\nConnection: close\r\n\r\nabc";
+
+    /// A `200` answer that promises ten bytes of body and closes after three.
+    const CUT_SHORT: &str = "HTTP/1.1 200 OK\r\nContent-Length: 10\r\nConnection: close\r\n\r\nabc";
+
+    /// No answer at all: the connection is closed once the request is read.
+    const UNANSWERED: &str = "";
+
+    /// Answers one connection per entry of `responses`, in order, with that entry's raw bytes, then
+    /// stops listening, so a further request is refused. The receiver yields one message per
+    /// connection accepted.
+    fn serve_in_turn(responses: Vec<&'static str>) -> (MaskedUrl, Receiver<()>) {
+        let listener = TcpListener::bind("127.0.0.1:0").expect("a bindable port");
+        let port = listener.local_addr().expect("a local address").port();
+        let (answered_tx, answered_rx) = channel();
+        thread::spawn(move || {
+            for response in responses {
+                let Ok((mut stream, _)) = listener.accept() else {
+                    return;
+                };
+                let mut buffer = [0_u8; 1024];
+                let _ = stream.read(&mut buffer);
+                // Counted before the answer is written, so the count is complete once the fetch ends.
+                let _ = answered_tx.send(());
+                let _ = stream.write_all(response.as_bytes());
+                let _ = stream.flush();
+            }
+        });
+        (
+            MaskedUrl::plain(Url::parse(&format!("http://127.0.0.1:{port}/Observations")).expect("a valid URL")),
+            answered_rx,
         )
     }
 
@@ -605,6 +652,47 @@ mod tests {
         busy.assert();
         delivered.assert();
         assert_eq!(fetched.bytes(), b"abc");
+    }
+
+    #[test]
+    fn a_body_cut_short_is_asked_for_again_until_it_arrives_whole() {
+        let (url, answered) = serve_in_turn(vec![CUT_SHORT, WHOLE]);
+
+        let fetched = downloader().fetch(&url).expect("a body");
+
+        assert_eq!(fetched.bytes(), b"abc");
+        assert_eq!(answered.try_iter().count(), 2);
+    }
+
+    #[test]
+    fn a_connection_closed_without_an_answer_is_asked_again() {
+        let (url, answered) = serve_in_turn(vec![UNANSWERED, WHOLE]);
+
+        let fetched = downloader().fetch(&url).expect("a body");
+
+        assert_eq!(fetched.bytes(), b"abc");
+        assert_eq!(answered.try_iter().count(), 2);
+    }
+
+    #[test]
+    fn a_source_that_keeps_failing_in_transport_fails_with_a_transport_failure_once_the_attempts_are_spent() {
+        let (url, answered) = serve_in_turn(vec![UNANSWERED, CUT_SHORT, UNANSWERED, WHOLE]);
+
+        let error = downloader().fetch(&url).expect_err("a transport failure");
+
+        assert!(matches!(error, CollectorError::Http { .. }), "{}", rendered(&error));
+        assert_eq!(answered.try_iter().count(), 3);
+    }
+
+    #[test]
+    fn a_requested_shutdown_after_a_transport_failure_ends_the_fetch_as_interrupted() {
+        let (url, answered) = serve_in_turn(vec![UNANSWERED, WHOLE]);
+        let mut downloader = Downloader::new(UserAgent::from("cassiopeia/test".to_owned()), RequestHeaders::default(), &STOPPING);
+
+        let error = downloader.fetch(&url).expect_err("an interruption");
+
+        assert!(matches!(error, CollectorError::Interrupted { .. }), "{}", rendered(&error));
+        assert_eq!(answered.try_iter().count(), 1);
     }
 
     #[test]
