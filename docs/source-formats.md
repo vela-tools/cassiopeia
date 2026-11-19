@@ -99,7 +99,7 @@ Cassiopeia converts CSV fields to JSON values as it reads them:
 - Empty fields become `null`, and so does `\N`, the missing-value token of SQL dumps.
 - Values listed in the input's `dialect.nullValues`, such as `NE`, become `null`.
 - Integers and decimal numbers become JSON numbers. A decimal comma, as in `12,45`, is read as a number only when the input's `dialect` states `decimalSeparator: ","`; otherwise the value stays a string.
-- `true`, `yes`, and `on` become `true`; `false`, `no`, and `off` become `false`, ignoring case.
+- `true` and `false` become booleans, ignoring case. `yes`, `no`, `on`, and `off` remain strings, because a column of codes holds them as often as a column of answers: the ISO 3166 code of Norway is `NO`. Declare `transformation: "boolean"` to read them as booleans.
 - Values with leading zeroes remain strings, which preserves identifiers such as `00123`.
 - Everything else remains a string.
 
