@@ -121,27 +121,9 @@ impl RelationshipStore for DashMapRelationshipStore {
         Ok(())
     }
 
-    fn take_all_relationships(&self, parent_urn: &Urn) -> Result<StoredRelationships> {
+    fn assemble_relationships(&self, parent_urn: &Urn) -> Result<StoredRelationships> {
         let entries = self.relationships.remove(parent_urn).map(|(_, entries)| entries).unwrap_or_default();
         Ok(joined_in_source_order(entries))
-    }
-
-    fn get_all_relationships(&self, parent_urn: &Urn) -> Result<StoredRelationships> {
-        let Some(entries) = self.relationships.get(parent_urn) else {
-            return Ok(StoredRelationships::default());
-        };
-        // The writes of one parent mostly land in the order of the source, so only a parent whose
-        // targets did not is copied to be put in order.
-        if !entries.is_sorted_by_key(|stored| stored.position) {
-            let unordered = entries.clone();
-            drop(entries);
-            return Ok(joined_in_source_order(unordered));
-        }
-        let mut relationships = StoredRelationships::default();
-        for stored in entries.iter() {
-            join(&mut relationships, &stored.property, stored.child.clone());
-        }
-        Ok(relationships)
     }
 
     fn destroy(&self) -> Result<()> {
@@ -192,10 +174,12 @@ mod tests {
     }
 
     #[test]
-    fn get_all_is_non_destructive_while_take_drains() {
+    fn assembling_a_parent_drains_its_relationships_and_leaves_other_parents_stored() {
         let store = DashMapRelationshipStore::new();
         let parent: Urn = "urn:ngsi-ld:Parent:1".parse().unwrap();
-        let written: Vec<RelationshipEdge> = edges(parent.as_str(), "hasPart", &["urn:ngsi-ld:Child:A"]);
+        let other: Urn = "urn:ngsi-ld:Parent:2".parse().unwrap();
+        let mut written: Vec<RelationshipEdge> = edges(parent.as_str(), "hasPart", &["urn:ngsi-ld:Child:A"]);
+        written.extend(edges(other.as_str(), "hasPart", &["urn:ngsi-ld:Child:B"]));
 
         store
             .add_edges(FragmentEdges {
@@ -204,43 +188,9 @@ mod tests {
             })
             .unwrap();
 
-        let read = store.get_all_relationships(&parent).unwrap();
-        assert_eq!(in_order(&read, "hasPart"), ["urn:ngsi-ld:Child:A"]);
-
-        let taken = store.take_all_relationships(&parent).unwrap();
-        assert_eq!(in_order(&taken, "hasPart"), ["urn:ngsi-ld:Child:A"]);
-
-        let after = store.take_all_relationships(&parent).unwrap();
-        assert!(after.is_empty());
-    }
-
-    #[test]
-    fn reading_a_parent_whose_targets_landed_out_of_order_leaves_them_stored_as_written() {
-        let store = DashMapRelationshipStore::new();
-        let parent: Urn = "urn:ngsi-ld:Parent:1".parse().unwrap();
-        let second = edges(parent.as_str(), "hasPart", &["urn:ngsi-ld:Child:B"]);
-        let first = edges(parent.as_str(), "hasPart", &["urn:ngsi-ld:Child:A"]);
-        store
-            .add_edges(FragmentEdges {
-                position: record(1),
-                edges: &second,
-            })
-            .unwrap();
-        store
-            .add_edges(FragmentEdges {
-                position: record(0),
-                edges: &first,
-            })
-            .unwrap();
-
-        for _ in 0..2 {
-            let read = store.get_all_relationships(&parent).unwrap();
-            assert_eq!(in_order(&read, "hasPart"), ["urn:ngsi-ld:Child:A", "urn:ngsi-ld:Child:B"]);
-        }
-        let stored = store.relationships.get(&parent).unwrap();
-        assert_eq!(
-            stored.iter().map(|stored| stored.child.as_str()).collect::<Vec<&str>>(),
-            ["urn:ngsi-ld:Child:B", "urn:ngsi-ld:Child:A"]
-        );
+        assert_eq!(in_order(&store.assemble_relationships(&parent).unwrap(), "hasPart"), ["urn:ngsi-ld:Child:A"]);
+        assert!(store.relationships.get(&parent).is_none());
+        assert!(store.assemble_relationships(&parent).unwrap().is_empty());
+        assert_eq!(in_order(&store.assemble_relationships(&other).unwrap(), "hasPart"), ["urn:ngsi-ld:Child:B"]);
     }
 }

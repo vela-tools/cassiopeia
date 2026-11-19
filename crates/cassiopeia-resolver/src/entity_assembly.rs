@@ -63,7 +63,7 @@ impl FragmentResolver {
     /// objects by attribute name, nested objects by path, and the objects of a multi-attribute
     /// relationship by the instance that minted them (ETSI GS CIM 009 v1.9.1 clause 4.5.5).
     fn split_relationships(&self, base_id: &Urn) -> Result<EntityRelationships> {
-        let stored_relationships = self.relationship_store.get_all_relationships(base_id)?;
+        let stored_relationships = self.relationship_store.assemble_relationships(base_id)?;
         let mut relationships = Relationships::default();
         let mut nested_relationships = NestedRelationships::default();
         let mut instance_relationships = InstanceRelationships::default();
