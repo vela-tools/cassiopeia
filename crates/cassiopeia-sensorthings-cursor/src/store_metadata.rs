@@ -1,6 +1,6 @@
 use crate::cursor_store_error::CursorStoreError;
 use cassiopeia_sensorthings::{cursor_name::CursorName, service_root::ServiceRoot};
-use redb::{ReadTransaction, TableDefinition, TableError, WriteTransaction};
+use redb::{ReadTransaction, ReadableTable, TableDefinition, TableError, WriteTransaction};
 use std::path::Path;
 use strum::IntoStaticStr;
 

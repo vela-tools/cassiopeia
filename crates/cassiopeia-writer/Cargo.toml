@@ -9,7 +9,7 @@ repository.workspace = true
 
 [dependencies]
 ahash = "0.8.12"
-bytes = "1.12.1"
+bytes = "1.12.2"
 cassiopeia-common.workspace = true
 cassiopeia-diagnostic.workspace = true
 cassiopeia-ngsi-ld.workspace = true
