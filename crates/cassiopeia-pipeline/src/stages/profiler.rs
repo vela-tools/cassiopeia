@@ -1,15 +1,14 @@
-use crate::{error::PipelineError, pipeline_stage::PipelineStage};
+use crate::{error::PipelineError, lane_failure::LaneFailure, pipeline_stage::PipelineStage};
 use cassiopeia_collector::error::CollectorError;
 use cassiopeia_common::{
-    batch::Batch,
-    channel::{ChannelPolicy, ChannelReceiver, ChannelSender, channel_with_telemetry},
+    channel::{ChannelPolicy, ChannelReceiver, channel_with_telemetry},
     format::DataFormat,
     signal::Signal,
     stage::Stage,
     telemetry::{channel_boundary::ChannelBoundary, run::RunTelemetry},
 };
 use cassiopeia_csv_dialect::statement::DialectStatement;
-use cassiopeia_ir::{fragment::Fragment, mapped::Mapped, payload::CollectedPayload};
+use cassiopeia_ir::payload::CollectedPayload;
 use cassiopeia_profiler::{
     auto_profiler::AutoProfiler,
     passthrough_profiler::PassthroughProfiler,
@@ -27,19 +26,15 @@ use std::{convert::Infallible, fs, sync::Arc, thread::spawn};
 /// payload is counted against the profiler stage after format detection and successful routing.
 ///
 /// A profiler failure (a payload whose format cannot be detected, most commonly a source file that
-/// cannot be read) is the lane's failure, so it is forwarded to the shared error path
-/// (`error_sink`) as a fatal [`Signal::Error`] and counted against the run. This mirrors the
-/// collector and ingestor lanes; without it a missing input would leave the run exiting cleanly.
-pub(crate) fn spawn_profiler_thread(
-    profiler: Box<dyn Profiler>,
-    routes: ProfilerRoutes,
-    error_sink: ChannelSender<Signal<Batch<Mapped<Fragment>>, PipelineError>>,
-    telemetry: Arc<RunTelemetry>,
-) {
+/// cannot be read) is the lane's failure, so it is reported through the lane's `failure` path and
+/// counted against the run. This mirrors the collector and ingestor lanes; without it a missing input
+/// would leave the run exiting cleanly. The thread holds its handle on the path until it has
+/// reported, so the lane does not count as ended before its failure is known.
+pub(crate) fn spawn_profiler_thread(profiler: Box<dyn Profiler>, routes: ProfilerRoutes, failure: LaneFailure, telemetry: Arc<RunTelemetry>) {
     spawn(move || {
         if let Err(error) = profiler.profile(routes) {
             telemetry.add_errors(1);
-            let _ = error_sink.send(Signal::Error(PipelineError::from(error)));
+            failure.report(PipelineError::from(error));
         }
     });
 }
@@ -49,14 +44,14 @@ pub(crate) fn spawn_profiler_thread(
 /// A declared format takes the passthrough profiler, which inspects a CSV under the input's stated
 /// `dialect`; an undeclared one takes the auto-detector. Data
 /// payloads flow to the profiler on a policy-controlled channel; a collector failure is the lane's failure, so
-/// it is forwarded straight to the shared error path (`error_sink`) and the lane is torn down,
-/// rather than routed through the profiler as a re-typed error.
+/// it is reported straight through the lane's `failure` path and the lane is torn down, rather than
+/// routed through the profiler as a re-typed error.
 pub(crate) fn create_profiler(
     format_override: Option<DataFormat>,
     dialect: DialectStatement,
     collector_rx: ChannelReceiver<Signal<CollectedPayload, CollectorError>>,
     channel_policy: ChannelPolicy,
-    error_sink: ChannelSender<Signal<Batch<Mapped<Fragment>>, PipelineError>>,
+    failure: LaneFailure,
     reporter: &'static dyn Reporter,
     telemetry: Arc<RunTelemetry>,
 ) -> Box<dyn Profiler> {
@@ -87,7 +82,7 @@ pub(crate) fn create_profiler(
                     }
                 }
                 Signal::Error(error) => {
-                    let _ = error_sink.send(Signal::Error(PipelineError::from(error)));
+                    failure.report(PipelineError::from(error));
                     break;
                 }
                 Signal::Stop => {
@@ -119,14 +114,8 @@ fn payload_bytes(payload: &CollectedPayload) -> u64 {
 
 #[cfg(test)]
 mod tests {
-    use crate::{error::PipelineError, stages::profiler::spawn_profiler_thread};
-    use cassiopeia_common::{
-        batch::Batch,
-        channel::{ChannelPolicy, channel},
-        signal::Signal,
-        telemetry::run::RunTelemetry,
-    };
-    use cassiopeia_ir::{fragment::Fragment, mapped::Mapped};
+    use crate::{error::PipelineError, lane_failure::LaneEndings, stages::profiler::spawn_profiler_thread};
+    use cassiopeia_common::telemetry::run::RunTelemetry;
     use cassiopeia_profiler::{
         error::ProfilerError,
         profiler::{Profiler, ProfilerRoutes},
@@ -154,27 +143,27 @@ mod tests {
     }
 
     #[test]
-    fn a_profiler_failure_is_forwarded_to_the_shared_error_sink_and_counted() {
+    fn a_profiler_failure_is_reported_as_the_lane_s_failure_and_counted() {
         let telemetry = Arc::new(RunTelemetry::new());
-        let (error_tx, error_rx) = channel::<Signal<Batch<Mapped<Fragment>>, PipelineError>>(ChannelPolicy::Unbounded);
+        let mut endings = LaneEndings::default();
 
-        spawn_profiler_thread(Box::new(FailingProfiler), HashMap::new(), error_tx, Arc::clone(&telemetry));
+        spawn_profiler_thread(Box::new(FailingProfiler), HashMap::new(), endings.open(), Arc::clone(&telemetry));
 
-        let signal = error_rx.recv().expect("the profiler thread must forward its failure onto the error sink");
-        assert!(matches!(signal, Signal::Error(PipelineError::Profiler(_))));
+        let error = endings.first_failure().unwrap_err();
+        assert!(matches!(error, PipelineError::Profiler(_)), "{error}");
         assert_eq!(telemetry.snapshot().counters.errors, 1);
     }
 
     #[test]
-    fn a_successful_profiler_forwards_no_error() {
+    fn a_successful_profiler_reports_no_failure() {
         let telemetry = Arc::new(RunTelemetry::new());
-        let (error_tx, error_rx) = channel::<Signal<Batch<Mapped<Fragment>>, PipelineError>>(ChannelPolicy::Unbounded);
+        let mut endings = LaneEndings::default();
 
-        spawn_profiler_thread(Box::new(SilentProfiler), HashMap::new(), error_tx, Arc::clone(&telemetry));
+        spawn_profiler_thread(Box::new(SilentProfiler), HashMap::new(), endings.open(), Arc::clone(&telemetry));
 
-        // The thread drops its sender when it ends, so a clean lane closes the channel with nothing
-        // queued and no error counted.
-        assert!(error_rx.recv().is_err());
+        // The thread drops its handle when it ends, so a clean lane ends with no failure reported and
+        // no error counted.
+        assert!(endings.first_failure().is_ok());
         assert_eq!(telemetry.snapshot().counters.errors, 0);
     }
 }

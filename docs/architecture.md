@@ -116,7 +116,7 @@ Cassiopeia uses the type system to keep concepts separate across stage boundarie
 
 The pipeline also has a deliberate progression of data shapes. Ingestion produces source records. Expansion adds the mapping context, target identity, and relationship information needed to create partial entity contributions. Resolution combines those contributions. Extraction and transformation produce the final NGSI-LD entity. Each boundary narrows the gap between source data and the output standard.
 
-Failures follow the same rule. Stages report typed errors with their source context intact. A stage failure reaches the orchestrator and the run report instead of being swallowed, and a worker panic is converted into a recorded pipeline failure.
+Failures follow the same rule. Stages report typed errors with their source context intact. A stage failure reaches the orchestrator and the run report instead of being swallowed, and a worker panic is converted into a recorded pipeline failure. Each input lane reports its failure on a path of its own, and the first phase reads those paths in manifest order, so when several lanes fail, the cycle reports the failure of the earliest one whichever failed first in time.
 
 ## The NGSI-LD domain
 
