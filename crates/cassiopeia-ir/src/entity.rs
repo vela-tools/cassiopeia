@@ -1,4 +1,5 @@
 use crate::{
+    attribute_owners::AttributeOwners,
     metadata::EntityMetadata,
     relationships::{InstanceRelationships, NestedRelationships, Relationships},
     resolved_attribute::ResolvedAttribute,
@@ -44,6 +45,9 @@ pub struct EntityParts {
     pub instance_relationships: Option<InstanceRelationships>,
     /// Objects of relationships declared as sub-attributes, keyed by their path from the entity.
     pub nested_relationships: Option<NestedRelationships>,
+    /// Which carried mapping's declaration each attribute is taken from, when several mappings carry
+    /// the entity.
+    pub attribute_owners: Option<AttributeOwners>,
 }
 
 /// The final intermediate representation of an entity, ready for NGSI-LD serialization once resolved.
@@ -81,13 +85,19 @@ pub struct Entity {
     /// [`relationships`](Self::relationships). `None` for the common case of an entity with no nested
     /// relationships, so a plain entity allocates no map.
     nested_relationships: Option<NestedRelationships>,
+    /// Which carried mapping's declaration each attribute is taken from, when several mappings carry
+    /// the entity and may declare one name.
+    ///
+    /// `None` for the common case of an entity one mapping carries, whose every declaration is the
+    /// only one of its name, so a plain entity allocates no record.
+    attribute_owners: Option<AttributeOwners>,
 }
 
 impl Entity {
     /// Builds an entity from its resolved identity, data, scope, entity `expiresAt`, relationships,
     /// and values.
     ///
-    /// Metadata starts empty and is attached later by the extractor stage.
+    /// Metadata and the attribute owners start empty and are attached later by the extractor stage.
     #[must_use]
     pub const fn new(
         id: Urn,
@@ -107,6 +117,7 @@ impl Entity {
             metadata: None,
             instance_relationships: None,
             nested_relationships: None,
+            attribute_owners: None,
         }
     }
 
@@ -123,6 +134,7 @@ impl Entity {
             metadata: self.metadata,
             instance_relationships: self.instance_relationships,
             nested_relationships: self.nested_relationships,
+            attribute_owners: self.attribute_owners,
         }
     }
 }
@@ -146,7 +158,7 @@ mod tests {
     }
 
     #[test]
-    fn new_leaves_metadata_empty_and_preserves_the_other_parts() {
+    fn new_leaves_metadata_and_attribute_owners_empty_and_preserves_the_other_parts() {
         let mut relationships = IndexMap::default();
         relationships.insert(NameBuf::new("refRoad").expect("valid"), vec![urn()]);
         let entity = Entity::new(urn(), json!({"id": "1"}), None, None, relationships.clone(), None);
@@ -161,6 +173,7 @@ mod tests {
             metadata,
             instance_relationships,
             nested_relationships,
+            attribute_owners,
             ..
         } = entity.into_parts();
         assert_eq!(id, urn());
@@ -171,6 +184,7 @@ mod tests {
         assert_eq!(metadata, None);
         assert_eq!(instance_relationships, None);
         assert_eq!(nested_relationships, None);
+        assert_eq!(attribute_owners, None);
     }
 
     #[test]

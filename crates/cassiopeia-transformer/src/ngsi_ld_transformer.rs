@@ -10,6 +10,7 @@ use crate::{
 };
 use cassiopeia_common::parallelism::Parallelism;
 use cassiopeia_ir::{
+    attribute_owners::CarriedDeclaration,
     entity::{Entity, EntityParts},
     mapped::Mapped,
 };
@@ -56,6 +57,7 @@ fn transform_entity(mapped: Mapped<Entity>, unit_codes: &mut UnitCodeCache, loss
         values,
         metadata,
         instance_relationships,
+        attribute_owners,
         ..
     } = entity.into_parts();
     let mut values = values.unwrap_or_default();
@@ -82,12 +84,26 @@ fn transform_entity(mapped: Mapped<Entity>, unit_codes: &mut UnitCodeCache, loss
         metadata: metadata.as_ref(),
     };
 
-    // A joined entity carries one mapping per contributing fragment; each mapping's attributes read
-    // their own value or objects from the shared maps, building every attribute exactly once.
+    // A joined entity carries one mapping per contributing fragment, and an attribute name several of
+    // them declare is built only from the declaration the extractor took it from, with that
+    // declaration's value or objects. An entity one mapping carries records no owners and builds
+    // every declaration it makes.
     let attributes = mappings
         .iter()
-        .flat_map(|mapping| mapping.attributes())
-        .filter_map(|(name, config)| Some((name.clone(), build_attribute(name, config, &mut store, &mut cache, losses)?)))
+        .enumerate()
+        .flat_map(|(carried, mapping)| {
+            mapping.attributes().iter().enumerate().map(move |(index, attribute)| {
+                (
+                    CarriedDeclaration {
+                        mapping: carried,
+                        declaration: index,
+                    },
+                    attribute,
+                )
+            })
+        })
+        .filter(|(at, _)| attribute_owners.as_ref().is_none_or(|owners| owners.owns(*at)))
+        .filter_map(|(_, (name, config))| Some((name.clone(), build_attribute(name, config, &mut store, &mut cache, losses)?)))
         .collect();
 
     NgsiLdEntity::builder()
@@ -131,9 +147,10 @@ mod tests {
     use cassiopeia_geometry::geometry::NgsiLdGeometry;
     use cassiopeia_ir::{
         attribute_content::AttributeContent,
+        attribute_owners::{AttributeOwners, CarriedDeclaration},
         entity::{AttributeValues, Entity},
         instance_index::InstanceIndex,
-        mapped::Mapped,
+        mapped::{Mapped, Mappings},
         metadata::MetadataStorage,
         relationships::{InstanceObjects, InstanceRelationships},
         resolved_attribute::ResolvedAttribute,
@@ -355,6 +372,63 @@ mod tests {
             })
             .collect();
         assert_eq!(value_types, [Some("String"), Some("PostalAddress")]);
+    }
+
+    /// Transforms `entity`, carried by `mappings` in their order, after recording that the declaration
+    /// at `owner` owns the attribute it names.
+    fn transform_joined(mut entity: Entity, mappings: Mappings, owner: CarriedDeclaration) -> NgsiLdEntity {
+        let mut owners = AttributeOwners::new(&mappings);
+        owners.claim(owner);
+        entity.set_attribute_owners(Some(owners));
+        NgsiLdTransformer::new()
+            .transform(Mapped::with_mappings(entity, mappings), &QualifierLosses::new())
+            .unwrap()
+    }
+
+    #[test]
+    fn a_shared_name_is_built_with_the_declaration_of_the_mapping_that_owns_it() {
+        // The first mapping declares a raw-JSON attribute, which would find no JSON in the text the
+        // second mapping resolved and drop it.
+        let first = mapping(
+            r#"{ version: "v4", dataModel: "Sensor", identity: { entityName: "S-{{ id }}" }, attributes: { label: { type: "JsonProperty", source: "{{ label }}" } } }"#,
+        );
+        let second =
+            mapping(r#"{ version: "v4", dataModel: "Sensor", identity: { entityName: "S-{{ id }}" }, attributes: { label: { source: "{{ label }}" } } }"#);
+        let value_map = values(vec![("label", single(Value::String("North".into())))]);
+        let entity = Entity::new(urn("urn:ngsi-ld:Sensor:1"), json!({}), None, None, IndexMap::default(), Some(value_map));
+
+        let result = transform_joined(entity, Mappings::from_iter([first, second]), CarriedDeclaration { mapping: 1, declaration: 0 });
+
+        let Some(NgsiLdAttributeWrapper::Single(attr)) = result.attributes.get(&name("label")) else {
+            panic!("expected a single attribute");
+        };
+        let NgsiLdAttribute::Property(property) = attr.as_ref() else {
+            panic!("expected a property, got {attr:?}");
+        };
+        assert_eq!(property.value, Value::String("North".into()));
+    }
+
+    #[test]
+    fn a_later_mapping_s_declaration_of_a_name_an_earlier_mapping_owns_is_never_built() {
+        let first =
+            mapping(r#"{ version: "v4", dataModel: "Device", identity: { entityName: "D-{{ id }}" }, attributes: { owner: { source: "{{ owner }}" } } }"#);
+        let second = mapping(
+            r#"{ version: "v4", dataModel: "Device", identity: { entityName: "D-{{ id }}" }, attributes: { owner: { type: "Relationship", source: "{{ owner }}", target: { entity: "Person" } } } }"#,
+        );
+        let mut relationships = IndexMap::default();
+        relationships.insert(name("owner"), vec![urn("urn:ngsi-ld:Person:7")]);
+        let value_map = values(vec![("owner", single(Value::String("Ada".into())))]);
+        let entity = Entity::new(urn("urn:ngsi-ld:Device:1"), json!({}), None, None, relationships, Some(value_map));
+
+        let result = transform_joined(entity, Mappings::from_iter([first, second]), CarriedDeclaration { mapping: 0, declaration: 0 });
+
+        let Some(NgsiLdAttributeWrapper::Single(attr)) = result.attributes.get(&name("owner")) else {
+            panic!("expected a single attribute");
+        };
+        let NgsiLdAttribute::Property(property) = attr.as_ref() else {
+            panic!("expected the first mapping's property, got {attr:?}");
+        };
+        assert_eq!(property.value, Value::String("Ada".into()));
     }
 
     #[test]

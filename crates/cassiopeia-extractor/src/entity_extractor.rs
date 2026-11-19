@@ -5,6 +5,7 @@ use crate::{
         resolution_error::{ResolutionError, Result as ResolutionResult},
         resolver::resolve,
     },
+    attribute_claims::{AttributeClaims, Claim},
     dropped_attributes::DroppedAttributes,
     error::{ExtractionError, Result},
     extractor::Extractor,
@@ -12,6 +13,7 @@ use crate::{
 use cassiopeia_common::parallelism::Parallelism;
 use cassiopeia_ir::{
     assembled_entity::{AssembledEntity, AssembledEntityParts},
+    attribute_owners::CarriedDeclaration,
     entity::{AttributeValues, Entity},
     entity_relationships::EntityRelationshipsParts,
     mapped::{Mapped, Mappings},
@@ -64,45 +66,54 @@ impl Extractor for EntityExtractor {
         let mut values = AttributeValues::default();
         let mut metadata = EntityMetadata::default();
         let mappings: Mappings = fragments.iter().map(|fragment| Arc::clone(fragment.mapping())).collect();
+        let mut claims = AttributeClaims::of(&mappings);
+        let mut unresolved = Vec::new();
 
-        // Each fragment resolves through its own mapping against its own record; disjoint attribute
-        // names across mappings make the union a concatenation, last-writer-wins on the rare collision.
-        for fragment in &fragments {
-            let mut unresolved = Vec::new();
-            let attributes = fragment.mapping().attributes();
-            if fragment.observed().is_some() {
-                // The mapping kept its attributes from several records, so each attribute resolves
-                // against the record its own observation was kept from.
-                let observed = ObservedFragment {
-                    fragment,
-                    resolver: &self.resolver,
-                    relationships: &relationships,
-                    dropped,
+        // Each fragment resolves through its own mapping against its own record, in the order of the
+        // manifest. An attribute name several mappings declare is taken whole by the first whose
+        // fragment gives it a value, so a later declaration of a name already taken is skipped
+        // unresolved.
+        for (carried, fragment) in fragments.iter().enumerate() {
+            let input = TemplateInput::new(fragment.record(), fragment.variables());
+            // The mapping kept its attributes from several records, so each attribute resolves
+            // against the record its own observation was kept from.
+            let observed = fragment.observed().is_some().then_some(ObservedFragment {
+                fragment,
+                resolver: &self.resolver,
+                relationships: &relationships,
+                dropped,
+            });
+            for (index, (name, config)) in fragment.mapping().attributes().iter().enumerate() {
+                let at = CarriedDeclaration {
+                    mapping: carried,
+                    declaration: index,
                 };
-                for (index, (name, config)) in attributes.iter().enumerate() {
-                    file(
-                        observed.resolve(index, name, config, &mut metadata),
+                if claims.as_ref().is_some_and(|claims| claims.taken_before(at, name)) {
+                    continue;
+                }
+                let resolved = match &observed {
+                    Some(observed) => observed.resolve(index, name, config, &mut metadata),
+                    None => resolve(
+                        &mut ResolutionContext::new(input, &self.resolver, &relationships, dropped, Some(&mut metadata)),
                         name,
-                        &id,
-                        &mut values,
-                        dropped,
-                        &mut unresolved,
-                    )?;
+                        config,
+                    ),
+                };
+                if let Some(claims) = &mut claims {
+                    claims.settle(at, name, Claim::of(&resolved, name, config, &relationships), &mut metadata);
                 }
-            } else {
-                let input = TemplateInput::new(fragment.record(), fragment.variables());
-                let mut context = ResolutionContext::new(input, &self.resolver, &relationships, dropped, Some(&mut metadata));
-                for (name, config) in attributes {
-                    file(resolve(&mut context, name, config), name, &id, &mut values, dropped, &mut unresolved)?;
-                }
+                file(resolved, name, &id, &mut values, dropped, &mut unresolved)?;
             }
-            // A relationship's objects were minted upstream and travel on the entity, so a
-            // relationship whose properties failed to resolve is removed from them as well; otherwise
-            // it would be emitted stripped of the properties its mapping declared.
-            for name in unresolved {
+        }
+        // A relationship's objects were minted upstream and travel on the entity, so a relationship
+        // whose properties failed to resolve is removed from them as well, unless another mapping took
+        // its name; otherwise it would be emitted stripped of the properties its mapping declared.
+        for name in unresolved {
+            if claims.as_ref().is_none_or(|claims| !claims.taken(name)) {
                 relationships.remove_attribute(name);
             }
         }
+        let attribute_owners = claims.map(AttributeClaims::into_owners);
 
         // The data is spent once every fragment is resolved; the transformer reads only the resolved
         // maps and the carried mappings, so the entity's own record is no longer needed. Nested
@@ -118,6 +129,7 @@ impl Extractor for EntityExtractor {
             entity.set_metadata(Some(metadata));
         }
         entity.set_instance_relationships(instance_relationships.filter(|instances| !instances.is_empty()));
+        entity.set_attribute_owners(attribute_owners);
 
         Ok(Mapped::with_mappings(entity, mappings))
     }

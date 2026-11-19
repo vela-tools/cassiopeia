@@ -2,7 +2,9 @@
 //! entity on every run and entity store as if every record were merged in the order of the source: a
 //! field the inputs disagree on keeps the value of the first input in the manifest that holds it, and
 //! within that input of its first record that holds it, while a field only a later input holds is
-//! taken from that input.
+//! taken from that input. Inputs that read the mapping with different `vars` render their records
+//! through it as two mappings, and an attribute they disagree on is still taken from the first input
+//! in the manifest.
 
 use crate::end_to_end::{
     harness::{RunOutcome, attempt_inputs_end_to_end},
@@ -47,16 +49,22 @@ struct SharedMapping {
 
 impl SharedMapping {
     fn new(sources: &[&str]) -> SharedMapping {
+        SharedMapping::declaring(sources.iter().map(|records| (*records, "")))
+    }
+
+    /// The inputs of one run, each reading the records of one of `sources`, in order, with the
+    /// members, such as `vars`, that its pair splices into the input's declaration.
+    fn declaring<'s>(sources: impl IntoIterator<Item = (&'s str, &'s str)>) -> SharedMapping {
         let folder = TempDir::new().unwrap();
         let mapping = folder.path().join("stations.json5");
         fs::write(&mapping, STATIONS).unwrap();
         let declared = sources
-            .iter()
+            .into_iter()
             .enumerate()
-            .map(|(index, records)| {
+            .map(|(index, (records, members))| {
                 let data = folder.path().join(format!("stations-{index}.csv"));
                 fs::write(&data, records).unwrap();
-                format!(r#"{{ source: "{}", mapping: "{}" }}"#, data.display(), mapping.display())
+                format!(r#"{{ source: "{}", mapping: "{}"{members} }}"#, data.display(), mapping.display())
             })
             .collect();
         SharedMapping { _folder: folder, declared }
@@ -147,6 +155,20 @@ fn inputs_that_only_add_fields_to_one_another_report_no_merge_on_any_store() {
             assert_eq!(value_of(station, "capacity"), &json!(40));
             assert_eq!(value_of(station, "zone"), &json!("B"));
             assert!(outcome.coded(RECORDS_MERGED).is_empty(), "{:?}", outcome.diagnostics);
+        },
+    );
+}
+
+#[test]
+fn inputs_reading_the_mapping_with_different_vars_keep_the_first_input_s_value_on_every_run_and_store() {
+    let inputs = SharedMapping::declaring([(NORTH, r#", vars: { network: "north" }"#), (SOUTH, r#", vars: { network: "south" }"#)]);
+    assert_every_run_and_store_writes_the_same(
+        |store| inputs.run(store),
+        |outcome| {
+            let station = only_entity(outcome);
+            assert_eq!(value_of(station, "name"), &json!("Main"));
+            assert_eq!(value_of(station, "capacity"), &json!(40));
+            assert_eq!(value_of(station, "zone"), &json!("B"));
         },
     );
 }

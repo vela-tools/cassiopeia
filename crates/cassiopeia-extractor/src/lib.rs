@@ -32,6 +32,7 @@
 //! reaches the writer and the run can report what it lost.
 
 pub mod attribute;
+pub(crate) mod attribute_claims;
 pub mod dropped_attributes;
 pub mod dropped_geometries;
 pub mod dropped_geometry;

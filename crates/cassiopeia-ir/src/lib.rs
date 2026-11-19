@@ -7,6 +7,7 @@
 
 pub mod assembled_entity;
 pub mod attribute_content;
+pub mod attribute_owners;
 pub mod entity;
 pub mod entity_relationships;
 pub mod error;
