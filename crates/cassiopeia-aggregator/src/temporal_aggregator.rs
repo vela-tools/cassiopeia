@@ -87,9 +87,9 @@ mod tests {
         entity
     }
 
-    /// A static `name` instance carrying no `observedAt`.
-    fn name_instance() -> NgsiLdAttributeWrapper {
-        NgsiLdAttributeWrapper::single(NgsiLdAttribute::Property(NgsiLdProperty::new(Value::try_from(json!("KATRINA")).unwrap())))
+    /// A static `name` instance holding `name`, carrying no `observedAt`.
+    fn name_instance(name: &str) -> NgsiLdAttributeWrapper {
+        NgsiLdAttributeWrapper::single(NgsiLdAttribute::Property(NgsiLdProperty::new(Value::try_from(json!(name)).unwrap())))
     }
 
     /// A temporal `location` `GeoProperty` observation for `id`.
@@ -137,18 +137,20 @@ mod tests {
     }
 
     #[test]
-    fn a_static_attribute_stays_single_while_the_temporal_one_becomes_a_multi() {
+    fn a_static_attribute_stays_single_from_the_first_offered_while_the_temporal_one_becomes_a_multi() {
+        // The observations name the storm differently, and the first offered is the newer one, so
+        // only the order of offering decides which name is kept.
         let mut first = wind_observation("urn:ngsi-ld:TropicalCyclone:A", 50.0, "2005-08-25T18:00:00Z");
-        first.attributes.insert(NameBuf::new("name").unwrap(), name_instance());
+        first.attributes.insert(NameBuf::new("name").unwrap(), name_instance("KATRINA"));
         let mut second = wind_observation("urn:ngsi-ld:TropicalCyclone:A", 45.0, "2005-08-25T12:00:00Z");
-        second.attributes.insert(NameBuf::new("name").unwrap(), name_instance());
+        second.attributes.insert(NameBuf::new("name").unwrap(), name_instance("KATIA"));
 
         let mut aggregator = TemporalAggregator::new();
         aggregator.offer(first);
         aggregator.offer(second);
         let folded = aggregator.finish().unwrap();
 
-        assert!(matches!(folded.attributes.get("name"), Some(NgsiLdAttributeWrapper::Single(_))));
+        assert_eq!(folded.attributes.get("name"), Some(&name_instance("KATRINA")));
         assert!(matches!(folded.attributes.get("maxSustainedWind"), Some(NgsiLdAttributeWrapper::Multi(_))));
     }
 

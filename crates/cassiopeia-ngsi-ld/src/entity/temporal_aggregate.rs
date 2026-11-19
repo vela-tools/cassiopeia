@@ -292,20 +292,25 @@ mod tests {
     }
 
     #[test]
-    fn a_static_attribute_is_kept_once_as_a_single_instance() {
-        // `name` carries no observedAt, so it stays one value across observations rather than an array.
-        let name_instance = || NgsiLdAttributeWrapper::single(NgsiLdAttribute::Property(NgsiLdProperty::new(Value::try_from(json!("KATRINA")).unwrap())));
-        let mut first = wind_observation(50.0, "2005-08-25T18:00:00Z");
-        first.attributes.insert(NameBuf::new("name").unwrap(), name_instance());
-        let mut second = wind_observation(45.0, "2005-08-25T12:00:00Z");
-        second.attributes.insert(NameBuf::new("name").unwrap(), name_instance());
+    fn a_static_attribute_the_observations_disagree_on_is_kept_once_from_the_first_folded() {
+        // `name` carries no observedAt, so it stays one value across observations rather than an
+        // array. Each observation names the storm differently, and the first folded is neither the
+        // oldest nor the last, so only the order of folding decides which name is kept.
+        let named = |name: &str, wind: f64, observed_at: &str| {
+            let mut observation = wind_observation(wind, observed_at);
+            observation.attributes.insert(
+                NameBuf::new("name").unwrap(),
+                NgsiLdAttributeWrapper::single(NgsiLdAttribute::Property(NgsiLdProperty::new(Value::try_from(json!(name)).unwrap()))),
+            );
+            observation
+        };
 
-        let mut aggregate = TemporalAggregate::new(first);
-        aggregate.push(second);
-        let entity = aggregate.finish();
+        let mut aggregate = TemporalAggregate::new(named("KATRINA", 50.0, "2005-08-25T18:00:00Z"));
+        aggregate.push(named("KARL", 40.0, "2005-08-25T06:00:00Z"));
+        aggregate.push(named("KATIA", 45.0, "2005-08-25T12:00:00Z"));
+        let json = aggregate.finish().to_json(NgsiLdRepresentation::Normalized).unwrap();
 
-        let name = entity.attributes.get("name").expect("the static attribute");
-        assert!(matches!(name, NgsiLdAttributeWrapper::Single(_)));
+        assert_eq!(json["name"], json!({ "type": "Property", "value": "KATRINA" }));
     }
 
     #[test]

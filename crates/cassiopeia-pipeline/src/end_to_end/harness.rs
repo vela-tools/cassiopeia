@@ -551,5 +551,10 @@ pub(crate) fn entity_ids(outcome: &RunOutcome) -> Vec<String> {
     ids
 }
 
+/// The ids of the entities `entities` holds, in its order.
+pub(crate) fn listed_ids(entities: &[Value]) -> Vec<&str> {
+    entities.iter().filter_map(|entity| entity["id"].as_str()).collect()
+}
+
 /// Both entity-store backends a run can select.
 pub(crate) const STORES: [StoreKind; 2] = [StoreKind::DashMap, StoreKind::Redb];

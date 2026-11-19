@@ -1,5 +1,8 @@
 use crate::{
-    end_to_end::harness::{RunOutcome, RunSchemas, STORES, attempt_declared_end_to_end, attempt_file_end_to_end, attempt_scheduled_end_to_end, entity_ids},
+    end_to_end::{
+        harness::{RunOutcome, RunSchemas, STORES, attempt_declared_end_to_end, attempt_file_end_to_end, attempt_scheduled_end_to_end, entity_ids, listed_ids},
+        repeated_runs::assert_every_run_and_store_writes_the_same,
+    },
     error::PipelineError,
 };
 use cassiopeia_common::store_kind::StoreKind;
@@ -170,24 +173,22 @@ fn a_range_read_into_series_files_sorts_instances_oldest_first() {
 
 #[test]
 fn a_range_snapshot_replayed_into_series_files_writes_the_same_files_on_every_run_and_store() {
-    let mut runs: Vec<Vec<Value>> = Vec::new();
-    for store in STORES {
-        for _ in 0..10 {
+    assert_every_run_and_store_writes_the_same(
+        |store| {
             let (result, outcome) = run_snapshot(store, &fixture("frost-v1.1-range.jsonl"), SERIES_OUTPUT);
             result.unwrap();
-
+            outcome
+        },
+        |outcome| {
             // The file lists the Things in the order their first records come in the snapshot.
-            let ids: Vec<&str> = outcome.entities.iter().filter_map(|entity| entity["id"].as_str()).collect();
-            assert_eq!(ids, FROST_THINGS, "{store:?}");
+            assert_eq!(listed_ids(&outcome.entities), FROST_THINGS);
             for id in FROST_THINGS {
                 // `dateObserved` carries no `observedAt`, so it is kept from the Thing's first record in
                 // the snapshot, its `pm10` reading at 11:00, rather than from any of the later ones.
-                assert_eq!(entity(&outcome, id)["dateObserved"]["value"], "2026-11-16T11:00:00Z", "{store:?} {id}");
+                assert_eq!(entity(outcome, id)["dateObserved"]["value"], "2026-11-16T11:00:00Z", "{id}");
             }
-            runs.push(outcome.entities);
-        }
-    }
-    assert!(runs.windows(2).all(|pair| pair[0] == pair[1]));
+        },
+    );
 }
 
 #[test]
