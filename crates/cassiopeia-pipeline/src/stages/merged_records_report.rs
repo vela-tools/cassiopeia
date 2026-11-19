@@ -16,7 +16,8 @@ use cassiopeia_resolver::{
 /// The headline carries the id, the count, and the field because the concise form shows nothing else:
 /// the entities travel as a context field, which is only rendered under `-v`, and a reader who cannot
 /// see which id lost which field has nothing to go and inspect. It does not say which record's value
-/// was kept: with records arriving in parallel that is not the same from one run to the next.
+/// was kept: that follows from the records' `observedAt` and their order in the source, and is the
+/// same on every run.
 fn headline(merged: &MergedType) -> String {
     let exemplar = &merged.exemplar;
     let first = format!(
