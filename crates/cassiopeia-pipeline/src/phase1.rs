@@ -1,9 +1,11 @@
 use crate::{
     completion::drain_completion,
     controller::RunController,
-    error::Result,
+    error::{PipelineError, Result},
     input_config::InputConfig,
+    lane_failure::LaneEndings,
     pipeline::Pipeline,
+    pipeline_stage::PipelineStage,
     scheduled_run::ScheduledRun,
     stages::{
         collector::{lane_collector, spawn_collector_thread},
@@ -28,7 +30,7 @@ use cassiopeia_expander::{expander::Expander, generic::GenericExpander, router::
 use cassiopeia_ir::source_position::SourcePosition;
 use cassiopeia_mapping::template::resolver::TemplateResolver;
 use cassiopeia_resolver::{entity_source::EntitySource, fragment_resolver::FragmentResolver};
-use std::sync::Arc;
+use std::{sync::Arc, thread::spawn};
 
 /// One input lane as a cycle runs it: its configuration, the router its records are expanded
 /// through, and, for an incremental read, the cursor it resumes from and leaves its update in.
@@ -52,10 +54,15 @@ impl Pipeline {
     /// The lane of an incremental input resumes from the positions of its cursor and leaves its
     /// update in the cursor's slot.
     ///
+    /// The lanes run concurrently, so when several fail, which fails first in time depends on how
+    /// their threads are scheduled. The phase reports the failure of the first lane in manifest
+    /// order that fails, as soon as every lane before it has ended, so the same inputs fail a cycle
+    /// with the same error on every run.
+    ///
     /// # Errors
     ///
-    /// Returns the resolver's typed [`PipelineError`](crate::error::PipelineError) when the sink
-    /// reports a fragment could not be resolved.
+    /// Returns the failure of the first lane in manifest order that fails, and otherwise the
+    /// resolver's typed [`PipelineError`] when the sink reports a fragment could not be resolved.
     pub(crate) fn run_phase1(
         &self,
         lanes: Vec<CycleLane<'_>>,
@@ -79,6 +86,7 @@ impl Pipeline {
         // resolver's intake, fed by every lane's expander bridge.
         let (shared_tx, shared_rx) = env.channel(Some(ChannelBoundary::between(Stage::Expander, Stage::Resolver)));
         let _ = shared_tx.send(Signal::Meta(run.meta.clone()));
+        let mut endings = LaneEndings::default();
 
         // Every lane's mappings are registered in the order of the manifest before any lane starts, so
         // they take their ids, and the mappings joined onto one entity their order, in that order
@@ -102,6 +110,9 @@ impl Pipeline {
             },
         ) in (0_u32..).zip(lanes)
         {
+            // The lane's collector splitter, profiler and expander each hold a handle on its failure
+            // path, so the lane counts as ended only once all three have.
+            let failure = endings.open();
             let ingestor_bank = spawn_ingestor_bank(
                 &input.mapping_binding,
                 self.output.temporal,
@@ -134,11 +145,11 @@ impl Pipeline {
                 input.dialect.clone(),
                 collector_rx,
                 channel_policy,
-                shared_tx.clone(),
+                failure.clone(),
                 self.context.reporter,
                 Arc::clone(&env.telemetry),
             );
-            spawn_profiler_thread(profiler, ingestor_bank.routes, shared_tx.clone(), Arc::clone(&env.telemetry));
+            spawn_profiler_thread(profiler, ingestor_bank.routes, failure.clone(), Arc::clone(&env.telemetry));
 
             // The lane keeps its variables for the next cycle, so the expander takes its own handle on
             // the shared map.
@@ -149,6 +160,7 @@ impl Pipeline {
                 expander,
                 ingestor_bank.output_rx,
                 shared_tx.clone(),
+                failure,
                 batch_size,
                 SourcePosition::first_of(lane_index),
                 &env,
@@ -160,7 +172,14 @@ impl Pipeline {
 
         let resolver_rx = spawn_resolver_thread(fragment_resolver.clone(), shared_rx, num_inputs, env);
 
-        drain_completion(resolver_rx)?;
+        // The resolver's completion is drained on a thread of its own while the lanes are waited for
+        // in manifest order, so a bounded completion channel never holds the resolver, and through it
+        // the lanes, back.
+        let resolved = spawn(move || drain_completion(resolver_rx));
+        endings.first_failure()?;
+        resolved.join().map_err(|_| PipelineError::StagePanic {
+            stage: PipelineStage::ResolverSink,
+        })??;
 
         Ok(fragment_resolver.get_unique_entity_count().unwrap_or(0))
     }

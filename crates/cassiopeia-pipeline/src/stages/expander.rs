@@ -1,5 +1,6 @@
 use crate::{
     error::PipelineError,
+    lane_failure::LaneFailure,
     pipeline_stage::PipelineStage,
     stages::{
         batch_sink_report::report_sink,
@@ -91,10 +92,16 @@ impl<'a> FragmentEmitter<'a> {
 /// and so is a relationship whose source, or whose synthetic entity's identity, failed to render:
 /// the entity still publishes, so nothing downstream can tell the member was ever meant to be there.
 /// Cancellation, upstream termination, or a lost downstream channel stops processing.
+///
+/// A failure of the lane's ingestor arrives here, as the lane's last stage, and is reported through
+/// the lane's `failure` path rather than onto the shared intake, so the cycle can report the failures
+/// of its lanes in manifest order. The thread holds its handle on the path until it ends, after
+/// every ingestor of the lane, so the lane counts as ended only then.
 pub(crate) fn spawn_expander_thread(
     expander: Box<dyn Expander>,
     receiver: ChannelReceiver<Signal<Batch<Record>, PipelineError>>,
     tx: FragmentSender,
+    failure: LaneFailure,
     batch_size: usize,
     first: SourcePosition,
     env: &StageEnv,
@@ -171,11 +178,7 @@ pub(crate) fn spawn_expander_thread(
                     }
                 }
                 Signal::Stop => break,
-                Signal::Error(error) => {
-                    if tx.send(Signal::Error(error)).is_err() {
-                        return;
-                    }
-                }
+                Signal::Error(error) => failure.report(error),
                 Signal::Meta(meta) => {
                     if tx.send(Signal::Meta(meta)).is_err() {
                         return;

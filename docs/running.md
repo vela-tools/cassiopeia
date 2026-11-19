@@ -117,7 +117,7 @@ The [validation guide](validation.md) covers the modes, the outcome matrix, and 
 
 ## Handle failures
 
-A cycle fails when a stage reports a fatal error, such as a validation abort under `--validation-mode fail` or a write that cannot be completed. `--on-failure` decides what the *run* does next and which exit status it returns. The same policy governs one-shot runs and repeating schedules. Its manifest equivalent is the top-level `onFailure` field. Like `--validation-mode`, the flag shapes the run and is mutually exclusive with `--manifest`.
+A cycle fails when a stage reports a fatal error, such as a validation abort under `--validation-mode fail` or a write that cannot be completed. When several inputs fail in one cycle, the cycle fails with the error of the input the manifest lists first, once every input before it has been read, so the same inputs fail a run with the same error every time. `--on-failure` decides what the *run* does next and which exit status it returns. The same policy governs one-shot runs and repeating schedules. Its manifest equivalent is the top-level `onFailure` field. Like `--validation-mode`, the flag shapes the run and is mutually exclusive with `--manifest`.
 
 | `--on-failure` | Scheduled run: after a failed cycle | One-shot run | Process exit |
 | --- | --- | --- | --- |

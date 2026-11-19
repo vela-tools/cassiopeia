@@ -23,6 +23,7 @@ mod failure_code;
 mod first_cycle;
 mod ignored_key_report;
 mod input_config;
+mod lane_failure;
 pub mod local_context_error;
 mod memory_sampler;
 pub mod observer;

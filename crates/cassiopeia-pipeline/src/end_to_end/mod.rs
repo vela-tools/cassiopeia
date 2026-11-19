@@ -8,6 +8,7 @@ mod golden;
 mod harness;
 mod historical_locations;
 mod incremental_reads;
+mod input_failures;
 mod inputs_sharing_a_mapping;
 mod json_collections;
 mod local_contexts;
