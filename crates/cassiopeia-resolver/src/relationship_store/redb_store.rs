@@ -36,8 +36,8 @@ const RELATIONSHIPS_TABLE: TableDefinition<&[u8], &[u8]> = TableDefinition::new(
 /// No two fragments share a position and each records its edges in one call, so no two edges share
 /// a key. [`add_edges`](RelationshipStore::add_edges) and
 /// [`add_edge_batch`](RelationshipStore::add_edge_batch) commit a single
-/// `WriteTransaction`; [`take_all_relationships`](RelationshipStore::take_all_relationships)
-/// extracts the parent's prefix range in one write transaction, removing each target as it is read.
+/// `WriteTransaction`; [`assemble_relationships`](RelationshipStore::assemble_relationships)
+/// prefix-scans one parent in a read transaction and leaves its rows in place.
 #[derive(Debug, Clone)]
 pub struct RedbRelationshipStore {
     db: Arc<Database>,
@@ -198,37 +198,7 @@ impl RelationshipStore for RedbRelationshipStore {
         Ok(())
     }
 
-    fn take_all_relationships(&self, parent_urn: &Urn) -> Result<StoredRelationships> {
-        let prefix = Self::make_parent_prefix(parent_urn);
-        let end = Self::prefix_end(&prefix);
-
-        let mut result = StoredRelationships::default();
-
-        let mut write_txn = self.db.begin_write().map_err(|e| self.redb_err(e.into(), StoreAction::BeginTransaction))?;
-        write_txn
-            .set_durability(Durability::None)
-            .map_err(|e| self.redb_err(e.into(), StoreAction::SetDurability))?;
-        {
-            let mut table = write_txn
-                .open_table(RELATIONSHIPS_TABLE)
-                .map_err(|e| self.redb_err(e.into(), StoreAction::OpenTable))?;
-            let mut extracted = table
-                .extract_if(prefix.as_slice()..end.as_slice(), |_, _| true)
-                .map_err(|e| self.redb_err(e.into(), StoreAction::Remove))?;
-            for entry in &mut extracted {
-                let (_, value) = entry.map_err(|e| self.redb_err(e.into(), StoreAction::Remove))?;
-                let (property, child_urn) = Self::parse_value(value.value())?;
-                join(&mut result, property, child_urn);
-            }
-            // Dropping the iterator would discard a failure to finalize the removals it yielded.
-            extracted.close().map_err(|e| self.redb_err(e.into(), StoreAction::Remove))?;
-        }
-        write_txn.commit().map_err(|e| self.redb_err(e.into(), StoreAction::CommitTransaction))?;
-
-        Ok(result)
-    }
-
-    fn get_all_relationships(&self, parent_urn: &Urn) -> Result<StoredRelationships> {
+    fn assemble_relationships(&self, parent_urn: &Urn) -> Result<StoredRelationships> {
         // Read-only scan: redb read transactions are MVCC and lock-free, so
         // `rayon::par_iter` callers can assemble entities concurrently instead of
         // serializing on the single writer.
@@ -352,7 +322,7 @@ mod tests {
     }
 
     #[test]
-    fn get_all_is_non_destructive_while_take_drains() {
+    fn assembling_a_parent_leaves_its_relationships_stored() {
         let store = RedbRelationshipStore::new().unwrap();
         let parent: Urn = "urn:ngsi-ld:Parent:1".parse().unwrap();
         let written = edges(parent.as_str(), "hasPart", &["urn:ngsi-ld:Child:A"]);
@@ -365,10 +335,8 @@ mod tests {
             .unwrap();
 
         for _ in 0..2 {
-            assert_eq!(in_order(&store.get_all_relationships(&parent).unwrap(), "hasPart"), ["urn:ngsi-ld:Child:A"]);
+            assert_eq!(in_order(&store.assemble_relationships(&parent).unwrap(), "hasPart"), ["urn:ngsi-ld:Child:A"]);
         }
-        assert_eq!(in_order(&store.take_all_relationships(&parent).unwrap(), "hasPart"), ["urn:ngsi-ld:Child:A"]);
-        assert!(store.take_all_relationships(&parent).unwrap().is_empty());
     }
 
     #[test]
@@ -392,7 +360,7 @@ mod tests {
             ])
             .unwrap();
 
-        assert_eq!(in_order(&store.take_all_relationships(&parent_a).unwrap(), "has"), ["urn:ngsi-ld:Child:X"]);
-        assert_eq!(in_order(&store.take_all_relationships(&parent_b).unwrap(), "has"), ["urn:ngsi-ld:Child:Y"]);
+        assert_eq!(in_order(&store.assemble_relationships(&parent_a).unwrap(), "has"), ["urn:ngsi-ld:Child:X"]);
+        assert_eq!(in_order(&store.assemble_relationships(&parent_b).unwrap(), "has"), ["urn:ngsi-ld:Child:Y"]);
     }
 }

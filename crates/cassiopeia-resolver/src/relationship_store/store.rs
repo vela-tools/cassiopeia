@@ -39,10 +39,8 @@ pub(crate) fn join(relationships: &mut StoredRelationships, key: &str, target: U
 
 /// Stores parent-child relationships discovered during resolution.
 ///
-/// Relationships are written via [`add_edges`](Self::add_edges) and consumed via either
-/// [`take_all_relationships`](Self::take_all_relationships), which removes and returns them, or
-/// [`get_all_relationships`](Self::get_all_relationships), which reads them without mutating the
-/// store.
+/// Relationships are written via [`add_edges`](Self::add_edges) and read back once per parent, at
+/// entity assembly, via [`assemble_relationships`](Self::assemble_relationships).
 ///
 /// The stages before the store run in parallel, so the fragments of one entity reach it in whatever
 /// order their threads finish them. A store therefore keeps the position of the fragment beside
@@ -80,35 +78,27 @@ pub trait RelationshipStore: Debug + Send + Sync + 'static {
         Ok(())
     }
 
-    /// Removes and returns all relationships for the given parent URN.
+    /// Assembles the relationships stored for the parent `parent_urn`.
     ///
     /// Returns a [`StoredRelationships`] map from relationship key to the distinct child URNs in the
     /// order of the source: by the positions their edges were recorded at, the edges of one fragment
     /// in the order it gave them, each child once at its earliest place. The map is empty when the
     /// parent has none.
     ///
-    /// # Errors
-    ///
-    /// Returns [`RelationshipStoreError`](crate::relationship_store::error::RelationshipStoreError)
-    /// when the store cannot be read or updated.
-    fn take_all_relationships(&self, parent_urn: &Urn) -> Result<StoredRelationships>;
-
-    /// Read-only counterpart of [`take_all_relationships`](Self::take_all_relationships).
-    ///
-    /// Returns the same grouped map but leaves the store untouched. Entity assembly visits each
-    /// URN once and then calls [`destroy`](Self::destroy), so skipping the remove halves the disk
-    /// work; for redb it also lets
-    /// callers open concurrent read transactions instead of serializing on the
-    /// single writer. The default implementation delegates to the removing
-    /// variant; concrete backends override it with a read-only path.
+    /// **Assembly consumes the parent's relationships.** Entity assembly visits each parent once and
+    /// calls [`destroy`](Self::destroy) right after, so a store is free to release them as they are
+    /// read, and each backend does what is cheapest for it. An in-memory store drains them: moving
+    /// the targets out spares a copy of each, and their memory is freed as assembly progresses, so
+    /// asking twice for one parent yields its relationships once and an empty map after. A
+    /// disk-backed store leaves them in place: removing them would only write to a file deleted
+    /// next, and would queue the parallel assembly threads behind redb's single writer, whereas its
+    /// read transactions run side by side.
     ///
     /// # Errors
     ///
     /// Returns [`RelationshipStoreError`](crate::relationship_store::error::RelationshipStoreError)
     /// when the store cannot be read.
-    fn get_all_relationships(&self, parent_urn: &Urn) -> Result<StoredRelationships> {
-        self.take_all_relationships(parent_urn)
-    }
+    fn assemble_relationships(&self, parent_urn: &Urn) -> Result<StoredRelationships>;
 
     /// Releases all stored relationships.
     ///
@@ -171,18 +161,14 @@ pub(crate) mod tests {
         store.add_edges(FragmentEdges { position, edges: &edges }).unwrap();
     }
 
-    /// Asserts that both reads of [`PARENT`] hold `expected`, each key's children in order, the keys
-    /// in order too.
+    /// Asserts that the relationships assembled for [`PARENT`] hold `expected`, each key's children in
+    /// order, the keys in order too.
     fn assert_reads_back(store: &dyn RelationshipStore, expected: &[(&str, &[&str])]) {
         let parent: Urn = PARENT.parse().unwrap();
-        let read = store.get_all_relationships(&parent).unwrap();
-        let taken = store.take_all_relationships(&parent).unwrap();
-        for relationships in [read, taken] {
-            let found: Vec<(&str, Vec<&str>)> = relationships.keys().map(|key| (key.as_str(), in_order(&relationships, key))).collect();
-            let expected: Vec<(&str, Vec<&str>)> = expected.iter().map(|(key, children)| (*key, children.to_vec())).collect();
-            assert_eq!(found, expected);
-        }
-        assert!(store.take_all_relationships(&parent).unwrap().is_empty());
+        let relationships = store.assemble_relationships(&parent).unwrap();
+        let found: Vec<(&str, Vec<&str>)> = relationships.keys().map(|key| (key.as_str(), in_order(&relationships, key))).collect();
+        let expected: Vec<(&str, Vec<&str>)> = expected.iter().map(|(key, children)| (*key, children.to_vec())).collect();
+        assert_eq!(found, expected);
     }
 
     /// Cross-backend contract: targets written out of the order of the source come back in it.
@@ -312,7 +298,7 @@ pub(crate) mod tests {
 
         let other: Urn = other.parse().unwrap();
         assert_eq!(
-            in_order(&store.get_all_relationships(&other).unwrap(), "servedBy"),
+            in_order(&store.assemble_relationships(&other).unwrap(), "servedBy"),
             ["urn:ngsi-ld:Line:U7", "urn:ngsi-ld:Line:U9", "urn:ngsi-ld:Line:U8"]
         );
         assert_reads_back(store, &[("servedBy", &["urn:ngsi-ld:Line:U1", "urn:ngsi-ld:Line:U2", "urn:ngsi-ld:Line:U3"])]);

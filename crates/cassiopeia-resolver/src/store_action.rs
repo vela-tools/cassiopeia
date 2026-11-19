@@ -31,9 +31,6 @@ pub enum StoreAction {
     /// Iterating a table.
     #[strum(serialize = "iterate a table")]
     Iterate,
-    /// Removing a row.
-    #[strum(serialize = "remove a row")]
-    Remove,
     /// Setting a transaction's durability.
     #[strum(serialize = "set transaction durability")]
     SetDurability,
