@@ -1,0 +1,31 @@
+// Attributes that share one `observedAt` template rank the records of an entity as whole records:
+// the current state keeps the latest record whole, so an attribute it holds no value for is left
+// out rather than taken from an older record, whether the latest record comes last or first.
+{
+    version: "v4",
+    dataModel: "Sensor",
+    identity: {
+        entityName: "{{ code }}",
+    },
+    attributes: {
+        temperature: {
+            source: "{{ t }}",
+            transformation: "float",
+            properties: {
+                observedAt: {
+                    source: "{{ time }}",
+                    transformation: "datetime",
+                },
+            },
+        },
+        status: {
+            source: "{{ status }}",
+            properties: {
+                observedAt: {
+                    source: "{{ time }}",
+                    transformation: "datetime",
+                },
+            },
+        },
+    },
+}

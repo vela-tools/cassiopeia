@@ -244,7 +244,7 @@ pub(crate) mod tests {
         },
         field_path::FieldPath,
         mapping_id::MappingId,
-        test_order::{ReadsEverything, next_batch, next_position},
+        test_order::{EVERY_ORDER_OF_THREE, ReadsEverything, next_batch, next_position},
     };
     use cassiopeia_ir::{
         observed_records::{ObservedRecords, RecordChoice},
@@ -475,6 +475,41 @@ pub(crate) mod tests {
                 )),
                 "{id}"
             );
+        }
+    }
+
+    /// Contract every current-state [`EntityStore`] must honour: the records of a mapping whose
+    /// attributes share one `observedAt` template rank as whole records, so the fragment is the record
+    /// observed last, kept whole: a value only older records hold is not carried over from them, and
+    /// an attribute the record observed last holds no value for is left out of the entity. This holds
+    /// in every order the records can arrive in, across separate writes as well as within one batch.
+    pub(crate) fn assert_keeps_the_record_observed_last_whole_without_a_value(store: &dyn EntityStore) {
+        let records = [
+            ("2026-03-01T10:00:00Z", json!({ "t": 20, "status": "ok" })),
+            ("2026-03-01T11:00:00Z", json!({ "status": "warm" })),
+            ("2026-03-01T10:30:00Z", json!({ "t": 21, "status": "cold" })),
+        ];
+        let observation = |id: &Urn, record: usize| {
+            let (time, data) = &records[record];
+            FragmentWrite {
+                ranking: ranked(time),
+                ..write_at(id, at(record), data.clone())
+            }
+        };
+        for order in EVERY_ORDER_OF_THREE {
+            let name = order.map(|record| record.to_string()).join("-");
+            let written: Urn = format!("urn:ngsi-ld:Sensor:written-{name}").parse().unwrap();
+            let batched: Urn = format!("urn:ngsi-ld:Sensor:batched-{name}").parse().unwrap();
+
+            for record in order {
+                store.store_fragment(observation(&written, record)).unwrap();
+            }
+            store.store_fragment_batch(order.map(|record| observation(&batched, record)).into()).unwrap();
+
+            for id in [written, batched] {
+                let units = store.assemble_entity(&id, &ReadsEverything).unwrap().units;
+                assert_eq!((&units[0][0].data, &units[0][0].observed), (&json!({ "status": "warm" }), &None), "{id}");
+            }
         }
     }
 

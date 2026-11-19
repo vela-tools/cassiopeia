@@ -209,6 +209,7 @@ mod tests {
                     assert_hands_ids_on_in_order_of_their_first_records,
                     assert_joins_expiries_across_mappings,
                     assert_joins_inputs_in_the_order_of_the_manifest,
+                    assert_keeps_the_record_observed_last_whole_without_a_value,
                     assert_merges_scopes_per_id,
                     assert_ranks_by_instant,
                     assert_ranks_each_slot_on_its_own,
@@ -250,6 +251,11 @@ mod tests {
     #[test]
     fn each_slot_of_a_temporal_mapping_keeps_the_record_observed_last_in_it() {
         assert_ranks_each_slot_on_its_own(&DashMapLatestEntityStore::new());
+    }
+
+    #[test]
+    fn a_shared_observed_at_keeps_the_record_observed_last_whole_without_a_value_it_lacks() {
+        assert_keeps_the_record_observed_last_whole_without_a_value(&DashMapLatestEntityStore::new());
     }
 
     #[test]
@@ -312,26 +318,6 @@ mod tests {
         );
         assert_eq!(unit[0].data, json!({"first": 1}));
         assert_eq!(unit[2].data, json!({"third": 3}));
-    }
-
-    #[test]
-    fn a_temporal_mapping_keeps_only_the_latest_record() {
-        let store = DashMapLatestEntityStore::new();
-        let id = urn("urn:ngsi-ld:Camera:1");
-        // Only the superseded record carries `battery`, so a merge rather than a replacement would
-        // leave it in the retained record.
-        let first = json!({"on": false, "battery": 80, "ts": "2026-04-03T22:00:20Z"});
-        let middle = json!({"on": true, "ts": "2026-04-03T22:10:20Z"});
-        let last = json!({"on": false, "ts": "2026-04-03T22:05:20Z"});
-
-        store.store_fragment(write(&id, first, 1, Some("2026-04-03T22:00:20Z"))).unwrap();
-        store.store_fragment(write(&id, middle.clone(), 1, Some("2026-04-03T22:10:20Z"))).unwrap();
-        store.store_fragment(write(&id, last, 1, Some("2026-04-03T22:05:20Z"))).unwrap();
-
-        let assembled = store.assemble_entity(&id, &ReadsEverything).unwrap();
-        assert_eq!(assembled.units.len(), 1);
-        assert_eq!(assembled.units[0].len(), 1);
-        assert_eq!(assembled.units[0][0].data, middle);
     }
 
     #[test]
