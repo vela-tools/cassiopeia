@@ -192,7 +192,7 @@ Generate a manifest file from command-line arguments
 
 * `-i`, `--input <INPUT>` — Data source file path or URL
 * `-m`, `--mapping <FILE>` — JSON5 mapping file defining the transformation rules
-* `--input-header <NAME: VALUE>` — Extra HTTP header sent when fetching a remote input, written as `Name: Value`; repeat for several. Typically carries an API key, e.g. `--input-header "X-Api-Key: <key>"`. Refused for a local input
+* `--input-header <NAME: VALUE>` — Extra HTTP header sent when fetching a remote input, written as `Name: Value`; repeat for several. Typically carries an API key, e.g. `--input-header "X-Api-Key: <key>"`. Refused for a local input. Recorded on the generated manifest as the input's `headers`
 * `-t`, `--type <FORMAT>` — Data format of the input source
 
   Default value: `auto`
@@ -223,7 +223,7 @@ Generate a manifest file from command-line arguments
   - `sensorthings`:
     An OGC SensorThings API snapshot file: the readings one SensorThings read collected, as JSON Lines
 
-* `--on-failure <MODE>` — How the run reacts to a failed cycle and what it exits with: abort (stop and exit non-zero), continue (run the rest, still exit non-zero), or ignore (run the rest, exit zero). Defaults to abort
+* `--on-failure <MODE>` — How the run reacts to a failed cycle and what it exits with: abort (stop and exit non-zero), continue (run the rest, still exit non-zero), or ignore (run the rest, exit zero). Defaults to abort. Recorded on the generated manifest as `onFailure`
 * `-M`, `--manifest-output <FILE>` — Output path for the generated manifest
 
   Default value: `manifest.json5`
