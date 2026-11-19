@@ -96,8 +96,9 @@ impl Downloader {
     ///
     /// A server that answers `429` or a `5xx` is asked again with backoff, waiting at least the
     /// `Retry-After` it sent, up to [`DEFAULT_MAX_ATTEMPTS`] attempts in all; its last answer is the
-    /// failure once they are spent, or once shutdown cuts a wait short. Any other non-success status
-    /// fails at once, since sending the same request again cannot change it.
+    /// failure once they are spent. A stop that cuts a wait short ends the fetch as interrupted,
+    /// since a stop is no failure of the source. Any other non-success status fails at once, since
+    /// sending the same request again cannot change it.
     ///
     /// Every URL a failure names is masked as `url` is, and a transport failure is stripped of the
     /// URL reqwest would quote, which is the request URL secrets and all.
@@ -105,8 +106,9 @@ impl Downloader {
     /// # Errors
     ///
     /// Returns [`CollectorError::ClientInit`] when the HTTP client cannot be built,
-    /// [`CollectorError::Http`] when the request never completes, and [`CollectorError::HttpStatus`]
-    /// when the server answers with a non-success status.
+    /// [`CollectorError::Http`] when the request never completes, [`CollectorError::HttpStatus`]
+    /// when the server answers with a non-success status, and [`CollectorError::Interrupted`] when
+    /// the run is stopped during a wait to ask again.
     pub fn fetch(&mut self, url: &MaskedUrl) -> Result<FetchedBody, CollectorError> {
         let mut attempt: u32 = 1;
         let answer = loop {
@@ -120,7 +122,10 @@ impl Downloader {
                 answer.status
             );
             if sleep_or_shutdown(delay, self.shutdown) == BackoffSleep::ShutdownRequested {
-                break answer;
+                return Err(CollectorError::Interrupted {
+                    // The error owns the URL, while the caller keeps the one it asked for.
+                    url: Box::new(url.clone()),
+                });
             }
             attempt += 1;
         };
@@ -603,7 +608,7 @@ mod tests {
     }
 
     #[test]
-    fn a_requested_shutdown_ends_the_wait_and_fails_with_the_last_answer() {
+    fn a_requested_shutdown_ends_the_wait_as_interrupted_rather_than_with_the_last_answer() {
         let mut server = mockito::Server::new();
         let failing = server.mock("GET", "/feed.csv").with_status(503).expect(1).create();
         let directory = TempDir::new().expect("a temporary directory");
@@ -614,6 +619,6 @@ mod tests {
             .expect_err("a failure");
 
         failing.assert();
-        assert!(matches!(error, CollectorError::HttpStatus { status, .. } if status.as_u16() == 503));
+        assert!(matches!(error, CollectorError::Interrupted { .. }));
     }
 }

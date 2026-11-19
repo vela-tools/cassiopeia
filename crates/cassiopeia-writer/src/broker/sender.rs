@@ -62,7 +62,8 @@ pub struct SerializationParts {
 pub struct SharedCounters {
     /// The shared count of successfully written entities.
     pub written: Arc<AtomicUsize>,
-    /// The shared count of dropped entities.
+    /// The shared count of dropped entities: those a delivery failure lost. An entity the run's stop
+    /// leaves unsent is not counted, since a stop is no failure and the cycle reports itself stopped.
     pub failed: Arc<AtomicUsize>,
     /// The shared congestion metrics.
     pub metrics: Arc<BrokerMetrics>,
@@ -112,7 +113,6 @@ pub fn sender_loop(receiver: &Receiver<BatchJob>, ctx: &SenderContext) {
 
     while let Ok(mut job) = receiver.recv() {
         if ctx.runtime.shutdown.load(Ordering::Acquire) {
-            ctx.counters.failed.fetch_add(job.entities.len(), Ordering::Relaxed);
             break;
         }
 
@@ -133,7 +133,6 @@ pub fn sender_loop(receiver: &Receiver<BatchJob>, ctx: &SenderContext) {
                 continue;
             }
             if ctx.runtime.shutdown.load(Ordering::Acquire) {
-                ctx.counters.failed.fetch_add(entity_count, Ordering::Relaxed);
                 continue;
             }
 
