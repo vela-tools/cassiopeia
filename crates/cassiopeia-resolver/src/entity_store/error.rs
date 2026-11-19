@@ -56,6 +56,15 @@ pub enum EntityStoreError {
         length: usize,
     },
 
+    /// The entity ids of a disk-backed store could not be sorted into source order through the
+    /// temporary files the sort writes.
+    #[error("Failed to sort the entity ids of the entity store into source order")]
+    SortIds {
+        /// The underlying I/O error.
+        #[source]
+        source: io::Error,
+    },
+
     /// An entity id read back from the disk-backed store is not a URN.
     #[error("The entity id '{id}' read back from the entity store is not a URN")]
     StoredId {
