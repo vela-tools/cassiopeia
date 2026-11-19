@@ -55,7 +55,6 @@ pub fn run() -> Result<()> {
     let cli = Cli::parse();
     let config = load_config(&cli)?;
 
-    shutdown::install_sync_handler()?;
     let reporter = init_terminal_reporter(&config.logger, cli.verbosity())?;
     build_thread_pool(&config)?;
 
@@ -116,7 +115,7 @@ fn dispatch(command: &Commands, config: &Config, cli_config: &CliConfig, reporte
         Commands::Schema(command) => dispatch_schema(&command.command),
         Commands::Manifest(command) => dispatch_manifest(&command.command),
         Commands::Config(command) => dispatch_config(&command.command),
-        Commands::Map(args) => run_mapping(args, config, reporter),
+        Commands::Map(args) => run_mapping(args, config, reporter, shutdown::watch_stop_signals()?),
         Commands::Explorer { light } => {
             explorer::launch_explorer(cli_config, ThemeChoice::from_light(*light))?;
             Ok(())
@@ -185,7 +184,7 @@ fn dispatch_sdm(command: &SdmSubcommand, cli_config: &CliConfig, reporter: &'sta
 fn dispatch_sensorthings(command: &SensorThingsSubcommand, cursors: &Path) -> Result<()> {
     match command {
         SensorThingsSubcommand::Readings(args) => {
-            let listing = list_server_readings(args)?;
+            let listing = list_server_readings(args, shutdown::watch_stop_signals()?)?;
             println!("{}", render_readings(listing.readings()));
             for limit in listing.limits_reached() {
                 eprintln!("{}", render_limit_note(limit));

@@ -1,11 +1,4 @@
-use crate::{
-    build_info::default_user_agent,
-    cli::map::MapArgs,
-    error::Result,
-    manifest_build::manifest_from_map_args,
-    pipeline_config::pipeline_config,
-    shutdown,
-};
+use crate::{build_info::default_user_agent, cli::map::MapArgs, error::Result, manifest_build::manifest_from_map_args, pipeline_config::pipeline_config};
 use cassiopeia_common::run_var::run_vars_to_map;
 use cassiopeia_configuration::config::Config;
 use cassiopeia_manifest::manifest::Manifest;
@@ -14,10 +7,14 @@ use cassiopeia_pipeline::{
     pipeline::{Pipeline, ValidationOverrides},
 };
 use cassiopeia_reporter::reporter::Reporter;
-use std::{env, sync::Arc};
+use std::{
+    env,
+    sync::{Arc, atomic::AtomicBool},
+};
 
-/// Runs the `map` command: builds or loads the manifest, then drives the pipeline to completion.
-pub fn run_mapping(args: &MapArgs, config: &Config, reporter: &'static dyn Reporter) -> Result<()> {
+/// Runs the `map` command: builds or loads the manifest, then drives the pipeline to completion, or
+/// until `shutdown` is raised, when the current cycle ends at its next stopping point.
+pub fn run_mapping(args: &MapArgs, config: &Config, reporter: &'static dyn Reporter, shutdown: &'static AtomicBool) -> Result<()> {
     args.validate()?;
 
     let manifest = load_or_build_manifest(args)?;
@@ -38,7 +35,7 @@ pub fn run_mapping(args: &MapArgs, config: &Config, reporter: &'static dyn Repor
     // still wins over both, resolved inside `from_manifest`.
     let cli_vars = run_vars_to_map(&args.var);
 
-    let mut pipeline = Pipeline::from_manifest(&manifest, validation, cli_vars, pipeline_config, reporter, shutdown::flag(), observer)?;
+    let mut pipeline = Pipeline::from_manifest(&manifest, validation, cli_vars, pipeline_config, reporter, shutdown, observer)?;
 
     pipeline.run()?;
 
