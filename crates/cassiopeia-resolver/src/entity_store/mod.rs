@@ -20,6 +20,7 @@ pub mod redb_latest_store;
 pub(crate) mod redb_scope;
 pub mod redb_series_store;
 pub(crate) mod redb_slot_value;
+pub(crate) mod redb_source_order;
 pub mod retention;
 pub mod store;
 pub(crate) mod stored_observation;
