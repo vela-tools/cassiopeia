@@ -1,7 +1,7 @@
 use crate::{
     error::PipelineError,
     stages::{
-        nonconformant_types::NonconformantTypes,
+        nonconformant_types::{NonconformantTypes, WarnedEntity},
         pump::BatchSender,
         stage_env::StageEnv,
         validation_abort::abort_error,
@@ -32,8 +32,9 @@ pub(crate) struct ValidationSettings {
 enum Enforced {
     /// Forward the entity and count it as processed.
     Passed,
-    /// Forward the entity but count it only as a warning, not as processed.
-    Warned,
+    /// Forward the entity but count it only as a warning, not as processed. The warning counts in
+    /// the run's totals only when it is the first of its entity.
+    Warned(WarnedEntity),
     /// Tear the run down with this error; the entity is not forwarded.
     Aborted(PipelineError),
 }
@@ -94,13 +95,13 @@ impl Enforcement {
         match decide(self.mode, &verdict) {
             Decision::Forward => Enforced::Passed,
             Decision::Warn(reason) => {
-                self.warned_types.record(reason, entity);
+                let warned = self.warned_types.record(reason, entity);
                 if let (Some(report), Ok(outcome)) = (&self.report, verdict)
                     && let ValidationDiagnostics::Report { entry, .. } = outcome.into_diagnostics()
                 {
                     report.record(entry);
                 }
-                Enforced::Warned
+                Enforced::Warned(warned)
             }
             Decision::Abort => Enforced::Aborted(abort_error(verdict, entity, self.report.as_ref())),
         }
@@ -121,8 +122,10 @@ impl Enforcement {
 /// One batch's entities as their verdicts are enforced: what is forwarded, how it is counted, and
 /// the error that stopped the batch, if one did.
 ///
-/// The two counts are distinct on purpose: a passing entity advances the progress bar, a warned one
-/// is completed without advancing it (its warning already showed there), and both are forwarded.
+/// The counts are distinct on purpose: a passing entity advances the progress bar, a warned one
+/// is completed without advancing it (its warning already showed there), and both are forwarded. A
+/// series run checks each record of an entity on its own, so only the first warned record of an
+/// entity adds a warning, and the run's warnings count the entities it writes.
 pub(crate) struct EnforcedBatch<T> {
     /// What is forwarded, in arrival order.
     forwarded: Batch<T>,
@@ -130,6 +133,8 @@ pub(crate) struct EnforcedBatch<T> {
     passed: u64,
     /// Entities forwarded despite a warning, counted as completed but not as processed.
     warned: u64,
+    /// The warned entities not warned about before, each one warning in the run's totals.
+    warnings: u64,
     /// The error that stopped the batch.
     abort: Option<PipelineError>,
 }
@@ -141,6 +146,7 @@ impl<T: Send + 'static> EnforcedBatch<T> {
             forwarded: Batch::with_capacity(capacity),
             passed: 0,
             warned: 0,
+            warnings: 0,
             abort: None,
         }
     }
@@ -161,8 +167,12 @@ impl<T: Send + 'static> EnforcedBatch<T> {
                 self.forwarded.push(forward(entity));
                 ControlFlow::Continue(())
             }
-            Enforced::Warned => {
+            Enforced::Warned(warned) => {
                 self.warned += 1;
+                match warned {
+                    WarnedEntity::New => self.warnings += 1,
+                    WarnedEntity::Repeated => {}
+                }
                 self.forwarded.push(forward(entity));
                 ControlFlow::Continue(())
             }
@@ -180,11 +190,12 @@ impl<T: Send + 'static> EnforcedBatch<T> {
             forwarded,
             passed,
             warned,
+            warnings,
             abort,
         } = self;
-        if warned > 0 {
-            stage.warn_inc_by(warned);
-            enforcement.telemetry.add_warnings(warned);
+        if warnings > 0 {
+            stage.warn_inc_by(warnings);
+            enforcement.telemetry.add_warnings(warnings);
         }
         let sent = if forwarded.is_empty() {
             ControlFlow::Continue(())

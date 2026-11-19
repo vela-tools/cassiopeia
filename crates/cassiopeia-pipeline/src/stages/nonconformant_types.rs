@@ -15,15 +15,30 @@ use urn_rs::Urn;
 struct WarnedType {
     /// The first entity warned about under this pair, so the report can point at a real offender.
     exemplar: Urn,
+    /// The entity counted last under this pair. A series run checks each record of an entity on its
+    /// own, and the records of one entity arrive in a row, so a record of the entity counted last
+    /// adds nothing to the count.
+    latest: Urn,
     /// How many entities were warned about.
     occurrences: NonZeroU64,
+}
+
+/// Whether a warned record counted a new entity under its reason and type.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum WarnedEntity {
+    /// The record is the first warned about of its entity, which now counts as one more warning.
+    New,
+    /// The record belongs to the entity warned about last, which already counted.
+    Repeated,
 }
 
 /// The entity types a run warned about, grouped by why.
 ///
 /// Relaxed validation deliberately asks for no per-entity diagnostics, so there is nothing to report
-/// beyond the type and the reason, which is exactly the grouping a reader wants anyway. A repeat
-/// costs one hash probe and one increment, and only a pair never seen before clones an identifier.
+/// beyond the type and the reason, which is exactly the grouping a reader wants anyway. Each group
+/// counts entities, not records: a series run checks each record of an entity on its own, and the
+/// count names how many of the entities the run writes were warned about. A repeat costs one hash
+/// probe and one comparison, and only a new entity clones an identifier.
 ///
 /// The map is an [`IndexMap`] so a run over the same source reports its types in the same order
 /// every time.
@@ -38,22 +53,31 @@ impl NonconformantTypes {
         NonconformantTypes::default()
     }
 
-    /// Records one warned entity under its reason and type.
-    pub(crate) fn record(&mut self, reason: WarnReason, entity: &NgsiLdEntity) {
+    /// Records one warned record under its reason and type, counting its entity unless the record
+    /// belongs to the entity counted last there. The records of one entity arrive in a row, as the
+    /// store emits them, so each entity counts once.
+    pub(crate) fn record(&mut self, reason: WarnReason, entity: &NgsiLdEntity) -> WarnedEntity {
         if let Some(warned) = self.entries.get_mut(&(reason, entity.entity_type.clone())) {
+            if warned.latest == entity.id {
+                return WarnedEntity::Repeated;
+            }
+            // The entry outlives the borrowed entity, so it keeps its own copy of the id.
+            warned.latest = entity.id.clone();
             warned.occurrences = warned.occurrences.saturating_add(1);
-            return;
+            return WarnedEntity::New;
         }
 
-        // A pair seen for the first time is the only case that owns anything: the map key must own
-        // the type name and the exemplar must outlive the borrowed entity.
+        // A pair seen for the first time owns its type name as the map key, and the exemplar and the
+        // latest id must outlive the borrowed entity.
         self.entries.insert(
             (reason, entity.entity_type.clone()),
             WarnedType {
                 exemplar: entity.id.clone(),
+                latest: entity.id.clone(),
                 occurrences: NonZeroU64::MIN,
             },
         );
+        WarnedEntity::New
     }
 
     /// Whether nothing was warned about.
@@ -103,7 +127,10 @@ fn headline(reason: WarnReason, count: u64, entity_type: &NameBuf, exemplar: &Ur
 
 #[cfg(test)]
 mod tests {
-    use crate::stages::{nonconformant_types::NonconformantTypes, validation_decision::WarnReason};
+    use crate::stages::{
+        nonconformant_types::{NonconformantTypes, WarnedEntity},
+        validation_decision::WarnReason,
+    };
     use cassiopeia_ngsi_ld::entity::{NgsiLdEntity, name::NameBuf};
     use cassiopeia_reporter::backend::noop::NoopReporter;
     use pretty_assertions::assert_eq;
@@ -132,6 +159,34 @@ mod tests {
         let warned = sink.entries.values().next().expect("a group");
         assert_eq!(warned.occurrences.get(), 1000);
         assert_eq!(warned.exemplar.to_string(), "urn:ngsi-ld:AirQualityObserved:ES-0");
+    }
+
+    #[test]
+    fn the_records_of_one_entity_in_a_row_count_as_one_entity() {
+        let mut sink = NonconformantTypes::new();
+        let recorded: Vec<WarnedEntity> = ["1", "1", "1", "2", "2"]
+            .iter()
+            .map(|id| {
+                sink.record(
+                    WarnReason::SchemaAbsent,
+                    &entity("TropicalCyclone", &format!("urn:ngsi-ld:TropicalCyclone:{id}")),
+                )
+            })
+            .collect();
+
+        assert_eq!(
+            recorded,
+            [
+                WarnedEntity::New,
+                WarnedEntity::Repeated,
+                WarnedEntity::Repeated,
+                WarnedEntity::New,
+                WarnedEntity::Repeated
+            ]
+        );
+        let warned = sink.entries.values().next().expect("a group");
+        assert_eq!(warned.occurrences.get(), 2);
+        assert_eq!(warned.exemplar.to_string(), "urn:ngsi-ld:TropicalCyclone:1");
     }
 
     #[test]
