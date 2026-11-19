@@ -21,4 +21,4 @@ jobs:
       - uses: ./.github/actions/native-dependencies
       - run: rustup toolchain install
       - uses: Swatinem/rust-cache@v2
-      - run: cargo test --workspace --all-features --locked -- --skip end_to_end::golden::
+      - run: cargo test --workspace --all-features --locked -- --skip 'end_to_end::golden::'
