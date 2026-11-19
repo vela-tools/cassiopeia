@@ -18,6 +18,7 @@ use indexmap::IndexMap;
 use langtag::LangTagBuf;
 use serde::{Deserialize, Deserializer, Serialize, de::Error as DeserializeError};
 use serde_json::Value as JsonValue;
+use std::sync::Arc;
 use typed_builder::TypedBuilder;
 
 /// A mapping's attribute declarations, keyed by the NGSI-LD attribute name they produce.
@@ -122,8 +123,10 @@ pub struct Attribute {
     /// parent document's version and is lifted into a full [`Mapping`] at load time (see
     /// the private `deserialize_synthetic_entity`). Loading the document keeps it only on a top-level
     /// Relationship or `ListRelationship`, the attribute that links the main entity to it, and drops
-    /// it anywhere else with a warning. Mutable access exists so the expansion stage can compile the
-    /// synthetic mapping in place.
+    /// it anywhere else with a warning.
+    ///
+    /// The mapping is shared, so every fragment it produces carries the same mapping and the
+    /// resolver keeps one mapping id for it across the run.
     #[serde(
         default,
         rename = "syntheticEntity",
@@ -131,8 +134,8 @@ pub struct Attribute {
         deserialize_with = "deserialize_synthetic_entity"
     )]
     #[builder(default = Default::default())]
-    #[getset(get = "pub", get_mut = "pub")]
-    synthetic_entity: Option<Mapping>,
+    #[getset(get = "pub")]
+    synthetic_entity: Option<Arc<Mapping>>,
 
     /// The entity a relationship attribute points at.
     ///
@@ -204,7 +207,7 @@ pub struct Attribute {
 /// rejected by [`Version`](crate::version::Version). The top-level document remains strictly
 /// required to declare its own `version`, because it is parsed by the derived deserializer, not
 /// this function.
-fn deserialize_synthetic_entity<'de, D>(deserializer: D) -> Result<Option<Mapping>, D::Error>
+fn deserialize_synthetic_entity<'de, D>(deserializer: D) -> Result<Option<Arc<Mapping>>, D::Error>
 where
     D: Deserializer<'de>,
 {
@@ -216,10 +219,22 @@ where
     }
     let mapping: Mapping = serde_json::from_value(value).map_err(DeserializeError::custom)?;
 
-    Ok(Some(mapping.into_synthetic()))
+    Ok(Some(Arc::new(mapping.into_synthetic())))
 }
 
 impl Attribute {
+    /// The synthetic entity's mapping, for loading the document to compile and check in place.
+    ///
+    /// Loading holds the only handle on the mapping, so taking it mutably never copies it.
+    pub fn synthetic_entity_mut(&mut self) -> Option<&mut Mapping> {
+        self.synthetic_entity.as_mut().map(Arc::make_mut)
+    }
+
+    /// Detaches the synthetic entity, returning it if one was declared.
+    pub const fn take_synthetic_entity(&mut self) -> Option<Arc<Mapping>> {
+        self.synthetic_entity.take()
+    }
+
     /// Walks this attribute and everything nested beneath it, depth-first.
     #[must_use]
     pub fn iter_recursive(&self) -> AttributeIterator<'_> {

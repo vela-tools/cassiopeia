@@ -139,7 +139,7 @@ impl KeyGathering<'_> {
                 }
                 .top_level(synthetic.attributes_mut());
             }
-        } else if attribute.synthetic_entity_mut().take().is_some() {
+        } else if attribute.take_synthetic_entity().is_some() {
             self.record(site(), IgnoredKeyKind::WithoutEffect(IneffectiveKey::SyntheticEntity));
         }
     }

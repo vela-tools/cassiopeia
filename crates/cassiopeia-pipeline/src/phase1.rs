@@ -88,12 +88,16 @@ impl Pipeline {
         let _ = shared_tx.send(Signal::Meta(run.meta.clone()));
         let mut endings = LaneEndings::default();
 
-        // Every lane's mappings are registered in the order of the manifest before any lane starts, so
-        // they take their ids, and the mappings joined onto one entity their order, in that order
-        // whichever lane's records reach the resolver first.
+        // Every lane's mappings, each followed by the synthetic entities it declares, are registered in
+        // the order of the manifest before any lane starts, so they take their ids, and the mappings
+        // joined onto one entity their order, in that order whichever lane's records reach the
+        // resolver first.
         for lane in &lanes {
             for mapping in lane.router.mappings() {
                 fragment_resolver.register(mapping, &lane.input.variables);
+                for synthetic in mapping.attributes().values().filter_map(|attribute| attribute.synthetic_entity().as_ref()) {
+                    fragment_resolver.register(synthetic, &lane.input.variables);
+                }
             }
         }
 
