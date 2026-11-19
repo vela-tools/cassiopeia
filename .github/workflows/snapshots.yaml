@@ -25,4 +25,4 @@ jobs:
         with:
           tool: cargo-insta
       - run: cargo fetch --locked
-      - run: cargo insta test --check --unreferenced=reject -p cassiopeia-pipeline --all-features -- end_to_end::golden::
+      - run: cargo insta test --check --unreferenced=reject -p cassiopeia-pipeline --all-features -- 'end_to_end::golden::'
