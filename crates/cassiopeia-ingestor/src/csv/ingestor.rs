@@ -187,7 +187,7 @@ impl CsvIngestor {
     ///
     /// A blank field and a null token are a missing value. Leading-zero numbers are kept as strings
     /// (identifiers such as postal codes), otherwise integers, floats written with the notation's
-    /// decimal separator, and booleans are parsed out.
+    /// decimal separator, and the booleans `true` and `false` are parsed out.
     fn infer_value(field: &str, notation: &ValueNotation) -> Value {
         let field = field.trim();
         if field.is_empty() {
@@ -215,9 +215,13 @@ impl CsvIngestor {
             return Value::Number(number);
         }
 
-        if field.eq_ignore_ascii_case("true") || field.eq_ignore_ascii_case("yes") || field.eq_ignore_ascii_case("on") {
+        // `yes`, `no`, `on` and `off` stay text: they are codes as often as answers, such as the ISO
+        // 3166 code `NO` and the IATA codes `ON`, `YES` and `OFF`, and the text is gone once read as
+        // a boolean. A mapping that wants a boolean declares `transformation: "boolean"`, which
+        // reads them.
+        if field.eq_ignore_ascii_case("true") {
             Value::Bool(true)
-        } else if field.eq_ignore_ascii_case("false") || field.eq_ignore_ascii_case("no") || field.eq_ignore_ascii_case("off") {
+        } else if field.eq_ignore_ascii_case("false") {
             Value::Bool(false)
         } else {
             Value::String(field.to_string())
@@ -387,11 +391,27 @@ mod tests {
     }
 
     #[test]
-    fn boolean_words_are_inferred_as_bools() {
-        let (_dir, payload) = profiled_csv("name,active\nAda,yes\nGrace,no\n", None);
+    fn true_and_false_in_any_case_are_inferred_as_bools() {
+        let (_dir, payload) = profiled_csv("name,active\nAda,true\nGrace,FALSE\nLin,True\n", None);
         let records = ingest_all(payload);
-        assert_eq!(records[0].data().get("active"), Some(&Value::Bool(true)));
-        assert_eq!(records[1].data().get("active"), Some(&Value::Bool(false)));
+        let active: Vec<_> = records.iter().map(|record| record.data().get("active")).collect();
+        assert_eq!(active, [Some(&Value::Bool(true)), Some(&Value::Bool(false)), Some(&Value::Bool(true))]);
+    }
+
+    #[test]
+    fn yes_no_on_and_off_keep_their_text() {
+        let (_dir, payload) = profiled_csv("country,code\nNorway,\"NO\"\nNauru,ON\nYasuj,yes\nOff,off\n", None);
+        let records = ingest_all(payload);
+        let codes: Vec<_> = records.iter().map(|record| record.data().get("code")).collect();
+        assert_eq!(
+            codes,
+            [
+                Some(&Value::String("NO".to_string())),
+                Some(&Value::String("ON".to_string())),
+                Some(&Value::String("yes".to_string())),
+                Some(&Value::String("off".to_string())),
+            ]
+        );
     }
 
     #[test]
