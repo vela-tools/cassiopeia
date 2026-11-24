@@ -1051,7 +1051,7 @@ dependencies = [
  "indexmap 2.14.2",
  "iri-rs",
  "jiff 1.0.1",
- "jsonld-syntax",
+ "jsonld-syntax 0.28.0",
  "langtag",
  "lazy-regex",
  "num-traits",
@@ -4307,7 +4307,7 @@ dependencies = [
  "jsonld-core",
  "jsonld-expansion",
  "jsonld-serialization",
- "jsonld-syntax",
+ "jsonld-syntax 0.27.1",
  "jstrict",
  "rdfx",
  "thiserror 2.0.21",
@@ -4324,7 +4324,7 @@ dependencies = [
  "jsonld-context-processing",
  "jsonld-core",
  "jsonld-expansion",
- "jsonld-syntax",
+ "jsonld-syntax 0.27.1",
  "jstrict",
  "rdfx",
  "smallvec",
@@ -4341,7 +4341,7 @@ dependencies = [
  "foldhash",
  "iri-rs",
  "jsonld-core",
- "jsonld-syntax",
+ "jsonld-syntax 0.27.1",
  "parking_lot 0.13.0",
  "rdfx",
  "thiserror 2.0.21",
@@ -4359,7 +4359,7 @@ dependencies = [
  "hashbrown 0.17.1",
  "indexmap 2.14.2",
  "iri-rs",
- "jsonld-syntax",
+ "jsonld-syntax 0.27.1",
  "jstrict",
  "langtag",
  "ld-core",
@@ -4384,7 +4384,7 @@ dependencies = [
  "contextual",
  "jsonld-context-processing",
  "jsonld-core",
- "jsonld-syntax",
+ "jsonld-syntax 0.27.1",
  "jstrict",
  "langtag",
  "rdfx",
@@ -4412,6 +4412,24 @@ name = "jsonld-syntax"
 version = "0.27.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "064c865077dbb0dd53a241e88e1b26c815c11125b0ea16c42566ea4e3ff7b0d0"
+dependencies = [
+ "contextual",
+ "hashbrown 0.17.1",
+ "indexmap 2.14.2",
+ "iri-rs",
+ "jstrict",
+ "langtag",
+ "rdfx",
+ "smallvec",
+ "smol_str",
+ "thiserror 2.0.21",
+]
+
+[[package]]
+name = "jsonld-syntax"
+version = "0.28.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "51d7f40e5317f6dff601a33a91039ffe17b3ab7f0312266155ecc9f4bee2938e"
 dependencies = [
  "contextual",
  "hashbrown 0.17.1",
