@@ -51,7 +51,7 @@ urn-rs = "1.0.0"
 cassiopeia-terminal-style.workspace = true
 insta = { version = "1.49.0", features = ["glob", "json"] }
 jsonptr = { version = "0.8.2", default-features = false }
-jsonschema = "0.61.2"
+jsonschema = "0.62.0"
 mockito = { version = "1.7.2", default-features = false }
 pretty_assertions = "1.4.1"
 serde = { version = "1.0.229", features = ["derive"] }
