@@ -1,0 +1,28 @@
+name: about
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: about-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  about:
+    name: cargo about generate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - run: rustup toolchain install
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-about@0.9.3
+          fallback: none
+      - run: cargo fetch --locked
+      - run: cargo about generate --frozen --fail --all-features --output-file "${RUNNER_TEMP}/third-party-licenses.md" third-party-licenses/template.hbs

@@ -1,0 +1,28 @@
+# Third-party licences
+
+The `cassiopeia` binary is built from the crates below, each used under the licence it is listed with. Cassiopeia's own crates are among them, under the EUPL-1.2 that `LICENSE.md` holds. The text of every licence follows, with the crates it covers, and the notice of each crate that ships one follows the licences.
+
+## Overview
+
+The licences, each with the number of crates used under it.
+
+{{#each overview}}
+- {{{name}}} ({{count}})
+{{/each}}
+
+## Licences
+
+{{#each licenses}}
+### {{{name}}}
+
+Covers {{#each used_by}}{{#if @index}}, {{/if}}{{{crate.name}}} {{{crate.version}}}{{/each}}.
+
+~~~text
+{{{text}}}
+~~~
+
+{{/each}}
+## Notices
+
+The notice each crate below ships, which its Apache-2.0 licence asks to be kept with the binary.
+
