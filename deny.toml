@@ -49,6 +49,7 @@ allow = ["CDLA-Permissive-2.0"]
 [advisories]
 db-urls = ["https://github.com/rustsec/advisory-db"]
 yanked = "deny"
+unmaintained = "all"
 ignore = [
     # proc-macro-error is unmaintained with no safe upgrade available. Build-time
     # only, pulled in twice by langtag: via str-newtype -> str-newtype-derive, and
