@@ -1,0 +1,178 @@
+{
+  "@context": "https://openvex.dev/ns/v0.2.0",
+  "@id": "https://github.com/vela-tools/cassiopeia/blob/main/.vex/cassiopeia.openvex.json",
+  "author": "Cassiopeia",
+  "timestamp": "2026-11-25T11:54:28Z",
+  "last_updated": "2026-11-25T11:54:28Z",
+  "version": 1,
+  "statements": [
+    {
+      "vulnerability": {
+        "name": "RUSTSEC-2024-0370"
+      },
+      "products": [
+        {
+          "@id": "pkg:oci/cassiopeia?repository_url=ghcr.io/vela-tools/cassiopeia",
+          "subcomponents": [
+            {
+              "@id": "pkg:cargo/proc-macro-error@1.0.4"
+            }
+          ]
+        },
+        {
+          "@id": "pkg:docker/vela-tools/cassiopeia?repository_url=ghcr.io",
+          "subcomponents": [
+            {
+              "@id": "pkg:cargo/proc-macro-error@1.0.4"
+            }
+          ]
+        }
+      ],
+      "status": "not_affected",
+      "justification": "component_not_present",
+      "impact_statement": "proc-macro-error 1.0.4 is unmaintained, which the advisory reports in place of a vulnerability. Only the procedural macros of static-automata-macros 1.1.0, static-regular-grammar 2.0.2 and str-newtype-derive 2.0.0 use it, so it runs while Cassiopeia compiles and none of its code is in the binary."
+    },
+    {
+      "vulnerability": {
+        "name": "RUSTSEC-2026-0459",
+        "aliases": [
+          "CVE-2026-119375",
+          "GHSA-72w2-rjgg-q729"
+        ]
+      },
+      "products": [
+        {
+          "@id": "pkg:oci/cassiopeia?repository_url=ghcr.io/vela-tools/cassiopeia",
+          "subcomponents": [
+            {
+              "@id": "pkg:cargo/libsqlite3-sys@0.38.2"
+            }
+          ]
+        },
+        {
+          "@id": "pkg:docker/vela-tools/cassiopeia?repository_url=ghcr.io",
+          "subcomponents": [
+            {
+              "@id": "pkg:cargo/libsqlite3-sys@0.38.2"
+            }
+          ]
+        }
+      ],
+      "status": "not_affected",
+      "justification": "vulnerable_code_not_present",
+      "impact_statement": "The image builds Cassiopeia without the geopackage-bundled feature, so libsqlite3-sys 0.38.2 compiles none of the SQLite it bundles, and links SQLite 3.54.1 instead, which the image build compiles from the official source and which carries the fix."
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-119375",
+        "aliases": [
+          "RUSTSEC-2026-0459",
+          "GHSA-72w2-rjgg-q729"
+        ]
+      },
+      "products": [
+        {
+          "@id": "pkg:oci/cassiopeia?repository_url=ghcr.io/vela-tools/cassiopeia",
+          "subcomponents": [
+            {
+              "@id": "pkg:cargo/libsqlite3-sys@0.38.2"
+            }
+          ]
+        },
+        {
+          "@id": "pkg:docker/vela-tools/cassiopeia?repository_url=ghcr.io",
+          "subcomponents": [
+            {
+              "@id": "pkg:cargo/libsqlite3-sys@0.38.2"
+            }
+          ]
+        }
+      ],
+      "status": "not_affected",
+      "justification": "vulnerable_code_not_present",
+      "impact_statement": "The image builds Cassiopeia without the geopackage-bundled feature, so libsqlite3-sys 0.38.2 compiles none of the SQLite it bundles, and links SQLite 3.54.1 instead, which the image build compiles from the official source and which carries the fix."
+    },
+    {
+      "vulnerability": {
+        "name": "GHSA-72w2-rjgg-q729",
+        "aliases": [
+          "RUSTSEC-2026-0459",
+          "CVE-2026-119375"
+        ]
+      },
+      "products": [
+        {
+          "@id": "pkg:oci/cassiopeia?repository_url=ghcr.io/vela-tools/cassiopeia",
+          "subcomponents": [
+            {
+              "@id": "pkg:cargo/libsqlite3-sys@0.38.2"
+            }
+          ]
+        },
+        {
+          "@id": "pkg:docker/vela-tools/cassiopeia?repository_url=ghcr.io",
+          "subcomponents": [
+            {
+              "@id": "pkg:cargo/libsqlite3-sys@0.38.2"
+            }
+          ]
+        }
+      ],
+      "status": "not_affected",
+      "justification": "vulnerable_code_not_present",
+      "impact_statement": "The image builds Cassiopeia without the geopackage-bundled feature, so libsqlite3-sys 0.38.2 compiles none of the SQLite it bundles, and links SQLite 3.54.1 instead, which the image build compiles from the official source and which carries the fix."
+    },
+    {
+      "vulnerability": {
+        "name": "RUSTSEC-2026-0542"
+      },
+      "products": [
+        {
+          "@id": "pkg:oci/cassiopeia?repository_url=ghcr.io/vela-tools/cassiopeia",
+          "subcomponents": [
+            {
+              "@id": "pkg:cargo/humantime@2.4.0"
+            }
+          ]
+        },
+        {
+          "@id": "pkg:docker/vela-tools/cassiopeia?repository_url=ghcr.io",
+          "subcomponents": [
+            {
+              "@id": "pkg:cargo/humantime@2.4.0"
+            }
+          ]
+        }
+      ],
+      "status": "not_affected",
+      "justification": "vulnerable_code_not_present",
+      "impact_statement": "humantime 2.4.0 is unmaintained, which the advisory reports in place of a vulnerability, on the grounds that it wraps chrono. No maintained release exists."
+    },
+    {
+      "vulnerability": {
+        "name": "RUSTSEC-2026-0543"
+      },
+      "products": [
+        {
+          "@id": "pkg:oci/cassiopeia?repository_url=ghcr.io/vela-tools/cassiopeia",
+          "subcomponents": [
+            {
+              "@id": "pkg:cargo/chrono@0.4.45"
+            }
+          ]
+        },
+        {
+          "@id": "pkg:docker/vela-tools/cassiopeia?repository_url=ghcr.io",
+          "subcomponents": [
+            {
+              "@id": "pkg:cargo/chrono@0.4.45"
+            }
+          ]
+        }
+      ],
+      "status": "not_affected",
+      "justification": "vulnerable_code_not_present",
+      "impact_statement": "chrono 0.4.45 is unmaintained, which the advisory reports in place of a vulnerability. No maintained release exists."
+    }
+  ]
+}

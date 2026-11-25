@@ -1,0 +1,23 @@
+name: vex
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: vex-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  vex:
+    name: vex check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - run: rustup toolchain install
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo run --package cassiopeia-vex-generator --locked -- check

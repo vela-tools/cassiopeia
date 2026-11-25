@@ -1,0 +1,16 @@
+[RUSTSEC-2024-0370]
+justification = "component_not_present"
+crates = ["proc-macro-error@1.0.4"]
+
+[RUSTSEC-2026-0459]
+aliases = ["CVE-2026-119375", "GHSA-72w2-rjgg-q729"]
+justification = "vulnerable_code_not_present"
+crates = ["libsqlite3-sys@0.38.2"]
+
+[RUSTSEC-2026-0542]
+justification = "vulnerable_code_not_present"
+crates = ["humantime@2.4.0"]
+
+[RUSTSEC-2026-0543]
+justification = "vulnerable_code_not_present"
+crates = ["chrono@0.4.45"]
