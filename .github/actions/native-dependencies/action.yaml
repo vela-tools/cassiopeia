@@ -9,9 +9,3 @@ runs:
       run: |
         sudo apt-get update
         sudo apt-get install -y --no-install-recommends cmake g++ git libclang-dev libopenjp2-7-dev
-    # eccodes-sys clones libaec v1.1.4 from gitlab.dkrz.de, which DKRZ took offline on 2026-11-19
-    # over the Ruby advisory GHSA-34m4-m9fh-gqp5. The libaec author's GitHub mirror serves the same
-    # tag at commit 7204505. Remove this step once gitlab.dkrz.de is back.
-    - name: Fetch libaec from its GitHub mirror
-      shell: bash
-      run: git config --global url.https://github.com/MathisRosenhauer/libaec.git.insteadOf https://gitlab.dkrz.de/k202009/libaec.git
