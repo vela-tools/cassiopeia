@@ -77,9 +77,9 @@ RUN doc=/usr/share/doc/cassiopeia \
     && mkdir -p "$doc" \
     && third-party-licenses/generate.sh "$(uname -m)-unknown-linux-gnu" "$doc/third-party-licenses.md" --no-default-features --features geopackage,grib1,grib2-full \
     && install -m 0644 -t "$doc" LICENSE.md NOTICE.md \
-    && install -D -m 0644 -t "$doc/eccodes" target/release/build/eccodes-sys-*/out/src/eccodes/LICENSE target/release/build/eccodes-sys-*/out/src/eccodes/NOTICE \
-    && install -D -m 0644 -t "$doc/eckit" target/release/build/eckit-sys-*/out/src/eckit/LICENSE target/release/build/eckit-sys-*/out/src/eckit/NOTICE \
-    && install -D -m 0644 -t "$doc/libaec" target/release/build/eccodes-sys-*/out/src/libaec/LICENSE.txt \
+    && install -D -m 0644 -t "$doc/eccodes" target/release/build/eccodes-sys/*/out/src/eccodes/LICENSE target/release/build/eccodes-sys/*/out/src/eccodes/NOTICE \
+    && install -D -m 0644 -t "$doc/eckit" target/release/build/eckit-sys/*/out/src/eckit/LICENSE target/release/build/eckit-sys/*/out/src/eckit/NOTICE \
+    && install -D -m 0644 -t "$doc/libaec" target/release/build/eccodes-sys/*/out/src/libaec/LICENSE.txt \
     && install -D -m 0644 -t "$doc/sqlite" /opt/sqlite/share/doc/sqlite/copyright
 
 FROM chef AS rootfs
