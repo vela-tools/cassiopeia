@@ -1,5 +1,74 @@
 # Changelog
 
+## [1.3.1](https://github.com/vela-tools/cassiopeia/compare/v1.3.0...v1.3.1) - 2026-11-25
+
+### Highlights
+
+**This is the first release to come with SBOMs, a VEX document and full licence texts.**
+
+- The release binaries now carry the list of Rust crates they were built from, so a vulnerability scanner can check them directly. Every binary is scanned before it's published.
+- Each archive and the container image include the licence texts of every crate they're built from. The image also includes those of the C libraries it compiles in.
+- The image carries a signed VEX document that tells scanners which advisories don't affect it, and the same document is attached to the release. [Advisory rulings](https://github.com/vela-tools/cassiopeia/blob/v1.3.1/docs/advisory-rulings.md) explains why each one doesn't apply.
+- Each platform image carries signed SPDX and CycloneDX SBOMs, and the CycloneDX ones are attached to the release too.
+
+[Verifying the image](https://github.com/vela-tools/cassiopeia/blob/v1.3.1/docs/docker.md#verifying-the-image) shows how to check the signatures.
+
+### Security
+
+**A crafted SensorThings next link can crash Cassiopeia ([RUSTSEC-2026-0592](https://rustsec.org/advisories/RUSTSEC-2026-0592)). Fixed in this release.**
+
+When a SensorThings server answers with an `@iot.nextLink`, Cassiopeia checks that the link stays on the service root's origin, so a read never sends its input's headers, and the credentials in them, to another host. That check calls `Url::origin()` from the `url` crate. In `url` 2.5.8 and earlier, the function calls itself once for every `blob:` prefix in a URL, with no limit. A next link built from about 10,000 nested `blob:` prefixes, roughly 50 KB, overflows the stack of the thread that reads it, and the process aborts.
+
+The abort stops every input in the run. A scheduled run that keeps reading the same server aborts on every cycle, and `cassiopeia sensorthings readings` crashes the same way. To send such a link, an attacker has to control the server's responses, so it would be the server's operator or someone who can tamper with a plain `http://` connection to it. Cassiopeia aborts before it requests the link, so nothing is sent anywhere, and the crash doesn't read memory or run code.
+
+Every build of Cassiopeia 1.3.0 is affected, including the release binaries, the container image and builds from source. Earlier releases can't read SensorThings servers at all. Until you upgrade, only read SensorThings servers you trust, and only over `https://`.
+
+**How it is fixed.** This release updates `url` to 2.5.9. Its `Url::origin()` only looks inside a `blob:` URL when the inner URL is `http`, `https` or `file`. Any other `blob:` URL gets an opaque origin, and the function never calls itself. A next link of nested `blob:` prefixes now fails the origin check the way a link to another host does, and the input fails without sending the request, as [Reading a server](https://github.com/vela-tools/cassiopeia/blob/v1.3.1/docs/source-formats.md#reading-a-server) describes. SensorThings servers don't page through `blob:` URLs, so the update doesn't refuse anything legitimate.
+
+### Changes
+
+#### 🔒 Security
+
+- bump url dependency
+
+#### 🐛 Bug Fixes
+
+- read the c library licences
+
+<details>
+<summary>Internal changes (17)</summary>
+
+#### 📦 Dependencies
+
+- bump sigstore/cosign-installer from 4.1.3 to 4.1.4
+- bump distroless/cc-debian13 from `809d04a` to `dac90a2`
+
+#### 🏗️ Build
+
+- label the image with the project identity
+- pin the docker toolchain by digest and checksum
+- ship the third-party licence texts
+
+#### 👷 CI
+
+- fix shellcheck and actionlint findings
+- attest sboms to each platform image
+- re-attest vex to a published release
+- attest the vex document to the image
+- add the vex rulings and check the generated document
+- build the release binaries with cargo auditable
+- build the glibc release binaries on ubuntu 24.04
+- build the documentation with node 26
+- build on the ubuntu 26.04 arm and macos 26 runners
+- fetch libaec from gitlab.dkrz.de again
+
+#### 🧹 Chores
+
+- update dependencies
+- bring back unmaintained advisories
+
+</details>
+
 ## [1.3.0](https://github.com/vela-tools/cassiopeia/compare/v1.2.0...v1.3.0) - 2026-11-19
 
 ### Highlights
@@ -87,64 +156,7 @@
 - sort redb ids for hand-off through extsort run files
 - select only the observation members a sensorthings read uses ([#165](https://github.com/vela-tools/cassiopeia/issues/165))
 
-<details>
-<summary>Internal changes (33)</summary>
-
-#### 🔧 Refactor
-
-- read relationships at assembly through one consuming store method
-- rework attribute builders
-
-#### 📚 Documentation
-
-- name sensorthings, stop signals and contexts
-- describe source-order merging in resolver and report comments
-- complete the sensorthings server differences the release check found
-- describe how 52north and istsos4 answer sensorthings reads ([#169](https://github.com/vela-tools/cassiopeia/issues/169))
-- update contributing documentation
-- fix outdated links
-
-#### 📦 Dependencies
-
-- bump netcdf-writer from 0.12.1 to 0.13.0
-- bump sha2 from 0.10.9 to 0.11.1
-- bump netcdf-core from 0.12.1 to 0.13.0
-- bump the cargo-minor group across 1 directory with 5 updates
-- bump netcdf-reader from 0.12.1 to 0.13.0
-- bump lz4_flex from 0.11.6 to 0.11.7
-- bump the cargo-minor group across 1 directory with 13 updates
-- bump rust
-- bump rust-toolchain from 1.99.1 to 1.100.0
-- bump distroless/cc-debian13 from `e1f5543` to `809d04a`
-
-#### 🏗️ Build
-
-- ignore unmaintained chrono and humantime advisories for time being
-- adopt final changelog and tag format
-
-#### 👷 CI
-
-- fetch libaec from its github mirror while gitlab.dkrz.de is offline
-- quote the golden test filter and format the ngsi-ld manifest
-
-#### 🧪 Tests
-
-- prove series runs keep unobserved values from the first record ([#170](https://github.com/vela-tools/cassiopeia/issues/170))
-- cover a newest record without a value under a shared observedat ([#141](https://github.com/vela-tools/cassiopeia/issues/141))
-- extend golden corpus, name first difference ([#127](https://github.com/vela-tools/cassiopeia/issues/127))
-- add a golden corpus that snapshots what each v4 mapping construct writes, checked in its own workflow
-- check the first top of a sensorthings latest request with and without a filter ([#169](https://github.com/vela-tools/cassiopeia/issues/169))
-- import yore code_pages module for clippy absolute_paths on rust 1.100
-
-#### 🧹 Chores
-
-- bump version
-- update dependencies
-- update dependencies
-- update dependabot configuration
-- update issue templates
-
-</details>
+This list leaves out 33 internal changes. The [commit history](https://github.com/vela-tools/cassiopeia/compare/v1.2.0...v1.3.0) has them.
 
 ## [1.2.0](https://github.com/vela-tools/cassiopeia/compare/v1.1.1...v1.2.0) - 2026-11-11
 
