@@ -32,7 +32,7 @@ cassiopeia-sensorthings.workspace = true
 cassiopeia-sensorthings-cursor.workspace = true
 cassiopeia-terminal-style.workspace = true
 bugreport = { version = "0.6.0", default-features = false, features = ["collector_operating_system", "format_markdown"] }
-clap = { version = "4.6.8", features = ["derive", "wrap_help"] }
+clap = { version = "4.6.10", features = ["derive", "wrap_help"] }
 cron = "0.17.0"
 ctrlc = { version = "3.5.3", features = ["termination"] }
 eccodes-sys = { version = "2.50.0", default-features = false, features = ["memfs"], optional = true }
@@ -43,7 +43,7 @@ mimalloc = "0.1.52"
 rayon = "1.12.0"
 shadow-rs = "2.0.0"
 thiserror = "2.0.21"
-url = "2.5.8"
+url = "2.5.9"
 
 [dev-dependencies]
 cassiopeia-ngsi-ld.workspace = true

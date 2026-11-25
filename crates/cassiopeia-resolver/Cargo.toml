@@ -8,7 +8,7 @@ license.workspace = true
 repository.workspace = true
 
 [dependencies]
-ahash = "0.8.12"
+ahash = "0.8.14"
 cassiopeia-common.workspace = true
 cassiopeia-ir.workspace = true
 cassiopeia-mapping.workspace = true

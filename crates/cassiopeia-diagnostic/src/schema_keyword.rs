@@ -32,6 +32,8 @@ pub enum SchemaKeyword {
     ExclusiveMinimum,
     /// `format`.
     Format,
+    /// `maxContains`.
+    MaxContains,
     /// `maxItems`.
     MaxItems,
     /// `maxLength`.
@@ -40,6 +42,8 @@ pub enum SchemaKeyword {
     MaxProperties,
     /// `maximum`.
     Maximum,
+    /// `minContains`.
+    MinContains,
     /// `minItems`.
     MinItems,
     /// `minLength`.
@@ -98,6 +102,7 @@ mod tests {
     fn keyword_names_use_the_specification_casing() {
         assert_eq!(SchemaKeyword::AdditionalProperties.to_string(), "additionalProperties");
         assert_eq!(SchemaKeyword::MinLength.to_string(), "minLength");
+        assert_eq!(SchemaKeyword::MaxContains.to_string(), "maxContains");
         assert_eq!(SchemaKeyword::Type.to_string(), "type");
         assert_eq!(SchemaKeyword::Enum.to_string(), "enum");
     }
