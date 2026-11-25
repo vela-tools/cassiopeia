@@ -122,14 +122,23 @@ jobs:
       - name: Upload
         uses: actions/upload-artifact@v7
         with:
-          name: ${{ matrix.platform }}
+          name: archive-${{ matrix.platform }}
           path: |
             cassiopeia-${{ matrix.platform }}.${{ matrix.archive }}
             cassiopeia-${{ matrix.platform }}.${{ matrix.archive }}.sha256
           if-no-files-found: error
 
+  image:
+    uses: ./.github/workflows/docker.yaml
+    permissions:
+      artifact-metadata: write
+      attestations: write
+      contents: read
+      id-token: write
+      packages: write
+
   release:
-    needs: build
+    needs: [build, image]
     runs-on: ubuntu-latest
     permissions:
       artifact-metadata: write
@@ -144,7 +153,13 @@ jobs:
       - uses: actions/download-artifact@v8
         with:
           path: dist
+          pattern: archive-*
           merge-multiple: true
+
+      - uses: actions/download-artifact@v8
+        with:
+          name: cyclonedx-sboms
+          path: dist
 
       - name: Verify checksums
         working-directory: dist

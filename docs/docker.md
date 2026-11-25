@@ -64,6 +64,14 @@ Each image also carries an OpenVEX attestation of the VEX document its commit ho
 gh attestation verify oci://ghcr.io/vela-tools/cassiopeia:latest --repo vela-tools/cassiopeia --predicate-type https://openvex.dev/ns/v0.2.0
 ```
 
+Each platform image also carries two SBOMs that [Syft](https://github.com/anchore/syft) writes from it, one in SPDX 2.3 and one in CycloneDX 1.6, each attested to that platform image. The release attaches the CycloneDX ones as `cassiopeia-linux-amd64.cdx.json` and `cassiopeia-linux-arm64.cdx.json`, for tools that fetch nothing from a registry. An SBOM describes one platform image, so its attestation sits on that image's digest rather than on the manifest list. List the platform digests, then verify each SBOM by its predicate type:
+
+```bash
+docker buildx imagetools inspect ghcr.io/vela-tools/cassiopeia:latest
+gh attestation verify oci://ghcr.io/vela-tools/cassiopeia@sha256:... --repo vela-tools/cassiopeia --predicate-type https://spdx.dev/Document/v2.3
+gh attestation verify oci://ghcr.io/vela-tools/cassiopeia@sha256:... --repo vela-tools/cassiopeia --predicate-type https://cyclonedx.org/bom
+```
+
 ## Running the container
 
 The image's entrypoint is the `cassiopeia` binary. Docker passes everything after the image name to that command. Check that it runs:
