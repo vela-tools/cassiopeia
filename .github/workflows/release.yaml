@@ -63,8 +63,16 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends musl-tools
 
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-audit@0.23.0,cargo-auditable@0.7.7
+          fallback: none
+
       - name: Build
-        run: cargo build --release --locked --no-default-features --bin cassiopeia --target ${{ matrix.target }}
+        run: cargo auditable build --release --locked --no-default-features --bin cassiopeia --target ${{ matrix.target }}
+
+      - name: Audit dependencies
+        run: cargo audit bin "target/${{ matrix.target }}/release/cassiopeia${{ matrix.ext }}"
 
       - name: Verify GeoPackage is disabled
         shell: bash
