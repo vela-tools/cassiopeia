@@ -74,6 +74,8 @@ tar -xf cassiopeia-linux-x86_64-musl.tar.xz
 install -m 0755 cassiopeia ~/.local/bin/   # or any directory on your PATH
 ```
 
+Each archive also holds Cassiopeia's `LICENSE.md` and `NOTICE.md`, and `third-party-licenses.md`, which lists every crate that platform's binary is built from with the licence it is used under, followed by the text of each licence and the `NOTICE` file of each crate that ships one.
+
 A static build resolves hostnames through musl's own DNS resolver rather than the system NSS plugins, which only matters where hosts resolve through something other than DNS.
 
 Every release also publishes a `.sha256` checksum beside each archive. The checksum covers the archive itself, so download both and verify before unpacking: `sha256sum -c cassiopeia-<platform>.tar.xz.sha256` on Linux, or `shasum -a 256 -c cassiopeia-<platform>.tar.xz.sha256` on macOS.

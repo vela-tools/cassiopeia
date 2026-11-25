@@ -3,7 +3,7 @@ FROM rust:1.100.0-trixie AS chef
 RUN apt-get update \
     && apt-get install -y --no-install-recommends cmake g++ git libclang-dev libopenjp2-7-dev \
     && rm -rf /var/lib/apt/lists/*
-RUN cargo install --locked cargo-audit@0.23.0 cargo-auditable@0.7.7 cargo-chef@0.1.78
+RUN cargo install --locked cargo-about@0.9.3 cargo-audit@0.23.0 cargo-auditable@0.7.7 cargo-chef@0.1.78
 WORKDIR /cassiopeia
 
 FROM chef AS planner
@@ -31,9 +31,11 @@ RUN curl -fsSLo sqlite.tar.gz "https://sqlite.org/2026/sqlite-autoconf-${SQLITE_
         -DHAVE_USLEEP=1 \
         -DHAVE_ISNAN \
         -c sqlite3.c -o sqlite3.o \
-    && mkdir -p /opt/sqlite/include /opt/sqlite/lib \
+    && mkdir -p /opt/sqlite/include /opt/sqlite/lib /opt/sqlite/share/doc/sqlite \
     && ar rcs /opt/sqlite/lib/libsqlite3.a sqlite3.o \
-    && cp sqlite3.h sqlite3ext.h /opt/sqlite/include/
+    && cp sqlite3.h sqlite3ext.h /opt/sqlite/include/ \
+    && sed -n '/^\*\{5,\}/q;s/^\*\* \{0,1\}//p' sqlite3.h > /opt/sqlite/share/doc/sqlite/copyright \
+    && grep -q 'disclaims copyright' /opt/sqlite/share/doc/sqlite/copyright
 
 FROM chef AS builder
 
@@ -45,6 +47,7 @@ ENV CARGO_INSTALL_ROOT=/usr/local \
 COPY --from=sqlite /opt/sqlite /opt/sqlite
 COPY --from=planner /cassiopeia/recipe.json recipe.json
 RUN cargo chef cook --release --locked --no-default-features --features geopackage,grib1,grib2-full --recipe-path recipe.json
+RUN cargo fetch --locked
 COPY . .
 RUN cargo auditable build --release --locked --no-default-features --features geopackage,grib1,grib2-full --bin cassiopeia
 RUN features="$(target/release/cassiopeia --version | grep '^features ')" \
@@ -52,6 +55,14 @@ RUN features="$(target/release/cassiopeia --version | grep '^features ')" \
     && case " $features " in *" +geopackage "*" -geopackage-bundled "*" +grib1 "*" +grib2-full "*) ;; *) exit 1 ;; esac \
     && ! ldd target/release/cassiopeia | grep -F libsqlite3
 RUN cargo audit --ignore RUSTSEC-2026-0459 bin target/release/cassiopeia
+RUN doc=/usr/share/doc/cassiopeia \
+    && mkdir -p "$doc" \
+    && third-party-licenses/generate.sh "$(uname -m)-unknown-linux-gnu" "$doc/third-party-licenses.md" --no-default-features --features geopackage,grib1,grib2-full \
+    && install -m 0644 -t "$doc" LICENSE.md NOTICE.md \
+    && install -D -m 0644 -t "$doc/eccodes" target/release/build/eccodes-sys-*/out/src/eccodes/LICENSE target/release/build/eccodes-sys-*/out/src/eccodes/NOTICE \
+    && install -D -m 0644 -t "$doc/eckit" target/release/build/eckit-sys-*/out/src/eckit/LICENSE target/release/build/eckit-sys-*/out/src/eckit/NOTICE \
+    && install -D -m 0644 -t "$doc/libaec" target/release/build/eccodes-sys-*/out/src/libaec/LICENSE.txt \
+    && install -D -m 0644 -t "$doc/sqlite" /opt/sqlite/share/doc/sqlite/copyright
 
 FROM chef AS rootfs
 
@@ -64,5 +75,6 @@ FROM gcr.io/distroless/cc-debian13:latest@sha256:dac90a25ffe03ebaace90cda886b081
 COPY --from=rootfs /rootfs/ /
 COPY --from=builder /usr/local/lib/cassiopeia /usr/local/lib/cassiopeia
 COPY --from=builder /cassiopeia/target/release/cassiopeia /usr/local/bin/cassiopeia
+COPY --from=builder /usr/share/doc/cassiopeia /usr/share/doc/cassiopeia
 
 ENTRYPOINT ["/usr/local/bin/cassiopeia"]
