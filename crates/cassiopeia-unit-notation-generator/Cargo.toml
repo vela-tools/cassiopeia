@@ -10,7 +10,7 @@ publish = false
 
 [dependencies]
 cefact-units = "1.0.0"
-clap = { version = "4.6.8", features = ["derive"] }
+clap = { version = "4.6.10", features = ["derive"] }
 derive_more = { version = "2.1.1", features = ["display"] }
 hex = "0.4.3"
 oxrdf = "0.3.5"

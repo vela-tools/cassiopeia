@@ -144,9 +144,11 @@ fn payload_of(kind: &ValidationErrorKind) -> SchemaViolationKind {
         | ValidationErrorKind::Minimum { limit } => SchemaViolationKind::OutOfBounds {
             limit: Arc::new(limit.clone()),
         },
-        ValidationErrorKind::MaxItems { limit }
+        ValidationErrorKind::MaxContains { limit }
+        | ValidationErrorKind::MaxItems { limit }
         | ValidationErrorKind::MaxLength { limit }
         | ValidationErrorKind::MaxProperties { limit }
+        | ValidationErrorKind::MinContains { limit }
         | ValidationErrorKind::MinItems { limit }
         | ValidationErrorKind::MinLength { limit }
         | ValidationErrorKind::MinProperties { limit } => SchemaViolationKind::OutOfBounds {
@@ -176,7 +178,6 @@ fn payload_of(kind: &ValidationErrorKind) -> SchemaViolationKind {
         },
         ValidationErrorKind::AdditionalItems { .. }
         | ValidationErrorKind::BacktrackLimitExceeded { .. }
-        | ValidationErrorKind::RegexEngineFailure { .. }
         | ValidationErrorKind::Contains
         | ValidationErrorKind::Custom { .. }
         | ValidationErrorKind::FalseSchema
@@ -264,6 +265,22 @@ mod tests {
 
         assert_eq!(keyword, SchemaKeyword::MinLength);
         assert_eq!(kind, SchemaViolationKind::OutOfBounds { limit: Arc::new(json!(3)) });
+    }
+
+    #[test]
+    fn too_few_matching_items_name_min_contains_and_keep_its_limit() {
+        let (keyword, kind) = first(&json!({"type": "array", "contains": {"type": "number"}, "minContains": 2}), &json!([1, "a"]));
+
+        assert_eq!(keyword, SchemaKeyword::MinContains);
+        assert_eq!(kind, SchemaViolationKind::OutOfBounds { limit: Arc::new(json!(2)) });
+    }
+
+    #[test]
+    fn too_many_matching_items_name_max_contains_and_keep_its_limit() {
+        let (keyword, kind) = first(&json!({"type": "array", "contains": {"type": "number"}, "maxContains": 1}), &json!([1, 2]));
+
+        assert_eq!(keyword, SchemaKeyword::MaxContains);
+        assert_eq!(kind, SchemaViolationKind::OutOfBounds { limit: Arc::new(json!(1)) });
     }
 
     #[test]

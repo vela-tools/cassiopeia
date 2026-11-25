@@ -22,7 +22,7 @@ reqwest = { version = "0.13.5", features = ["blocking"] }
 serde_json = "1.0.154"
 thiserror = "2.0.21"
 tracing = "0.1.44"
-url = "2.5.8"
+url = "2.5.9"
 
 [dev-dependencies]
 mockito = { version = "1.7.2", default-features = false }
