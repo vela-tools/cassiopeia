@@ -86,6 +86,8 @@ gh attestation verify cassiopeia-linux-x86_64-musl.tar.xz --repo vela-tools/cass
 
 Add `--signer-workflow vela-tools/cassiopeia/.github/workflows/release.yaml` to pin the check to the release workflow rather than accepting any workflow in the repository.
 
+Each binary is built with [`cargo auditable`](https://github.com/rust-secure-code/cargo-auditable), which embeds the list of Rust crates compiled into it, so `cargo audit bin cassiopeia` and scanners such as Trivy and Grype can check those crates against the RustSec advisory database. The release workflow runs `cargo audit bin` on every binary before publishing it and fails when it finds a vulnerability.
+
 The release binaries are built with `--no-default-features`, so they do **not** link ecCodes or SQLite. They can decode GRIB2 with the pure-Rust reader, but report GRIB1 and GeoPackage input as unsupported. If you need GRIB1 or GeoPackage, build from source with the default features using one of the options below.
 
 ### 2. Clone and install onto your PATH
