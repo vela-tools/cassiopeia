@@ -246,7 +246,7 @@ jobs:
               *) echo "no C library label for ${name}" >&2; exit 1 ;;
             esac
             read -r digest _ < "${archive}.sha256"
-            printf '| `%s` | %s %s%s | `%s` |\n' \
+            printf "| \`%s\` | %s %s%s | \`%s\` |\n" \
               "$name" "$arch_label" "$libc_label" "$os_label" "$digest" >> release-body.md
           done
 
