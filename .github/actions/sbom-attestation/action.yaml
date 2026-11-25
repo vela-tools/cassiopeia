@@ -1,0 +1,100 @@
+name: SBOM attestation
+description: Generates an SPDX and a CycloneDX 1.6 SBOM of each platform image a published image index points at, and attests each to its platform image, pushing the attestations to the registry. The job checks out the commit, logs in to the registry, sets up buildx and holds attestations, id-token and packages write permission.
+
+inputs:
+  image:
+    description: The image's repository, without a tag, such as ghcr.io/vela-tools/cassiopeia.
+    required: true
+  digest:
+    description: The digest of the image's index.
+    required: true
+
+outputs:
+  directory:
+    description: The directory holding the SBOMs, as <name>-linux-<architecture>.spdx.json and <name>-linux-<architecture>.cdx.json, where <name> is the last segment of the image's repository, such as cassiopeia.
+    value: ${{ steps.sboms.outputs.directory }}
+
+runs:
+  using: composite
+  steps:
+    - id: platforms
+      uses: ./.github/actions/platform-digests
+      with:
+        image: ${{ inputs.image }}
+        digest: ${{ inputs.digest }}
+
+    - id: syft
+      uses: anchore/sbom-action/download-syft@v0.24.3
+      with:
+        syft-version: v1.57.2
+
+    - name: Name the SBOMs
+      id: sboms
+      shell: bash
+      env:
+        IMAGE: ${{ inputs.image }}
+      run: |
+        set -euo pipefail
+        name="${IMAGE##*/}"
+        directory="${RUNNER_TEMP}/sboms"
+        mkdir -p "$directory"
+        {
+          echo "name=${name}"
+          echo "directory=${directory}"
+          echo "amd64=${directory}/${name}-linux-amd64"
+          echo "arm64=${directory}/${name}-linux-arm64"
+        } >> "$GITHUB_OUTPUT"
+
+    - name: Generate the linux/amd64 SBOMs
+      shell: bash
+      env:
+        SYFT: ${{ steps.syft.outputs.cmd }}
+        SYFT_CHECK_FOR_APP_UPDATE: "false"
+        SOURCE: registry:${{ inputs.image }}@${{ steps.platforms.outputs.amd64 }}
+        NAME: ${{ steps.sboms.outputs.name }}
+        SBOM: ${{ steps.sboms.outputs.amd64 }}
+      run: |
+        "$SYFT" scan "$SOURCE" --source-name "$NAME" -o "spdx-json=${SBOM}.spdx.json" -o "cyclonedx-json@1.6=${SBOM}.cdx.json"
+
+    - name: Generate the linux/arm64 SBOMs
+      shell: bash
+      env:
+        SYFT: ${{ steps.syft.outputs.cmd }}
+        SYFT_CHECK_FOR_APP_UPDATE: "false"
+        SOURCE: registry:${{ inputs.image }}@${{ steps.platforms.outputs.arm64 }}
+        NAME: ${{ steps.sboms.outputs.name }}
+        SBOM: ${{ steps.sboms.outputs.arm64 }}
+      run: |
+        "$SYFT" scan "$SOURCE" --source-name "$NAME" -o "spdx-json=${SBOM}.spdx.json" -o "cyclonedx-json@1.6=${SBOM}.cdx.json"
+
+    - name: Attest the linux/amd64 SPDX SBOM
+      uses: actions/attest@v4
+      with:
+        subject-name: ${{ inputs.image }}
+        subject-digest: ${{ steps.platforms.outputs.amd64 }}
+        sbom-path: ${{ steps.sboms.outputs.amd64 }}.spdx.json
+        push-to-registry: true
+
+    - name: Attest the linux/amd64 CycloneDX SBOM
+      uses: actions/attest@v4
+      with:
+        subject-name: ${{ inputs.image }}
+        subject-digest: ${{ steps.platforms.outputs.amd64 }}
+        sbom-path: ${{ steps.sboms.outputs.amd64 }}.cdx.json
+        push-to-registry: true
+
+    - name: Attest the linux/arm64 SPDX SBOM
+      uses: actions/attest@v4
+      with:
+        subject-name: ${{ inputs.image }}
+        subject-digest: ${{ steps.platforms.outputs.arm64 }}
+        sbom-path: ${{ steps.sboms.outputs.arm64 }}.spdx.json
+        push-to-registry: true
+
+    - name: Attest the linux/arm64 CycloneDX SBOM
+      uses: actions/attest@v4
+      with:
+        subject-name: ${{ inputs.image }}
+        subject-digest: ${{ steps.platforms.outputs.arm64 }}
+        sbom-path: ${{ steps.sboms.outputs.arm64 }}.cdx.json
+        push-to-registry: true

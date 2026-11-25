@@ -1,12 +1,7 @@
 name: docker
 
 on:
-  push:
-    tags:
-      - v[0-9]+.[0-9]+.[0-9]+
-      - v[0-9]+.[0-9]+.[0-9]+-alpha.[0-9]+
-      - v[0-9]+.[0-9]+.[0-9]+-beta.[0-9]+
-      - v[0-9]+.[0-9]+.[0-9]+-rc.[0-9]+
+  workflow_call:
   workflow_dispatch:
 
 permissions:
@@ -158,3 +153,18 @@ jobs:
         with:
           image: ${{ env.IMAGE }}
           digest: ${{ steps.digest.outputs.digest }}
+
+      - name: Attest SBOMs
+        id: sboms
+        uses: ./.github/actions/sbom-attestation
+        with:
+          image: ${{ env.IMAGE }}
+          digest: ${{ steps.digest.outputs.digest }}
+
+      - name: Upload the CycloneDX SBOMs
+        uses: actions/upload-artifact@v7
+        with:
+          name: cyclonedx-sboms
+          path: ${{ steps.sboms.outputs.directory }}/*.cdx.json
+          if-no-files-found: error
+          retention-days: 1
