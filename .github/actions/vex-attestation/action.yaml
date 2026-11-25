@@ -1,0 +1,46 @@
+name: VEX attestation
+description: Attests the OpenVEX document from the checkout to a published image's index and to each of its platform images, and pushes the attestations to the registry. The job checks out the commit, logs in to the registry, sets up buildx and holds attestations, id-token and packages write permission.
+
+inputs:
+  image:
+    description: The image's repository, without a tag, such as ghcr.io/vela-tools/cassiopeia.
+    required: true
+  digest:
+    description: The digest of the image's index.
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - id: platforms
+      uses: ./.github/actions/platform-digests
+      with:
+        image: ${{ inputs.image }}
+        digest: ${{ inputs.digest }}
+
+    - name: Attest the index
+      uses: actions/attest@v4
+      with:
+        subject-name: ${{ inputs.image }}
+        subject-digest: ${{ inputs.digest }}
+        predicate-type: https://openvex.dev/ns/v0.2.0
+        predicate-path: .vex/cassiopeia.openvex.json
+        push-to-registry: true
+
+    - name: Attest the linux/amd64 image
+      uses: actions/attest@v4
+      with:
+        subject-name: ${{ inputs.image }}
+        subject-digest: ${{ steps.platforms.outputs.amd64 }}
+        predicate-type: https://openvex.dev/ns/v0.2.0
+        predicate-path: .vex/cassiopeia.openvex.json
+        push-to-registry: true
+
+    - name: Attest the linux/arm64 image
+      uses: actions/attest@v4
+      with:
+        subject-name: ${{ inputs.image }}
+        subject-digest: ${{ steps.platforms.outputs.arm64 }}
+        predicate-type: https://openvex.dev/ns/v0.2.0
+        predicate-path: .vex/cassiopeia.openvex.json
+        push-to-registry: true

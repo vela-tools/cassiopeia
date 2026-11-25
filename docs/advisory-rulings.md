@@ -30,7 +30,15 @@ When the check reports a crate version the lockfile no longer holds, the ruling 
 
 ## Using the document
 
-Give the document to a scanner along with the image, for example `trivy image --vex .vex/cassiopeia.openvex.json ghcr.io/vela-tools/cassiopeia:latest` or `grype ghcr.io/vela-tools/cassiopeia:latest --vex .vex/cassiopeia.openvex.json`. The document covers the image only. The release binaries are built without default features, so they hold neither SQLite nor libsqlite3-sys, and `cargo audit bin` reads no VEX document.
+Every release publishes the document of its commit in two places. The `docker` workflow attests it to the image's manifest list and to each platform image, and the `release` workflow attaches it to the GitHub release as `cassiopeia.openvex.json`. Trivy reads the attestation from the registry, and Grype takes the release asset:
+
+```bash
+trivy image --vex oci --show-suppressed --platform linux/amd64 ghcr.io/vela-tools/cassiopeia:latest
+wget https://github.com/vela-tools/cassiopeia/releases/latest/download/cassiopeia.openvex.json
+grype ghcr.io/vela-tools/cassiopeia:latest --platform linux/amd64 --vex cassiopeia.openvex.json
+```
+
+`--show-suppressed` lists each advisory the document rules on as `not_affected` instead of leaving it out. [Verifying the image](docker.md#verifying-the-image) shows how to verify the attestation. The document covers the image only. The release binaries are built without default features, so they hold neither SQLite nor libsqlite3-sys, and `cargo audit bin` reads no VEX document.
 
 ## RUSTSEC-2026-0459: SQLite write-ahead logs
 

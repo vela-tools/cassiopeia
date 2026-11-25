@@ -58,6 +58,12 @@ gh attestation verify oci://ghcr.io/vela-tools/cassiopeia:v1.0.0 --repo vela-too
 
 Add `--signer-workflow vela-tools/cassiopeia/.github/workflows/docker.yaml` to pin the check to the image workflow rather than accepting any workflow in the repository.
 
+Each image also carries an OpenVEX attestation of the VEX document its commit holds, on the manifest list and on each platform image, so a scanner that looks it up by the digest it pulled finds it. It tells scanners which advisories don't affect the image, as [Advisory rulings](advisory-rulings.md) describes. Verify it with:
+
+```bash
+gh attestation verify oci://ghcr.io/vela-tools/cassiopeia:latest --repo vela-tools/cassiopeia --predicate-type https://openvex.dev/ns/v0.2.0
+```
+
 ## Running the container
 
 The image's entrypoint is the `cassiopeia` binary. Docker passes everything after the image name to that command. Check that it runs:

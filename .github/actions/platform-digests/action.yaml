@@ -1,0 +1,37 @@
+name: Platform digests
+description: Reads the digests of the linux/amd64 and linux/arm64 images a published image index points at. The job logs in to the registry and has buildx set up.
+
+inputs:
+  image:
+    description: The image's repository, without a tag, such as ghcr.io/vela-tools/cassiopeia.
+    required: true
+  digest:
+    description: The digest of the image's index.
+    required: true
+
+outputs:
+  amd64:
+    description: The digest of the linux/amd64 image.
+    value: ${{ steps.platforms.outputs.amd64 }}
+  arm64:
+    description: The digest of the linux/arm64 image.
+    value: ${{ steps.platforms.outputs.arm64 }}
+
+runs:
+  using: composite
+  steps:
+    - name: Resolve the platform image digests
+      id: platforms
+      shell: bash
+      env:
+        IMAGE: ${{ inputs.image }}
+        DIGEST: ${{ inputs.digest }}
+      run: |
+        set -euo pipefail
+        index="$(docker buildx imagetools inspect "${IMAGE}@${DIGEST}" --raw)"
+        for architecture in amd64 arm64; do
+          digest="$(jq -er --arg architecture "$architecture" '
+            [.manifests[] | select(.platform.os == "linux" and .platform.architecture == $architecture) | .digest]
+            | if length == 1 then .[0] else error("the index holds no single linux/\($architecture) image") end' <<< "$index")"
+          echo "${architecture}=${digest}" >> "$GITHUB_OUTPUT"
+        done
