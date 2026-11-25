@@ -22,7 +22,7 @@ jobs:
             platform: linux-x86_64-gnu
             ext: ""
             archive: tar.xz
-          - os: ubuntu-24.04-arm
+          - os: ubuntu-26.04-arm
             target: aarch64-unknown-linux-gnu
             platform: linux-aarch64-gnu
             ext: ""
@@ -32,12 +32,12 @@ jobs:
             platform: linux-x86_64-musl
             ext: ""
             archive: tar.xz
-          - os: ubuntu-24.04-arm
+          - os: ubuntu-26.04-arm
             target: aarch64-unknown-linux-musl
             platform: linux-aarch64-musl
             ext: ""
             archive: tar.xz
-          - os: macos-15
+          - os: macos-26
             target: aarch64-apple-darwin
             platform: macos-aarch64
             ext: ""
