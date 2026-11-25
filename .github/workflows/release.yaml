@@ -159,6 +159,9 @@ jobs:
             dist/*.tar.xz
             dist/*.zip
 
+      - name: Stage the VEX document
+        run: cp .vex/cassiopeia.openvex.json dist/cassiopeia.openvex.json
+
       - name: Resolve the release notes range
         id: notes
         env:
@@ -235,7 +238,7 @@ jobs:
       - name: Create release
         uses: ncipollo/release-action@v1
         with:
-          artifacts: "dist/cassiopeia-*"
+          artifacts: "dist/cassiopeia-*,dist/cassiopeia.openvex.json"
           allowUpdates: true
           artifactErrorsFailBuild: true
           draft: false

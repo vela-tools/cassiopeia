@@ -90,6 +90,8 @@ jobs:
       id-token: write
       packages: write
     steps:
+      - uses: actions/checkout@v7
+
       - name: Download digests
         uses: actions/download-artifact@v8
         with:
@@ -150,3 +152,9 @@ jobs:
           subject-name: ${{ env.IMAGE }}
           subject-digest: ${{ steps.digest.outputs.digest }}
           push-to-registry: true
+
+      - name: Attest VEX
+        uses: ./.github/actions/vex-attestation
+        with:
+          image: ${{ env.IMAGE }}
+          digest: ${{ steps.digest.outputs.digest }}
