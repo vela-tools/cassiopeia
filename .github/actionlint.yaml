@@ -1,0 +1,5 @@
+# ubuntu-26.04-arm is a GitHub-hosted runner that actionlint 1.7.12 does not list yet. Remove this once an
+# actionlint release knows the label.
+self-hosted-runner:
+  labels:
+    - ubuntu-26.04-arm

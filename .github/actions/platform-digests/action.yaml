@@ -25,10 +25,10 @@ runs:
       shell: bash
       env:
         IMAGE: ${{ inputs.image }}
-        DIGEST: ${{ inputs.digest }}
+        INDEX_DIGEST: ${{ inputs.digest }}
       run: |
         set -euo pipefail
-        index="$(docker buildx imagetools inspect "${IMAGE}@${DIGEST}" --raw)"
+        index="$(docker buildx imagetools inspect "${IMAGE}@${INDEX_DIGEST}" --raw)"
         for architecture in amd64 arm64; do
           digest="$(jq -er --arg architecture "$architecture" '
             [.manifests[] | select(.platform.os == "linux" and .platform.architecture == $architecture) | .digest]
