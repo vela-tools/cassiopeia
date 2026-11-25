@@ -1,0 +1,92 @@
+name: vex-attest
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: The release whose image gets the attestation, such as 1.3.1.
+        required: true
+        type: string
+      dry-run:
+        description: Check the document and resolve the release and its image, but attest and upload nothing.
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+jobs:
+  attest:
+    name: vex attest
+    runs-on: ubuntu-latest
+    permissions:
+      artifact-metadata: write
+      attestations: write
+      contents: write
+      id-token: write
+      packages: write
+    env:
+      IMAGE: ghcr.io/vela-tools/cassiopeia
+    steps:
+      - uses: actions/checkout@v7
+      - run: rustup toolchain install
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo run --package cassiopeia-vex-generator --locked -- check
+
+      - uses: docker/setup-buildx-action@v4
+
+      - uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Resolve the release
+        id: release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          if ! [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-(alpha|beta|rc)\.[0-9]+)?$ ]]; then
+            echo "not a release version: ${VERSION}" >&2
+            exit 1
+          fi
+          gh release view "v${VERSION}" --repo "$GITHUB_REPOSITORY" --json tagName --jq .tagName
+          digest="$(docker buildx imagetools inspect "${IMAGE}:${VERSION}" --format '{{json .Manifest}}' | jq -er '.digest')"
+          echo "digest=${digest}" >> "$GITHUB_OUTPUT"
+
+      - id: platforms
+        uses: ./.github/actions/platform-digests
+        with:
+          image: ${{ env.IMAGE }}
+          digest: ${{ steps.release.outputs.digest }}
+
+      - name: Report the dry run
+        if: inputs.dry-run
+        env:
+          VERSION: ${{ inputs.version }}
+          INDEX: ${{ steps.release.outputs.digest }}
+          AMD64: ${{ steps.platforms.outputs.amd64 }}
+          ARM64: ${{ steps.platforms.outputs.arm64 }}
+        run: |
+          {
+            echo "Would attest .vex/cassiopeia.openvex.json to:"
+            echo "- ${IMAGE}@${INDEX}"
+            echo "- ${IMAGE}@${AMD64} (linux/amd64)"
+            echo "- ${IMAGE}@${ARM64} (linux/arm64)"
+            echo "Would replace cassiopeia.openvex.json on release v${VERSION}."
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+
+      - if: ${{ !inputs.dry-run }}
+        uses: ./.github/actions/vex-attestation
+        with:
+          image: ${{ env.IMAGE }}
+          digest: ${{ steps.release.outputs.digest }}
+
+      - name: Replace the release's VEX asset
+        if: ${{ !inputs.dry-run }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ inputs.version }}
+        run: gh release upload "v${VERSION}" .vex/cassiopeia.openvex.json --clobber --repo "$GITHUB_REPOSITORY"

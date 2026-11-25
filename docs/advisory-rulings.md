@@ -40,6 +40,17 @@ grype ghcr.io/vela-tools/cassiopeia:latest --platform linux/amd64 --vex cassiope
 
 `--show-suppressed` lists each advisory the document rules on as `not_affected` instead of leaving it out. [Verifying the image](docker.md#verifying-the-image) shows how to verify the attestation. The document covers the image only. The release binaries are built without default features, so they hold neither SQLite nor libsqlite3-sys, and `cargo audit bin` reads no VEX document.
 
+## Ruling after a release
+
+An advisory published after a release reaches that release's image through the `vex-attest` workflow. It checks the document of the commit it runs on, attests that document to the published image's manifest list and to both platform images, and replaces the release's `cassiopeia.openvex.json`.
+
+1. Branch from the release's tag, so the rulings are checked against the lockfile the release was built from.
+2. Add the ignore and the ruling, regenerate the document, and push the branch.
+3. Start the workflow on the branch as a dry run. It checks the document and resolves the release and the image's three digests, but attests and uploads nothing: `gh workflow run vex-attest.yaml --ref <branch> -f version=1.3.1 -f dry-run=true`.
+4. Start it again without `-f dry-run=true`.
+
+GitHub starts a manually triggered workflow only once its file is on the default branch. Each run adds an attestation beside the earlier ones. Trivy reads only the first OpenVEX attestation the registry lists for a digest, so give it the release asset with `--vex cassiopeia.openvex.json` to apply the newest document.
+
 ## RUSTSEC-2026-0459: SQLite write-ahead logs
 
 Also CVE-2026-119375 and GHSA-72w2-rjgg-q729. SQLite before 3.54.0 can return uninitialized page-cache memory when it opens a database together with a write-ahead log whose page size differs from the database's. libsqlite3-sys 0.6.0 to 0.38.2 are affected when they compile the SQLite they bundle, which they do with their `bundled` feature.
