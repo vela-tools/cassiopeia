@@ -28,6 +28,7 @@ These pages cover individual subjects in detail. Use them from a guide or go str
 
 - [Command-line reference](cli.md): every `cassiopeia` flag and subcommand with its default, generated from the CLI itself.
 - [Running with Docker](docker.md): run the container, mount the paths it needs, and keep the catalog, inputs, and outputs between runs.
+- [Advisory rulings](advisory-rulings.md): the advisories that don't affect the container image, the proof behind each, and the VEX document that tells scanners so.
 - [NGSI-LD attribute types](ngsi-ld/attribute-types.md): the eight attribute types, with each one's canonical payload, value member, defining ETSI GS CIM 009 clause, and guidance on when to use it.
 - [NGSI-LD data representations](ngsi-ld/representation.md): the normalized, concise, and simplified representations at the specification level, with the clauses that define them.
 - [Terminal interfaces](tui.md): the Explorer, which browses a Smart Data Model schema, and the Wizard, which guides you through authoring a mapping against a chosen model.

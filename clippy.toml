@@ -7,5 +7,5 @@ allow-expect-in-tests = true
 allow-panic-in-tests = true
 allow-unwrap-in-tests = true
 
-# SensorThings is the name of an OGC standard, not an identifier; `..` keeps clippy's default list.
-doc-valid-idents = ["SensorThings", ".."]
+# SensorThings and OpenVEX are the names of standards, not identifiers; `..` keeps clippy's default list.
+doc-valid-idents = ["SensorThings", "OpenVEX", ".."]

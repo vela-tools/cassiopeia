@@ -541,6 +541,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "cargo-lock"
+version = "11.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "50524592e6bfbb1bf6f94e8184a786f637faeaf1cf37bbe65502b9a2c5c48939"
+dependencies = [
+ "semver",
+ "serde",
+ "toml",
+ "url",
+]
+
+[[package]]
 name = "cargo-platform"
 version = "0.1.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1414,6 +1426,26 @@ dependencies = [
  "reqwest",
  "serde_json",
  "thiserror 2.0.21",
+]
+
+[[package]]
+name = "cassiopeia-vex-generator"
+version = "1.3.0"
+dependencies = [
+ "cargo-lock",
+ "clap",
+ "derive_more",
+ "jiff 1.0.3",
+ "packageurl",
+ "semver",
+ "serde",
+ "serde_json",
+ "serde_with",
+ "strum",
+ "tempfile",
+ "thiserror 2.0.21",
+ "toml",
+ "url",
 ]
 
 [[package]]
@@ -5452,6 +5484,16 @@ dependencies = [
  "oxilangtag",
  "oxiri",
  "oxrdf",
+ "thiserror 2.0.21",
+]
+
+[[package]]
+name = "packageurl"
+version = "0.7.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e7719f5f3fc6fbf28f1b6b3d1cddd43958116db8f2e6c97e520757fbb490fcbf"
+dependencies = [
+ "percent-encoding",
  "thiserror 2.0.21",
 ]
 

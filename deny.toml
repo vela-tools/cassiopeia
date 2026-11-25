@@ -51,13 +51,10 @@ db-urls = ["https://github.com/rustsec/advisory-db"]
 yanked = "deny"
 unmaintained = "all"
 ignore = [
-    # proc-macro-error is unmaintained with no safe upgrade available. Build-time
-    # only, pulled in twice by langtag: via str-newtype -> str-newtype-derive, and
-    # via static-automata -> static-automata-macros. Not a vulnerability.
-    { id = "RUSTSEC-2024-0370", reason = "unmaintained, build-time only, no upgrade path upstream" },
-    { id = "RUSTSEC-2026-0459", reason = "geopackage still requires rusqlite 0.40, so no patched libsqlite3-sys is reachable; the GeoPackage ingestor refuses a file with a -wal beside it" },
-    { id = "RUSTSEC-2026-0542", reason = "humantime unmaintained because it wraps chrono, no maintained release exists; jiff's friendly duration format replaces it" },
-    { id = "RUSTSEC-2026-0543", reason = "chrono unmaintained, no maintained release exists; Cassiopeia's time handling moves to jiff" },
+    { id = "RUSTSEC-2024-0370", reason = "proc-macro-error 1.0.4 is unmaintained, which the advisory reports in place of a vulnerability. Only the procedural macros of static-automata-macros 1.1.0, static-regular-grammar 2.0.2 and str-newtype-derive 2.0.0 use it, so it runs while Cassiopeia compiles and none of its code is in the binary." },
+    { id = "RUSTSEC-2026-0459", reason = "The image builds Cassiopeia without the geopackage-bundled feature, so libsqlite3-sys 0.38.2 compiles none of the SQLite it bundles, and links SQLite 3.54.1 instead, which the image build compiles from the official source and which carries the fix." },
+    { id = "RUSTSEC-2026-0542", reason = "humantime 2.4.0 is unmaintained, which the advisory reports in place of a vulnerability, on the grounds that it wraps chrono. No maintained release exists." },
+    { id = "RUSTSEC-2026-0543", reason = "chrono 0.4.45 is unmaintained, which the advisory reports in place of a vulnerability. No maintained release exists." },
 ]
 
 [bans]
