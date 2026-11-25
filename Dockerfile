@@ -95,4 +95,11 @@ COPY --from=builder /usr/local/lib/cassiopeia /usr/local/lib/cassiopeia
 COPY --from=builder /cassiopeia/target/release/cassiopeia /usr/local/bin/cassiopeia
 COPY --from=builder /usr/share/doc/cassiopeia /usr/share/doc/cassiopeia
 
+LABEL org.opencontainers.image.title="Cassiopeia" \
+      org.opencontainers.image.description="Adaptive pipeline that maps any source to validated and standards-compliant NGSI-LD entities." \
+      org.opencontainers.image.url="https://vela-tools.github.io/cassiopeia/" \
+      org.opencontainers.image.documentation="https://vela-tools.github.io/cassiopeia/docs/reference/docker" \
+      org.opencontainers.image.source="https://github.com/vela-tools/cassiopeia" \
+      org.opencontainers.image.licenses="EUPL-1.2"
+
 ENTRYPOINT ["/usr/local/bin/cassiopeia"]
